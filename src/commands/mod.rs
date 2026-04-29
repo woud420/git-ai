@@ -15,6 +15,7 @@ pub mod hooks;
 pub mod install_hooks;
 pub mod log;
 pub mod login;
+pub mod notes_migrate;
 pub mod logout;
 pub mod personal_dashboard;
 pub mod show;

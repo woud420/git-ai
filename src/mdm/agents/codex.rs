@@ -4,6 +4,7 @@ use crate::mdm::utils::{
     binary_exists, generate_diff, home_dir, is_git_ai_checkpoint_command, write_atomic,
 };
 use serde_json::{Value as JsonValue, json};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
@@ -95,6 +96,71 @@ impl CodexInstaller {
         has_git_ai_bin && has_checkpoint_codex && has_hook_input
     }
 
+    fn event_name_to_snake_case(event: &str) -> &'static str {
+        match event {
+            "PreToolUse" => "pre_tool_use",
+            "PostToolUse" => "post_tool_use",
+            "Stop" => "stop",
+            _ => unreachable!("unknown Codex hook event: {event}"),
+        }
+    }
+
+    fn canonical_json(value: &JsonValue) -> JsonValue {
+        match value {
+            JsonValue::Object(map) => {
+                let mut sorted = serde_json::Map::new();
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort();
+                for key in keys {
+                    sorted.insert(key.clone(), Self::canonical_json(&map[key]));
+                }
+                JsonValue::Object(sorted)
+            }
+            JsonValue::Array(items) => {
+                JsonValue::Array(items.iter().map(Self::canonical_json).collect())
+            }
+            other => other.clone(),
+        }
+    }
+
+    fn compute_trust_hash(event_name_snake: &str, command: &str) -> Result<String, GitAiError> {
+        let mut handler = Map::new();
+        handler.insert("type".to_string(), TomlValue::String("command".to_string()));
+        handler.insert("async".to_string(), TomlValue::Boolean(false));
+        handler.insert(
+            "command".to_string(),
+            TomlValue::String(command.to_string()),
+        );
+        handler.insert("timeout".to_string(), TomlValue::Integer(600));
+
+        let mut identity = Map::new();
+        identity.insert(
+            "event_name".to_string(),
+            TomlValue::String(event_name_snake.to_string()),
+        );
+        identity.insert(
+            "hooks".to_string(),
+            TomlValue::Array(vec![TomlValue::Table(handler)]),
+        );
+
+        let toml_value = TomlValue::Table(identity);
+        let json_value = serde_json::to_value(&toml_value).map_err(|e| {
+            GitAiError::Generic(format!(
+                "Failed to convert TOML to JSON for trust hash: {e}"
+            ))
+        })?;
+        let canonical = Self::canonical_json(&json_value);
+        let bytes = serde_json::to_vec(&canonical).map_err(|e| {
+            GitAiError::Generic(format!("Failed to serialize JSON for trust hash: {e}"))
+        })?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        let hash = hasher.finalize();
+        let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+        Ok(format!("sha256:{hex}"))
+    }
+
     fn config_hooks_feature_enabled(config: &TomlValue) -> bool {
         let features = config.get("features");
         let new_flag = features
@@ -176,6 +242,8 @@ impl CodexInstaller {
             GitAiError::Generic("Codex config hooks field must be a table".to_string())
         })?;
 
+        let mut installed_positions: Vec<(&str, usize, usize)> = Vec::new();
+
         for event_name in CODEX_HOOK_EVENTS {
             let blocks = hooks_obj
                 .get(event_name)
@@ -235,6 +303,7 @@ impl CodexInstaller {
                 .get_mut("hooks")
                 .and_then(|value| value.as_array_mut())
             {
+                let handler_idx = hooks_array.len();
                 let mut hook_entry = Map::new();
                 hook_entry.insert("type".to_string(), TomlValue::String("command".to_string()));
                 hook_entry.insert(
@@ -242,9 +311,36 @@ impl CodexInstaller {
                     TomlValue::String(desired_command.clone()),
                 );
                 hooks_array.push(TomlValue::Table(hook_entry));
+                installed_positions.push((event_name, target_idx, handler_idx));
             }
 
             hooks_obj.insert(event_name.to_string(), TomlValue::Array(cleaned_blocks));
+        }
+
+        // Write trust state so Codex auto-trusts our hooks without TUI approval
+        let config_path_str = Self::config_path().to_string_lossy().to_string();
+        let state_table = hooks_obj
+            .entry("state")
+            .or_insert_with(|| TomlValue::Table(Map::new()));
+        if !state_table.is_table() {
+            *state_table = TomlValue::Table(Map::new());
+        }
+        let state_obj = state_table.as_table_mut().ok_or_else(|| {
+            GitAiError::Generic("Codex config hooks.state must be a table".to_string())
+        })?;
+
+        for (event_name, group_idx, handler_idx) in &installed_positions {
+            let snake_name = Self::event_name_to_snake_case(event_name);
+            let state_key = format!(
+                "{}:{}:{}:{}",
+                config_path_str, snake_name, group_idx, handler_idx
+            );
+            let trust_hash = Self::compute_trust_hash(snake_name, &desired_command)?;
+
+            let mut entry = Map::new();
+            entry.insert("enabled".to_string(), TomlValue::Boolean(true));
+            entry.insert("trusted_hash".to_string(), TomlValue::String(trust_hash));
+            state_obj.insert(state_key, TomlValue::Table(entry));
         }
 
         Ok(merged)
@@ -334,6 +430,29 @@ impl CodexInstaller {
                 hooks_obj.remove(event_name);
             } else {
                 hooks_obj.insert(event_name.to_string(), TomlValue::Array(cleaned_blocks));
+            }
+        }
+
+        // Remove trust state entries for git-ai hooks
+        let config_path_str = Self::config_path().to_string_lossy().to_string();
+        if let Some(state_table) = hooks_obj.get_mut("state").and_then(|v| v.as_table_mut()) {
+            let keys_to_remove: Vec<String> = state_table
+                .keys()
+                .filter(|key| {
+                    key.starts_with(&config_path_str)
+                        && CODEX_HOOK_EVENTS.iter().any(|event| {
+                            let snake = Self::event_name_to_snake_case(event);
+                            key.contains(&format!(":{snake}:"))
+                        })
+                })
+                .cloned()
+                .collect();
+            for key in &keys_to_remove {
+                state_table.remove(key);
+                changed = true;
+            }
+            if state_table.is_empty() {
+                hooks_obj.remove("state");
             }
         }
 
@@ -1719,6 +1838,244 @@ codex_hooks = true
                 !check.hooks_up_to_date,
                 "legacy format should not be considered up-to-date"
             );
+        });
+    }
+
+    #[test]
+    fn test_compute_trust_hash_deterministic() {
+        let hash1 = CodexInstaller::compute_trust_hash(
+            "pre_tool_use",
+            "/usr/local/bin/git-ai checkpoint codex --hook-input stdin",
+        )
+        .unwrap();
+        let hash2 = CodexInstaller::compute_trust_hash(
+            "pre_tool_use",
+            "/usr/local/bin/git-ai checkpoint codex --hook-input stdin",
+        )
+        .unwrap();
+        assert_eq!(hash1, hash2);
+        assert!(hash1.starts_with("sha256:"));
+        assert_eq!(hash1.len(), 7 + 64); // "sha256:" + 64 hex chars
+    }
+
+    #[test]
+    fn test_compute_trust_hash_differs_by_event() {
+        let hash_pre = CodexInstaller::compute_trust_hash(
+            "pre_tool_use",
+            "/usr/local/bin/git-ai checkpoint codex --hook-input stdin",
+        )
+        .unwrap();
+        let hash_post = CodexInstaller::compute_trust_hash(
+            "post_tool_use",
+            "/usr/local/bin/git-ai checkpoint codex --hook-input stdin",
+        )
+        .unwrap();
+        let hash_stop = CodexInstaller::compute_trust_hash(
+            "stop",
+            "/usr/local/bin/git-ai checkpoint codex --hook-input stdin",
+        )
+        .unwrap();
+        assert_ne!(hash_pre, hash_post);
+        assert_ne!(hash_pre, hash_stop);
+        assert_ne!(hash_post, hash_stop);
+    }
+
+    #[test]
+    fn test_compute_trust_hash_differs_by_command() {
+        let hash1 = CodexInstaller::compute_trust_hash(
+            "pre_tool_use",
+            "/usr/local/bin/git-ai checkpoint codex --hook-input stdin",
+        )
+        .unwrap();
+        let hash2 = CodexInstaller::compute_trust_hash(
+            "pre_tool_use",
+            "/opt/bin/git-ai checkpoint codex --hook-input stdin",
+        )
+        .unwrap();
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_canonical_json_sorts_keys() {
+        let input: JsonValue = serde_json::json!({
+            "z_key": 1,
+            "a_key": 2,
+            "m_key": {"b": 1, "a": 2}
+        });
+        let result = CodexInstaller::canonical_json(&input);
+        let serialized = serde_json::to_string(&result).unwrap();
+        assert_eq!(serialized, r#"{"a_key":2,"m_key":{"a":2,"b":1},"z_key":1}"#);
+    }
+
+    #[test]
+    #[serial]
+    fn test_install_hooks_writes_trust_state() {
+        with_temp_home(|home| {
+            let codex_dir = home.join(".codex");
+            fs::create_dir_all(&codex_dir).unwrap();
+            let config_path = codex_dir.join("config.toml");
+            fs::write(&config_path, "model = \"o3\"\n").unwrap();
+
+            let installer = CodexInstaller;
+            let params = HookInstallerParams {
+                binary_path: test_binary_path(),
+            };
+
+            installer
+                .install_hooks(&params, false)
+                .expect("install should succeed");
+
+            let content = fs::read_to_string(&config_path).unwrap();
+            let parsed = CodexInstaller::parse_config_toml(&content).unwrap();
+
+            let state = parsed
+                .get("hooks")
+                .and_then(|v| v.get("state"))
+                .and_then(|v| v.as_table())
+                .expect("hooks.state should exist");
+
+            let config_path_str = config_path.to_string_lossy().to_string();
+            for event in ["pre_tool_use", "post_tool_use", "stop"] {
+                let key = format!("{config_path_str}:{event}:0:0");
+                let entry = state
+                    .get(&key)
+                    .and_then(|v| v.as_table())
+                    .unwrap_or_else(|| panic!("state entry for {event} should exist"));
+                assert_eq!(entry.get("enabled").and_then(|v| v.as_bool()), Some(true));
+                let hash = entry
+                    .get("trusted_hash")
+                    .and_then(|v| v.as_str())
+                    .expect("trusted_hash should exist");
+                assert!(
+                    hash.starts_with("sha256:"),
+                    "hash should have sha256 prefix"
+                );
+                assert_eq!(hash.len(), 71, "hash should be sha256: + 64 hex chars");
+            }
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_uninstall_hooks_removes_trust_state() {
+        with_temp_home(|home| {
+            let codex_dir = home.join(".codex");
+            fs::create_dir_all(&codex_dir).unwrap();
+            let config_path = codex_dir.join("config.toml");
+            fs::write(&config_path, "model = \"o3\"\n").unwrap();
+
+            let installer = CodexInstaller;
+            let params = HookInstallerParams {
+                binary_path: test_binary_path(),
+            };
+
+            installer
+                .install_hooks(&params, false)
+                .expect("install should succeed");
+
+            // Verify state exists before uninstall
+            let content = fs::read_to_string(&config_path).unwrap();
+            let parsed = CodexInstaller::parse_config_toml(&content).unwrap();
+            assert!(
+                parsed
+                    .get("hooks")
+                    .and_then(|v| v.get("state"))
+                    .and_then(|v| v.as_table())
+                    .is_some(),
+                "state should exist after install"
+            );
+
+            installer
+                .uninstall_hooks(&params, false)
+                .expect("uninstall should succeed");
+
+            let content = fs::read_to_string(&config_path).unwrap();
+            let parsed = CodexInstaller::parse_config_toml(&content).unwrap();
+            assert!(
+                parsed.get("hooks").is_none(),
+                "hooks table should be removed after uninstall"
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_install_preserves_existing_state_entries() {
+        with_temp_home(|home| {
+            let codex_dir = home.join(".codex");
+            fs::create_dir_all(&codex_dir).unwrap();
+            let config_path = codex_dir.join("config.toml");
+            fs::write(
+                &config_path,
+                r#"
+model = "o3"
+
+[hooks.state."/some/other/hooks.json:pre_tool_use:0:0"]
+enabled = true
+trusted_hash = "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+"#,
+            )
+            .unwrap();
+
+            let installer = CodexInstaller;
+            let params = HookInstallerParams {
+                binary_path: test_binary_path(),
+            };
+
+            installer
+                .install_hooks(&params, false)
+                .expect("install should succeed");
+
+            let content = fs::read_to_string(&config_path).unwrap();
+            let parsed = CodexInstaller::parse_config_toml(&content).unwrap();
+            let state = parsed
+                .get("hooks")
+                .and_then(|v| v.get("state"))
+                .and_then(|v| v.as_table())
+                .expect("hooks.state should exist");
+
+            // Existing state entry should be preserved
+            assert!(
+                state.contains_key("/some/other/hooks.json:pre_tool_use:0:0"),
+                "non-git-ai state entry should be preserved"
+            );
+
+            // Our state entries should also be present
+            let config_path_str = config_path.to_string_lossy().to_string();
+            assert!(
+                state.contains_key(&format!("{config_path_str}:pre_tool_use:0:0")),
+                "git-ai state entry should be added"
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_install_hooks_trust_state_idempotent() {
+        with_temp_home(|home| {
+            let codex_dir = home.join(".codex");
+            fs::create_dir_all(&codex_dir).unwrap();
+            let config_path = codex_dir.join("config.toml");
+            fs::write(&config_path, "model = \"o3\"\n").unwrap();
+
+            let installer = CodexInstaller;
+            let params = HookInstallerParams {
+                binary_path: test_binary_path(),
+            };
+
+            installer
+                .install_hooks(&params, false)
+                .expect("first install should succeed");
+            let content_after_first = fs::read_to_string(&config_path).unwrap();
+
+            // Second install should be a no-op (returns None)
+            let diff = installer
+                .install_hooks(&params, false)
+                .expect("second install should succeed");
+            assert!(diff.is_none(), "second install should be a no-op");
+
+            let content_after_second = fs::read_to_string(&config_path).unwrap();
+            assert_eq!(content_after_first, content_after_second);
         });
     }
 }

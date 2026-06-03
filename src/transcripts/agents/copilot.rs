@@ -87,17 +87,35 @@ impl CopilotAgent {
     /// Returns the VS Code workspace storage root directories to scan.
     fn vscode_workspace_storage_roots() -> Vec<PathBuf> {
         let mut roots = Vec::new();
+        let products = ["Code", "Code - Insiders"];
+
         #[cfg(target_os = "macos")]
         if let Some(home) = dirs::home_dir() {
-            roots.push(home.join("Library/Application Support/Code/User/workspaceStorage"));
+            for product in &products {
+                roots.push(
+                    home.join("Library/Application Support")
+                        .join(product)
+                        .join("User/workspaceStorage"),
+                );
+            }
         }
         #[cfg(target_os = "linux")]
         if let Some(config) = dirs::config_dir() {
-            roots.push(config.join("Code/User/workspaceStorage"));
+            for product in &products {
+                roots.push(config.join(product).join("User/workspaceStorage"));
+            }
         }
         #[cfg(target_os = "windows")]
-        if let Some(appdata) = dirs::config_dir() {
-            roots.push(appdata.join("Code/User/workspaceStorage"));
+        {
+            let appdata = std::env::var("APPDATA")
+                .map(PathBuf::from)
+                .ok()
+                .or_else(dirs::config_dir);
+            if let Some(appdata) = appdata {
+                for product in &products {
+                    roots.push(appdata.join(product).join("User/workspaceStorage"));
+                }
+            }
         }
         roots
     }

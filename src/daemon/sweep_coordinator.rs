@@ -2,6 +2,7 @@ use crate::transcripts::agent::{Agent, StreamDescriptor, get_all_agents};
 use crate::transcripts::db::{SessionRecord, TranscriptsDatabase};
 use crate::transcripts::sweep::{DiscoveredSession, SweepStrategy};
 use crate::transcripts::types::TranscriptError;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -80,11 +81,24 @@ impl SweepCoordinator {
                 }
             }
 
-            // Shared streams: check once per agent (resolve via first discovered session)
-            if let Some(first) = discovered.first() {
-                let canonical = Self::canonicalize_path(&first.transcript_path);
+            // Shared streams: resolve from each distinct path (e.g., Code vs Code Insiders
+            // have separate globalStorage directories with independent OTEL DBs)
+            let mut seen_shared_paths = HashSet::new();
+            for session in &discovered {
+                let canonical = Self::canonicalize_path(&session.transcript_path);
                 for stream in &shared {
-                    if let Some(item) = self.check_shared_stream(stream, &canonical, &first.tool)? {
+                    let Some(item) = self.check_shared_stream(stream, &canonical, &session.tool)?
+                    else {
+                        continue;
+                    };
+                    let SweepItem::SharedStream {
+                        canonical_path: ref p,
+                        ..
+                    } = item
+                    else {
+                        continue;
+                    };
+                    if seen_shared_paths.insert(p.clone()) {
                         items.push(item);
                     }
                 }

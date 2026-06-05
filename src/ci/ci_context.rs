@@ -6,7 +6,10 @@ use crate::error::GitAiError;
 use crate::git::notes_api::{
     read_authorship_v3 as get_reference_as_authorship_log_v3, read_note as show_authorship_note,
 };
-use crate::git::refs::{copy_ref, merge_notes_from_ref, ref_exists};
+use crate::git::refs::{
+    AI_AUTHORSHIP_FORK_TRACKING_REF, copy_missing_notes_for_commits_from_ref,
+    note_blob_oids_for_commits, ref_exists,
+};
 use crate::git::repository::{CommitRange, Repository, exec_git};
 use crate::git::sync_authorship::fetch_authorship_notes;
 use std::fs;
@@ -58,6 +61,7 @@ pub enum CiRunResult {
 pub struct CiRunOptions {
     pub skip_fetch_notes: bool,
     pub skip_fetch_base: bool,
+    pub skip_fetch_fork_notes: bool,
     pub skip_push: bool,
 }
 
@@ -104,25 +108,6 @@ impl CiContext {
                     println!("Fetched authorship history");
                 }
 
-                // If this is a fork PR, fetch notes from the fork repository
-                let mut fork_notes_fetched = false;
-                if let Some(fork_url) = fork_clone_url {
-                    println!("Fetching authorship notes from fork...");
-                    match Self::fetch_fork_notes(&self.repo, fork_url) {
-                        Ok(true) => {
-                            println!("Fetched authorship notes from fork");
-                            fork_notes_fetched = true;
-                        }
-                        Ok(false) => println!("No authorship notes found on fork"),
-                        Err(e) => {
-                            println!(
-                                "Warning: Failed to fetch fork notes ({}), continuing without them",
-                                e
-                            );
-                        }
-                    }
-                }
-
                 // Check if authorship already exists for this commit
                 match get_reference_as_authorship_log_v3(&self.repo, merge_commit_sha) {
                     Ok(existing_log) => {
@@ -143,13 +128,20 @@ impl CiContext {
                 let merge_commit = self.repo.find_commit(merge_commit_sha.clone())?;
                 let parent_count = merge_commit.parents().count();
                 if parent_count > 1 {
-                    // For fork PRs with merge commits, the merged commits from the
-                    // fork have the same SHAs. Now that we've fetched fork notes,
-                    // those notes are attached to the correct commits. Just push them.
+                    // For fork PRs with merge commits, the merged commits keep
+                    // their fork SHAs. Import only notes for those PR commits,
+                    // then push the scoped local authorship ref.
                     if fork_clone_url.is_some() {
-                        if !ref_exists(&self.repo, "refs/notes/ai") {
+                        let (_source_base, original_commits) =
+                            self.original_pr_commits(head_sha, base_ref, base_sha);
+                        let fork_notes_imported = self.import_fork_notes_for_commits(
+                            fork_clone_url,
+                            &original_commits,
+                            options,
+                        )?;
+                        if !self.has_notes_for_any_commit(&original_commits)? {
                             println!(
-                                "No local authorship notes available after origin/fork fetch; skipping fork note push"
+                                "No local authorship notes available for fork PR commits; skipping fork note push"
                             );
                             return Ok(CiRunResult::SkippedSimpleMerge);
                         }
@@ -158,16 +150,23 @@ impl CiContext {
                             "{} has {} parents (merge commit from fork) - preserving fork notes",
                             merge_commit_sha, parent_count
                         );
-                        if fork_notes_fetched {
-                            println!("Fork notes were fetched and merged locally");
+                        if fork_notes_imported > 0 {
+                            println!(
+                                "Imported {} fork authorship notes for PR commits",
+                                fork_notes_imported
+                            );
                         } else {
                             println!(
                                 "Using existing local authorship notes (no additional fork notes fetched)"
                             );
                         }
-                        println!("Pushing authorship...");
-                        self.repo.push_authorship("origin")?;
-                        println!("Pushed authorship. Done.");
+                        if options.skip_push {
+                            println!("Skipping authorship push (--skip-push). Done.");
+                        } else {
+                            println!("Pushing authorship...");
+                            self.repo.push_authorship("origin")?;
+                            println!("Pushed authorship. Done.");
+                        }
                         return Ok(CiRunResult::ForkNotesPreserved);
                     }
                     println!(
@@ -178,6 +177,33 @@ impl CiContext {
                 }
 
                 if merge_commit_sha == head_sha {
+                    if fork_clone_url.is_some() {
+                        let (_source_base, original_commits) =
+                            self.original_pr_commits(head_sha, base_ref, base_sha);
+                        let fork_notes_imported = self.import_fork_notes_for_commits(
+                            fork_clone_url,
+                            &original_commits,
+                            options,
+                        )?;
+                        if self.has_notes_for_any_commit(&original_commits)? {
+                            println!(
+                                "{} equals head {} (fast-forward from fork) - preserving fork notes",
+                                merge_commit_sha, head_sha
+                            );
+                            println!(
+                                "Imported {} fork authorship notes for PR commits",
+                                fork_notes_imported
+                            );
+                            if options.skip_push {
+                                println!("Skipping authorship push (--skip-push). Done.");
+                            } else {
+                                println!("Pushing authorship...");
+                                self.repo.push_authorship("origin")?;
+                                println!("Pushed authorship. Done.");
+                            }
+                            return Ok(CiRunResult::ForkNotesPreserved);
+                        }
+                    }
                     println!(
                         "{} equals head {} (fast-forward)",
                         merge_commit_sha, head_sha
@@ -211,34 +237,16 @@ impl CiContext {
                 // Detect squash vs rebase merge by counting commits
                 // For squash: N original commits → 1 merge commit
                 // For rebase: N original commits → N rebased commits
-                let merge_base = self
-                    .repo
-                    .merge_base(head_sha.to_string(), base_ref.to_string())
-                    .ok();
-
-                let original_commits = if let Some(ref base) = merge_base {
-                    let mut commits = CommitRange::new_infer_refname(
-                        &self.repo,
-                        base.clone(),
-                        head_sha.to_string(),
-                        None,
-                    )
-                    .map(|r| r.all_commits())
-                    .unwrap_or_else(|_| vec![head_sha.to_string()]);
-                    // CommitRange uses `git rev-list` which returns newest-first.
-                    // rewrite_authorship_after_rebase_v2 expects oldest-first (same as
-                    // the local rebase hook which calls .reverse() after rev-list).
-                    commits.reverse();
-                    commits
-                } else {
-                    vec![head_sha.to_string()]
-                };
+                let (original_commits_base, original_commits) =
+                    self.original_pr_commits(head_sha, base_ref, base_sha);
 
                 println!(
-                    "Original commits in PR: {} (from merge base {:?})",
+                    "Original commits in PR: {} (from {:?})",
                     original_commits.len(),
-                    merge_base
+                    original_commits_base
                 );
+
+                self.import_fork_notes_for_commits(fork_clone_url, &original_commits, options)?;
 
                 // For multi-commit PRs, check if this is a rebase merge (multiple new commits)
                 // by walking back from merge_commit_sha
@@ -354,11 +362,11 @@ impl CiContext {
         Ok(())
     }
 
-    /// Fetch authorship notes from a fork repository URL and merge them into
-    /// the local refs/notes/ai. Returns Ok(true) if notes were found and merged,
+    /// Fetch authorship notes from a fork repository URL into the fork tracking ref.
+    /// Returns Ok(true) if notes were found and fetched,
     /// Ok(false) if no notes exist on the fork.
     fn fetch_fork_notes(repo: &Repository, fork_url: &str) -> Result<bool, GitAiError> {
-        let tracking_ref = "refs/notes/ai-remote/fork";
+        let tracking_ref = AI_AUTHORSHIP_FORK_TRACKING_REF;
 
         // Check if the fork has notes
         let mut ls_remote_args = repo.global_args_for_exec();
@@ -397,19 +405,119 @@ impl CiContext {
 
         exec_git(&fetch_args)?;
 
-        // Merge fork notes into local refs/notes/ai
-        let local_notes_ref = "refs/notes/ai";
-        if ref_exists(repo, tracking_ref) {
-            if ref_exists(repo, local_notes_ref) {
-                // Both exist - merge (fork notes fill in what origin doesn't have)
-                merge_notes_from_ref(repo, tracking_ref)?;
-            } else {
-                // Only fork notes exist - copy them to local
-                copy_ref(repo, tracking_ref, local_notes_ref)?;
-            }
+        Ok(true)
+    }
+
+    fn import_fork_notes_for_commits(
+        &self,
+        fork_clone_url: &Option<String>,
+        commit_shas: &[String],
+        options: CiRunOptions,
+    ) -> Result<usize, GitAiError> {
+        let Some(fork_url) = fork_clone_url else {
+            return Ok(0);
+        };
+        if commit_shas.is_empty() {
+            println!("No PR commits found; skipping fork authorship note import");
+            return Ok(0);
         }
 
-        Ok(true)
+        let source_ref_available = if options.skip_fetch_fork_notes {
+            println!(
+                "Skipping fork authorship notes fetch; using {} if it exists",
+                AI_AUTHORSHIP_FORK_TRACKING_REF
+            );
+            ref_exists(&self.repo, AI_AUTHORSHIP_FORK_TRACKING_REF)
+        } else {
+            println!(
+                "Fetching authorship notes from fork into {}...",
+                AI_AUTHORSHIP_FORK_TRACKING_REF
+            );
+            match Self::fetch_fork_notes(&self.repo, fork_url) {
+                Ok(true) => {
+                    println!("Fetched authorship notes from fork");
+                    true
+                }
+                Ok(false) => {
+                    println!("No authorship notes found on fork");
+                    false
+                }
+                Err(e) => {
+                    println!(
+                        "Warning: Failed to fetch fork notes ({}), continuing without them",
+                        e
+                    );
+                    false
+                }
+            }
+        };
+
+        if !source_ref_available {
+            return Ok(0);
+        }
+
+        let copied = copy_missing_notes_for_commits_from_ref(
+            &self.repo,
+            AI_AUTHORSHIP_FORK_TRACKING_REF,
+            commit_shas,
+        )?;
+        println!(
+            "Imported {} fork authorship notes for {} PR commits from {}",
+            copied,
+            commit_shas.len(),
+            AI_AUTHORSHIP_FORK_TRACKING_REF
+        );
+        Ok(copied)
+    }
+
+    fn has_notes_for_any_commit(&self, commit_shas: &[String]) -> Result<bool, GitAiError> {
+        Ok(!note_blob_oids_for_commits(&self.repo, commit_shas)?.is_empty())
+    }
+
+    fn original_pr_commits(
+        &self,
+        head_sha: &str,
+        base_ref: &str,
+        base_sha: &str,
+    ) -> (Option<String>, Vec<String>) {
+        if !base_sha.is_empty()
+            && let Ok(mut commits) = CommitRange::new_infer_refname(
+                &self.repo,
+                base_sha.to_string(),
+                head_sha.to_string(),
+                None,
+            )
+            .map(|r| r.all_commits())
+            && !commits.is_empty()
+        {
+            commits.reverse();
+            return (Some(format!("base_sha {}", base_sha)), commits);
+        }
+
+        let merge_base = self
+            .repo
+            .merge_base(head_sha.to_string(), base_ref.to_string())
+            .ok();
+
+        if let Some(ref base) = merge_base
+            && let Ok(mut commits) =
+                CommitRange::new_infer_refname(&self.repo, base.clone(), head_sha.to_string(), None)
+                    .map(|r| r.all_commits())
+            && !commits.is_empty()
+        {
+            commits.reverse();
+            return (Some(format!("merge-base {}", base)), commits);
+        }
+
+        let resolved_head = self
+            .repo
+            .revparse_single(head_sha)
+            .map(|obj| obj.id())
+            .unwrap_or_else(|_| head_sha.to_string());
+        (
+            merge_base.map(|base| format!("merge-base {}", base)),
+            vec![resolved_head],
+        )
     }
 
     /// Get the rebased commits by walking back from merge_commit_sha.

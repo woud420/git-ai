@@ -3,7 +3,9 @@ use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use git_ai::ci::ci_context::{CiContext, CiEvent, CiRunResult};
 use git_ai::git::notes_api::read_authorship_v3 as get_reference_as_authorship_log_v3;
+use git_ai::git::refs::{notes_add, show_authorship_note};
 use git_ai::git::repository as GitAiRepository;
+use std::fs;
 
 /// Helper: set up "origin" as a self-referencing remote so fetch_authorship_notes("origin")
 /// doesn't fail. In real CI the repo is cloned from origin, so it always exists.
@@ -317,6 +319,105 @@ fn test_ci_fork_no_notes() {
     );
 }
 
+/// A fork notes ref is untrusted input. CI must import only notes attached to
+/// commits that are actually in the PR, not every note present in the fork.
+#[test]
+fn test_ci_fork_notes_ignores_notes_outside_pr_commit_range() {
+    let upstream = TestRepo::new();
+    let upstream_file = upstream.path().join("feature.js");
+
+    fs::write(&upstream_file, "// Original code\n").unwrap();
+    upstream.git_og(&["add", "-A"]).unwrap();
+    upstream
+        .git_og(&["commit", "-m", "Initial commit"])
+        .unwrap();
+    let base_sha = upstream
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+    upstream.git(&["branch", "-M", "main"]).unwrap();
+    add_self_origin(&upstream);
+
+    let fork = TestRepo::new();
+    let upstream_path = upstream.path().to_str().unwrap().to_string();
+    fork.git_og(&["remote", "add", "upstream", &upstream_path])
+        .unwrap();
+    fork.git_og(&["fetch", "upstream"]).unwrap();
+    fork.git_og(&["checkout", "-b", "main", "upstream/main"])
+        .unwrap();
+
+    let fork_repo = GitAiRepository::find_repository_in_path(fork.path().to_str().unwrap())
+        .expect("Failed to find fork repository");
+    notes_add(&fork_repo, &base_sha, "malicious note for upstream base")
+        .expect("add malicious fork note");
+
+    let mut fork_file = fork.filename("feature.js");
+    fork_file.set_contents(lines![
+        "// Original code",
+        "// AI feature from fork".ai(),
+        "function forkFeature() {}".ai()
+    ]);
+    let fork_commit = fork.stage_all_and_commit("Add AI feature in fork").unwrap();
+    let fork_head_sha = fork_commit.commit_sha.clone();
+
+    upstream
+        .git_og(&["remote", "add", "fork", fork.path().to_str().unwrap()])
+        .unwrap();
+    upstream
+        .git_og(&["fetch", "fork", "main:refs/fork/main"])
+        .unwrap();
+
+    fs::write(
+        &upstream_file,
+        "// Original code\n// AI feature from fork\nfunction forkFeature() {}\n",
+    )
+    .unwrap();
+    upstream.git_og(&["add", "-A"]).unwrap();
+    upstream
+        .git_og(&["commit", "-m", "Merge fork PR via squash"])
+        .unwrap();
+    let merge_sha = upstream
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    let upstream_repo = GitAiRepository::find_repository_in_path(upstream.path().to_str().unwrap())
+        .expect("Failed to find upstream repository");
+
+    let ci_context = CiContext::with_repository(
+        upstream_repo,
+        CiEvent::Merge {
+            merge_commit_sha: merge_sha.clone(),
+            head_ref: "main".to_string(),
+            head_sha: fork_head_sha.clone(),
+            base_ref: "main".to_string(),
+            base_sha: base_sha.clone(),
+            fork_clone_url: Some(fork.path().to_str().unwrap().to_string()),
+        },
+    );
+
+    let result = ci_context.run().unwrap();
+    assert!(
+        matches!(result, CiRunResult::AuthorshipRewritten { .. }),
+        "Expected AuthorshipRewritten for fork squash merge, got {:?}",
+        result
+    );
+
+    let upstream_repo_after =
+        GitAiRepository::find_repository_in_path(upstream.path().to_str().unwrap())
+            .expect("Failed to find upstream repository");
+    assert!(
+        show_authorship_note(&upstream_repo_after, &base_sha).is_none(),
+        "malicious fork note for base commit must not be imported"
+    );
+    assert!(
+        get_reference_as_authorship_log_v3(&upstream_repo_after, &merge_sha).is_ok(),
+        "squash commit should still receive rewritten authorship from PR commit notes"
+    );
+}
+
 /// Test merge commit from fork with no notes anywhere.
 ///
 /// If neither origin nor fork has refs/notes/ai, CI should not attempt to push
@@ -575,5 +676,119 @@ fn test_ci_fork_squash_merge_multiple_commits() {
     assert!(
         !log.attestations.is_empty(),
         "Authorship log should have attestations from fork's AI code"
+    );
+}
+
+#[test]
+fn test_ci_local_merge_can_use_preloaded_fork_notes_ref() {
+    let upstream = TestRepo::new();
+    let upstream_file = upstream.path().join("app.js");
+
+    fs::write(&upstream_file, "// App v1\n").unwrap();
+    upstream.git_og(&["add", "-A"]).unwrap();
+    upstream
+        .git_og(&["commit", "-m", "Initial commit"])
+        .unwrap();
+    let base_sha = upstream
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+    upstream.git(&["branch", "-M", "main"]).unwrap();
+
+    let fork = TestRepo::new();
+    let upstream_path = upstream.path().to_str().unwrap().to_string();
+    fork.git_og(&["remote", "add", "upstream", &upstream_path])
+        .unwrap();
+    fork.git_og(&["fetch", "upstream"]).unwrap();
+    fork.git_og(&["checkout", "-b", "main", "upstream/main"])
+        .unwrap();
+
+    let fork_repo = GitAiRepository::find_repository_in_path(fork.path().to_str().unwrap())
+        .expect("Failed to find fork repository");
+    notes_add(
+        &fork_repo,
+        &base_sha,
+        "malicious note outside the PR commit set",
+    )
+    .expect("add malicious fork note");
+
+    let mut fork_file = fork.filename("app.js");
+    fork_file.set_contents(lines![
+        "// App v1",
+        "// AI feature".ai(),
+        "function aiFeature() {}".ai()
+    ]);
+    let fork_commit = fork.stage_all_and_commit("Add AI feature").unwrap();
+    let fork_head_sha = fork_commit.commit_sha.clone();
+
+    upstream
+        .git_og(&["remote", "add", "fork", fork.path().to_str().unwrap()])
+        .unwrap();
+    upstream
+        .git_og(&["fetch", "fork", "main:refs/fork/main"])
+        .unwrap();
+    upstream
+        .git_og(&[
+            "fetch",
+            fork.path().to_str().unwrap(),
+            "+refs/notes/ai:refs/notes/ai-remote/fork",
+        ])
+        .unwrap();
+
+    fs::write(
+        &upstream_file,
+        "// App v1\n// AI feature\nfunction aiFeature() {}\n",
+    )
+    .unwrap();
+    upstream.git_og(&["add", "-A"]).unwrap();
+    upstream
+        .git_og(&["commit", "-m", "Merge fork PR via squash"])
+        .unwrap();
+    let merge_sha = upstream
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    let output = upstream
+        .git_ai(&[
+            "ci",
+            "local",
+            "merge",
+            "--merge-commit-sha",
+            &merge_sha,
+            "--base-ref",
+            "main",
+            "--head-ref",
+            "main",
+            "--head-sha",
+            &fork_head_sha,
+            "--base-sha",
+            &base_sha,
+            "--fork-clone-url",
+            "https://example.invalid/fork.git",
+            "--skip-fetch-notes",
+            "--skip-fetch-base",
+            "--skip-fetch-fork-notes",
+            "--skip-push",
+        ])
+        .expect("ci local merge should use preloaded fork notes");
+
+    assert!(
+        output.contains("authorship rewritten successfully"),
+        "expected successful local CI rewrite, got:\n{}",
+        output
+    );
+
+    let upstream_repo = GitAiRepository::find_repository_in_path(upstream.path().to_str().unwrap())
+        .expect("Failed to find upstream repository");
+    assert!(
+        show_authorship_note(&upstream_repo, &base_sha).is_none(),
+        "local CI must not import unrelated notes from the preloaded fork ref"
+    );
+    assert!(
+        get_reference_as_authorship_log_v3(&upstream_repo, &merge_sha).is_ok(),
+        "local CI should rewrite authorship from preloaded fork notes"
     );
 }

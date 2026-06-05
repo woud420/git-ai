@@ -16,10 +16,7 @@ fn print_ci_result(result: &CiRunResult, prefix: &str) {
             println!("{}: skipped simple merge (authorship preserved)", prefix);
         }
         CiRunResult::ForkNotesPreserved => {
-            println!(
-                "{}: fork notes fetched and pushed (merge commit from fork)",
-                prefix
-            );
+            println!("{}: fork notes preserved", prefix);
         }
         CiRunResult::SkippedFastForward => {
             println!("{}: skipped fast-forward merge", prefix);
@@ -209,6 +206,7 @@ fn handle_ci_local(args: &[String]) {
             let skip_fetch_all = has_bool_flag("--skip-fetch");
             let skip_fetch_notes = skip_fetch_all || has_bool_flag("--skip-fetch-notes");
             let skip_fetch_base = skip_fetch_all || has_bool_flag("--skip-fetch-base");
+            let skip_fetch_fork_notes = skip_fetch_all || has_bool_flag("--skip-fetch-fork-notes");
             let skip_push = has_bool_flag("--skip-push");
 
             // Required inputs for merge
@@ -273,6 +271,7 @@ fn handle_ci_local(args: &[String]) {
             match ctx.run_with_options(CiRunOptions {
                 skip_fetch_notes,
                 skip_fetch_base,
+                skip_fetch_fork_notes,
                 skip_push,
             }) {
                 Ok(result) => {
@@ -312,7 +311,7 @@ fn print_ci_help_and_exit() -> ! {
         "                     merge  --merge-commit-sha <sha> --base-ref <ref> --head-ref <ref> --head-sha <sha> --base-sha <sha> [--fork-clone-url <url>]"
     );
     eprintln!(
-        "                            [--skip-fetch-notes] [--skip-fetch-base] [--skip-fetch] [--skip-push]"
+        "                            [--skip-fetch-notes] [--skip-fetch-base] [--skip-fetch-fork-notes] [--skip-fetch] [--skip-push]"
     );
     std::process::exit(1);
 }
@@ -324,9 +323,11 @@ fn print_ci_local_help_and_exit() -> ! {
     eprintln!();
     eprintln!("Events:");
     eprintln!(
-        "  merge  --merge-commit-sha <sha> --base-ref <ref> --head-ref <ref> --head-sha <sha> --base-sha <sha>"
+        "  merge  --merge-commit-sha <sha> --base-ref <ref> --head-ref <ref> --head-sha <sha> --base-sha <sha> [--fork-clone-url <url>]"
     );
-    eprintln!("         [--skip-fetch-notes] [--skip-fetch-base] [--skip-fetch] [--skip-push]");
+    eprintln!(
+        "         [--skip-fetch-notes] [--skip-fetch-base] [--skip-fetch-fork-notes] [--skip-fetch] [--skip-push]"
+    );
     std::process::exit(1);
 }
 

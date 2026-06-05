@@ -200,11 +200,17 @@ fn test_ci_required_flags_for_merge() {
 
 #[test]
 fn test_ci_optional_skip_fetch_flags_for_merge() {
-    let optional_flags = ["--skip-fetch-notes", "--skip-fetch-base", "--skip-fetch"];
+    let optional_flags = [
+        "--skip-fetch-notes",
+        "--skip-fetch-base",
+        "--skip-fetch-fork-notes",
+        "--skip-fetch",
+    ];
 
-    assert_eq!(optional_flags.len(), 3);
+    assert_eq!(optional_flags.len(), 4);
     assert!(optional_flags.contains(&"--skip-fetch-notes"));
     assert!(optional_flags.contains(&"--skip-fetch-base"));
+    assert!(optional_flags.contains(&"--skip-fetch-fork-notes"));
     assert!(optional_flags.contains(&"--skip-fetch"));
 }
 

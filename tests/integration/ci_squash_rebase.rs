@@ -600,6 +600,7 @@ fn test_ci_rebase_merge_commit_order_pairing() {
     let result = ctx.run_with_options(CiRunOptions {
         skip_fetch_notes: true,
         skip_fetch_base: true,
+        skip_fetch_fork_notes: true,
         skip_push: false,
     });
     assert!(
@@ -1438,6 +1439,7 @@ fn test_ci_squash_merge_not_misclassified_as_rebase_on_linear_main() {
     ctx.run_with_options(CiRunOptions {
         skip_fetch_notes: true,
         skip_fetch_base: true,
+        skip_fetch_fork_notes: true,
         skip_push: true,
     })
     .expect("CI merge rewrite should succeed");

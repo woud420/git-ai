@@ -1214,6 +1214,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[serial_test::serial]
     fn test_is_superuser_expected_environment_ci() {
         let had_ci = std::env::var_os("CI");
         unsafe { std::env::set_var("CI", "true") };
@@ -1225,6 +1226,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_superuser_is_allowed_env_var() {
         let had_var = std::env::var_os("GIT_AI_ALLOW_SUPERUSER");
         unsafe { std::env::set_var("GIT_AI_ALLOW_SUPERUSER", "1") };

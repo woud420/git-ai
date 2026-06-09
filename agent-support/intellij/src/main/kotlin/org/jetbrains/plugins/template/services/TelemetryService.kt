@@ -1,6 +1,5 @@
 package org.jetbrains.plugins.template.services
 
-import com.intellij.ide.plugins.PluginManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.components.Service
@@ -243,9 +242,12 @@ class TelemetryService : Disposable {
 
     private fun getPluginVersion(): String {
         return try {
-            @Suppress("UnstableApiUsage")
-            PluginManager.getPluginByClass(this::class.java)?.version ?: "unknown"
-        } catch (e: Exception) {
+            val xml = this::class.java.classLoader
+                .getResourceAsStream("META-INF/plugin.xml")
+                ?.bufferedReader()?.readText() ?: return "unknown"
+            Regex("<version>(.+?)</version>").find(xml)
+                ?.groupValues?.get(1) ?: "unknown"
+        } catch (_: Exception) {
             "unknown"
         }
     }

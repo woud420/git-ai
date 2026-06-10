@@ -113,9 +113,10 @@ namespace GitAiVS.Services
                 using var proc = Process.Start(psi);
                 if (proc == null) return null;
 
-                var output = proc.StandardOutput.ReadToEnd().Trim();
+                var outputTask = proc.StandardOutput.ReadToEndAsync();
                 proc.WaitForExit(PathLookupTimeoutMs);
                 if (!proc.HasExited) { proc.Kill(); return null; }
+                var output = outputTask.Result.Trim();
 
                 if (proc.ExitCode != 0) return null;
 
@@ -151,8 +152,8 @@ namespace GitAiVS.Services
                 using var proc = Process.Start(psi);
                 if (proc == null) return null;
 
-                var output = proc.StandardOutput.ReadToEnd().Trim();
-                var stderr = proc.StandardError.ReadToEnd().Trim();
+                var outputTask = proc.StandardOutput.ReadToEndAsync();
+                var stderrTask = proc.StandardError.ReadToEndAsync();
                 proc.WaitForExit(VersionCheckTimeoutMs);
 
                 if (!proc.HasExited)
@@ -161,6 +162,9 @@ namespace GitAiVS.Services
                     Trace.WriteLine("[git-ai] git-ai version check timed out");
                     return null;
                 }
+
+                var output = outputTask.Result.Trim();
+                var stderr = stderrTask.Result.Trim();
 
                 if (proc.ExitCode != 0)
                 {

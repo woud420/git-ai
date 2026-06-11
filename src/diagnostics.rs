@@ -218,6 +218,11 @@ pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
         sanitize_label(&target.label),
         crate::uuid::generate_v4()
     ));
+    let trace_command_dir = debug_self_check_root().join(format!(
+        "trace2-{}-{}",
+        sanitize_label(&target.label),
+        crate::uuid::generate_v4()
+    ));
 
     let snapshot = match snapshot_global_trace2_event_target(&mut commands, &target.program) {
         Ok(snapshot) => snapshot,
@@ -234,9 +239,13 @@ pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
     let result = (|| -> Result<(Vec<String>, String), String> {
         fs::create_dir_all(&trace_dir)
             .map_err(|e| format!("failed to create {}: {}", trace_dir.display(), e))?;
+        fs::create_dir_all(&trace_command_dir)
+            .map_err(|e| format!("failed to create {}: {}", trace_command_dir.display(), e))?;
         let _ = fs::remove_file(&trace_path);
         let trace_path_string = trace_path.to_string_lossy().to_string();
 
+        // This intentionally uses global git config rather than a process-local
+        // GIT_TRACE2_EVENT override so the diagnostic exercises the install path.
         run_required(
             &mut commands,
             &target.program,
@@ -251,11 +260,18 @@ pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
         )?;
         changed_global_event_target = true;
 
-        run_required(&mut commands, &target.program, &["version"], None)?;
+        // Use init rather than version: when terminal git is the git-ai proxy,
+        // read-only commands intentionally suppress trace2 before invoking real git.
+        run_required(
+            &mut commands,
+            &target.program,
+            &["init", "."],
+            Some(&trace_command_dir),
+        )?;
 
         let trace2_json = fs::read_to_string(&trace_path)
             .map_err(|e| format!("failed to read {}: {}", trace_path.display(), e))?;
-        let details = validate_trace2_version_command_events(&trace2_json)?;
+        let details = validate_trace2_command_events(&trace2_json, "init")?;
         Ok((details, trace2_json))
     })();
 
@@ -265,27 +281,36 @@ pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
         Ok(())
     };
     let _ = fs::remove_file(&trace_path);
+    let _ = fs::remove_dir_all(&trace_command_dir);
 
     match (result, restore_result) {
         (Ok((mut details, trace2_json)), Ok(())) => {
             details.insert(0, format!("trace2 file: {}", trace_path.display()));
+            details.insert(1, format!("command dir: {}", trace_command_dir.display()));
             DiagnosticCheckResult::passed("trace2 file self-check completed", details, commands)
                 .with_trace2_json(Some(trace2_json))
         }
         (Ok((mut details, trace2_json)), Err(restore_err)) => {
+            details.insert(0, format!("trace2 file: {}", trace_path.display()));
+            details.insert(1, format!("command dir: {}", trace_command_dir.display()));
             details.push(format!("restore failed: {}", restore_err));
             DiagnosticCheckResult::failed("trace2 file self-check failed", details, commands)
                 .with_trace2_json(Some(trace2_json))
         }
         (Err(err), Ok(())) => DiagnosticCheckResult::failed(
             "trace2 file self-check failed",
-            vec![format!("trace2 file: {}", trace_path.display()), err],
+            vec![
+                format!("trace2 file: {}", trace_path.display()),
+                format!("command dir: {}", trace_command_dir.display()),
+                err,
+            ],
             commands,
         ),
         (Err(err), Err(restore_err)) => DiagnosticCheckResult::failed(
             "trace2 file self-check failed",
             vec![
                 format!("trace2 file: {}", trace_path.display()),
+                format!("command dir: {}", trace_command_dir.display()),
                 err,
                 format!("restore failed: {}", restore_err),
             ],
@@ -616,7 +641,10 @@ fn restore_global_trace2_event_target(
     Ok(())
 }
 
-fn validate_trace2_version_command_events(trace2_json: &str) -> Result<Vec<String>, String> {
+fn validate_trace2_command_events(
+    trace2_json: &str,
+    expected_command: &str,
+) -> Result<Vec<String>, String> {
     let mut events = Vec::new();
     for (idx, line) in trace2_json.lines().enumerate() {
         let trimmed = line.trim();
@@ -638,9 +666,9 @@ fn validate_trace2_version_command_events(trace2_json: &str) -> Result<Vec<Strin
     let has_start = events
         .iter()
         .any(|event| event.get("event").and_then(Value::as_str) == Some("start"));
-    let has_cmd_name_version = events.iter().any(|event| {
+    let has_cmd_name_expected = events.iter().any(|event| {
         event.get("event").and_then(Value::as_str) == Some("cmd_name")
-            && event.get("name").and_then(Value::as_str) == Some("version")
+            && event.get("name").and_then(Value::as_str) == Some(expected_command)
     });
     let has_exit_zero = events.iter().any(|event| {
         event.get("event").and_then(Value::as_str) == Some("exit")
@@ -654,7 +682,10 @@ fn validate_trace2_version_command_events(trace2_json: &str) -> Result<Vec<Strin
     let failures = [
         (has_version, "missing version event"),
         (has_start, "missing start event"),
-        (has_cmd_name_version, "missing cmd_name event for version"),
+        (
+            has_cmd_name_expected,
+            "missing cmd_name event for expected command",
+        ),
         (has_exit_zero, "missing exit event with code 0"),
         (has_atexit_zero, "missing atexit event with code 0"),
     ]
@@ -668,7 +699,10 @@ fn validate_trace2_version_command_events(trace2_json: &str) -> Result<Vec<Strin
 
     Ok(vec![
         format!("events: {}", events.len()),
-        "validated: version/start/cmd_name(version)/exit(0)/atexit(0)".to_string(),
+        format!(
+            "validated: version/start/cmd_name({})/exit(0)/atexit(0)",
+            expected_command
+        ),
     ])
 }
 
@@ -721,27 +755,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_trace2_version_command_events_accepts_expected_events() {
+    fn test_validate_trace2_command_events_accepts_expected_events() {
         let trace = r#"{"event":"version"}
-{"event":"start","argv":["git","version"]}
-{"event":"cmd_name","name":"version"}
+{"event":"start","argv":["git","init","."]}
+{"event":"cmd_name","name":"init"}
 {"event":"exit","code":0}
 {"event":"atexit","code":0}
 "#;
 
-        let details = validate_trace2_version_command_events(trace).unwrap();
+        let details = validate_trace2_command_events(trace, "init").unwrap();
         assert!(details.iter().any(|detail| detail == "events: 5"));
     }
 
     #[test]
-    fn test_validate_trace2_version_command_events_rejects_missing_cmd_name() {
+    fn test_validate_trace2_command_events_rejects_missing_cmd_name() {
         let trace = r#"{"event":"version"}
-{"event":"start","argv":["git","version"]}
+{"event":"start","argv":["git","init","."]}
 {"event":"exit","code":0}
 {"event":"atexit","code":0}
 "#;
 
-        let err = validate_trace2_version_command_events(trace).unwrap_err();
-        assert!(err.contains("missing cmd_name event for version"));
+        let err = validate_trace2_command_events(trace, "init").unwrap_err();
+        assert!(err.contains("missing cmd_name event for expected command"));
     }
 }

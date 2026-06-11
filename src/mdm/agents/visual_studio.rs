@@ -41,9 +41,7 @@ impl HookInstaller for VisualStudioInstaller {
         }
 
         // Check if any installation has the extension
-        let any_has_extension = installations
-            .iter()
-            .any(|inst| is_extension_installed(inst));
+        let any_has_extension = installations.iter().any(is_extension_installed);
 
         Ok(HookCheckResult {
             tool_installed: true,
@@ -185,20 +183,11 @@ struct VsInstallation {
     instance_id: String,
 }
 
-/// Find Visual Studio installations using vswhere.exe (Windows) or return empty on other platforms.
+/// Find Visual Studio installations using vswhere.exe.
 fn find_visual_studio_installations() -> Vec<VsInstallation> {
-    #[cfg(not(windows))]
-    {
-        Vec::new()
-    }
-
-    #[cfg(windows)]
-    {
-        find_visual_studio_windows()
-    }
+    find_visual_studio_windows()
 }
 
-#[cfg(windows)]
 fn find_visual_studio_windows() -> Vec<VsInstallation> {
     // vswhere.exe ships with the VS installer
     let vswhere_paths = [
@@ -212,7 +201,10 @@ fn find_visual_studio_windows() -> Vec<VsInstallation> {
         ),
     ];
 
-    let vswhere = match vswhere_paths.iter().find(|p| std::path::Path::new(p).exists()) {
+    let vswhere = match vswhere_paths
+        .iter()
+        .find(|p| std::path::Path::new(p).exists())
+    {
         Some(path) => path.clone(),
         None => {
             tracing::debug!("Visual Studio: vswhere.exe not found");
@@ -277,96 +269,74 @@ fn find_visual_studio_windows() -> Vec<VsInstallation> {
 
 /// Check if the git-ai extension is installed in a VS instance.
 fn is_extension_installed(inst: &VsInstallation) -> bool {
-    #[cfg(not(windows))]
-    {
-        let _ = inst;
-        false
+    // VS extensions install to %LOCALAPPDATA%\Microsoft\VisualStudio\<version>_<instanceId>\Extensions\
+    let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let major_version = inst.display_version.split('.').next().unwrap_or("17");
+
+    let extensions_dir = std::path::PathBuf::from(&local_app_data)
+        .join("Microsoft")
+        .join("VisualStudio")
+        .join(format!("{}.0_{}", major_version, inst.instance_id))
+        .join("Extensions");
+
+    if !extensions_dir.exists() {
+        return false;
     }
 
-    #[cfg(windows)]
-    {
-        // VS extensions install to %LOCALAPPDATA%\Microsoft\VisualStudio\<version>_<instanceId>\Extensions\
-        let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_default();
-        let major_version = inst.display_version.split('.').next().unwrap_or("17");
+    // Walk the extensions directory looking for our extension manifest
+    if let Ok(entries) = std::fs::read_dir(&extensions_dir) {
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            let manifest = entry_path.join("extension.vsixmanifest");
+            if manifest_contains_extension(&manifest) {
+                return true;
+            }
 
-        let extensions_dir = std::path::PathBuf::from(&local_app_data)
-            .join("Microsoft")
-            .join("VisualStudio")
-            .join(format!("{}.0_{}", major_version, inst.instance_id))
-            .join("Extensions");
-
-        if !extensions_dir.exists() {
-            return false;
-        }
-
-        // Walk the extensions directory looking for our extension manifest
-        if let Ok(entries) = std::fs::read_dir(&extensions_dir) {
-            for entry in entries.flatten() {
-                let manifest = entry.path().join("extension.vsixmanifest");
-                if manifest.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&manifest) {
-                        if content.contains(EXTENSION_ID) || content.contains("GitAiVS") {
-                            return true;
-                        }
-                    }
-                }
-
-                // Check subdirectories (extensions can be nested one level)
-                if entry.path().is_dir() {
-                    if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
-                        for sub in sub_entries.flatten() {
-                            let sub_manifest = sub.path().join("extension.vsixmanifest");
-                            if sub_manifest.exists() {
-                                if let Ok(content) = std::fs::read_to_string(&sub_manifest) {
-                                    if content.contains(EXTENSION_ID)
-                                        || content.contains("GitAiVS")
-                                    {
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
+            // Check subdirectories (extensions can be nested one level)
+            if entry_path.is_dir()
+                && let Ok(sub_entries) = std::fs::read_dir(entry_path)
+            {
+                for sub in sub_entries.flatten() {
+                    let sub_manifest = sub.path().join("extension.vsixmanifest");
+                    if manifest_contains_extension(&sub_manifest) {
+                        return true;
                     }
                 }
             }
         }
-
-        false
     }
+
+    false
+}
+
+fn manifest_contains_extension(manifest: &std::path::Path) -> bool {
+    std::fs::read_to_string(manifest)
+        .is_ok_and(|content| content.contains(EXTENSION_ID) || content.contains("GitAiVS"))
 }
 
 /// Install the VSIX extension using VSIXInstaller.exe.
 fn install_vsix(inst: &VsInstallation) -> Result<bool, GitAiError> {
-    #[cfg(not(windows))]
-    {
-        let _ = inst;
-        Ok(false)
-    }
+    let vsix_installer = std::path::PathBuf::from(&inst.install_path)
+        .join("Common7")
+        .join("IDE")
+        .join("VSIXInstaller.exe");
 
-    #[cfg(windows)]
-    {
-        let vsix_installer = std::path::PathBuf::from(&inst.install_path)
-            .join("Common7")
-            .join("IDE")
-            .join("VSIXInstaller.exe");
-
-        if !vsix_installer.exists() {
-            tracing::debug!(
-                "Visual Studio: VSIXInstaller.exe not found at {}",
-                vsix_installer.display()
-            );
-            return Ok(false);
-        }
-
-        // TODO: Download VSIX from marketplace or bundled location
-        // For now, provide manual install instructions
+    if !vsix_installer.exists() {
         tracing::debug!(
-            "Visual Studio: Automatic VSIX installation not yet implemented. \
-             VSIXInstaller found at {}",
+            "Visual Studio: VSIXInstaller.exe not found at {}",
             vsix_installer.display()
         );
-        Ok(false)
+        return Ok(false);
     }
+
+    // TODO: Download VSIX from marketplace or bundled location
+    // For now, provide manual install instructions
+    tracing::debug!(
+        "Visual Studio: Automatic VSIX installation not yet implemented. \
+         VSIXInstaller found at {}",
+        vsix_installer.display()
+    );
+    Ok(false)
 }
 
 #[cfg(test)]

@@ -126,7 +126,7 @@ fn recover_bash_mtime(
             "target_repo_work_dir": repo_work_dir.as_str(),
             "file_timestamps_ns": timestamps,
             "selected_bash_call_id": candidate.id,
-            "selected_bash_repo_work_dir": candidate.repo_work_dir.as_str(),
+            "selected_bash_repo_work_dir": candidate.repo_work_dir.as_deref(),
             "selected_tool_use_id": candidate.tool_use_id,
             "selected_command": candidate.command,
             "distance_ns": distance_ns,
@@ -344,7 +344,9 @@ fn bash_candidate_tier(
         return BashCandidateTier::ExistingCommitSession;
     }
 
-    if path_is_equal_or_child(target_repo_work_dir, &candidate.repo_work_dir) {
+    if let Some(repo_work_dir) = candidate.repo_work_dir.as_deref()
+        && path_is_equal_or_child(target_repo_work_dir, repo_work_dir)
+    {
         return BashCandidateTier::WorkdirAncestor;
     }
 
@@ -687,7 +689,9 @@ mod tests {
         BashCheckpointCall {
             id,
             invocation_key: format!("{}:{}", external_session_id, tool_use_id),
-            repo_work_dir: repo_work_dir.to_string(),
+            original_cwd: repo_work_dir.to_string(),
+            repo_work_dir: Some(repo_work_dir.to_string()),
+            repo_discovery_error: None,
             session_id: external_session_id.to_string(),
             tool_use_id: tool_use_id.to_string(),
             agent_id: test_agent(external_session_id),

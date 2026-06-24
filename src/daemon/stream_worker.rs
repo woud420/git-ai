@@ -1016,7 +1016,12 @@ impl StreamWorker {
                         }),
                     };
                     let trace_id = generate_trace_id();
-                    let mut event_attrs = base_attrs.clone().trace_id(trace_id);
+                    let mut event_attrs = base_attrs
+                        .clone()
+                        .trace_id(trace_id)
+                        .external_event_id_opt(eid.clone())
+                        .external_parent_event_id_opt(pid.clone())
+                        .external_tool_use_id_opt(tid.clone());
 
                     if let Some(event_sid) = agent.extract_event_session_id(&raw_event) {
                         let derived_session_id = generate_session_id(&event_sid, &stream.tool);

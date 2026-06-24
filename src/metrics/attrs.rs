@@ -20,7 +20,10 @@ pub mod attr_pos {
     pub const TRACE_ID: usize = 25;
     pub const PARENT_SESSION_ID: usize = 26;
     pub const EXTERNAL_PARENT_SESSION_ID: usize = 27;
+    pub const EXTERNAL_EVENT_ID: usize = 28;
+    pub const EXTERNAL_PARENT_EVENT_ID: usize = 29;
     pub const CUSTOM_ATTRIBUTES: usize = 30;
+    pub const EXTERNAL_TOOL_USE_ID: usize = 31;
 }
 
 /// Common attributes for all events.
@@ -41,7 +44,10 @@ pub mod attr_pos {
 /// | 25 | trace_id | String | No (nullable) |
 /// | 26 | parent_session_id | String | No (nullable) |
 /// | 27 | external_parent_session_id | String | No (nullable) |
+/// | 28 | external_event_id | String | No (nullable) |
+/// | 29 | external_parent_event_id | String | No (nullable) |
 /// | 30 | custom_attributes | String (JSON) | No (nullable) |
+/// | 31 | external_tool_use_id | String | No (nullable) |
 #[derive(Debug, Clone, Default)]
 pub struct EventAttributes {
     pub git_ai_version: PosField<String>,
@@ -58,6 +64,9 @@ pub struct EventAttributes {
     pub parent_session_id: PosField<String>,
     pub external_session_id: PosField<String>,
     pub external_parent_session_id: PosField<String>,
+    pub external_event_id: PosField<String>,
+    pub external_parent_event_id: PosField<String>,
+    pub external_tool_use_id: PosField<String>,
     pub custom_attributes: PosField<String>,
 }
 
@@ -249,6 +258,63 @@ impl EventAttributes {
         }
     }
 
+    // Builder methods for external_event_id
+    pub fn external_event_id(mut self, value: impl Into<String>) -> Self {
+        self.external_event_id = Some(Some(value.into()));
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn external_event_id_null(mut self) -> Self {
+        self.external_event_id = Some(None);
+        self
+    }
+
+    pub fn external_event_id_opt(self, value: Option<String>) -> Self {
+        match value {
+            Some(v) => self.external_event_id(v),
+            None => self,
+        }
+    }
+
+    // Builder methods for external_parent_event_id
+    pub fn external_parent_event_id(mut self, value: impl Into<String>) -> Self {
+        self.external_parent_event_id = Some(Some(value.into()));
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn external_parent_event_id_null(mut self) -> Self {
+        self.external_parent_event_id = Some(None);
+        self
+    }
+
+    pub fn external_parent_event_id_opt(self, value: Option<String>) -> Self {
+        match value {
+            Some(v) => self.external_parent_event_id(v),
+            None => self,
+        }
+    }
+
+    // Builder methods for external_tool_use_id
+    pub fn external_tool_use_id(mut self, value: impl Into<String>) -> Self {
+        self.external_tool_use_id = Some(Some(value.into()));
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn external_tool_use_id_null(mut self) -> Self {
+        self.external_tool_use_id = Some(None);
+        self
+    }
+
+    pub fn external_tool_use_id_opt(self, value: Option<String>) -> Self {
+        match value {
+            Some(v) => self.external_tool_use_id(v),
+            None => self,
+        }
+    }
+
     // Builder methods for custom_attributes
     pub fn custom_attributes(mut self, value: impl Into<String>) -> Self {
         self.custom_attributes = Some(Some(value.into()));
@@ -320,8 +386,23 @@ impl PosEncoded for EventAttributes {
         );
         sparse_set(
             &mut map,
+            attr_pos::EXTERNAL_EVENT_ID,
+            string_to_json(&self.external_event_id),
+        );
+        sparse_set(
+            &mut map,
+            attr_pos::EXTERNAL_PARENT_EVENT_ID,
+            string_to_json(&self.external_parent_event_id),
+        );
+        sparse_set(
+            &mut map,
             attr_pos::CUSTOM_ATTRIBUTES,
             string_to_json(&self.custom_attributes),
+        );
+        sparse_set(
+            &mut map,
+            attr_pos::EXTERNAL_TOOL_USE_ID,
+            string_to_json(&self.external_tool_use_id),
         );
         map
     }
@@ -345,6 +426,9 @@ impl PosEncoded for EventAttributes {
                 arr,
                 attr_pos::EXTERNAL_PARENT_SESSION_ID,
             ),
+            external_event_id: sparse_get_string(arr, attr_pos::EXTERNAL_EVENT_ID),
+            external_parent_event_id: sparse_get_string(arr, attr_pos::EXTERNAL_PARENT_EVENT_ID),
+            external_tool_use_id: sparse_get_string(arr, attr_pos::EXTERNAL_TOOL_USE_ID),
             custom_attributes: sparse_get_string(arr, attr_pos::CUSTOM_ATTRIBUTES),
         }
     }
@@ -596,6 +680,12 @@ mod tests {
         assert_eq!(EXTERNAL_SESSION_ID, 23);
         assert_eq!(SESSION_ID, 24);
         assert_eq!(TRACE_ID, 25);
+        assert_eq!(PARENT_SESSION_ID, 26);
+        assert_eq!(EXTERNAL_PARENT_SESSION_ID, 27);
+        assert_eq!(EXTERNAL_EVENT_ID, 28);
+        assert_eq!(EXTERNAL_PARENT_EVENT_ID, 29);
+        assert_eq!(CUSTOM_ATTRIBUTES, 30);
+        assert_eq!(EXTERNAL_TOOL_USE_ID, 31);
     }
 
     #[test]
@@ -737,5 +827,51 @@ mod tests {
             Some(Some("has-value".to_string()))
         );
         assert_eq!(attrs.external_parent_session_id, None);
+    }
+
+    #[test]
+    fn test_event_attributes_external_event_ids() {
+        let attrs = EventAttributes::with_version("1.0.0")
+            .external_event_id("event-123")
+            .external_parent_event_id("parent-event-456")
+            .external_tool_use_id("tool-use-789");
+
+        assert_eq!(attrs.external_event_id, Some(Some("event-123".to_string())));
+        assert_eq!(
+            attrs.external_parent_event_id,
+            Some(Some("parent-event-456".to_string()))
+        );
+        assert_eq!(
+            attrs.external_tool_use_id,
+            Some(Some("tool-use-789".to_string()))
+        );
+
+        let sparse = attrs.to_sparse();
+        assert_eq!(
+            sparse.get("28"),
+            Some(&Value::String("event-123".to_string()))
+        );
+        assert_eq!(
+            sparse.get("29"),
+            Some(&Value::String("parent-event-456".to_string()))
+        );
+        assert_eq!(
+            sparse.get("31"),
+            Some(&Value::String("tool-use-789".to_string()))
+        );
+
+        let restored = EventAttributes::from_sparse(&sparse);
+        assert_eq!(
+            restored.external_event_id,
+            Some(Some("event-123".to_string()))
+        );
+        assert_eq!(
+            restored.external_parent_event_id,
+            Some(Some("parent-event-456".to_string()))
+        );
+        assert_eq!(
+            restored.external_tool_use_id,
+            Some(Some("tool-use-789".to_string()))
+        );
     }
 }

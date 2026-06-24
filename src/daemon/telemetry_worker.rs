@@ -21,6 +21,7 @@ use tokio::time::{Duration, interval};
 const FLUSH_INTERVAL: Duration = Duration::from_secs(3);
 
 static METRICS_UPLOAD_AVAILABLE: AtomicBool = AtomicBool::new(false);
+static METRICS_METADATA_BACKFILL_STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Accumulated telemetry events waiting to be flushed.
 struct TelemetryBuffer {
@@ -316,11 +317,34 @@ pub fn spawn_telemetry_worker() -> DaemonTelemetryWorkerHandle {
         buffer: buffer.clone(),
     };
 
+    spawn_metrics_metadata_backfill();
+
     tokio::spawn(async move {
         telemetry_flush_loop(buffer).await;
     });
 
     handle
+}
+
+fn spawn_metrics_metadata_backfill() {
+    if METRICS_METADATA_BACKFILL_STARTED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+
+    std::mem::drop(tokio::task::spawn_blocking(|| {
+        if let Err(e) = backfill_metrics_event_metadata() {
+            tracing::warn!(%e, "telemetry: failed to backfill metrics event metadata");
+        }
+    }));
+}
+
+fn backfill_metrics_event_metadata() -> Result<(), GitAiError> {
+    let db = MetricsDatabase::global()?;
+    let mut db_lock = db
+        .lock()
+        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
+    let _ = db_lock.backfill_event_metadata()?;
+    Ok(())
 }
 
 async fn telemetry_flush_loop(buffer: Arc<Mutex<TelemetryBuffer>>) {

@@ -355,6 +355,9 @@ fn execute_resolved_checkpoint(
             .metadata
             .get("tool_use_id")
             .map(|s| s.as_str());
+        if let Some(tuid) = tool_use_id {
+            attrs = attrs.external_tool_use_id(tuid);
+        }
 
         let edit_kind = checkpoint_request
             .metadata

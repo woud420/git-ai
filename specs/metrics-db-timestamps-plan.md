@@ -32,7 +32,7 @@ The metadata columns are:
 ## Requirements
 
 1. Add a metrics DB migration that creates all requested metadata columns as nullable columns.
-2. Add `external_event_id`, `external_parent_event_id`, and `external_tool_use_id` to standardized `EventAttributes` without moving any existing attribute positions.
+2. Do not change metric event schemas or `EventAttributes`; this is a storage-only denormalization.
 3. New metrics inserts must set every available metadata column from valid metric JSON.
 4. Malformed or schema-incomplete metric JSON must still insert; unavailable columns remain `NULL`.
 5. Existing metric rows must be backfilled asynchronously, not as blocking migration work.
@@ -52,17 +52,22 @@ The metadata columns are:
   - `metrics_event_ts_kind` index on `(event_ts, event_kind, id)` for rows where both metadata columns are non-null.
 - Use a dedicated helper `add_event_metadata_columns()` from `apply_migration(3)` so partially applied/concurrent states are handled the same way as the retry-column migration.
 
-### Standardized Attributes
+### Metadata Sources
 
-Keep existing attribute positions stable and add:
+Keep `EventAttributes` unchanged. The DB extractor reads existing common attributes from `a`:
 
-- `EXTERNAL_EVENT_ID = 28`
-- `EXTERNAL_PARENT_EVENT_ID = 29`
-- `EXTERNAL_TOOL_USE_ID = 31`
+- `trace_id`
+- `session_id`
+- `parent_session_id`
+- `tool`
+- `external_session_id`
+- `external_parent_session_id`
 
-Position `30` remains `CUSTOM_ATTRIBUTES`.
+The external event and tool-use IDs are event-specific, so the DB extractor reads them from existing `v` value positions:
 
-Add fields and builders to `EventAttributes`, plus `to_sparse()` and `from_sparse()` support. Existing event-specific value positions remain populated for backward compatibility.
+- event 4 checkpoint value position 7 -> `external_tool_use_id`
+- event 5 session_event value positions 1/2/3 -> external event/parent/tool-use IDs
+- event 6 otel_trace value positions 1/2/3 -> external event/parent/tool-use IDs
 
 ### Shared Metadata Extraction
 
@@ -83,13 +88,10 @@ It parses only the compact top-level fields needed from metrics JSON:
   - `tool`
   - `external_session_id`
   - `external_parent_session_id`
-  - `external_event_id`
-  - `external_parent_event_id`
-  - `external_tool_use_id`
-- legacy event-specific values:
-  - event 4 checkpoint value position 7 -> fallback `external_tool_use_id`
-  - event 5 session_event value positions 1/2/3 -> fallback external event/parent/tool-use IDs
-  - event 6 otel_trace value positions 1/2/3 -> fallback external event/parent/tool-use IDs
+- event-specific values:
+  - event 4 checkpoint value position 7 -> `external_tool_use_id`
+  - event 5 session_event value positions 1/2/3 -> external event/parent/tool-use IDs
+  - event 6 otel_trace value positions 1/2/3 -> external event/parent/tool-use IDs
 
 The helper returns `None` if the top-level timestamp or event kind is missing, null, negative, not an integer, or out of range. Optional string identifiers are independently extracted when valid strings are present. This helper is the only code path that interprets DB metadata from `event_json`.
 
@@ -135,8 +137,8 @@ Add `MetricsDatabase::backfill_event_metadata()` as a cursor-based loop over bat
 Triggering:
 
 - Spawn the backfill from `spawn_telemetry_worker()` so daemon startup eventually fixes prior rows even if no new metric events arrive.
-- Also trigger opportunistically after metric persistence through `submit_telemetry()` and `submit_telemetry_sync()` if practical without blocking user commands.
 - Run in `spawn_blocking` because it uses rusqlite and the global DB mutex.
+- Lock the global DB for one bounded batch at a time so ordinary metric operations can interleave with large backfills.
 
 Backfill can safely race with new inserts because:
 
@@ -144,39 +146,24 @@ Backfill can safely race with new inserts because:
 - Backfill only scans rows whose required timestamp/kind metadata is still null.
 - Updates are idempotent.
 
-### Event Emission
-
-Mirror per-event IDs into standardized attributes where they are emitted today:
-
-- In `stream_worker`, after extracting event IDs for `session_event` and `otel_trace`, attach them to per-event `EventAttributes`.
-- In checkpoint metrics emission, attach `external_tool_use_id` to attributes when checkpoint values include it.
-- Keep the existing value fields populated so existing server-side consumers and tests are not broken.
-
 ### Tests First
 
 Add RED unit tests in `src/metrics/db.rs`:
 
 1. Fresh schema is version 4 and includes all nullable metadata columns.
 2. Version 3 DB migrates to version 4 without backfilling rows synchronously.
-3. New valid inserts populate `event_ts`, `event_kind`, and requested identifiers from attributes, including delivered rows.
-4. New inserts fall back to legacy value positions for external event IDs/tool-use IDs.
+3. New valid inserts populate `event_ts`, `event_kind`, and existing common identifiers from attributes, including delivered rows.
+4. New inserts populate event-specific external event IDs/tool-use IDs from session_event, otel_trace, and checkpoint values.
 5. Malformed/incomplete inserts keep metadata null.
 6. Backfill updates valid legacy rows and leaves invalid rows null.
 7. History reads legacy rows correctly before backfill and uses the same records after backfill.
 8. Retention prunes old rows using `event_ts` when present.
 
-Add `EventAttributes` tests:
-
-1. New external ID builders write positions 28, 29, and 31.
-2. `from_sparse()` reads new positions.
-
-Add event emission tests only where existing unit tests can cheaply prove the attributes are mirrored.
-
 ## Review Passes
 
 ### Pass 1: DRY
 
-Metadata extraction must live in exactly one helper. Inserts, backfill, and fallback read paths should call that helper rather than each defining partial JSON structs. Attribute position constants should be reused instead of numeric string literals in extraction code.
+Metadata extraction must live in exactly one helper. Inserts, backfill, and fallback read paths should call that helper rather than each defining partial JSON structs. Common attribute position constants and event-specific value position constants should be reused instead of numeric string literals in extraction code.
 
 ### Pass 2: Migration Safety
 

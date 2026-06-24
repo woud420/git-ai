@@ -34,6 +34,9 @@ const MIGRATIONS: &[&str] = &[r#"
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_bash_calls_invocation
         ON bash_checkpoint_calls(session_id, tool_use_id, start_trace_id);
+
+    CREATE INDEX IF NOT EXISTS idx_bash_calls_time
+        ON bash_checkpoint_calls(start_time_ns, end_time_ns);
 "#];
 
 static BASH_HISTORY_DB: OnceLock<Mutex<BashHistoryDatabase>> = OnceLock::new();
@@ -82,6 +85,7 @@ pub struct BashCheckpointCall {
 
 pub struct BashHistoryDatabase {
     conn: Connection,
+    enabled: bool,
 }
 
 impl BashHistoryDatabase {
@@ -94,6 +98,21 @@ impl BashHistoryDatabase {
             }
         });
         Ok(db_mutex)
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn disabled_in_test_harness() -> bool {
+        std::env::var_os("GIT_AI_TEST_BASH_CHECKPOINT_DB_PATH").is_none()
+            && (std::env::var_os("GIT_AI_TEST_DB_PATH").is_some()
+                || std::env::var_os("GITAI_TEST_DB_PATH").is_some())
+    }
+
+    fn disabled_database() -> Self {
+        let conn = Connection::open_in_memory().expect("Failed to create disabled bash DB");
+        BashHistoryDatabase {
+            conn,
+            enabled: false,
+        }
     }
 
     fn fallback_database() -> Self {
@@ -111,7 +130,10 @@ impl BashHistoryDatabase {
                 );
                 let conn =
                     Connection::open_in_memory().expect("Failed to create in-memory bash DB");
-                let mut db = BashHistoryDatabase { conn };
+                let mut db = BashHistoryDatabase {
+                    conn,
+                    enabled: true,
+                };
                 db.initialize_schema()
                     .expect("Failed to initialize in-memory bash DB schema");
                 db
@@ -132,12 +154,20 @@ impl BashHistoryDatabase {
             PRAGMA temp_store=MEMORY;
             "#,
         )?;
-        let mut db = Self { conn };
+        let mut db = Self {
+            conn,
+            enabled: true,
+        };
         db.initialize_schema()?;
         Ok(db)
     }
 
     fn new() -> Result<Self, GitAiError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if Self::disabled_in_test_harness() {
+            return Ok(Self::disabled_database());
+        }
+
         let db_path = Self::database_path()?;
         Self::open_at_path(&db_path)
     }
@@ -236,6 +266,10 @@ impl BashHistoryDatabase {
     }
 
     pub fn record_start(&mut self, call: &BashCallStart) -> Result<(), GitAiError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
         self.prune_old_calls_if_due()?;
 
         let now = unix_now_secs();
@@ -280,6 +314,10 @@ impl BashHistoryDatabase {
     }
 
     pub fn record_end(&mut self, call: &BashCallEnd) -> Result<(), GitAiError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
         self.prune_old_calls_if_due()?;
 
         let now = unix_now_secs();
@@ -359,10 +397,13 @@ impl BashHistoryDatabase {
 
     pub fn candidates_near_timestamps(
         &self,
-        repo_work_dir: &str,
         timestamps_ns: &[u128],
         window_ns: u128,
     ) -> Result<Vec<BashCheckpointCall>, GitAiError> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
+
         if timestamps_ns.is_empty() {
             return Ok(Vec::new());
         }
@@ -387,16 +428,12 @@ impl BashHistoryDatabase {
                    start_trace_id, end_trace_id, start_time_ns, end_time_ns,
                    command, metadata_json
             FROM bash_checkpoint_calls
-            WHERE repo_work_dir = ?1
-              AND start_time_ns <= ?2
-              AND COALESCE(end_time_ns, start_time_ns) >= ?3
+            WHERE start_time_ns <= ?1
+              AND COALESCE(end_time_ns, start_time_ns) >= ?2
             ORDER BY id ASC
             "#,
         )?;
-        let rows = stmt.query_map(
-            params![repo_work_dir, ns_to_i64(max_ts)?, ns_to_i64(min_ts)?],
-            row_to_call,
-        )?;
+        let rows = stmt.query_map(params![ns_to_i64(max_ts)?, ns_to_i64(min_ts)?], row_to_call)?;
 
         let mut calls = Vec::new();
         for row in rows {
@@ -412,6 +449,10 @@ impl BashHistoryDatabase {
     }
 
     pub fn all_calls_for_test(&self) -> Result<Vec<BashCheckpointCall>, GitAiError> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
+
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, invocation_key, repo_work_dir, session_id, tool_use_id,
@@ -431,6 +472,10 @@ impl BashHistoryDatabase {
     }
 
     fn prune_old_calls_if_due(&mut self) -> Result<(), GitAiError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
         let now = unix_now_secs();
         let last_prune: Option<i64> = self
             .conn
@@ -452,6 +497,10 @@ impl BashHistoryDatabase {
     }
 
     pub fn prune_old_calls(&mut self, now: u64) -> Result<(), GitAiError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
         let cutoff = now.saturating_sub(RETENTION_SECS);
         let tx = self.conn.transaction()?;
         tx.execute(
@@ -624,13 +673,13 @@ mod tests {
     #[test]
     fn candidate_query_filters_by_window() {
         let (mut db, _dir) = test_db();
-        for (tool_use_id, start, end) in [
-            ("near-before", 1_000_u128, 2_000_u128),
-            ("near-after", 8_000, 9_000),
-            ("outside", 20_000, 21_000),
+        for (repo_work_dir, tool_use_id, start, end) in [
+            ("/repo", "near-before", 1_000_u128, 2_000_u128),
+            ("/other-repo", "near-after", 8_000, 9_000),
+            ("/repo", "outside", 20_000, 21_000),
         ] {
             db.record_start(&BashCallStart {
-                repo_work_dir: "/repo".to_string(),
+                repo_work_dir: repo_work_dir.to_string(),
                 session_id: "session".to_string(),
                 tool_use_id: tool_use_id.to_string(),
                 agent_id: test_agent(),
@@ -641,7 +690,7 @@ mod tests {
             })
             .unwrap();
             db.record_end(&BashCallEnd {
-                repo_work_dir: "/repo".to_string(),
+                repo_work_dir: repo_work_dir.to_string(),
                 session_id: "session".to_string(),
                 tool_use_id: tool_use_id.to_string(),
                 agent_id: test_agent(),
@@ -655,9 +704,7 @@ mod tests {
             .unwrap();
         }
 
-        let calls = db
-            .candidates_near_timestamps("/repo", &[5_000], 3_000)
-            .unwrap();
+        let calls = db.candidates_near_timestamps(&[5_000], 3_000).unwrap();
         let ids: Vec<_> = calls.iter().map(|c| c.tool_use_id.as_str()).collect();
         assert_eq!(ids, vec!["near-before", "near-after"]);
     }

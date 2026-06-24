@@ -267,12 +267,6 @@ where
             &human_author,
             &mut authorship_log,
             &recovery_hunks,
-            Some(
-                crate::authorship::attribution_recovery::RecoveryWorkingLogContext {
-                    working_log: &working_log,
-                    parent_checkpoints: &parent_working_log,
-                },
-            ),
         )?;
         authorship_log.metadata.base_commit_sha = commit_sha.clone();
     }
@@ -495,7 +489,6 @@ pub fn post_commit_amend(
 ) -> Result<(String, AuthorshipLog), GitAiError> {
     let repo_storage = &repo.storage;
     let working_log = repo_storage.working_log_for_base_commit(original_commit)?;
-    let parent_working_log = working_log.read_all_checkpoints()?;
 
     // Compute pathspecs: changed files in the amended commit + working log touched files
     let changed_files = repo.list_commit_files(amended_commit, None)?;
@@ -601,12 +594,6 @@ pub fn post_commit_amend(
         &human_author,
         &mut authorship_log,
         &recovery_hunks,
-        Some(
-            crate::authorship::attribution_recovery::RecoveryWorkingLogContext {
-                working_log: &working_log,
-                parent_checkpoints: &parent_working_log,
-            },
-        ),
     )?;
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();
 

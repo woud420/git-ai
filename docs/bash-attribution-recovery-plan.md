@@ -20,7 +20,7 @@ The goal is to keep the fast checkpoint path intact, but add daemon-owned durabl
 - Keep checkpoint subprocess overhead limited to parsing already-available hook fields and sending them over the existing control socket.
 - Put durable bash history in the daemon, not in checkpoint command processes.
 - Recover only unknown committed lines; never overwrite explicit AI or known-human attestations.
-- Treat unchanged lines from legacy `human` pre-bash checkpoints as negative evidence; those lines were already present before the bash call and should not be recovered as bash output.
+- Prefer minimizing unknown/untracked committed lines over preserving legacy `human` pre-bash holes during bash recovery.
 - Add recovery after the normal authorship log is built and before custom attributes, note serialization, and stats. Existing session pruning happens inside the normal builder, so recovery must add any recovered session records itself.
 - Model recovery as ordered solvers so future recovery stages can be added without changing post-commit control flow.
 - Emit checkpoint metrics for recovered attribution with enough metadata to explain why recovery selected a session.
@@ -62,6 +62,9 @@ CREATE INDEX idx_bash_calls_repo_time
 
 CREATE UNIQUE INDEX idx_bash_calls_invocation
     ON bash_checkpoint_calls(session_id, tool_use_id, start_trace_id);
+
+CREATE INDEX idx_bash_calls_time
+    ON bash_checkpoint_calls(start_time_ns, end_time_ns);
 ```
 
 Retention:
@@ -72,7 +75,7 @@ Retention:
 Rust record shape:
 
 - `BashCheckpointCall`: persisted row with optional `end_time_ns`, optional command, and parsed metadata.
-- `BashCallCandidate`: query result for recovery scoring.
+- `repo_work_dir` is retained for audit/debug metadata, but recovery candidate lookup is global by timestamp so cross-repo/cross-worktree bash commands can recover attribution.
 
 ## Control API Changes
 
@@ -150,10 +153,9 @@ For each eligible file:
 
 1. Read the committed file metadata from the working tree when the committed file matches the working tree.
 2. Use both `mtime` and `ctime` when available, converted to nanoseconds since epoch.
-3. Query bash history for the same canonical worktree key and calls whose `[start_time_ns, end_time_ns]` window is within ±3 seconds of either file timestamp.
+3. Query global bash history for calls whose `[start_time_ns, end_time_ns]` window is within ±3 seconds of either file timestamp.
 4. Score candidates by nearest timestamp distance, then prefer completed calls, then prefer calls with command text, then newest row id.
-5. Before attribution, exclude unknown committed lines whose same line content already existed in a legacy `human` checkpoint before the bash call.
-6. If a candidate is selected, add an attestation for all remaining unknown committed lines in that file to:
+5. If a candidate is selected, add an attestation for all unknown committed lines in that file to:
 
 `generate_session_id(agent_external_id, agent_tool)::generate_trace_id()`
 
@@ -164,9 +166,10 @@ Recovery metadata metric JSON should include:
 - `solver`: `"bash_mtime"`
 - `file_path`
 - `unknown_lines`
-- `file_mtime_ns`
-- `file_ctime_ns`
+- `target_repo_work_dir`
+- `file_timestamps_ns`
 - `selected_bash_call_id`
+- `selected_bash_repo_work_dir`
 - `selected_tool_use_id`
 - `selected_command`
 - `distance_ns`
@@ -194,11 +197,12 @@ For each remaining eligible file:
 
 1. Build a map of line -> author from current authorship log entries.
 2. Identify contiguous unknown line runs inside committed hunks.
-3. Recover attribution only when the unknown run is directly between two AI-attributed neighbors from the same session key.
-4. Do not extend from known-human (`h_`) or legacy `human`.
-5. Do not bridge between two different AI sessions.
-6. Add a new trace id while preserving the recovered or original session id prefix.
-7. Do not recover single-sided leading or trailing unknown runs; those are too ambiguous and caused false positives in reset/rebase/merge scenarios.
+3. Recover attribution when the unknown run is directly between two AI-attributed neighbors from the same session key.
+4. Recover up to three leading or trailing unknown lines when a run touches one AI-attributed edge and is open-ended on the other side.
+5. Do not extend from known-human (`h_`) or legacy `human`.
+6. Do not bridge between two different AI sessions.
+7. Add a new trace id while preserving the recovered or original session id prefix.
+8. Only recover lines from the remaining unknown set derived from committed hunks, so earlier solvers are not overridden.
 
 Metric:
 
@@ -248,11 +252,12 @@ Add RED tests before implementation:
 6. Integration: edge extension:
    - AI checkpoints produce matching AI-attributed lines around an unknown gap.
    - Commit recovery bridges only the unknown gap between the matching AI session lines.
+   - Unknown leading and trailing lines next to an AI block recover up to three lines per side.
 
 7. Integration: edge extension guardrails:
    - Unknown line between two different AI sessions remains unknown.
    - Unknown line adjacent only to known-human remains unknown.
-   - Unknown line with only one neighboring AI attribution remains unknown.
+   - Unknown line with one AI neighbor and a known-human or different-session neighbor remains unknown.
 
 8. Metric unit tests:
    - checkpoint sparse encoding includes the new nullable fields.

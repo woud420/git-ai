@@ -2,14 +2,12 @@ use crate::authorship::authorship_log::{LineRange, SessionRecord};
 use crate::authorship::authorship_log_serialization::{
     AuthorshipLog, generate_session_id, generate_trace_id,
 };
-use crate::authorship::imara_diff_utils::{DiffOp, capture_diff_slices};
-use crate::authorship::working_log::{Checkpoint, CheckpointKind};
+use crate::authorship::working_log::CheckpointKind;
 use crate::commands::checkpoint_agent::bash_tool::StatEntry;
 use crate::daemon::bash_history_db::{BashCheckpointCall, distance_to_call_window};
 use crate::error::GitAiError;
 use crate::git::repo_state::worktree_root_for_path;
-use crate::git::repo_storage::PersistedWorkingLog;
-use crate::git::repository::{Repository, batch_read_paths_at_treeishes};
+use crate::git::repository::Repository;
 use crate::metrics::{CheckpointValues, EventAttributes, MetricEvent, PosEncoded};
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -17,11 +15,7 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const BASH_RECOVERY_WINDOW_NS: u128 = 3_000_000_000;
-
-pub(crate) struct RecoveryWorkingLogContext<'a> {
-    pub working_log: &'a PersistedWorkingLog,
-    pub parent_checkpoints: &'a [Checkpoint],
-}
+const EDGE_EXTENSION_MAX_LINES: usize = 3;
 
 pub(crate) fn recover_attribution(
     repo: &Repository,
@@ -30,30 +24,13 @@ pub(crate) fn recover_attribution(
     human_author: &str,
     authorship_log: &mut AuthorshipLog,
     committed_hunks: &HashMap<String, Vec<LineRange>>,
-    working_log_context: Option<RecoveryWorkingLogContext<'_>>,
 ) -> Result<(), GitAiError> {
     if committed_hunks.is_empty() {
         return Ok(());
     }
 
-    let empty_exclusions: HashMap<String, HashSet<u32>> = HashMap::new();
-    if unknown_lines_by_file(authorship_log, committed_hunks, &empty_exclusions).is_empty() {
+    if unknown_lines_by_file(authorship_log, committed_hunks).is_empty() {
         return Ok(());
-    }
-
-    let mut recovery_exclusions =
-        parent_known_human_same_content_lines(repo, parent_sha, commit_sha, committed_hunks);
-    if let Some(context) = working_log_context {
-        merge_line_exclusions(
-            &mut recovery_exclusions,
-            legacy_human_checkpoint_same_content_lines(
-                repo,
-                commit_sha,
-                committed_hunks,
-                context.working_log,
-                context.parent_checkpoints,
-            ),
-        );
     }
 
     recover_bash_mtime(
@@ -63,7 +40,6 @@ pub(crate) fn recover_attribution(
         human_author,
         authorship_log,
         committed_hunks,
-        &recovery_exclusions,
     )?;
     recover_adjacent_edges(
         repo,
@@ -71,7 +47,6 @@ pub(crate) fn recover_attribution(
         commit_sha,
         authorship_log,
         committed_hunks,
-        &recovery_exclusions,
     );
     Ok(())
 }
@@ -83,12 +58,10 @@ fn recover_bash_mtime(
     human_author: &str,
     authorship_log: &mut AuthorshipLog,
     committed_hunks: &HashMap<String, Vec<LineRange>>,
-    recovery_exclusions: &HashMap<String, HashSet<u32>>,
 ) -> Result<(), GitAiError> {
     let repo_work_dir = repo_worktree_key(repo)?;
     let workdir = repo.workdir()?;
-    let unknown_by_file =
-        unknown_lines_by_file(authorship_log, committed_hunks, recovery_exclusions);
+    let unknown_by_file = unknown_lines_by_file(authorship_log, committed_hunks);
     if unknown_by_file.is_empty() {
         return Ok(());
     }
@@ -110,11 +83,7 @@ fn recover_bash_mtime(
 
     let candidates = match crate::daemon::bash_history_db::BashHistoryDatabase::global() {
         Ok(db) => match db.lock() {
-            Ok(db) => db.candidates_near_timestamps(
-                &repo_work_dir,
-                &all_timestamps,
-                BASH_RECOVERY_WINDOW_NS,
-            )?,
+            Ok(db) => db.candidates_near_timestamps(&all_timestamps, BASH_RECOVERY_WINDOW_NS)?,
             Err(_) => Vec::new(),
         },
         Err(_) => Vec::new(),
@@ -145,8 +114,10 @@ fn recover_bash_mtime(
             "solver": "bash_mtime",
             "file_path": file_path,
             "unknown_lines": unknown_lines,
+            "target_repo_work_dir": repo_work_dir.as_str(),
             "file_timestamps_ns": timestamps,
             "selected_bash_call_id": candidate.id,
+            "selected_bash_repo_work_dir": candidate.repo_work_dir.as_str(),
             "selected_tool_use_id": candidate.tool_use_id,
             "selected_command": candidate.command,
             "distance_ns": distance_ns,
@@ -185,34 +156,40 @@ fn recover_adjacent_edges(
     commit_sha: &str,
     authorship_log: &mut AuthorshipLog,
     committed_hunks: &HashMap<String, Vec<LineRange>>,
-    recovery_exclusions: &HashMap<String, HashSet<u32>>,
 ) {
-    let unknown = unknown_lines_by_file(authorship_log, committed_hunks, recovery_exclusions);
+    let unknown = unknown_lines_by_file(authorship_log, committed_hunks);
     for (file_path, unknown_lines) in unknown {
         let line_to_author = line_author_map(authorship_log, &file_path);
         let runs = contiguous_runs(&unknown_lines);
         for run in runs {
-            let Some(source_author) = source_author_for_edge_run(&line_to_author, &run) else {
+            let Some(recovery) = edge_recovery_for_run(&line_to_author, &run) else {
                 continue;
             };
             let trace_id = generate_trace_id();
-            let source_session = source_author
+            let source_session = recovery
+                .source_author
                 .split("::")
                 .next()
-                .unwrap_or(&source_author)
+                .unwrap_or(&recovery.source_author)
                 .to_string();
             let recovered_author = if source_session.starts_with("s_") {
                 format!("{}::{}", source_session, trace_id)
             } else {
-                source_author.clone()
+                recovery.source_author.clone()
             };
-            add_attestation(authorship_log, &file_path, &recovered_author, &run);
+            let recovered_line_count = recovery.lines.len() as u32;
+            add_attestation(
+                authorship_log,
+                &file_path,
+                &recovered_author,
+                &recovery.lines,
+            );
 
             let metadata = json!({
                 "solver": "edge_extension",
                 "file_path": file_path,
-                "source_author": source_author,
-                "recovered_lines": run,
+                "source_author": &recovery.source_author,
+                "recovered_lines": &recovery.lines,
             });
             record_recovery_metric(RecoveryMetricInput {
                 repo,
@@ -228,7 +205,7 @@ fn recover_adjacent_edges(
                 external_tool_use_id: None,
                 edit_kind: "attribution_recovery_edge",
                 checkpoint_type: "recovered_edge_extension",
-                recovered_line_count: run.len() as u32,
+                recovered_line_count,
                 metadata,
                 event_ts: None,
             });
@@ -312,19 +289,14 @@ fn insert_session_record(
 fn unknown_lines_by_file(
     authorship_log: &AuthorshipLog,
     committed_hunks: &HashMap<String, Vec<LineRange>>,
-    recovery_exclusions: &HashMap<String, HashSet<u32>>,
 ) -> BTreeMap<String, Vec<u32>> {
     let covered = covered_lines_by_file(authorship_log);
     let mut result = BTreeMap::new();
     for (file_path, ranges) in committed_hunks {
         let covered_lines = covered.get(file_path);
-        let excluded_lines = recovery_exclusions.get(file_path);
         let mut unknown = Vec::new();
         for line in ranges.iter().flat_map(LineRange::expand) {
             if !covered_lines.is_some_and(|lines| lines.contains(&line)) {
-                if excluded_lines.is_some_and(|lines| lines.contains(&line)) {
-                    continue;
-                }
                 unknown.push(line);
             }
         }
@@ -335,218 +307,6 @@ fn unknown_lines_by_file(
         }
     }
     result
-}
-
-fn parent_known_human_same_content_lines(
-    repo: &Repository,
-    parent_sha: &str,
-    commit_sha: &str,
-    committed_hunks: &HashMap<String, Vec<LineRange>>,
-) -> HashMap<String, HashSet<u32>> {
-    if parent_sha == "initial" {
-        return HashMap::new();
-    }
-
-    let Ok(parent_log) = crate::git::refs::get_reference_as_authorship_log_v3(repo, parent_sha)
-    else {
-        return HashMap::new();
-    };
-    let parent_known_human = known_human_lines_by_file(&parent_log);
-    if parent_known_human.is_empty() {
-        return HashMap::new();
-    }
-
-    let mut requests = Vec::new();
-    for file_path in committed_hunks.keys() {
-        if parent_known_human.contains_key(file_path) {
-            requests.push((parent_sha.to_string(), file_path.clone()));
-            requests.push((commit_sha.to_string(), file_path.clone()));
-        }
-    }
-
-    let Ok(contents) = batch_read_paths_at_treeishes(repo, &requests) else {
-        return HashMap::new();
-    };
-
-    let mut excluded = HashMap::new();
-    for (file_path, ranges) in committed_hunks {
-        let Some(parent_known_lines) = parent_known_human.get(file_path) else {
-            continue;
-        };
-        let Some(parent_content) = contents.get(&(parent_sha.to_string(), file_path.clone()))
-        else {
-            continue;
-        };
-        let Some(commit_content) = contents.get(&(commit_sha.to_string(), file_path.clone()))
-        else {
-            continue;
-        };
-
-        for line in same_content_target_lines_for_source_lines(
-            parent_content,
-            commit_content,
-            parent_known_lines,
-            ranges,
-        ) {
-            excluded
-                .entry(file_path.clone())
-                .or_insert_with(HashSet::new)
-                .insert(line);
-        }
-    }
-
-    excluded
-}
-
-fn legacy_human_checkpoint_same_content_lines(
-    repo: &Repository,
-    commit_sha: &str,
-    committed_hunks: &HashMap<String, Vec<LineRange>>,
-    working_log: &PersistedWorkingLog,
-    parent_checkpoints: &[Checkpoint],
-) -> HashMap<String, HashSet<u32>> {
-    let legacy_entries = parent_checkpoints
-        .iter()
-        .filter(|checkpoint| checkpoint.kind == CheckpointKind::Human)
-        .flat_map(|checkpoint| checkpoint.entries.iter())
-        .filter(|entry| committed_hunks.contains_key(&entry.file))
-        .collect::<Vec<_>>();
-    if legacy_entries.is_empty() {
-        return HashMap::new();
-    }
-
-    let requests = legacy_entries
-        .iter()
-        .map(|entry| (commit_sha.to_string(), entry.file.clone()))
-        .collect::<Vec<_>>();
-    let Ok(commit_contents) = batch_read_paths_at_treeishes(repo, &requests) else {
-        return HashMap::new();
-    };
-
-    let mut excluded = HashMap::new();
-    for entry in legacy_entries {
-        let Some(ranges) = committed_hunks.get(&entry.file) else {
-            continue;
-        };
-        let Some(commit_content) =
-            commit_contents.get(&(commit_sha.to_string(), entry.file.clone()))
-        else {
-            continue;
-        };
-        let Ok(checkpoint_content) = working_log.get_file_version(&entry.blob_sha) else {
-            continue;
-        };
-
-        let legacy_human_lines =
-            legacy_human_lines_for_entry(entry, checkpoint_content.lines().count() as u32);
-        for line in same_content_target_lines_for_source_lines(
-            &checkpoint_content,
-            commit_content,
-            &legacy_human_lines,
-            ranges,
-        ) {
-            excluded
-                .entry(entry.file.clone())
-                .or_insert_with(HashSet::new)
-                .insert(line);
-        }
-    }
-
-    excluded
-}
-
-fn same_content_target_lines_for_source_lines(
-    source_content: &str,
-    target_content: &str,
-    source_lines: &HashSet<u32>,
-    target_ranges: &[LineRange],
-) -> HashSet<u32> {
-    if source_lines.is_empty() {
-        return HashSet::new();
-    }
-
-    let target_candidate_lines = target_ranges
-        .iter()
-        .flat_map(LineRange::expand)
-        .collect::<HashSet<_>>();
-    if target_candidate_lines.is_empty() {
-        return HashSet::new();
-    }
-
-    let source_file_lines = source_content.lines().collect::<Vec<_>>();
-    let target_file_lines = target_content.lines().collect::<Vec<_>>();
-    let mut mapped = HashSet::new();
-
-    for op in capture_diff_slices(&source_file_lines, &target_file_lines) {
-        let DiffOp::Equal {
-            old_index,
-            new_index,
-            len,
-        } = op
-        else {
-            continue;
-        };
-        for offset in 0..len {
-            let source_line = (old_index + offset + 1) as u32;
-            if !source_lines.contains(&source_line) {
-                continue;
-            }
-            let target_line = (new_index + offset + 1) as u32;
-            if target_candidate_lines.contains(&target_line) {
-                mapped.insert(target_line);
-            }
-        }
-    }
-
-    mapped
-}
-
-fn legacy_human_lines_for_entry(
-    entry: &crate::authorship::working_log::WorkingLogEntry,
-    fallback_line_count: u32,
-) -> HashSet<u32> {
-    if entry.line_attributions.is_empty() {
-        return (1..=fallback_line_count).collect();
-    }
-
-    let mut lines = HashSet::new();
-    for line_attribution in &entry.line_attributions {
-        if line_attribution.author_id != "human" {
-            continue;
-        }
-        for line in line_attribution.start_line..=line_attribution.end_line {
-            lines.insert(line);
-        }
-    }
-    lines
-}
-
-fn merge_line_exclusions(
-    target: &mut HashMap<String, HashSet<u32>>,
-    source: HashMap<String, HashSet<u32>>,
-) {
-    for (file_path, lines) in source {
-        target.entry(file_path).or_default().extend(lines);
-    }
-}
-
-fn known_human_lines_by_file(authorship_log: &AuthorshipLog) -> HashMap<String, HashSet<u32>> {
-    let mut known_human = HashMap::new();
-    for file_attestation in &authorship_log.attestations {
-        let mut lines = HashSet::new();
-        for entry in &file_attestation.entries {
-            if !entry.hash.starts_with("h_") {
-                continue;
-            }
-            for line in entry.line_ranges.iter().flat_map(LineRange::expand) {
-                lines.insert(line);
-            }
-        }
-        if !lines.is_empty() {
-            known_human.insert(file_attestation.file_path.clone(), lines);
-        }
-    }
-    known_human
 }
 
 fn covered_lines_by_file(authorship_log: &AuthorshipLog) -> HashMap<String, HashSet<u32>> {
@@ -603,10 +363,15 @@ fn contiguous_runs(lines: &[u32]) -> Vec<Vec<u32>> {
     runs
 }
 
-fn source_author_for_edge_run(
+struct EdgeRecovery {
+    source_author: String,
+    lines: Vec<u32>,
+}
+
+fn edge_recovery_for_run(
     line_to_author: &BTreeMap<u32, String>,
     run: &[u32],
-) -> Option<String> {
+) -> Option<EdgeRecovery> {
     let first = *run.first()?;
     let last = *run.last()?;
     let prev = first
@@ -620,10 +385,42 @@ fn source_author_for_edge_run(
                 && is_ai_attestation(right)
                 && ai_session_key(left) == ai_session_key(right) =>
         {
-            Some(left.clone())
+            let mut lines = run
+                .iter()
+                .take(EDGE_EXTENSION_MAX_LINES)
+                .copied()
+                .collect::<Vec<_>>();
+            lines.extend(run.iter().rev().take(EDGE_EXTENSION_MAX_LINES).copied());
+            lines.sort_unstable();
+            lines.dedup();
+            Some(EdgeRecovery {
+                source_author: left.clone(),
+                lines,
+            })
         }
+        (Some(left), None) if is_ai_attestation(left) => Some(EdgeRecovery {
+            source_author: left.clone(),
+            lines: run.iter().take(EDGE_EXTENSION_MAX_LINES).copied().collect(),
+        }),
+        (None, Some(right)) if is_ai_attestation(right) => Some(EdgeRecovery {
+            source_author: right.clone(),
+            lines: run
+                .iter()
+                .rev()
+                .take(EDGE_EXTENSION_MAX_LINES)
+                .copied()
+                .collect(),
+        }),
         _ => None,
     }
+}
+
+#[cfg(test)]
+fn edge_recovered_lines(line_to_author: &BTreeMap<u32, String>, run: &[u32]) -> Option<Vec<u32>> {
+    edge_recovery_for_run(line_to_author, run).map(|mut recovery| {
+        recovery.lines.sort_unstable();
+        recovery.lines
+    })
 }
 
 fn is_ai_attestation(author: &str) -> bool {
@@ -752,58 +549,58 @@ mod tests {
             vec![LineRange::Range(1, 3), LineRange::Single(5)],
         )]);
 
-        let unknown = unknown_lines_by_file(&log, &committed, &HashMap::new());
+        let unknown = unknown_lines_by_file(&log, &committed);
         assert_eq!(unknown.get("a.txt").unwrap(), &vec![1, 3, 5]);
     }
 
     #[test]
-    fn same_content_mapping_handles_insertions_above_source_line() {
-        let source_lines = HashSet::from([2]);
-        let mapped = same_content_target_lines_for_source_lines(
-            "base\nhuman dirty before bash\n",
-            "bash recovered line\nbase\nhuman dirty before bash\n",
-            &source_lines,
-            &[LineRange::Range(1, 3)],
-        );
-
-        assert_eq!(mapped, HashSet::from([3]));
-    }
-
-    #[test]
-    fn same_content_mapping_only_returns_target_candidate_lines() {
-        let source_lines = HashSet::from([1, 2]);
-        let mapped = same_content_target_lines_for_source_lines(
-            "base\nhuman dirty before bash\n",
-            "base\nhuman dirty before bash\nbash recovered line\n",
-            &source_lines,
-            &[LineRange::Single(3)],
-        );
-
-        assert!(mapped.is_empty());
-    }
-
-    #[test]
-    fn edge_source_requires_same_ai_neighbors() {
+    fn edge_recovery_extends_one_sided_runs_and_bridges_matching_ai_neighbors() {
         let map = BTreeMap::from([
             (1, "s_a::t_1".to_string()),
             (3, "s_a::t_2".to_string()),
-            (5, "s_b::t_1".to_string()),
+            (10, "s_a::t_3".to_string()),
+            (20, "s_b::t_1".to_string()),
         ]);
 
         assert_eq!(
-            source_author_for_edge_run(&map, &[2]).as_deref(),
-            Some("s_a::t_1"),
+            edge_recovered_lines(&map, &[2]).as_deref(),
+            Some(&[2][..]),
             "different trace ids for the same session should extend by session"
         );
         assert_eq!(
-            source_author_for_edge_run(&map, &[4]).as_deref(),
+            edge_recovered_lines(&map, &[4, 5, 6, 7, 8, 9]).as_deref(),
+            Some(&[4, 5, 6, 7, 8, 9][..]),
+            "matching AI neighbors should recover up to three lines from each side"
+        );
+        assert_eq!(
+            edge_recovered_lines(&map, &[11, 12, 13, 14]).as_deref(),
+            Some(&[11, 12, 13][..]),
+            "trailing edge extension should recover at most three lines"
+        );
+        assert_eq!(
+            edge_recovered_lines(&map, &[16, 17, 18, 19]).as_deref(),
+            Some(&[17, 18, 19][..]),
+            "leading edge extension should recover the three lines nearest the AI block"
+        );
+    }
+
+    #[test]
+    fn edge_recovery_keeps_human_and_different_session_guardrails() {
+        let map = BTreeMap::from([
+            (1, "s_a::t_1".to_string()),
+            (3, "s_b::t_1".to_string()),
+            (5, "h_human::t_1".to_string()),
+        ]);
+
+        assert_eq!(
+            edge_recovered_lines(&map, &[2]).as_deref(),
             None,
             "different sessions must not be bridged"
         );
         assert_eq!(
-            source_author_for_edge_run(&map, &[6]).as_deref(),
+            edge_recovered_lines(&map, &[4]).as_deref(),
             None,
-            "single-sided edge extension is too ambiguous"
+            "known-human neighbors must not be used for edge extension"
         );
     }
 }

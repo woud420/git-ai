@@ -20,6 +20,7 @@ const SCHEMA_VERSION: usize = 4;
 const MAX_METRIC_UPLOAD_ATTEMPTS: u32 = 6;
 const METRIC_PROCESSING_LOCK_TIMEOUT_SECS: u64 = 10 * 60;
 pub(crate) const METADATA_BACKFILL_BATCH_SIZE: usize = 1000;
+const NS_PER_SECOND: u128 = 1_000_000_000;
 
 /// Database migrations - each migration upgrades the schema by one version
 const MIGRATIONS: &[&str] = &[
@@ -1225,11 +1226,11 @@ fn event_ts_bounds_for_ns_windows(timestamps_ns: &[u128], window_ns: u128) -> Op
     let mut min_ts: Option<u32> = None;
     let mut max_ts: Option<u32> = None;
     for timestamp_ns in timestamps_ns {
-        let start = timestamp_ns.saturating_sub(window_ns) / 1_000_000_000;
+        let start = timestamp_ns.saturating_sub(window_ns) / NS_PER_SECOND;
         let end = timestamp_ns
             .saturating_add(window_ns)
-            .min(u32::MAX as u128 * 1_000_000_000)
-            / 1_000_000_000;
+            .min(u32::MAX as u128 * NS_PER_SECOND)
+            / NS_PER_SECOND;
         let start = start.min(u32::MAX as u128) as u32;
         let end = end.min(u32::MAX as u128) as u32;
         min_ts = Some(min_ts.map_or(start, |current| current.min(start)));
@@ -1239,11 +1240,20 @@ fn event_ts_bounds_for_ns_windows(timestamps_ns: &[u128], window_ns: u128) -> Op
 }
 
 fn min_distance_to_event_ts(timestamps_ns: &[u128], event_ts: u32) -> Option<u128> {
-    let event_ns = event_ts as u128 * 1_000_000_000;
     timestamps_ns
         .iter()
-        .map(|timestamp_ns| timestamp_ns.abs_diff(event_ns))
+        .map(|timestamp_ns| distance_to_event_second(*timestamp_ns, event_ts))
         .min()
+}
+
+fn distance_to_event_second(timestamp_ns: u128, event_ts: u32) -> u128 {
+    let start_ns = event_ts as u128 * NS_PER_SECOND;
+    let end_ns = start_ns.saturating_add(NS_PER_SECOND - 1);
+    if timestamp_ns < start_ns {
+        start_ns - timestamp_ns
+    } else {
+        timestamp_ns.saturating_sub(end_ns)
+    }
 }
 
 fn recovery_attrs_from_event_json(event_json: &str) -> (Option<String>, Option<String>) {
@@ -2005,6 +2015,28 @@ mod tests {
         assert_eq!(candidates[0].event_ts, base_ts);
         assert_eq!(candidates[0].session_id, "session-near");
         assert_eq!(candidates[0].external_session_id, "external-near");
+    }
+
+    #[test]
+    fn test_session_event_candidates_treat_event_ts_as_second_bucket() {
+        let (mut db, _temp_dir) = create_test_db();
+        let base_ts = seconds_ago(60);
+        db.insert_events(&[session_event_json(
+            base_ts,
+            "session-bucket",
+            "external-bucket",
+            "codex",
+            Some("https://github.com/acme/repo"),
+        )])
+        .unwrap();
+
+        let timestamp_ns = base_ts as u128 * NS_PER_SECOND + 3_500_000_000;
+        let candidates = db
+            .session_event_candidates_near_timestamps(&[timestamp_ns], 3_000_000_000)
+            .unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].session_id, "session-bucket");
     }
 
     #[test]

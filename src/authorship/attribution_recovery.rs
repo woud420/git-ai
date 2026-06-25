@@ -20,6 +20,7 @@ const BASH_RECOVERY_WINDOW_NS: u128 = 3_000_000_000;
 const BASH_RECOVERY_COARSE_TIMESTAMP_NS: u128 = 1_000_000_000;
 pub(crate) const SESSION_EVENT_RECOVERY_WINDOW_NS: u128 = 3_000_000_000;
 const EDGE_EXTENSION_MAX_LINES: usize = 3;
+const NS_PER_SECOND: u128 = 1_000_000_000;
 
 pub(crate) type FileTimestampsByPath = HashMap<String, Vec<u128>>;
 pub(crate) type UnknownLinesByFile = BTreeMap<String, Vec<u32>>;
@@ -617,11 +618,20 @@ fn session_event_distance(
     candidate: &SessionEventRecoveryCandidate,
     timestamps: &[u128],
 ) -> Option<u128> {
-    let event_ns = candidate.event_ts as u128 * 1_000_000_000;
     timestamps
         .iter()
-        .map(|timestamp_ns| timestamp_ns.abs_diff(event_ns))
+        .map(|timestamp_ns| distance_to_event_second(*timestamp_ns, candidate.event_ts))
         .min()
+}
+
+fn distance_to_event_second(timestamp_ns: u128, event_ts: u32) -> u128 {
+    let start_ns = event_ts as u128 * NS_PER_SECOND;
+    let end_ns = start_ns.saturating_add(NS_PER_SECOND - 1);
+    if timestamp_ns < start_ns {
+        start_ns - timestamp_ns
+    } else {
+        timestamp_ns.saturating_sub(end_ns)
+    }
 }
 
 fn recovery_distance_to_call_window(timestamp_ns: u128, call: &BashCheckpointCall) -> Option<u128> {
@@ -1240,6 +1250,29 @@ mod tests {
             selection.is_none(),
             "session-event recovery must not attribute without a matching repo URL"
         );
+    }
+
+    #[test]
+    fn session_event_candidate_distance_uses_event_second_bucket() {
+        let event_ts = 1_700_000_000;
+        let timestamp_ns = event_ts as u128 * NS_PER_SECOND + 3_500_000_000;
+        let candidates = vec![session_event_candidate(
+            1,
+            "s_bucket",
+            "external-bucket",
+            event_ts,
+            Some("https://github.com/acme/repo"),
+        )];
+
+        let selection = select_best_session_event_candidate(
+            &candidates,
+            &[timestamp_ns],
+            "https://github.com/acme/repo",
+        )
+        .expect("expected second-bucket timestamp to match");
+
+        assert_eq!(selection.candidate.session_id, "s_bucket");
+        assert_eq!(selection.distance_ns, 2_500_000_001);
     }
 
     #[test]

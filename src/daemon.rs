@@ -2611,37 +2611,39 @@ impl ActorDaemonCoordinator {
             crate::daemon::stream_worker::SweepTrigger::PostCommit,
         );
 
-        if let Some(sweep_completion) = sweep_completion {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
+        let Some(sweep_completion) = sweep_completion else {
+            return;
+        };
+
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            tracing::debug!(
+                wait_ms = SESSION_EVENT_RECOVERY_PREFLIGHT_WAIT.as_millis() as u64,
+                "recovery transcript sweep wait expired"
+            );
+            return;
+        }
+        match sweep_completion.recv_timeout(remaining) {
+            Ok(Ok(())) => {
+                tracing::debug!("recovery transcript sweep completed before post-commit");
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(
+                    %error,
+                    "recovery transcript sweep failed before post-commit"
+                );
+                return;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 tracing::debug!(
                     wait_ms = SESSION_EVENT_RECOVERY_PREFLIGHT_WAIT.as_millis() as u64,
                     "recovery transcript sweep wait expired"
                 );
                 return;
             }
-            match sweep_completion.recv_timeout(remaining) {
-                Ok(Ok(())) => {
-                    tracing::debug!("recovery transcript sweep completed before post-commit");
-                }
-                Ok(Err(error)) => {
-                    tracing::debug!(
-                        %error,
-                        "recovery transcript sweep failed before post-commit"
-                    );
-                    return;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    tracing::debug!(
-                        wait_ms = SESSION_EVENT_RECOVERY_PREFLIGHT_WAIT.as_millis() as u64,
-                        "recovery transcript sweep wait expired"
-                    );
-                    return;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    tracing::debug!("recovery transcript sweep completion channel disconnected");
-                    return;
-                }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                tracing::debug!("recovery transcript sweep completion channel disconnected");
+                return;
             }
         }
 

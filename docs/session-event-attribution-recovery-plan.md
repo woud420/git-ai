@@ -26,8 +26,8 @@ solve.
 - Recovery only considers unknown lines inside committed hunks.
 - Bash recovery uses captured file `mtime`/`ctime` values, a three-second
   window, session note insertion, recovered checkpoint metrics, and solver
-  metadata. It must have repo/cwd ancestry evidence or an existing commit
-  session; time proximity alone is not safe enough.
+  metadata. Bash candidate ranking is intentionally left unchanged by this
+  session-event recovery work.
 - Session transcript ingestion emits metrics event id `5`
   (`MetricEventId::SessionEvent`) with cached DB metadata including
   `event_ts`, `event_kind`, `session_id`, `trace_id`, `tool`,
@@ -179,7 +179,7 @@ Recovery metadata JSON should include:
   `external_session_id`.
 - Do not recover a file when no file timestamp is available.
 - Do not use session-event recovery for rows from `mock_ai`.
-- Do not select time-only session-event or bash candidates.
+- Do not select time-only session-event candidates.
 - Do not trigger the session-event preflight wait when edge extension solves all
   unknown committed lines.
 - Do not let bash recovery reassign lines already recovered by session-event

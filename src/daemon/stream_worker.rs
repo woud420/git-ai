@@ -145,6 +145,20 @@ impl SweepTriggerGate {
     fn try_mark_sweep_at(&self, now: Instant, source: &str) -> bool {
         self.try_trigger_at(now, source, || true)
     }
+
+    fn force_trigger_at(&self, now: Instant, trigger_action: impl FnOnce() -> bool) -> bool {
+        let Ok(mut last_triggered_at) = self.last_triggered_at.lock() else {
+            tracing::warn!("failed to lock transcript sweep trigger cooldown");
+            return false;
+        };
+
+        if !trigger_action() {
+            return false;
+        }
+
+        *last_triggered_at = Some(now);
+        true
+    }
 }
 
 /// Handle for sending checkpoint notifications and sweep requests to the worker.
@@ -193,10 +207,11 @@ impl StreamWorkerHandle {
     /// Request a sweep for commit-time attribution recovery.
     ///
     /// This bypasses the user-facing cooldown because the caller performs its own
-    /// short bounded wait for a repo-linked metric row. Suppressing this request
-    /// can leave the current commit permanently missing recoverable attribution.
+    /// short bounded wait for a repo-linked metric row, but still marks the gate
+    /// so the regular post-commit sweep for the same command is suppressed.
     pub fn trigger_sweep_for_recovery(&self, trigger: SweepTrigger) -> bool {
-        self.sweep_tx.send(trigger).is_ok()
+        self.sweep_trigger_gate
+            .force_trigger_at(Instant::now(), || self.sweep_tx.send(trigger).is_ok())
     }
 
     fn trigger_sweep_at(&self, trigger: SweepTrigger, now: Instant) -> bool {
@@ -1513,6 +1528,28 @@ mod subagent_sweep_tests {
             handle.trigger_sweep_at(SweepTrigger::PostPush, started_at + Duration::from_secs(60))
         );
         assert_eq!(sweep_rx.try_recv().unwrap(), SweepTrigger::PostPush);
+    }
+
+    #[test]
+    fn recovery_sweep_bypasses_cooldown_and_suppresses_followup_trigger() {
+        let (sweep_tx, mut sweep_rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = StreamWorkerHandle::for_test_sweep_triggers(sweep_tx);
+        let started_at = Instant::now();
+
+        assert!(
+            handle
+                .sweep_trigger_gate
+                .try_mark_sweep_at(started_at, "periodic")
+        );
+
+        assert!(handle.trigger_sweep_for_recovery(SweepTrigger::PostCommit));
+        assert_eq!(sweep_rx.try_recv().unwrap(), SweepTrigger::PostCommit);
+
+        assert!(!handle.trigger_sweep_at(
+            SweepTrigger::PostCommit,
+            started_at + Duration::from_secs(29)
+        ));
+        assert_eq!(sweep_rx.try_recv(), Err(TryRecvError::Empty));
     }
 
     #[test]

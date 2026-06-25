@@ -454,7 +454,7 @@ fn select_best_bash_candidate<'a>(
                     candidate,
                     existing_commit_sessions,
                     target_repo_work_dir,
-                )?,
+                ),
             })
         })
         .min_by(|left, right| {
@@ -491,6 +491,7 @@ enum BashCandidateTier {
     ExistingCommitSession,
     WorkdirAncestor,
     CwdAncestor,
+    TimeOnly,
 }
 
 impl BashCandidateTier {
@@ -499,6 +500,7 @@ impl BashCandidateTier {
             Self::ExistingCommitSession => 0,
             Self::WorkdirAncestor => 1,
             Self::CwdAncestor => 2,
+            Self::TimeOnly => 3,
         }
     }
 
@@ -507,6 +509,7 @@ impl BashCandidateTier {
             Self::ExistingCommitSession => "existing_commit_session",
             Self::WorkdirAncestor => "workdir_ancestor",
             Self::CwdAncestor => "cwd_ancestor",
+            Self::TimeOnly => "time_only",
         }
     }
 }
@@ -515,23 +518,23 @@ fn bash_candidate_tier(
     candidate: &BashCheckpointCall,
     existing_commit_sessions: &HashSet<String>,
     target_repo_work_dir: &str,
-) -> Option<BashCandidateTier> {
+) -> BashCandidateTier {
     let session_id = bash_candidate_session_id(candidate);
     if existing_commit_sessions.contains(&session_id) {
-        return Some(BashCandidateTier::ExistingCommitSession);
+        return BashCandidateTier::ExistingCommitSession;
     }
 
     if let Some(repo_work_dir) = candidate.repo_work_dir.as_deref()
         && path_is_equal_or_child(target_repo_work_dir, repo_work_dir)
     {
-        return Some(BashCandidateTier::WorkdirAncestor);
+        return BashCandidateTier::WorkdirAncestor;
     }
 
     if path_is_equal_or_child(target_repo_work_dir, &candidate.original_cwd) {
-        return Some(BashCandidateTier::CwdAncestor);
+        return BashCandidateTier::CwdAncestor;
     }
 
-    None
+    BashCandidateTier::TimeOnly
 }
 
 fn bash_candidate_session_id(candidate: &BashCheckpointCall) -> String {
@@ -1170,18 +1173,18 @@ mod tests {
     }
 
     #[test]
-    fn bash_candidate_ranking_rejects_time_only_candidates() {
+    fn bash_candidate_ranking_falls_back_to_closest_time() {
         let candidates = vec![
             bash_call(1, "far-session", "tool-far", "/other-a", 900, None),
             bash_call(2, "near-session", "tool-near", "/other-b", 1_040, None),
         ];
 
-        let selection = select_best_bash_candidate(&candidates, &[1_050], &HashSet::new(), "/repo");
+        let selection = select_best_bash_candidate(&candidates, &[1_050], &HashSet::new(), "/repo")
+            .expect("expected candidate");
 
-        assert!(
-            selection.is_none(),
-            "bash mtime recovery must not attribute from time proximity alone"
-        );
+        assert_eq!(selection.candidate.tool_use_id, "tool-near");
+        assert_eq!(selection.tier, BashCandidateTier::TimeOnly);
+        assert_eq!(selection.distance_ns, 10);
     }
 
     #[test]

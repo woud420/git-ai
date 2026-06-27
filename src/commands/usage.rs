@@ -125,6 +125,7 @@ fn print_terminal(stats: &LocalActivityStats, repos: &[RepoActivitySummary]) {
             None => String::new(),
         }
     };
+    println!();
     println!("  {BOLD}{header}{RESET}");
 
     // --- Top bar: AI vs Human split ---

@@ -180,7 +180,7 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
         clone_dir.clone(),
         "rev-parse".to_string(),
         "--verify".to_string(),
-        previous_head_sha.clone(),
+        format!("{}^{{commit}}", previous_head_sha),
     ])
     .is_ok();
 
@@ -188,15 +188,20 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
         let previous_head_fetch_url = authenticated_fork_url
             .as_ref()
             .unwrap_or(&authenticated_url);
+        let previous_head_ref = format!("refs/git-ai/github/pr/{}/previous-head", pr_number);
         exec_git(&[
             "-C".to_string(),
             clone_dir.clone(),
             "fetch".to_string(),
             previous_head_fetch_url.clone(),
-            format!(
-                "{}:refs/github/pr/{}/previous",
-                previous_head_sha, pr_number
-            ),
+            previous_head_sha.clone(),
+        ])?;
+        exec_git(&[
+            "-C".to_string(),
+            clone_dir.clone(),
+            "update-ref".to_string(),
+            previous_head_ref,
+            previous_head_sha.clone(),
         ])?;
     }
 

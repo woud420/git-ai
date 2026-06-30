@@ -1,5 +1,29 @@
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{TestRepo, real_git_executable};
 use std::io::Write;
+use std::path::Path;
+use std::process::Command;
+
+fn run_real_git(args: &[&str]) -> String {
+    let output = Command::new(real_git_executable())
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run git {:?}: {}", args, e));
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(
+        output.status.success(),
+        "git {:?} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        args,
+        output.status.code(),
+        stdout,
+        stderr
+    );
+    stdout.trim().to_string()
+}
+
+fn path_str(path: &Path) -> &str {
+    path.to_str().expect("test path must be valid UTF-8")
+}
 
 // ==============================================================================
 // CI Handlers Tests - Module Structure and Types
@@ -118,6 +142,106 @@ fn test_ci_github_run_noops_when_synchronize_has_no_previous_head() {
         "Expected no-op output, got: {}",
         output
     );
+}
+
+#[test]
+fn test_ci_github_run_fetches_missing_previous_head_after_force_push() {
+    let ci_repo = TestRepo::new();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote_path = tmp.path().join("origin.git");
+    let work_path = tmp.path().join("work");
+    let remote = path_str(&remote_path);
+    let work = path_str(&work_path);
+
+    run_real_git(&["init", "--bare", "--initial-branch=main", remote]);
+    run_real_git(&[
+        "-C",
+        remote,
+        "config",
+        "uploadpack.allowAnySHA1InWant",
+        "true",
+    ]);
+    run_real_git(&["init", "--initial-branch=main", work]);
+    run_real_git(&["-C", work, "config", "user.name", "Test User"]);
+    run_real_git(&["-C", work, "config", "user.email", "test@example.com"]);
+
+    std::fs::write(work_path.join("file.txt"), "base\n").expect("write base");
+    run_real_git(&["-C", work, "add", "file.txt"]);
+    run_real_git(&["-C", work, "commit", "-m", "base"]);
+    let base_sha = run_real_git(&["-C", work, "rev-parse", "HEAD"]);
+    run_real_git(&["-C", work, "remote", "add", "origin", remote]);
+    run_real_git(&["-C", work, "push", "origin", "main"]);
+
+    run_real_git(&["-C", work, "checkout", "-b", "feature"]);
+    std::fs::write(work_path.join("file.txt"), "old PR head\n").expect("write old head");
+    run_real_git(&["-C", work, "commit", "-am", "old pr head"]);
+    let previous_head_sha = run_real_git(&["-C", work, "rev-parse", "HEAD"]);
+    run_real_git(&["-C", work, "push", "origin", "HEAD:refs/pull/42/head"]);
+
+    run_real_git(&["-C", work, "checkout", "-B", "feature", "main"]);
+    std::fs::write(work_path.join("file.txt"), "new PR head\n").expect("write new head");
+    run_real_git(&["-C", work, "commit", "-am", "new pr head"]);
+    let current_head_sha = run_real_git(&["-C", work, "rev-parse", "HEAD"]);
+    run_real_git(&[
+        "-C",
+        work,
+        "push",
+        "--force",
+        "origin",
+        "HEAD:refs/pull/42/head",
+    ]);
+
+    let remote_url =
+        url::Url::from_directory_path(&remote_path).expect("remote path should be file URL");
+    let mut event_file = tempfile::NamedTempFile::new().expect("event file");
+    let event = serde_json::json!({
+        "action": "synchronize",
+        "before": previous_head_sha,
+        "after": current_head_sha,
+        "pull_request": {
+            "number": 42,
+            "merged": false,
+            "merge_commit_sha": null,
+            "base": {
+                "ref": "main",
+                "sha": base_sha,
+                "repo": { "clone_url": remote_url.as_str() }
+            },
+            "head": {
+                "ref": "feature",
+                "sha": current_head_sha,
+                "repo": { "clone_url": remote_url.as_str() }
+            }
+        }
+    });
+    serde_json::to_writer(&mut event_file, &event).expect("write event");
+    event_file.flush().expect("flush event");
+
+    let output = ci_repo
+        .git_ai_with_env(
+            &["ci", "github", "run", "--no-cleanup"],
+            &[
+                ("GITHUB_EVENT_NAME", "pull_request"),
+                (
+                    "GITHUB_EVENT_PATH",
+                    event_file.path().to_str().expect("event path"),
+                ),
+            ],
+        )
+        .expect("github ci run should fetch the missing previous head");
+
+    assert!(
+        output.contains("GitHub CI: skipped non-rebase PR sync"),
+        "expected successful non-rebase sync skip, got:\n{}",
+        output
+    );
+
+    let clone_path = ci_repo.path().join("git-ai-ci-clone");
+    let clone = path_str(&clone_path);
+    let previous_commit = format!("{}^{{commit}}", previous_head_sha);
+    let resolved_previous_head =
+        run_real_git(&["-C", clone, "rev-parse", "--verify", &previous_commit]);
+    assert_eq!(resolved_previous_head, previous_head_sha);
 }
 
 // ==============================================================================

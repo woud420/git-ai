@@ -1,8 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::env;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use glob::Pattern;
 use serde::{Deserialize, Serialize, Serializer};
@@ -50,6 +52,63 @@ pub struct NotesBackendConfig {
     pub kind: NotesBackendKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_url: Option<String>,
+}
+
+/// Optional git-ai author override for authorship metadata.
+///
+/// Any unset field falls back to the effective Git committer identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct AuthorConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+impl AuthorConfig {
+    pub fn normalized(mut self) -> Self {
+        self.name = normalize_optional_string(self.name);
+        self.email = normalize_optional_string(self.email);
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none() && self.email.is_none()
+    }
+}
+
+/// Which Codex hook file git-ai should use when installing Codex hooks.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexHooksFormat {
+    /// Default: install git-ai Codex hooks inline in ~/.codex/config.toml.
+    #[default]
+    ConfigToml,
+    /// Install git-ai Codex hooks in ~/.codex/hooks.json.
+    HooksJson,
+}
+
+impl CodexHooksFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CodexHooksFormat::ConfigToml => "config_toml",
+            CodexHooksFormat::HooksJson => "hooks_json",
+        }
+    }
+
+    fn from_str(input: &str) -> Option<Self> {
+        match input.trim().to_lowercase().as_str() {
+            "config_toml" | "config-toml" => Some(CodexHooksFormat::ConfigToml),
+            "hooks_json" | "hooks-json" => Some(CodexHooksFormat::HooksJson),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for CodexHooksFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 /// Prompt storage mode enum for type-safe handling
@@ -116,8 +175,10 @@ pub struct Config {
     api_key: Option<String>,
     quiet: bool,
     allow_superuser: bool,
+    author: AuthorConfig,
     custom_attributes: HashMap<String, String>,
     git_ai_hooks: HashMap<String, Vec<String>>,
+    codex_hooks_format: CodexHooksFormat,
     notes_backend: NotesBackendConfig,
     transcript_streaming_lookback_days: Option<u32>,
 }
@@ -190,9 +251,13 @@ pub struct FileConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_superuser: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<AuthorConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_attributes: Option<HashMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_ai_hooks: Option<HashMap<String, Vec<String>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_hooks_format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_backend: Option<NotesBackendConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,6 +265,31 @@ pub struct FileConfig {
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
+
+const AUTHOR_CONFIG_CACHE_TTL: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthorConfigCacheKey {
+    config_path: Option<PathBuf>,
+    config_fingerprint: Option<AuthorConfigFileFingerprint>,
+    #[cfg(any(test, feature = "test-support"))]
+    test_patch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthorConfigFileFingerprint {
+    len: u64,
+    hash: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CachedAuthorConfig {
+    key: AuthorConfigCacheKey,
+    loaded_at: Instant,
+    author: AuthorConfig,
+}
+
+static AUTHOR_CONFIG_CACHE: OnceLock<Mutex<Option<CachedAuthorConfig>>> = OnceLock::new();
 
 #[cfg(any(test, feature = "test-support"))]
 static TEST_FEATURE_FLAGS_OVERRIDE: RwLock<Option<FeatureFlags>> = RwLock::new(None);
@@ -220,9 +310,13 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_storage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<AuthorConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_attributes: Option<HashMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feature_flags: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_hooks_format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_backend: Option<NotesBackendConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -250,6 +344,44 @@ impl Config {
         build_config()
     }
 
+    /// Return the fresh author override with a short process-local TTL.
+    ///
+    /// Author identity is consulted in hot paths such as checkpoint bursts and
+    /// daemon replay. This avoids the global `Config::get()` singleton while
+    /// still bounding repeated config file reads during a burst of operations.
+    pub fn fresh_author_cached() -> AuthorConfig {
+        let key = author_config_cache_key();
+        let now = Instant::now();
+        let cache = AUTHOR_CONFIG_CACHE.get_or_init(|| Mutex::new(None));
+        if let Ok(mut guard) = cache.lock() {
+            if let Some(cached) = guard.as_ref()
+                && cached.key == key
+                && now.duration_since(cached.loaded_at) < AUTHOR_CONFIG_CACHE_TTL
+            {
+                return cached.author.clone();
+            }
+
+            let author = build_config().author;
+            *guard = Some(CachedAuthorConfig {
+                key,
+                loaded_at: now,
+                author: author.clone(),
+            });
+            return author;
+        }
+
+        build_config().author
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn clear_author_config_cache_for_tests() {
+        if let Some(cache) = AUTHOR_CONFIG_CACHE.get()
+            && let Ok(mut guard) = cache.lock()
+        {
+            *guard = None;
+        }
+    }
+
     /// Returns the command to invoke git.
     pub fn git_cmd(&self) -> &str {
         &self.git_path
@@ -274,6 +406,14 @@ impl Config {
         &self,
         remotes: Option<&Vec<(String, String)>>,
     ) -> bool {
+        if remotes.is_some_and(|remotes| {
+            remotes.iter().any(|(_, remote_url)| {
+                crate::diagnostic_sentinels::is_debug_self_check_remote_url(remote_url)
+            })
+        }) {
+            return true;
+        }
+
         // First check if repository is in exclusion list - exclusions take precedence
         if !self.exclude_repositories.is_empty()
             && let Some(remotes) = remotes
@@ -305,8 +445,28 @@ impl Config {
     /// This uses a blacklist model: empty list = share everywhere, patterns = repos to exclude.
     /// Local repositories (no remotes) are only excluded if wildcard "*" pattern is present.
     pub fn should_exclude_prompts(&self, repository: &Option<Repository>) -> bool {
+        let remotes = repository
+            .as_ref()
+            .and_then(|repo| repo.remotes_with_urls().ok());
+
+        self.should_exclude_prompts_with_remotes(remotes.as_ref())
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn should_exclude_prompts_with_remotes(
+        &self,
+        remotes: Option<&Vec<(String, String)>>,
+    ) -> bool {
         // Empty exclusion list = never exclude
         if self.exclude_prompts_in_repositories.is_empty() {
+            return false;
+        }
+
+        if remotes.is_some_and(|remotes| {
+            remotes.iter().any(|(_, remote_url)| {
+                crate::diagnostic_sentinels::is_debug_self_check_remote_url(remote_url)
+            })
+        }) {
             return false;
         }
 
@@ -318,11 +478,6 @@ impl Config {
         if has_wildcard {
             return true;
         }
-
-        // Fetch remotes
-        let remotes = repository
-            .as_ref()
-            .and_then(|repo| repo.remotes_with_urls().ok());
 
         match remotes {
             Some(remotes) => {
@@ -481,6 +636,11 @@ impl Config {
         self.allow_superuser
     }
 
+    /// Returns the configured git-ai author override.
+    pub fn author(&self) -> &AuthorConfig {
+        &self.author
+    }
+
     /// Returns the custom attributes map (from config file + env var override).
     pub fn custom_attributes(&self) -> &HashMap<String, String> {
         &self.custom_attributes
@@ -494,6 +654,10 @@ impl Config {
     /// Returns configured shell commands for a specific hook.
     pub fn git_ai_hook_commands(&self, hook_name: &str) -> Option<&Vec<String>> {
         self.git_ai_hooks.get(hook_name)
+    }
+
+    pub fn codex_hooks_format(&self) -> CodexHooksFormat {
+        self.codex_hooks_format
     }
 
     /// Serialize the effective runtime config into pretty JSON.
@@ -719,6 +883,36 @@ where
     masked.serialize(serializer)
 }
 
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn author_config_cache_key() -> AuthorConfigCacheKey {
+    let config_path = config_file_path();
+    let config_fingerprint = config_path
+        .as_ref()
+        .and_then(|path| author_config_file_fingerprint(path));
+
+    AuthorConfigCacheKey {
+        config_path,
+        config_fingerprint,
+        #[cfg(any(test, feature = "test-support"))]
+        test_patch: env::var("GIT_AI_TEST_CONFIG_PATCH").ok(),
+    }
+}
+
+fn author_config_file_fingerprint(path: &Path) -> Option<AuthorConfigFileFingerprint> {
+    let data = fs::read(path).ok()?;
+    let mut hasher = DefaultHasher::new();
+    data.hash(&mut hasher);
+    Some(AuthorConfigFileFingerprint {
+        len: data.len() as u64,
+        hash: hasher.finish(),
+    })
+}
+
 fn build_config() -> Config {
     let file_cfg = load_file_config();
     let exclude_prompts_in_repositories = file_cfg
@@ -878,6 +1072,12 @@ fn build_config() -> Config {
         .and_then(|c| c.allow_superuser)
         .unwrap_or(false);
 
+    let author = file_cfg
+        .as_ref()
+        .and_then(|c| c.author.clone())
+        .unwrap_or_default()
+        .normalized();
+
     // Build custom attributes: file config as base, env var overrides
     let custom_attributes = build_custom_attributes(&file_cfg);
 
@@ -904,6 +1104,21 @@ fn build_config() -> Config {
             Some((hook_name, commands))
         })
         .collect::<HashMap<String, Vec<String>>>();
+
+    let codex_hooks_format = file_cfg
+        .as_ref()
+        .and_then(|c| c.codex_hooks_format.as_deref())
+        .and_then(|value| {
+            let parsed = CodexHooksFormat::from_str(value);
+            if parsed.is_none() {
+                eprintln!(
+                    "Warning: Invalid codex_hooks_format value '{}', using 'config_toml'",
+                    value
+                );
+            }
+            parsed
+        })
+        .unwrap_or_default();
 
     // Resolve notes_backend config: env vars override file config, which overrides defaults.
     let file_backend = file_cfg.as_ref().and_then(|c| c.notes_backend.clone());
@@ -956,8 +1171,10 @@ fn build_config() -> Config {
             api_key,
             quiet,
             allow_superuser,
+            author,
             custom_attributes: custom_attributes.clone(),
             git_ai_hooks: git_ai_hooks.clone(),
+            codex_hooks_format,
             notes_backend,
             transcript_streaming_lookback_days,
         };
@@ -984,8 +1201,10 @@ fn build_config() -> Config {
         api_key,
         quiet,
         allow_superuser,
+        author,
         custom_attributes,
         git_ai_hooks,
+        codex_hooks_format,
         notes_backend,
         transcript_streaming_lookback_days,
     }
@@ -1402,6 +1621,9 @@ fn apply_test_config_patch(config: &mut Config) {
         if let Some(custom_attributes) = patch.custom_attributes {
             config.custom_attributes = custom_attributes;
         }
+        if let Some(author) = patch.author {
+            config.author = author.normalized();
+        }
         if let Some(feature_flags_value) = patch.feature_flags
             && let Ok(deserialized) = serde_json::from_value::<
                 crate::feature_flags::DeserializableFeatureFlags,
@@ -1411,6 +1633,16 @@ fn apply_test_config_patch(config: &mut Config) {
                 config.feature_flags.clone(),
                 deserialized,
             );
+        }
+        if let Some(codex_hooks_format) = patch.codex_hooks_format {
+            if let Some(format) = CodexHooksFormat::from_str(&codex_hooks_format) {
+                config.codex_hooks_format = format;
+            } else {
+                eprintln!(
+                    "Warning: Invalid test codex_hooks_format value '{}', ignoring",
+                    codex_hooks_format
+                );
+            }
         }
         if let Some(nb) = patch.notes_backend {
             config.notes_backend.kind = nb.kind;
@@ -1456,11 +1688,51 @@ mod tests {
             api_key: None,
             quiet: false,
             allow_superuser: false,
+            author: AuthorConfig::default(),
             custom_attributes: HashMap::new(),
             git_ai_hooks: HashMap::new(),
+            codex_hooks_format: CodexHooksFormat::ConfigToml,
             notes_backend: NotesBackendConfig::default(),
             transcript_streaming_lookback_days: Some(7),
         }
+    }
+
+    #[test]
+    fn test_author_config_normalizes_empty_fields() {
+        let author = AuthorConfig {
+            name: Some("  Alice  ".to_string()),
+            email: Some("   ".to_string()),
+        }
+        .normalized();
+
+        assert_eq!(author.name.as_deref(), Some("Alice"));
+        assert!(author.email.is_none());
+        assert!(!author.is_empty());
+    }
+
+    #[test]
+    fn test_author_config_empty_when_all_fields_blank() {
+        let author = AuthorConfig {
+            name: Some("".to_string()),
+            email: Some("   ".to_string()),
+        }
+        .normalized();
+
+        assert!(author.is_empty());
+    }
+
+    #[test]
+    fn test_author_config_file_fingerprint_detects_same_length_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        fs::write(&path, br#"{"author":{"name":"Alice"}}"#).unwrap();
+        let first = author_config_file_fingerprint(&path).unwrap();
+
+        fs::write(&path, br#"{"author":{"name":"Carol"}}"#).unwrap();
+        let second = author_config_file_fingerprint(&path).unwrap();
+
+        assert_eq!(first.len, second.len);
+        assert_ne!(first, second);
     }
 
     #[test]
@@ -1658,8 +1930,10 @@ mod tests {
             api_key: None,
             quiet: false,
             allow_superuser: false,
+            author: AuthorConfig::default(),
             custom_attributes: HashMap::new(),
             git_ai_hooks: HashMap::new(),
+            codex_hooks_format: CodexHooksFormat::ConfigToml,
             notes_backend: NotesBackendConfig::default(),
             transcript_streaming_lookback_days: Some(7),
         }
@@ -1711,6 +1985,17 @@ mod tests {
 
         // Wildcard * should also exclude repos without remotes (None case)
         assert!(config.should_exclude_prompts(&None));
+    }
+
+    #[test]
+    fn test_debug_self_check_remote_bypasses_prompt_exclusion_wildcard() {
+        let config = create_test_config_with_exclude_prompts(vec!["*".to_string()]);
+        let remotes = vec![(
+            "origin".to_string(),
+            crate::diagnostic_sentinels::DEBUG_SELF_CHECK_REMOTE_URL.to_string(),
+        )];
+
+        assert!(!config.should_exclude_prompts_with_remotes(Some(&remotes)));
     }
 
     #[test]
@@ -1790,8 +2075,10 @@ mod tests {
             api_key: None,
             quiet: false,
             allow_superuser: false,
+            author: AuthorConfig::default(),
             custom_attributes: HashMap::new(),
             git_ai_hooks: HashMap::new(),
+            codex_hooks_format: CodexHooksFormat::ConfigToml,
             notes_backend: NotesBackendConfig::default(),
             transcript_streaming_lookback_days: Some(7),
         }

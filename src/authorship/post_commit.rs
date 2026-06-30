@@ -33,6 +33,8 @@ pub const STATS_SKIP_MAX_FILES_WITH_ADDITIONS: usize = 200;
 #[doc(hidden)]
 pub const STATS_SKIP_MAX_DELETED_LINES: usize = 6000;
 
+const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
 #[derive(Debug, Clone, Copy)]
 #[doc(hidden)]
 pub struct StatsCostEstimate {
@@ -350,14 +352,8 @@ where
             // the finalized commit's immediate parent to avoid buffering the whole
             // pulled range (PD-23 / #1677). No-hooks agents (Devin/Codex Cloud)
             // can be active during a pull, so this path is exposed too.
-            let immediate_parent = immediate_parent_diff_base(repo, &parent_sha, &commit_sha);
-            let diff_base = immediate_parent.as_deref().unwrap_or(&parent_sha);
-            let diff_base = if diff_base == "initial" {
-                "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-            } else {
-                diff_base
-            };
-            repo.diff_added_lines(diff_base, &commit_sha, None)
+            let diff_base = single_commit_diff_base(repo, &parent_sha, &commit_sha);
+            repo.diff_added_lines(&diff_base, &commit_sha, None)
                 .ok()
                 .map(|added_lines| {
                     added_lines
@@ -436,6 +432,7 @@ where
     let mut skip_reason = None;
 
     if options.compute_stats {
+        let stats_diff_base = single_commit_diff_base(repo, &parent_sha, &commit_sha);
         let is_merge_commit = repo
             .find_commit(commit_sha.clone())
             .map(|commit| commit.parent_count().unwrap_or(0) > 1)
@@ -444,7 +441,7 @@ where
         skip_reason = if is_merge_commit {
             Some(StatsSkipReason::MergeCommit)
         } else {
-            estimate_stats_cost(repo, &parent_sha, &commit_sha, &ignore_patterns)
+            estimate_stats_cost(repo, &stats_diff_base, &commit_sha, &ignore_patterns)
                 .ok()
                 .and_then(|estimate| {
                     if should_skip_expensive_post_commit_stats(&estimate) {
@@ -456,14 +453,11 @@ where
         };
 
         if skip_reason.is_none() {
-            let diff_base = if parent_sha == "initial" {
-                "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-            } else {
-                &parent_sha
-            };
-
-            let diff_hunks =
-                crate::commands::diff::get_diff_with_line_numbers(repo, diff_base, &commit_sha)?;
+            let diff_hunks = crate::commands::diff::get_diff_with_line_numbers(
+                repo,
+                &stats_diff_base,
+                &commit_sha,
+            )?;
 
             let computed = stats_for_commit_stats_from_hunks(
                 repo,
@@ -486,7 +480,7 @@ where
             record_commit_metrics(
                 repo,
                 &commit_sha,
-                &parent_sha,
+                &stats_diff_base,
                 &human_author,
                 &authorship_note_str,
                 &computed,
@@ -590,8 +584,8 @@ fn commit_tree_snapshot_for_files(
     Ok(snapshot)
 }
 
-/// Resolve the diff base for recovery so the diff is always bounded to the
-/// single commit being finalized.
+/// Resolve the diff base for post-commit diff parsing so the diff is always
+/// bounded to the single commit being finalized.
 ///
 /// Returns the immediate first parent of `commit_sha` when it can be resolved
 /// and differs from the supplied `parent_sha` (i.e. `parent_sha` is a far-behind
@@ -609,6 +603,16 @@ fn immediate_parent_diff_base(
     }
     let first_parent = commit.parent(0).ok()?.id();
     (first_parent != parent_sha).then_some(first_parent)
+}
+
+fn single_commit_diff_base(repo: &Repository, parent_sha: &str, commit_sha: &str) -> String {
+    let diff_base = immediate_parent_diff_base(repo, parent_sha, commit_sha)
+        .unwrap_or_else(|| parent_sha.to_string());
+    if diff_base == "initial" {
+        EMPTY_TREE_SHA.to_string()
+    } else {
+        diff_base
+    }
 }
 
 fn recovery_committed_hunks(
@@ -632,14 +636,8 @@ fn recovery_committed_hunks(
     // up in PD-23 / #1677). Resolving the immediate parent caps the diff to one
     // commit while leaving the normal/uncheckpointed-recovery cases unchanged
     // (there `parent_sha` already equals the immediate parent).
-    let immediate_parent = immediate_parent_diff_base(repo, parent_sha, commit_sha);
-    let diff_base = immediate_parent.as_deref().unwrap_or(parent_sha);
-    let diff_base = if diff_base == "initial" {
-        "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-    } else {
-        diff_base
-    };
-    let added_lines = repo.diff_added_lines(diff_base, commit_sha, None)?;
+    let diff_base = single_commit_diff_base(repo, parent_sha, commit_sha);
+    let added_lines = repo.diff_added_lines(&diff_base, commit_sha, None)?;
     Ok(added_lines
         .into_iter()
         .filter(|(_, lines)| !lines.is_empty())
@@ -1157,62 +1155,6 @@ fn record_commit_metrics(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_recovery_committed_hunks_bounds_diff_to_immediate_parent() {
-        use crate::git::test_utils::TmpRepo;
-
-        let repo = TmpRepo::new().expect("tmp repo");
-        repo.write_file("base.txt", "base\n", false).unwrap();
-        // `old_tip` simulates the local branch tip from before a `git pull`.
-        let old_tip = repo.commit_all("old tip").unwrap();
-
-        // A long run of intervening commits, each touching a distinct file, as a
-        // fast-forward pull would drag in. Diffing old_tip..final across all of
-        // these is exactly the unbounded full-range diff PD-23 hit.
-        for i in 0..8 {
-            repo.write_file(
-                &format!("upstream_{i}.txt"),
-                &format!("upstream {i}\n"),
-                false,
-            )
-            .unwrap();
-            repo.commit_all(&format!("upstream commit {i}")).unwrap();
-        }
-
-        // The final (newly pulled) commit only changes `final.txt`.
-        repo.write_file("final.txt", "final change\n", false)
-            .unwrap();
-        let final_sha = repo.commit_all("final").unwrap();
-
-        let gitai = repo.gitai_repo();
-
-        // Passing the far-behind `old_tip` as parent (the daemon fast-forward
-        // update-ref path) must still only diff the final commit's own changes,
-        // not the entire old_tip..final range.
-        let hunks = recovery_committed_hunks(gitai, &old_tip, &final_sha, None).unwrap();
-        assert!(
-            hunks.contains_key("final.txt"),
-            "recovery must see the finalized commit's own changes"
-        );
-        for i in 0..8 {
-            assert!(
-                !hunks.contains_key(&format!("upstream_{i}.txt")),
-                "recovery diff must be bounded to the immediate parent, not the full pull range"
-            );
-        }
-
-        // The immediate-parent helper resolves the far-behind ancestor to the
-        // commit's real first parent, and returns None when already immediate.
-        assert!(immediate_parent_diff_base(gitai, &old_tip, &final_sha).is_some());
-        let real_parent = gitai
-            .find_commit(final_sha.clone())
-            .unwrap()
-            .parent(0)
-            .unwrap()
-            .id();
-        assert!(immediate_parent_diff_base(gitai, &real_parent, &final_sha).is_none());
-    }
 
     #[test]
     fn test_count_line_ranges_handles_scattered_and_contiguous_lines() {

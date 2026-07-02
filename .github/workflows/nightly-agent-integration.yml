@@ -62,13 +62,6 @@ jobs:
               allowed = {a.strip() for a in agents_filter.split(",")}
               agents = {k: v for k, v in agents.items() if k in allowed}
 
-          headless_cmds = {
-              "claude":   "claude -p --dangerously-skip-permissions --max-turns 3",
-              "codex":    "codex exec --full-auto",
-              "gemini":   "gemini --approval-mode=yolo",
-              "opencode": "opencode run --command",
-          }
-
           def resolve_binary_name(pkg_spec, default_name):
               """Resolve the primary binary name from an npm package spec."""
               try:
@@ -126,7 +119,6 @@ jobs:
                       "npm_pkg":     npm_pkg,
                       "version":     ver,
                       "api_key_var": info["key"],
-                      "headless_cmd": headless_cmds[agent],
                       "binary_name": bin_name,
                   })
 
@@ -139,7 +131,6 @@ jobs:
                   "npm_pkg":     "",
                   "version":     "latest",
                   "api_key_var": "FACTORY_API_KEY",
-                  "headless_cmd": "droid exec --auto high",
                   "binary_name": "droid",
               })
 

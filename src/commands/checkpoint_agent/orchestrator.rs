@@ -1,5 +1,6 @@
 use crate::authorship::authorship_log_serialization::generate_trace_id;
 use crate::authorship::working_log::{AgentId, CheckpointKind};
+use crate::checkpoint_content_budget::CheckpointContentBudget;
 use crate::commands::checkpoint_agent::presets::{
     KnownHumanEdit, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
     StreamSource, UntrackedEdit,
@@ -57,6 +58,30 @@ struct RepoContext {
 
 const MAX_CHECKPOINT_FILES: usize = 1000;
 
+fn apply_checkpoint_content_budget(files: &mut [CheckpointFile]) {
+    let mut budget = CheckpointContentBudget::from_config(config::Config::get());
+    for file in files {
+        let Some(content) = file.content.as_ref() else {
+            continue;
+        };
+        if !budget.reserve(file.path.display(), content) {
+            file.content = None;
+        }
+    }
+}
+
+fn apply_dirty_file_overrides(
+    files: &mut [CheckpointFile],
+    dirty_files: &HashMap<PathBuf, String>,
+) {
+    for file in &mut *files {
+        if let Some(override_content) = dirty_files.get(&file.path) {
+            file.content = Some(override_content.clone());
+        }
+    }
+    apply_checkpoint_content_budget(files);
+}
+
 fn build_checkpoint_files(file_paths: &[PathBuf]) -> Result<Vec<CheckpointFile>, GitAiError> {
     let perf = std::env::var("GIT_AI_DEBUG_PERFORMANCE").is_ok_and(|v| !v.is_empty() && v != "0");
 
@@ -71,7 +96,8 @@ fn build_checkpoint_files(file_paths: &[PathBuf]) -> Result<Vec<CheckpointFile>,
 
     let mut repo_cache: HashMap<PathBuf, RepoContext> = HashMap::new();
     let mut files = Vec::new();
-    let max_size = config::Config::get().max_checkpoint_file_size_bytes();
+    let mut content_budget = CheckpointContentBudget::from_config(config::Config::get());
+    let max_size = content_budget.max_file_size_bytes();
 
     for path in capped_paths {
         if !path.is_absolute() {
@@ -143,6 +169,8 @@ fn build_checkpoint_files(file_paths: &[PathBuf]) -> Result<Vec<CheckpointFile>,
                 content.as_ref().map(|c| c.len()).unwrap_or(0),
             );
         }
+
+        let content = content.filter(|content| content_budget.reserve(path.display(), content));
 
         files.push(CheckpointFile {
             path: path.clone(),
@@ -317,23 +345,9 @@ fn split_files_into_requests(
 }
 
 fn execute_pre_file_edit(e: PreFileEdit) -> Result<Vec<CheckpointRequest>, GitAiError> {
-    let max_size = config::Config::get().max_checkpoint_file_size_bytes();
     let mut files = build_checkpoint_files(&e.file_paths)?;
     if let Some(ref dirty) = e.dirty_files {
-        for f in &mut files {
-            if let Some(override_content) = dirty.get(&f.path) {
-                if override_content.len() > max_size {
-                    tracing::warn!(
-                        "skipping dirty file override larger than max_checkpoint_file_size_bytes: {} ({} bytes)",
-                        f.path.display(),
-                        override_content.len(),
-                    );
-                    f.content = None;
-                } else {
-                    f.content = Some(override_content.clone());
-                }
-            }
-        }
+        apply_dirty_file_overrides(&mut files, dirty);
     }
     let mut metadata = e.context.metadata;
     if let Some(tuid) = e.tool_use_id {
@@ -354,23 +368,9 @@ fn execute_post_file_edit(
     e: PostFileEdit,
     preset_name: &str,
 ) -> Result<Vec<CheckpointRequest>, GitAiError> {
-    let max_size = config::Config::get().max_checkpoint_file_size_bytes();
     let mut files = build_checkpoint_files(&e.file_paths)?;
     if let Some(ref dirty) = e.dirty_files {
-        for f in &mut files {
-            if let Some(override_content) = dirty.get(&f.path) {
-                if override_content.len() > max_size {
-                    tracing::warn!(
-                        "skipping dirty file override larger than max_checkpoint_file_size_bytes: {} ({} bytes)",
-                        f.path.display(),
-                        override_content.len(),
-                    );
-                    f.content = None;
-                } else {
-                    f.content = Some(override_content.clone());
-                }
-            }
-        }
+        apply_dirty_file_overrides(&mut files, dirty);
     }
     let checkpoint_kind = match preset_name {
         "ai_tab" => CheckpointKind::AiTab,
@@ -395,23 +395,9 @@ fn execute_post_file_edit(
 }
 
 fn execute_known_human_edit(e: KnownHumanEdit) -> Result<Vec<CheckpointRequest>, GitAiError> {
-    let max_size = config::Config::get().max_checkpoint_file_size_bytes();
     let mut files = build_checkpoint_files(&e.file_paths)?;
     if let Some(ref dirty) = e.dirty_files {
-        for f in &mut files {
-            if let Some(override_content) = dirty.get(&f.path) {
-                if override_content.len() > max_size {
-                    tracing::warn!(
-                        "skipping dirty file override larger than max_checkpoint_file_size_bytes: {} ({} bytes)",
-                        f.path.display(),
-                        override_content.len(),
-                    );
-                    f.content = None;
-                } else {
-                    f.content = Some(override_content.clone());
-                }
-            }
-        }
+        apply_dirty_file_overrides(&mut files, dirty);
     }
     Ok(split_files_into_requests(
         files,

@@ -1245,6 +1245,18 @@ impl TestRepo {
                 serde_json::Value::Number(serde_json::Number::from(max_bytes as u64)),
             );
         }
+        if let Some(max_bytes) = patch.max_checkpoint_total_size_bytes {
+            config.insert(
+                "max_checkpoint_total_size_bytes".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(max_bytes as u64)),
+            );
+        }
+        if let Some(max_lines) = patch.max_checkpoint_total_lines {
+            config.insert(
+                "max_checkpoint_total_lines".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(max_lines as u64)),
+            );
+        }
 
         let config_dir = home.join(".git-ai");
         fs::create_dir_all(&config_dir).expect("failed to create test HOME config directory");

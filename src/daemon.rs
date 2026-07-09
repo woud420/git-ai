@@ -1,4 +1,5 @@
 use crate::authorship::authorship_log_serialization::AuthorshipLog;
+use crate::checkpoint_content_budget::CheckpointContentBudget;
 use crate::config;
 use crate::daemon::git_backend::GitBackend;
 use crate::error::GitAiError;
@@ -918,7 +919,8 @@ fn resolve_checkpoint_request(
     let mut files = Vec::new();
     let mut dirty_files: HashMap<String, Arc<str>> = HashMap::new();
     let mut seen = std::collections::HashSet::new();
-    let max_size = config::Config::fresh().max_checkpoint_file_size_bytes();
+    let config = config::Config::fresh();
+    let mut content_budget = CheckpointContentBudget::from_config(&config);
 
     for file in &mut request.files {
         let path_str = file.path.to_string_lossy();
@@ -955,10 +957,13 @@ fn resolve_checkpoint_request(
             continue;
         }
 
-        if let Some(content) = std::mem::take(&mut file.content)
-            && !content.chars().any(|c| c == '\0')
-            && content.len() <= max_size
-        {
+        if let Some(content) = std::mem::take(&mut file.content) {
+            if content.as_bytes().contains(&0) {
+                continue;
+            }
+            if !content_budget.reserve(&relative_path, &content) {
+                continue;
+            }
             dirty_files.insert(relative_path.clone(), Arc::from(content));
             files.push(relative_path);
         }

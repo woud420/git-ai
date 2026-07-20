@@ -55,6 +55,13 @@ git-ai config --add allowed_repositories "https://github.com/my-org/*"  # …or 
 
 **No per-repo setup or git hooks required.** Commit with the Agent, git, or your favorite git client. In allowed repositories, attribution will be linked to commits automatically.
 
+**Uninstall** is one command — it removes agent hooks, the git trace2 config, the daemon, and installed binaries, and reports everything it touched:
+
+```bash
+git-ai uninstall            # keeps your config and local attribution data
+git-ai uninstall --purge    # also deletes ~/.git-ai
+```
+
 **The [Git AI standard](https://github.com/git-ai-project/git-ai/blob/main/specs/git_ai_standard_v3.0.0.md) is supported by:**
 <table>
 <tr>

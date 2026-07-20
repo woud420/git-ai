@@ -11,8 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const TRACE2_EVENT_TARGET_KEY: &str = "trace2.eventTarget";
-const TRACE2_EVENT_NESTING_KEY: &str = "trace2.eventNesting";
+pub(crate) const TRACE2_EVENT_TARGET_KEY: &str = "trace2.eventTarget";
+pub(crate) const TRACE2_EVENT_NESTING_KEY: &str = "trace2.eventNesting";
 const TRACE2_EVENT_NESTING_VALUE: &str = "0";
 const VISUAL_STUDIO_INSTALLER_ID: &str = "visual-studio";
 
@@ -231,7 +231,10 @@ fn ensure_global_git_config_dirs() -> Result<(), GitAiError> {
     Ok(())
 }
 
-fn remove_global_git_config_section(git_cmd: &str, section: &str) -> Result<(), GitAiError> {
+pub(crate) fn remove_global_git_config_section(
+    git_cmd: &str,
+    section: &str,
+) -> Result<(), GitAiError> {
     let mut command = Command::new(git_cmd);
     command
         .args(["config", "--global", "--remove-section", section])

@@ -168,6 +168,12 @@ pub fn handle_git_ai(args: &[String]) {
                 std::process::exit(1);
             }
         },
+        "uninstall" => {
+            if let Err(e) = commands::uninstall::run_uninstall_all(&args[1..]) {
+                eprintln!("Uninstall failed: {}", e);
+                std::process::exit(1);
+            }
+        }
         "uninstall-hooks" => match commands::install_hooks::run_uninstall(&args[1..]) {
             Ok(statuses) => {
                 if let Ok(statuses_value) = serde_json::to_value(&statuses) {
@@ -370,6 +376,10 @@ fn print_help() {
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
     eprintln!("                           Also install the Visual Studio extension on Windows");
+    eprintln!(
+        "  uninstall          Remove git-ai from this machine (hooks, git config, daemon, binaries; --purge for data)"
+    );
+    eprintln!("  uninstall          Remove git-ai from this machine (add --purge to delete data)");
     eprintln!("  uninstall-hooks    Remove git-ai hooks from all detected tools");
     eprintln!("  ci                 Continuous integration utilities");
     eprintln!("    github                 GitHub CI helpers");

@@ -4,8 +4,8 @@ use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 
-use git_ai::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
 use git_ai::error::GitAiError;
+use git_ai::operations::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
 
 fn parse_ai_tab(hook_input: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
     resolve_preset("ai_tab")?.parse(hook_input, "t_test")

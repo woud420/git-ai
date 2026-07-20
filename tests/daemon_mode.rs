@@ -2,20 +2,20 @@
 #[path = "integration/repos/mod.rs"]
 mod repos;
 
+use git_ai::config::{NotesBackendConfig, NotesBackendKind};
+use git_ai::model::working_log::CheckpointKind;
 #[cfg(not(windows))]
-use git_ai::commands::checkpoint_agent::orchestrator::{
+use git_ai::operations::commands::checkpoint_agent::orchestrator::{
     BaseCommit, CheckpointFile, CheckpointRequest,
 };
-use git_ai::config::{NotesBackendConfig, NotesBackendKind};
 #[cfg(not(windows))]
-use git_ai::daemon::checkpoint::PreparedPathRole;
+use git_ai::operations::daemon::checkpoint::PreparedPathRole;
 #[cfg(not(windows))]
-use git_ai::daemon::send_control_request_with_timeout;
-use git_ai::daemon::{
+use git_ai::operations::daemon::send_control_request_with_timeout;
+use git_ai::operations::daemon::{
     ControlRequest, DaemonConfig, DaemonLock, local_socket_connects_with_timeout,
     open_local_socket_stream_with_timeout, read_daemon_pid, send_control_request,
 };
-use git_ai::model::working_log::CheckpointKind;
 use repos::test_file::ExpectedLineExt;
 use repos::test_repo::{
     DAEMON_SPAWN_LOADER_RETRY_ATTEMPTS, DaemonTestCompletionLogEntry, DaemonTestScope, TestRepo,
@@ -1202,7 +1202,7 @@ fn daemon_test_mode_human_checkpoint_with_explicit_preset_queues_via_daemon() {
 
     repo.wait_for_next_daemon_checkpoint_completion(completion_baseline);
 
-    let git_ai_repo = git_ai::git::repository::find_repository_in_path(
+    let git_ai_repo = git_ai::operations::git::repository::find_repository_in_path(
         repo.path()
             .to_str()
             .expect("repo path should be valid UTF-8"),

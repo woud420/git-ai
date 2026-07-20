@@ -1,8 +1,8 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::git::notes_api::write_note;
-use git_ai::git::repository as GitAiRepository;
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::operations::git::notes_api::write_note;
+use git_ai::operations::git::repository as GitAiRepository;
 
 fn direct_test_repo() -> TestRepo {
     TestRepo::new()
@@ -1639,7 +1639,7 @@ fn test_ci_rebase_merge_multiple_commits_standard_human() {
 /// base commits. Drives `CiContext::run_with_options` directly (still supported).
 #[test]
 fn test_ci_squash_merge_not_misclassified_as_rebase_on_linear_main() {
-    use git_ai::ci::ci_context::{CiContext, CiEvent, CiRunOptions};
+    use git_ai::operations::ci::ci_context::{CiContext, CiEvent, CiRunOptions};
 
     let repo = direct_test_repo();
     repo.git_og(&["config", "user.name", "Test User"]).unwrap();

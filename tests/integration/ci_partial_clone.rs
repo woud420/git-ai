@@ -1,6 +1,6 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::ci::ci_context::{CiContext, CiEvent, CiRunOptions, CiRunResult};
-use git_ai::git::repository as GitAiRepository;
+use git_ai::operations::ci::ci_context::{CiContext, CiEvent, CiRunOptions, CiRunResult};
+use git_ai::operations::git::repository as GitAiRepository;
 use std::fs;
 
 fn direct_test_repo() -> TestRepo {

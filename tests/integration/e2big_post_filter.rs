@@ -1,7 +1,7 @@
 use crate::repos::test_repo::TestRepo;
 
-use git_ai::git::repository::find_repository_in_path;
-use git_ai::git::status::MAX_PATHSPEC_ARGS;
+use git_ai::operations::git::repository::find_repository_in_path;
+use git_ai::operations::git::status::MAX_PATHSPEC_ARGS;
 use std::collections::HashSet;
 
 /// Pad a set of real paths with non-existent paths to exceed MAX_PATHSPEC_ARGS.

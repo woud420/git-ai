@@ -1,6 +1,6 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::git::repository::find_repository_in_path;
 use git_ai::model::working_log::CheckpointKind;
+use git_ai::operations::git::repository::find_repository_in_path;
 use rand::{RngExt, distr::Alphanumeric};
 use serde_json::json;
 use std::{fs, time::Instant};

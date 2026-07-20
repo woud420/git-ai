@@ -1,11 +1,11 @@
-use crate::commands::blame::{BlameAnalysisResult, GitAiBlameOptions};
 use crate::config::Config;
-use crate::daemon::control_api::{ControlRequest, FamilyStatus};
 use crate::diagnostic_sentinels::{
     DEBUG_SELF_CHECK_REMOTE_URL, debug_self_check_root, path_is_in_debug_self_check_root,
 };
-use crate::git::repository::discover_repository_in_path_no_git_exec;
 use crate::model::working_log::CheckpointKind;
+use crate::operations::commands::blame::{BlameAnalysisResult, GitAiBlameOptions};
+use crate::operations::daemon::control_api::{ControlRequest, FamilyStatus};
+use crate::operations::git::repository::discover_repository_in_path_no_git_exec;
 use crate::process_timeout::run_command_with_timeout;
 use serde_json::Value;
 use std::fs;
@@ -136,7 +136,7 @@ pub fn prepare_daemon_for_debug_self_checks(git_program: &str) -> DiagnosticChec
     let mut details = Vec::new();
     let mut probe_deadline = Instant::now() + DEBUG_CHECK_TIMEOUT;
 
-    let config = match crate::daemon::DaemonConfig::from_env_or_default_paths() {
+    let config = match crate::operations::daemon::DaemonConfig::from_env_or_default_paths() {
         Ok(config) => config,
         Err(err) => {
             return DiagnosticCheckResult::failed(
@@ -157,13 +157,13 @@ pub fn prepare_daemon_for_debug_self_checks(git_program: &str) -> DiagnosticChec
     ));
     details.push(format!("lock: {}", config.lock_path.display()));
 
-    let initially_up = crate::commands::daemon::daemon_is_up(&config);
+    let initially_up = crate::operations::commands::daemon::daemon_is_up(&config);
     details.push(format!("initial daemon running: {}", initially_up));
 
     let mut restarted = false;
     if initially_up && daemon_binary_is_stale(&config).unwrap_or(false) {
         details.push("running daemon was started before the current git-ai binary was written; restarting daemon".to_string());
-        if let Err(err) = crate::commands::daemon::restart_daemon(&config) {
+        if let Err(err) = crate::operations::commands::daemon::restart_daemon(&config) {
             details.push(format!("restart failed: {}", err));
             return DiagnosticCheckResult::failed(
                 "daemon readiness check failed",
@@ -175,7 +175,9 @@ pub fn prepare_daemon_for_debug_self_checks(git_program: &str) -> DiagnosticChec
         probe_deadline = Instant::now() + DEBUG_CHECK_TIMEOUT;
     } else if !initially_up {
         details.push("daemon was not running; starting daemon".to_string());
-        if let Err(err) = crate::commands::daemon::ensure_daemon_running(DEBUG_CHECK_TIMEOUT) {
+        if let Err(err) =
+            crate::operations::commands::daemon::ensure_daemon_running(DEBUG_CHECK_TIMEOUT)
+        {
             details.push(format!("start failed: {}", err));
             return DiagnosticCheckResult::failed(
                 "daemon readiness check failed",
@@ -203,7 +205,7 @@ pub fn prepare_daemon_for_debug_self_checks(git_program: &str) -> DiagnosticChec
             ));
             details
                 .push("restarting daemon and retrying trace2 daemon ingestion probe".to_string());
-            if let Err(restart_err) = crate::commands::daemon::restart_daemon(&config) {
+            if let Err(restart_err) = crate::operations::commands::daemon::restart_daemon(&config) {
                 details.push(format!("restart failed: {}", restart_err));
                 return DiagnosticCheckResult::failed(
                     "daemon readiness check failed",
@@ -252,7 +254,8 @@ pub fn prepare_daemon_for_debug_self_checks(git_program: &str) -> DiagnosticChec
 
 pub fn check_trace2_global_config(target: &GitDiagnosticTarget) -> DiagnosticCheckResult {
     let mut commands = Vec::new();
-    let expected_target = match crate::daemon::DaemonConfig::from_env_or_default_paths() {
+    let expected_target = match crate::operations::daemon::DaemonConfig::from_env_or_default_paths()
+    {
         Ok(config) => config.trace2_event_target(),
         Err(err) => {
             return DiagnosticCheckResult::failed(
@@ -445,7 +448,7 @@ pub fn run_attribution_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
 pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticCheckResult {
     let mut commands = Vec::new();
     let deadline = Instant::now() + DEBUG_CHECK_TIMEOUT;
-    let trace_dir = crate::mdm::utils::home_dir()
+    let trace_dir = crate::operations::mdm::utils::home_dir()
         .join(".git-ai")
         .join("internal")
         .join("daemon");
@@ -560,7 +563,7 @@ pub fn run_trace2_file_self_check(target: &GitDiagnosticTarget) -> DiagnosticChe
 fn run_daemon_trace2_ingestion_probe(
     commands: &mut Vec<CommandRecord>,
     git_program: &str,
-    config: &crate::daemon::DaemonConfig,
+    config: &crate::operations::daemon::DaemonConfig,
     deadline: Instant,
 ) -> Result<Vec<String>, String> {
     let probe_path =
@@ -864,7 +867,7 @@ fn self_check_blame_options(commit_sha: &str) -> GitAiBlameOptions {
 }
 
 fn wait_for_daemon_family_status(
-    config: &crate::daemon::DaemonConfig,
+    config: &crate::operations::daemon::DaemonConfig,
     repo_path: &Path,
     expected_min_seq: u64,
     deadline: Instant,
@@ -894,13 +897,13 @@ fn wait_for_daemon_family_status(
 }
 
 fn read_daemon_family_status(
-    config: &crate::daemon::DaemonConfig,
+    config: &crate::operations::daemon::DaemonConfig,
     repo_path: &Path,
 ) -> Result<FamilyStatus, String> {
     let request = ControlRequest::StatusFamily {
         repo_working_dir: repo_path.display().to_string(),
     };
-    let response = crate::daemon::send_control_request_with_timeout(
+    let response = crate::operations::daemon::send_control_request_with_timeout(
         &config.control_socket_path,
         &request,
         DAEMON_CONTROL_TIMEOUT,
@@ -920,7 +923,7 @@ fn read_daemon_family_status(
 }
 
 fn daemon_family_status_detail(repo_path: &Path) -> String {
-    let config = match crate::daemon::DaemonConfig::from_env_or_default_paths() {
+    let config = match crate::operations::daemon::DaemonConfig::from_env_or_default_paths() {
         Ok(config) => config,
         Err(err) => {
             return format!("daemon status for repo: <error: {}>", err);
@@ -937,7 +940,9 @@ fn daemon_family_status_detail(repo_path: &Path) -> String {
     }
 }
 
-fn daemon_binary_is_stale(config: &crate::daemon::DaemonConfig) -> Result<bool, String> {
+fn daemon_binary_is_stale(
+    config: &crate::operations::daemon::DaemonConfig,
+) -> Result<bool, String> {
     let Some(started_at_ns) = read_daemon_started_at_ns(config)? else {
         return Ok(false);
     };
@@ -945,7 +950,9 @@ fn daemon_binary_is_stale(config: &crate::daemon::DaemonConfig) -> Result<bool, 
     Ok(binary_modified_ns > started_at_ns)
 }
 
-fn read_daemon_started_at_ns(config: &crate::daemon::DaemonConfig) -> Result<Option<u128>, String> {
+fn read_daemon_started_at_ns(
+    config: &crate::operations::daemon::DaemonConfig,
+) -> Result<Option<u128>, String> {
     let pid_path = config.internal_dir.join("daemon").join("daemon.pid.json");
     let contents = match fs::read_to_string(&pid_path) {
         Ok(contents) => contents,

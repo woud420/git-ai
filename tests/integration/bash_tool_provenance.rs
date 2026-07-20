@@ -8,11 +8,11 @@
 //! commands.
 
 use crate::repos::test_repo::TestRepo;
-use git_ai::commands::checkpoint_agent::bash_tool::{
+use git_ai::model::working_log::AgentId;
+use git_ai::operations::commands::checkpoint_agent::bash_tool::{
     BashCheckpointAction, BashPostHookResult, diff, git_status_fallback, handle_bash_post_tool_use,
     handle_bash_pre_tool_use_with_context, set_daemon_socket_for_test, snapshot,
 };
-use git_ai::model::working_log::AgentId;
 use std::fs;
 use std::process::Command;
 use std::thread;
@@ -343,7 +343,7 @@ fn test_bash_provenance_truncate_to_zero() {
 #[cfg(unix)]
 #[test]
 fn test_bash_provenance_chmod_permission_change() {
-    use git_ai::commands::checkpoint_agent::bash_tool::diff;
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
     let repo = TestRepo::new();
     let root = repo_root(&repo);
     add_and_commit(&repo, "script.sh", "#!/bin/bash\necho hi", "initial commit");
@@ -367,7 +367,7 @@ fn test_bash_provenance_chmod_permission_change() {
 
 #[test]
 fn test_bash_provenance_mv_rename() {
-    use git_ai::commands::checkpoint_agent::bash_tool::diff;
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
     let repo = TestRepo::new();
     let root = repo_root(&repo);
     add_and_commit(&repo, "old_name.txt", "rename me", "initial commit");
@@ -1060,7 +1060,7 @@ fn test_bash_provenance_create_tarball() {
 
 #[test]
 fn test_bash_provenance_extract_tarball() {
-    use git_ai::commands::checkpoint_agent::bash_tool::diff;
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
     let repo = TestRepo::new();
     let root = repo_root(&repo);
     add_and_commit(&repo, "pkg/alpha.txt", "alpha", "add alpha");
@@ -1259,7 +1259,7 @@ fn test_git_status_fallback_rename_reports_both_paths() {
 
 #[test]
 fn test_bash_provenance_mv_directory_rename() {
-    use git_ai::commands::checkpoint_agent::bash_tool::diff;
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
     let repo = TestRepo::new();
     let root = repo_root(&repo);
 

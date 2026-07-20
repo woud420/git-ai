@@ -6,10 +6,10 @@
 //! Run with:
 //! `cargo test benchmark_stats_hunk_density_hotspot -- --ignored --nocapture`
 
-use git_ai::authorship::diff_ai_accepted::diff_ai_accepted_stats;
-use git_ai::authorship::post_commit::estimate_stats_cost_for_head;
-use git_ai::authorship::stats::{get_git_diff_stats, stats_for_commit_stats};
-use git_ai::git::find_repository_in_path;
+use git_ai::operations::authorship::diff_ai_accepted::diff_ai_accepted_stats;
+use git_ai::operations::authorship::post_commit::estimate_stats_cost_for_head;
+use git_ai::operations::authorship::stats::{get_git_diff_stats, stats_for_commit_stats};
+use git_ai::operations::git::find_repository_in_path;
 use std::fs;
 use std::path::Path;
 use std::process::Command;

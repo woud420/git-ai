@@ -6,13 +6,13 @@
 //! orchestration.
 
 use crate::repos::test_repo::TestRepo;
-use git_ai::commands::checkpoint_agent::bash_tool::{
+use git_ai::model::working_log::AgentId;
+use git_ai::operations::commands::checkpoint_agent::bash_tool::{
     Agent, BashCheckpointAction, BashPostHookResult, StatDiffResult, StatEntry, StatFileType,
     StatSnapshot, ToolClass, build_gitignore, classify_tool, diff, git_status_fallback,
     handle_bash_post_tool_use, handle_bash_pre_tool_use_with_context, normalize_path,
     set_daemon_socket_for_test, snapshot,
 };
-use git_ai::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1377,7 +1377,7 @@ fn test_post_hook_without_pre_clean_repo_returns_no_changes() {
 
 #[test]
 fn test_handle_bash_tool_detects_rename() {
-    use git_ai::commands::checkpoint_agent::bash_tool::diff;
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
     let repo = TestRepo::new();
     let root = repo_root(&repo);
 

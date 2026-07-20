@@ -1,9 +1,9 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::git::notes_api::write_note;
 use git_ai::model::authorship_log::PromptRecord;
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use git_ai::model::working_log::AgentId;
+use git_ai::operations::git::notes_api::write_note;
 use std::collections::HashMap;
 
 /// Test simple rebase with no conflicts where trees are identical - multiple commits
@@ -388,8 +388,9 @@ fn test_rebase_preserves_prompt_only_commit_note_metadata() {
     let mutated_source_note = original_log
         .serialize_to_string()
         .expect("serialize mutated source note");
-    let git_ai_repo = git_ai::git::find_repository_in_path(repo.path().to_str().unwrap())
-        .expect("find repository");
+    let git_ai_repo =
+        git_ai::operations::git::find_repository_in_path(repo.path().to_str().unwrap())
+            .expect("find repository");
     write_note(&git_ai_repo, &prod_commit.commit_sha, &mutated_source_note)
         .expect("overwrite source note with prompt-only metadata");
 

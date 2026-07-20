@@ -1,11 +1,11 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::fixture_path;
-use git_ai::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
 use git_ai::error::GitAiError;
-use git_ai::streams::agent::Agent;
-use git_ai::streams::agents::GeminiAgent;
-use git_ai::streams::watermark::ByteOffsetWatermark;
+use git_ai::operations::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
+use git_ai::operations::streams::agent::Agent;
+use git_ai::operations::streams::agents::GeminiAgent;
+use git_ai::operations::streams::watermark::ByteOffsetWatermark;
 use serde_json::json;
 use std::fs;
 

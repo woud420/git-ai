@@ -1,6 +1,6 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::virtual_attribution::VirtualAttributions;
-use git_ai::git::repository::find_repository_in_path;
+use git_ai::operations::authorship::virtual_attribution::VirtualAttributions;
+use git_ai::operations::git::repository::find_repository_in_path;
 
 #[test]
 fn test_virtual_attributions() {

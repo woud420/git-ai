@@ -5,11 +5,11 @@ mod repos;
 // Graphite-style restacks rewrite commits with `git commit-tree` + `git update-ref`.
 // These tests model that plumbing path directly so they do not depend on `gt`.
 
-use git_ai::daemon::open_local_socket_stream_with_timeout;
-use git_ai::git::find_repository_in_path;
-use git_ai::git::notes_api::read_note;
-use git_ai::git::repository::Repository as GitAiRepository;
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::operations::daemon::open_local_socket_stream_with_timeout;
+use git_ai::operations::git::find_repository_in_path;
+use git_ai::operations::git::notes_api::read_note;
+use git_ai::operations::git::repository::Repository as GitAiRepository;
 use repos::test_file::ExpectedLineExt;
 use repos::test_repo::{TestRepo, new_daemon_test_sync_session_id, real_git_executable};
 use serde_json::{Value, json};
@@ -104,7 +104,7 @@ fn raw_traced_git(repo: &TestRepo, args: &[&str]) -> String {
     command.env("GIT_CONFIG_NOSYSTEM", "1");
     command.env(
         "GIT_TRACE2_EVENT",
-        git_ai::daemon::DaemonConfig::trace2_event_target_for_path(
+        git_ai::operations::daemon::DaemonConfig::trace2_event_target_for_path(
             &repo.daemon_trace_socket_path(),
         ),
     );
@@ -146,7 +146,7 @@ fn raw_traced_git_stdin(repo: &TestRepo, args: &[&str], stdin: &str) -> String {
     command.env("GIT_CONFIG_NOSYSTEM", "1");
     command.env(
         "GIT_TRACE2_EVENT",
-        git_ai::daemon::DaemonConfig::trace2_event_target_for_path(
+        git_ai::operations::daemon::DaemonConfig::trace2_event_target_for_path(
             &repo.daemon_trace_socket_path(),
         ),
     );
@@ -200,7 +200,7 @@ fn raw_traced_git_with_session(repo: &TestRepo, args: &[&str], session: &str) ->
     command.env("GIT_CONFIG_NOSYSTEM", "1");
     command.env(
         "GIT_TRACE2_EVENT",
-        git_ai::daemon::DaemonConfig::trace2_event_target_for_path(
+        git_ai::operations::daemon::DaemonConfig::trace2_event_target_for_path(
             &repo.daemon_trace_socket_path(),
         ),
     );
@@ -308,7 +308,7 @@ fn replay_trace_payloads_to_daemon(repo: &TestRepo, payloads: &[Value]) {
 fn open_unfinished_mutating_trace_root(
     repo: &TestRepo,
     sid: &str,
-) -> git_ai::daemon::DaemonClientStream {
+) -> git_ai::operations::daemon::DaemonClientStream {
     let mut stream = open_local_socket_stream_with_timeout(
         &repo.daemon_trace_socket_path(),
         Duration::from_secs(2),

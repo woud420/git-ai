@@ -1,9 +1,9 @@
 //! Integration tests for Claude Code transcript reader.
 
-use git_ai::streams::agent::Agent;
-use git_ai::streams::agents::ClaudeAgent;
-use git_ai::streams::agents::claude::ClaudeAgent as ClaudeAgentImpl;
-use git_ai::streams::watermark::ByteOffsetWatermark;
+use git_ai::operations::streams::agent::Agent;
+use git_ai::operations::streams::agents::ClaudeAgent;
+use git_ai::operations::streams::agents::claude::ClaudeAgent as ClaudeAgentImpl;
+use git_ai::operations::streams::watermark::ByteOffsetWatermark;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;

@@ -1,9 +1,9 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::ignore::{
+use git_ai::operations::authorship::ignore::{
     effective_ignore_patterns, load_git_ai_ignore_patterns,
     load_linguist_generated_patterns_from_root_gitattributes,
 };
-use git_ai::git::repository::from_bare_repository;
+use git_ai::operations::git::repository::from_bare_repository;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -27,7 +27,10 @@ fn run_git(cwd: &Path, args: &[&str]) {
 fn make_bare_repo(
     root_gitattributes: Option<&str>,
     parent_gitattributes: Option<&str>,
-) -> (tempfile::TempDir, git_ai::git::repository::Repository) {
+) -> (
+    tempfile::TempDir,
+    git_ai::operations::git::repository::Repository,
+) {
     let temp = tempfile::tempdir().expect("tempdir");
     let source = temp.path().join("source");
     let bare = temp.path().join("bare.git");
@@ -67,7 +70,10 @@ fn make_bare_repo(
 fn make_bare_repo_with_ignore(
     root_gitattributes: Option<&str>,
     git_ai_ignore: Option<&str>,
-) -> (tempfile::TempDir, git_ai::git::repository::Repository) {
+) -> (
+    tempfile::TempDir,
+    git_ai::operations::git::repository::Repository,
+) {
     let temp = tempfile::tempdir().expect("tempdir");
     let source = temp.path().join("source");
     let bare = temp.path().join("bare.git");
@@ -125,7 +131,8 @@ generated\\ files/** linguist-generated=true
     repo.stage_all_and_commit("add gitattributes").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = load_linguist_generated_patterns_from_root_gitattributes(&gitai_repo);
     assert!(patterns.contains(&"*.generated.ts".to_string()));
     assert!(patterns.contains(&"dist/**".to_string()));
@@ -151,7 +158,8 @@ generated/** linguist-generated=true
     repo.stage_all_and_commit("add gitattributes").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = load_linguist_generated_patterns_from_root_gitattributes(&gitai_repo);
 
     assert!(patterns.contains(&"generated/**".to_string()));
@@ -176,7 +184,8 @@ assets/images/**
     repo.stage_all_and_commit("add .git-ai-ignore").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = load_git_ai_ignore_patterns(&gitai_repo);
     assert_eq!(patterns.len(), 3);
     assert!(patterns.contains(&"docs/**".to_string()));
@@ -197,7 +206,8 @@ fn git_ai_ignore_skips_comments_and_blank_lines() {
     repo.stage_all_and_commit("add .git-ai-ignore").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = load_git_ai_ignore_patterns(&gitai_repo);
     assert_eq!(patterns.len(), 2);
     assert!(patterns.contains(&"*.log".to_string()));
@@ -220,7 +230,8 @@ docs/**
     repo.stage_all_and_commit("add .git-ai-ignore").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = load_git_ai_ignore_patterns(&gitai_repo);
     assert_eq!(patterns.len(), 2);
 }
@@ -233,7 +244,8 @@ fn git_ai_ignore_returns_empty_when_file_missing() {
     repo.stage_all_and_commit("initial").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = load_git_ai_ignore_patterns(&gitai_repo);
     assert!(patterns.is_empty());
 }
@@ -246,7 +258,8 @@ fn effective_patterns_include_git_ai_ignore() {
     repo.stage_all_and_commit("add .git-ai-ignore").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = effective_ignore_patterns(&gitai_repo, &[], &[]);
     assert!(patterns.contains(&"custom/**".to_string()));
     assert!(patterns.contains(&"*.secret".to_string()));
@@ -269,7 +282,8 @@ fn effective_patterns_union_gitattributes_and_git_ai_ignore() {
         .unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let patterns = effective_ignore_patterns(&gitai_repo, &[], &[]);
     // From .gitattributes linguist-generated
     assert!(patterns.contains(&"generated/**".to_string()));
@@ -287,7 +301,8 @@ fn effective_patterns_union_git_ai_ignore_and_user_patterns() {
     repo.stage_all_and_commit("add .git-ai-ignore").unwrap();
 
     let gitai_repo =
-        git_ai::git::repository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+        git_ai::operations::git::repository::find_repository_in_path(repo.path().to_str().unwrap())
+            .unwrap();
     let user = vec!["tests/**".to_string()];
     let patterns = effective_ignore_patterns(&gitai_repo, &user, &[]);
     // From .git-ai-ignore

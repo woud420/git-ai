@@ -1,16 +1,16 @@
 #![allow(dead_code)]
 
-use git_ai::authorship::stats::CommitStats;
 use git_ai::config::ConfigPatch;
-use git_ai::daemon::{
+use git_ai::feature_flags::FeatureFlags;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::operations::authorship::stats::CommitStats;
+use git_ai::operations::daemon::{
     ControlRequest, DaemonConfig, local_socket_connects_with_timeout, send_control_request,
     send_control_request_with_timeout,
 };
-use git_ai::feature_flags::FeatureFlags;
-use git_ai::git::cli_parser::{ParsedGitInvocation, extract_clone_target_directory};
-use git_ai::git::repo_storage::PersistedWorkingLog;
-use git_ai::git::repository as GitAiRepository;
-use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::operations::git::cli_parser::{ParsedGitInvocation, extract_clone_target_directory};
+use git_ai::operations::git::repo_storage::PersistedWorkingLog;
+use git_ai::operations::git::repository as GitAiRepository;
 // BenchmarkResult for performance testing
 #[derive(Debug, Clone)]
 pub struct BenchmarkResult {
@@ -1164,7 +1164,9 @@ impl TestRepo {
             .map(|arg| (*arg).to_string())
             .collect::<Vec<_>>();
         let cwd = repo_context.unwrap_or_else(|| self.path().as_path());
-        git_ai::daemon::test_sync::tracked_parsed_git_invocation_for_test_sync(&argv, cwd)
+        git_ai::operations::daemon::test_sync::tracked_parsed_git_invocation_for_test_sync(
+            &argv, cwd,
+        )
     }
 
     pub(crate) fn git_command_affects_daemon_for_tracking(
@@ -1173,7 +1175,7 @@ impl TestRepo {
         repo_context: Option<&Path>,
     ) -> bool {
         let parsed = self.parsed_git_invocation_for_tracking(args, repo_context);
-        git_ai::daemon::test_sync::tracks_parsed_git_invocation_for_test_sync(&parsed)
+        git_ai::operations::daemon::test_sync::tracks_parsed_git_invocation_for_test_sync(&parsed)
     }
 
     pub fn new_with_daemon_scope(daemon_scope: DaemonTestScope) -> Self {
@@ -2242,7 +2244,7 @@ impl TestRepo {
         args.push("-c".to_string());
         args.push(format!(
             "{}={}",
-            git_ai::daemon::test_sync::TEST_SYNC_SESSION_CONFIG_KEY,
+            git_ai::operations::daemon::test_sync::TEST_SYNC_SESSION_CONFIG_KEY,
             session
         ));
     }
@@ -2611,7 +2613,7 @@ impl TestRepo {
         let tracked_invocation =
             self.parsed_git_invocation_for_tracking(args, Some(self.path.as_path()));
         let command_affects_daemon = env_explicitly_enables_trace2(envs)
-            && git_ai::daemon::test_sync::tracks_parsed_git_invocation_for_test_sync(
+            && git_ai::operations::daemon::test_sync::tracks_parsed_git_invocation_for_test_sync(
                 &tracked_invocation,
             );
         for attempt in 0..=retry_limit {
@@ -2757,7 +2759,7 @@ impl TestRepo {
         let retry_limit = 8usize;
         let retry_delay = Duration::from_millis(50);
         let command_affects_daemon = self.has_active_daemon()
-            && git_ai::daemon::test_sync::tracks_parsed_git_invocation_for_test_sync(
+            && git_ai::operations::daemon::test_sync::tracks_parsed_git_invocation_for_test_sync(
                 &tracked_invocation,
             );
         for attempt in 0..=retry_limit {
@@ -3189,11 +3191,13 @@ impl TestRepo {
                 // In daemon mode, the authorship note may not be immediately
                 // visible after the session completes due to filesystem flush
                 // timing. Retry briefly before failing.
-                let mut content = git_ai::git::notes_api::read_note(&repo, &head_commit);
+                let mut content =
+                    git_ai::operations::git::notes_api::read_note(&repo, &head_commit);
                 if content.is_none() {
                     for _ in 0..10 {
                         thread::sleep(Duration::from_millis(50));
-                        content = git_ai::git::notes_api::read_note(&repo, &head_commit);
+                        content =
+                            git_ai::operations::git::notes_api::read_note(&repo, &head_commit);
                         if content.is_some() {
                             break;
                         }

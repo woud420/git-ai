@@ -1,8 +1,8 @@
-use git_ai::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
 use git_ai::error::GitAiError;
-use git_ai::streams::agent::Agent;
-use git_ai::streams::agents::{ClaudeAgent, GeminiAgent};
-use git_ai::streams::watermark::ByteOffsetWatermark;
+use git_ai::operations::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
+use git_ai::operations::streams::agent::Agent;
+use git_ai::operations::streams::agents::{ClaudeAgent, GeminiAgent};
+use git_ai::operations::streams::watermark::ByteOffsetWatermark;
 use serde_json::json;
 use std::fs;
 
@@ -347,7 +347,7 @@ fn test_gemini_transcript_parsing_invalid_path() {
 
     assert!(result.is_err());
     match result {
-        Err(git_ai::streams::StreamError::Fatal { .. }) => {}
+        Err(git_ai::operations::streams::StreamError::Fatal { .. }) => {}
         _ => panic!("Expected Fatal error for nonexistent path"),
     }
 }

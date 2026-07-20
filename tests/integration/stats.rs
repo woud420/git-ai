@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::stats::CommitStats;
+use git_ai::operations::authorship::stats::CommitStats;
 use insta::assert_debug_snapshot;
 use std::fs;
 #[cfg(unix)]
@@ -189,7 +189,7 @@ fn test_stats_cli_range() {
         .expect("git-ai stats range should succeed");
 
     let output = extract_json_object(&raw);
-    let stats: git_ai::authorship::range_authorship::RangeAuthorshipStats =
+    let stats: git_ai::operations::authorship::range_authorship::RangeAuthorshipStats =
         serde_json::from_str(&output).unwrap();
 
     // Range should only include the AI commit's diff and report at least one AI-added line
@@ -238,7 +238,7 @@ fn test_stats_cli_range_ignores_repo_external_diff_helper() {
     );
 
     let output = extract_json_object(&raw);
-    let stats: git_ai::authorship::range_authorship::RangeAuthorshipStats =
+    let stats: git_ai::operations::authorship::range_authorship::RangeAuthorshipStats =
         serde_json::from_str(&output).unwrap();
     assert_eq!(stats.authorship_stats.total_commits, 1);
     assert!(
@@ -267,7 +267,7 @@ fn test_stats_cli_range_with_hostile_diff_config() {
         .git_ai(&["stats", &range, "--json"])
         .expect("git-ai stats range should succeed with hostile diff config");
     let output = extract_json_object(&raw);
-    let stats: git_ai::authorship::range_authorship::RangeAuthorshipStats =
+    let stats: git_ai::operations::authorship::range_authorship::RangeAuthorshipStats =
         serde_json::from_str(&output).unwrap();
 
     assert_eq!(stats.authorship_stats.total_commits, 1);
@@ -302,7 +302,7 @@ fn test_stats_cli_empty_tree_range() {
         .expect("git-ai stats empty-tree range should succeed");
 
     let output = extract_json_object(&raw);
-    let stats: git_ai::authorship::range_authorship::RangeAuthorshipStats =
+    let stats: git_ai::operations::authorship::range_authorship::RangeAuthorshipStats =
         serde_json::from_str(&output).unwrap();
 
     // Entire history from empty tree to HEAD:
@@ -319,7 +319,7 @@ fn test_stats_cli_empty_tree_range() {
 
 #[test]
 fn test_markdown_stats_deletion_only() {
-    use git_ai::authorship::stats::write_stats_to_markdown;
+    use git_ai::operations::authorship::stats::write_stats_to_markdown;
     use std::collections::BTreeMap;
 
     let stats = CommitStats {
@@ -340,7 +340,7 @@ fn test_markdown_stats_deletion_only() {
 
 #[test]
 fn test_markdown_stats_all_human() {
-    use git_ai::authorship::stats::write_stats_to_markdown;
+    use git_ai::operations::authorship::stats::write_stats_to_markdown;
     use std::collections::BTreeMap;
 
     let stats = CommitStats {
@@ -361,7 +361,7 @@ fn test_markdown_stats_all_human() {
 
 #[test]
 fn test_markdown_stats_all_ai() {
-    use git_ai::authorship::stats::write_stats_to_markdown;
+    use git_ai::operations::authorship::stats::write_stats_to_markdown;
     use std::collections::BTreeMap;
 
     let stats = CommitStats {
@@ -382,7 +382,7 @@ fn test_markdown_stats_all_ai() {
 
 #[test]
 fn test_markdown_stats_mixed() {
-    use git_ai::authorship::stats::write_stats_to_markdown;
+    use git_ai::operations::authorship::stats::write_stats_to_markdown;
     use std::collections::BTreeMap;
 
     let stats = CommitStats {
@@ -403,7 +403,7 @@ fn test_markdown_stats_mixed() {
 
 #[test]
 fn test_markdown_stats_no_mixed() {
-    use git_ai::authorship::stats::write_stats_to_markdown;
+    use git_ai::operations::authorship::stats::write_stats_to_markdown;
     use std::collections::BTreeMap;
 
     let stats = CommitStats {
@@ -424,7 +424,7 @@ fn test_markdown_stats_no_mixed() {
 
 #[test]
 fn test_markdown_stats_minimal_human() {
-    use git_ai::authorship::stats::write_stats_to_markdown;
+    use git_ai::operations::authorship::stats::write_stats_to_markdown;
     use std::collections::BTreeMap;
 
     // Test that humans get at least 2 visible blocks if they have more than 1 line
@@ -446,7 +446,7 @@ fn test_markdown_stats_minimal_human() {
 
 #[test]
 fn test_markdown_stats_formatting() {
-    use git_ai::authorship::stats::{ToolModelHeadlineStats, write_stats_to_markdown};
+    use git_ai::operations::authorship::stats::{ToolModelHeadlineStats, write_stats_to_markdown};
     use std::collections::BTreeMap;
 
     let mut tool_model_breakdown = BTreeMap::new();
@@ -666,7 +666,7 @@ fn test_stats_range_uses_default_ignores() {
         .git_ai(&["stats", &range, "--json"])
         .expect("git-ai stats range should succeed");
     let json = extract_json_object(&raw);
-    let range_stats: git_ai::authorship::range_authorship::RangeAuthorshipStats =
+    let range_stats: git_ai::operations::authorship::range_authorship::RangeAuthorshipStats =
         serde_json::from_str(&json).unwrap();
 
     assert_eq!(range_stats.range_stats.git_diff_added_lines, 1);

@@ -1,18 +1,18 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::error::GitAiError;
-use git_ai::git::notes_api;
-use git_ai::git::notes_api::{read_authorship_v3, read_note, write_note};
-use git_ai::git::refs::git_backend_for_tests::{
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::operations::git::notes_api;
+use git_ai::operations::git::notes_api::{read_authorship_v3, read_note, write_note};
+use git_ai::operations::git::refs::git_backend_for_tests::{
     commits_with_authorship_notes, get_commits_with_notes_from_list, grep_ai_notes,
     note_blob_oids_for_commits, notes_add_batch, notes_add_blob_batch,
 };
-use git_ai::git::refs::{
+use git_ai::operations::git::refs::{
     AI_AUTHORSHIP_FORK_TRACKING_REF, CommitAuthorship, copy_missing_notes_for_commits_from_ref,
     copy_ref, get_reference_as_working_log, merge_notes_from_ref,
     note_blob_oids_for_commits_from_ref, ref_exists,
 };
-use git_ai::git::repository::{exec_git, exec_git_stdin, find_repository_in_path};
-use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::operations::git::repository::{exec_git, exec_git_stdin, find_repository_in_path};
 use std::fs;
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ use std::fs;
 // ---------------------------------------------------------------------------
 
 /// Helper: create a TestRepo and obtain a gitai Repository handle.
-fn repo_with_handle() -> (TestRepo, git_ai::git::repository::Repository) {
+fn repo_with_handle() -> (TestRepo, git_ai::operations::git::repository::Repository) {
     let repo = TestRepo::new();
     let gitai_repo =
         find_repository_in_path(repo.path().to_str().unwrap()).expect("find repository");
@@ -36,7 +36,7 @@ fn head_sha(repo: &TestRepo) -> String {
 }
 
 fn git_stdin_stdout(
-    repo: &git_ai::git::repository::Repository,
+    repo: &git_ai::operations::git::repository::Repository,
     args: &[&str],
     stdin: &[u8],
 ) -> String {

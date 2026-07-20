@@ -57,7 +57,7 @@ misattribution is not.
 ```
 daemon (trace2 ingestion, see companion doc)
   └─ exact ref transitions + operation classification
-       └─ RewriteEvent  ──►  handle_rewrite_event()      src/authorship/rewrite.rs
+       └─ RewriteEvent  ──►  handle_rewrite_event()      src/operations/authorship/rewrite.rs
              ├─ NonFastForward { old_tip, new_tip, onto }   rebase, amend, restack, branch -f
              ├─ CherryPickComplete { sources, new_commits }
              └─ SquashMerge { source_head, squash_commit, onto }
@@ -233,12 +233,12 @@ arithmetic and never triggers migration by itself; only the subsequent
 
 The legacy machinery is deleted, not deprecated:
 
-- `src/authorship/rebase_authorship.rs` (monolithic per-op rewriter)
-- `src/git/rewrite_log.rs` and `.git/ai/rewrite_log` (pre/post-hook event journal)
-- `src/commands/hooks/{rebase,stash,push}_hooks.rs` (wrapper pre/post hooks for
+- `src/operations/authorship/rebase_authorship.rs` (monolithic per-op rewriter)
+- `src/operations/git/rewrite_log.rs` and `.git/ai/rewrite_log` (pre/post-hook event journal)
+- `src/operations/commands/hooks/{rebase,stash,push}_hooks.rs` (wrapper pre/post hooks for
   rewrite ops — superseded by daemon trace2 ownership)
-- `src/commands/squash_authorship.rs`
-- `src/git/diff_tree_to_tree.rs` (per-pair diff spawning)
+- `src/operations/commands/squash_authorship.rs`
+- `src/operations/git/diff_tree_to_tree.rs` (per-pair diff spawning)
 - mtime-guarded worktree snapshots and any live-worktree read in rewrite or
   post-commit side effects
 

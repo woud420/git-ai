@@ -40,7 +40,7 @@ fn resolve_git_ai_exe_from_invocation_path(path: PathBuf) -> PathBuf {
     }
 
     let hook_candidate = file_name.strip_suffix(".exe").unwrap_or(file_name);
-    if crate::commands::git_hook_handlers::is_git_hook_binary_name(hook_candidate) {
+    if crate::operations::commands::git_hook_handlers::is_git_hook_binary_name(hook_candidate) {
         if canonical_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -72,8 +72,10 @@ pub(crate) fn current_git_ai_exe() -> Result<PathBuf, GitAiError> {
 
 fn internal_git_ai_command_with_exe(exe: PathBuf, subcommand: &str) -> Command {
     let mut cmd = Command::new(exe);
-    cmd.arg(subcommand)
-        .env(crate::commands::git_hook_handlers::ENV_SKIP_ALL_HOOKS, "1");
+    cmd.arg(subcommand).env(
+        crate::operations::commands::git_hook_handlers::ENV_SKIP_ALL_HOOKS,
+        "1",
+    );
     cmd
 }
 
@@ -111,8 +113,8 @@ pub fn is_interactive_terminal() -> bool {
 /// Returns true if the process is running inside a background AI agent environment.
 pub fn is_in_background_agent() -> bool {
     !matches!(
-        crate::authorship::background_agent::detect(),
-        crate::authorship::background_agent::BackgroundAgent::None
+        crate::operations::authorship::background_agent::detect(),
+        crate::operations::authorship::background_agent::BackgroundAgent::None
     )
 }
 
@@ -575,8 +577,9 @@ mod tests {
         );
         assert!(
             cmd.get_envs().any(|(k, v)| {
-                k == std::ffi::OsStr::new(crate::commands::git_hook_handlers::ENV_SKIP_ALL_HOOKS)
-                    && v == Some(std::ffi::OsStr::new("1"))
+                k == std::ffi::OsStr::new(
+                    crate::operations::commands::git_hook_handlers::ENV_SKIP_ALL_HOOKS,
+                ) && v == Some(std::ffi::OsStr::new("1"))
             }),
             "internal command must always set GIT_AI_SKIP_ALL_HOOKS=1"
         );

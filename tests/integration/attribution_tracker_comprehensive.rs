@@ -17,7 +17,7 @@
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::attribution_tracker::{
+use git_ai::operations::authorship::attribution_tracker::{
     Attribution, AttributionConfig, AttributionTracker, INITIAL_ATTRIBUTION_TS, LineAttribution,
 };
 

@@ -14,7 +14,7 @@
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::git::repository::{find_repository, find_repository_in_path};
+use git_ai::operations::git::repository::{find_repository, find_repository_in_path};
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -934,7 +934,7 @@ fn test_commit_range_length() {
     .unwrap();
 
     // Create commit range
-    let range = git_ai::git::repository::CommitRange::new_infer_refname(
+    let range = git_ai::operations::git::repository::CommitRange::new_infer_refname(
         &repo,
         first.commit_sha.clone(),
         third.commit_sha.clone(),

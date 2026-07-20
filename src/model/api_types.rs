@@ -1,5 +1,5 @@
-use crate::commands::diff::FileDiffJson;
 use crate::model::authorship_log::{LineRange, PromptRecord};
+use crate::operations::commands::diff::FileDiffJson;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -115,7 +115,7 @@ pub struct CasUploadResponse {
 /// Wrapper for messages stored in CAS
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CasMessagesObject {
-    pub messages: Vec<crate::authorship::transcript::Message>,
+    pub messages: Vec<crate::operations::authorship::transcript::Message>,
 }
 
 /// A single authorship note entry (commit SHA + content).
@@ -280,8 +280,8 @@ pub struct DaemonLogsUploadResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::diff::FileDiffJson;
     use crate::model::authorship_log::LineRange;
+    use crate::operations::commands::diff::FileDiffJson;
     use std::collections::BTreeMap;
 
     #[test]
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn test_cas_messages_object() {
-        use crate::authorship::transcript::Message;
+        use crate::operations::authorship::transcript::Message;
 
         let messages = vec![Message::user("test".to_string(), None)];
 

@@ -9,17 +9,17 @@ fn test_fast_head_matches_git_cli() {
     repo.stage_all_and_commit("initial").unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
 
     let fast_result = reader.try_read_head().expect("Should read HEAD");
     let git_result = repo.git_og(&["symbolic-ref", "HEAD"]).unwrap();
     let git_result = git_result.trim();
 
     match fast_result {
-        git_ai::git::fast_reader::HeadKind::Symbolic(refname) => {
+        git_ai::operations::git::fast_reader::HeadKind::Symbolic(refname) => {
             assert_eq!(refname, git_result);
         }
-        git_ai::git::fast_reader::HeadKind::Detached(_) => {
+        git_ai::operations::git::fast_reader::HeadKind::Detached(_) => {
             panic!("Expected symbolic HEAD, got detached");
         }
     }
@@ -33,7 +33,7 @@ fn test_fast_resolve_ref_matches_git_cli() {
     repo.stage_all_and_commit("initial").unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
 
     let git_result = repo.git_og(&["rev-parse", "refs/heads/main"]).unwrap();
     let git_result = git_result.trim();
@@ -57,14 +57,14 @@ fn test_fast_detached_head_matches_git_cli() {
     repo.git_og(&["checkout", "--detach", "HEAD"]).unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
 
     let fast_head = reader.try_read_head().expect("Should read HEAD");
     match fast_head {
-        git_ai::git::fast_reader::HeadKind::Detached(oid) => {
+        git_ai::operations::git::fast_reader::HeadKind::Detached(oid) => {
             assert_eq!(oid, sha);
         }
-        git_ai::git::fast_reader::HeadKind::Symbolic(_) => {
+        git_ai::operations::git::fast_reader::HeadKind::Symbolic(_) => {
             panic!("Expected detached HEAD");
         }
     }
@@ -84,7 +84,7 @@ fn test_fast_packed_refs_matches_git_cli() {
     repo.git_og(&["pack-refs", "--all"]).unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
 
     let git_result = repo
         .git_og(&["rev-parse", "refs/heads/feature-branch"])
@@ -106,7 +106,7 @@ fn test_fast_impl_fallback_complex_syntax() {
     repo.stage_all_and_commit("initial").unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastRefReader::new(&git_dir, &git_dir);
 
     assert_eq!(reader.try_resolve_ref("HEAD~1"), None);
     assert_eq!(reader.try_resolve_ref("HEAD^2"), None);
@@ -129,7 +129,7 @@ fn test_fast_read_blob_matches_git_cli() {
     let blob_oid = ls_tree_output.split_whitespace().nth(2).unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastObjectReader::new(&git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastObjectReader::new(&git_dir);
 
     let fast_content = reader
         .try_read_blob(blob_oid)
@@ -152,7 +152,7 @@ fn test_fast_commit_tree_oid_matches_git_cli() {
     let expected_tree = expected_tree.trim();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastObjectReader::new(&git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastObjectReader::new(&git_dir);
 
     let fast_tree = reader
         .try_read_commit_tree_oid(commit_sha)
@@ -177,7 +177,7 @@ fn test_fast_tree_entry_for_path_matches_git_cli() {
     let expected_blob_oid = ls_tree_output.split_whitespace().nth(2).unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastObjectReader::new(&git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastObjectReader::new(&git_dir);
 
     let fast_blob_oid = reader
         .try_tree_entry_for_path(tree_sha, Path::new("src/utils/helper.rs"))
@@ -198,7 +198,7 @@ fn test_fast_read_packed_object_returns_none() {
     repo.git_og(&["gc", "--aggressive"]).unwrap();
 
     let git_dir = repo.path().join(".git");
-    let reader = git_ai::git::fast_reader::FastObjectReader::new(&git_dir);
+    let reader = git_ai::operations::git::fast_reader::FastObjectReader::new(&git_dir);
 
     let result = reader.try_read_commit_tree_oid(commit_sha);
     assert_eq!(
@@ -240,11 +240,11 @@ fn test_fast_reader_worktree_refs_in_common_dir() {
 
     let common_dir = repo.path().join(".git");
 
-    let reader = git_ai::git::fast_reader::FastRefReader::new(&wt_git_dir, &common_dir);
+    let reader = git_ai::operations::git::fast_reader::FastRefReader::new(&wt_git_dir, &common_dir);
 
     let head = reader.try_read_head().expect("Should read worktree HEAD");
     match head {
-        git_ai::git::fast_reader::HeadKind::Symbolic(refname) => {
+        git_ai::operations::git::fast_reader::HeadKind::Symbolic(refname) => {
             assert_eq!(refname, "refs/heads/wt-branch");
         }
         _ => panic!("Expected symbolic HEAD in worktree"),

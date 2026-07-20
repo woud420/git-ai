@@ -1,10 +1,10 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::metrics::{EventAttributes, MetricEvent, PosEncoded, SessionEventValues};
+use git_ai::operations::streams::agent::Agent;
+use git_ai::operations::streams::agents::ClaudeAgent;
+use git_ai::operations::streams::watermark::ByteOffsetWatermark;
+use git_ai::operations::streams::{StreamRecord, StreamsDatabase};
 use git_ai::repo_url::resolve_repo_url_from_path;
-use git_ai::streams::agent::Agent;
-use git_ai::streams::agents::ClaudeAgent;
-use git_ai::streams::watermark::ByteOffsetWatermark;
-use git_ai::streams::{StreamRecord, StreamsDatabase};
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -645,7 +645,7 @@ fn test_repo_work_dir_priority_infer_fallback() {
 
 #[test]
 fn test_cursor_infer_cwd_returns_none() {
-    use git_ai::streams::agents::CursorAgent;
+    use git_ai::operations::streams::agents::CursorAgent;
 
     let temp_dir = TempDir::new().unwrap();
     let transcript = temp_dir.path().join("session.jsonl");
@@ -660,7 +660,7 @@ fn test_cursor_infer_cwd_returns_none() {
 
 #[test]
 fn test_copilot_infer_cwd_returns_none() {
-    use git_ai::streams::agents::CopilotAgent;
+    use git_ai::operations::streams::agents::CopilotAgent;
 
     let temp_dir = TempDir::new().unwrap();
     let transcript = temp_dir.path().join("session.json");
@@ -852,7 +852,7 @@ fn test_full_pipeline_session_events_no_repo_url_when_unavailable() {
 
 #[test]
 fn test_codex_infer_cwd_from_session_meta() {
-    use git_ai::streams::agents::CodexAgent;
+    use git_ai::operations::streams::agents::CodexAgent;
 
     let temp_dir = TempDir::new().unwrap();
     let transcript = temp_dir.path().join("session.jsonl");
@@ -879,7 +879,7 @@ fn test_codex_infer_cwd_from_session_meta() {
 
 #[test]
 fn test_codex_infer_cwd_no_cwd() {
-    use git_ai::streams::agents::CodexAgent;
+    use git_ai::operations::streams::agents::CodexAgent;
 
     let temp_dir = TempDir::new().unwrap();
     let transcript = temp_dir.path().join("session.jsonl");

@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::stats::CommitStats;
+use git_ai::operations::authorship::stats::CommitStats;
 use std::fs;
 
 fn extract_json_object(output: &str) -> String {

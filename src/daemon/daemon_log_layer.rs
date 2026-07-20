@@ -153,6 +153,9 @@ fn daemon_log_capture_enabled() -> bool {
 
 fn compute_daemon_log_capture_enabled() -> bool {
     let config = Config::fresh();
+    if !config.telemetry_enabled() {
+        return false;
+    }
     let flags = config.get_feature_flags();
     if !flags.daemon_log_upload {
         return false;

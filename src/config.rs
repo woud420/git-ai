@@ -165,6 +165,7 @@ pub struct Config {
     allowed_repositories: Vec<Pattern>,
     #[serde(serialize_with = "serialize_patterns")]
     exclude_repositories: Vec<Pattern>,
+    telemetry_enabled: bool,
     telemetry_oss_disabled: bool,
     telemetry_enterprise_dsn: Option<String>,
     disable_version_checks: bool,
@@ -236,6 +237,8 @@ pub struct FileConfig {
     pub allowed_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_repositories: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry_oss: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -325,6 +328,8 @@ pub struct ConfigPatch {
     pub allowed_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry_oss_disabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disable_version_checks: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -535,6 +540,15 @@ impl Config {
     }
 
     /// Returns true if OSS telemetry is disabled.
+    /// Master telemetry switch. Telemetry is off by default; egress
+    /// (Sentry/PostHog, metrics upload, daemon log upload, heartbeats) only
+    /// runs when the `telemetry` config key is "on" (or the legacy
+    /// `telemetry_oss` key is "on"). An explicitly configured
+    /// `telemetry_enterprise_dsn` is its own opt-in and is not gated here.
+    pub fn telemetry_enabled(&self) -> bool {
+        self.telemetry_enabled
+    }
+
     pub fn is_telemetry_oss_disabled(&self) -> bool {
         self.telemetry_oss_disabled
     }
@@ -1054,6 +1068,10 @@ fn build_config() -> Config {
         .and_then(|c| c.telemetry_oss.clone())
         .filter(|s| s == "off")
         .is_some();
+    let telemetry_enabled = resolve_telemetry_enabled(
+        file_cfg.as_ref().and_then(|c| c.telemetry.as_deref()),
+        file_cfg.as_ref().and_then(|c| c.telemetry_oss.as_deref()),
+    );
     let telemetry_enterprise_dsn = file_cfg
         .as_ref()
         .and_then(|c| c.telemetry_enterprise_dsn.clone())
@@ -1257,6 +1275,7 @@ fn build_config() -> Config {
             include_prompts_in_repositories,
             allowed_repositories,
             exclude_repositories,
+            telemetry_enabled,
             telemetry_oss_disabled,
             telemetry_enterprise_dsn,
             disable_version_checks,
@@ -1290,6 +1309,7 @@ fn build_config() -> Config {
         include_prompts_in_repositories,
         allowed_repositories,
         exclude_repositories,
+        telemetry_enabled,
         telemetry_oss_disabled,
         telemetry_enterprise_dsn,
         disable_version_checks,
@@ -1482,6 +1502,20 @@ fn load_file_config() -> Option<FileConfig> {
     let path = config_file_path()?;
     let data = fs::read(&path).ok()?;
     parse_file_config_bytes(&data).ok()
+}
+
+/// Master telemetry switch resolution: off unless explicitly enabled via the
+/// `telemetry` key ("on"/"off") or the legacy `telemetry_oss` key ("on").
+fn resolve_telemetry_enabled(telemetry: Option<&str>, legacy_oss: Option<&str>) -> bool {
+    match telemetry.map(str::trim) {
+        Some("on") => true,
+        Some("off") => false,
+        Some(other) => {
+            eprintln!("Warning: Invalid telemetry value '{}', using 'off'", other);
+            false
+        }
+        None => legacy_oss.map(str::trim) == Some("on"),
+    }
 }
 
 fn parse_file_config_bytes(data: &[u8]) -> Result<FileConfig, serde_json::Error> {
@@ -1720,6 +1754,18 @@ fn apply_test_config_patch(config: &mut Config) {
         if let Some(telemetry_oss_disabled) = patch.telemetry_oss_disabled {
             config.telemetry_oss_disabled = telemetry_oss_disabled;
         }
+        if let Some(telemetry) = patch.telemetry {
+            match telemetry.trim() {
+                "on" => config.telemetry_enabled = true,
+                "off" => config.telemetry_enabled = false,
+                other => {
+                    eprintln!(
+                        "Warning: Invalid test telemetry value '{}', ignoring",
+                        other
+                    );
+                }
+            }
+        }
         if let Some(disable_version_checks) = patch.disable_version_checks {
             config.disable_version_checks = disable_version_checks;
         }
@@ -1804,6 +1850,7 @@ mod tests {
                 .into_iter()
                 .filter_map(|s| Pattern::new(&s).ok())
                 .collect(),
+            telemetry_enabled: false,
             telemetry_oss_disabled: false,
             telemetry_enterprise_dsn: None,
             disable_version_checks: false,
@@ -2157,6 +2204,7 @@ mod tests {
             include_prompts_in_repositories: vec![],
             allowed_repositories: vec![],
             exclude_repositories: vec![],
+            telemetry_enabled: false,
             telemetry_oss_disabled: false,
             telemetry_enterprise_dsn: None,
             disable_version_checks: false,
@@ -2305,6 +2353,7 @@ mod tests {
                 .collect(),
             allowed_repositories: vec![],
             exclude_repositories: vec![],
+            telemetry_enabled: false,
             telemetry_oss_disabled: false,
             telemetry_enterprise_dsn: None,
             disable_version_checks: false,
@@ -2681,6 +2730,20 @@ mod tests {
 
         let parsed = parse_file_config_bytes(data).expect("regular config should parse");
         assert_eq!(parsed.git_path.as_deref(), Some("/usr/bin/git"));
+    }
+
+    #[test]
+    fn test_telemetry_resolution_defaults_off() {
+        assert!(!resolve_telemetry_enabled(None, None));
+        assert!(resolve_telemetry_enabled(Some("on"), None));
+        assert!(!resolve_telemetry_enabled(Some("off"), None));
+        assert!(!resolve_telemetry_enabled(Some("bogus"), None));
+        // Legacy key: only an explicit "on" enables; absence or "off" stays off.
+        assert!(resolve_telemetry_enabled(None, Some("on")));
+        assert!(!resolve_telemetry_enabled(None, Some("off")));
+        // The new key wins over the legacy key.
+        assert!(!resolve_telemetry_enabled(Some("off"), Some("on")));
+        assert!(resolve_telemetry_enabled(Some("on"), Some("off")));
     }
 
     #[test]

@@ -104,7 +104,8 @@ fn print_config_help() {
         "  allowed_repositories         Repositories where collection is enabled (array; empty = collect nothing)"
     );
     println!("  exclude_repositories         Excluded repos (array)");
-    println!("  telemetry_oss                OSS telemetry setting (on/off)");
+    println!("  telemetry                    Master telemetry switch (on/off; default off)");
+    println!("  telemetry_oss                Legacy OSS telemetry setting (on/off)");
     println!("  telemetry_enterprise_dsn     Enterprise telemetry DSN");
     println!("  disable_version_checks       Disable version checks (bool)");
     println!("  disable_auto_updates         Disable auto updates (bool)");
@@ -298,6 +299,14 @@ fn show_all_config() -> Result<(), String> {
 
     // Booleans with runtime values
     effective_config.insert(
+        "telemetry".to_string(),
+        Value::String(if runtime_config.telemetry_enabled() {
+            "on".to_string()
+        } else {
+            "off".to_string()
+        }),
+    );
+    effective_config.insert(
         "telemetry_oss_disabled".to_string(),
         Value::Bool(runtime_config.is_telemetry_oss_disabled()),
     );
@@ -468,6 +477,11 @@ fn get_config_value(key: &str) -> Result<(), String> {
                     Value::Array(vec![])
                 }
             }
+            "telemetry" => Value::String(if runtime_config.telemetry_enabled() {
+                "on".to_string()
+            } else {
+                "off".to_string()
+            }),
             "telemetry_oss_disabled" => Value::Bool(runtime_config.is_telemetry_oss_disabled()),
             "telemetry_enterprise_dsn" => {
                 if let Some(ref dsn) = file_config.telemetry_enterprise_dsn {
@@ -687,6 +701,17 @@ fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String
                 )?;
                 crate::config::save_file_config(&file_config)?;
                 log_array_changes(&added, add_mode);
+            }
+            "telemetry" => {
+                if !matches!(value.trim(), "on" | "off") {
+                    return Err(format!(
+                        "Invalid telemetry value '{}': expected 'on' or 'off'",
+                        value
+                    ));
+                }
+                file_config.telemetry = Some(value.trim().to_string());
+                crate::config::save_file_config(&file_config)?;
+                println!("[telemetry]: {}", value.trim());
             }
             "telemetry_oss" => {
                 file_config.telemetry_oss = Some(value.to_string());
@@ -1082,6 +1107,13 @@ fn unset_config_value(key: &str) -> Result<(), String> {
                 crate::config::save_file_config(&file_config)?;
                 if let Some(items) = old_values {
                     log_array_removals(&items);
+                }
+            }
+            "telemetry" => {
+                let old_value = file_config.telemetry.take();
+                crate::config::save_file_config(&file_config)?;
+                if let Some(v) = old_value {
+                    println!("- [telemetry]: {}", v);
                 }
             }
             "telemetry_oss" => {

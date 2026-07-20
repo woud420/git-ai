@@ -1214,6 +1214,12 @@ impl TestRepo {
                 serde_json::Value::Array(values),
             );
         }
+        if let Some(telemetry) = &patch.telemetry {
+            config.insert(
+                "telemetry".to_string(),
+                serde_json::Value::String(telemetry.clone()),
+            );
+        }
         if let Some(telemetry_oss_disabled) = patch.telemetry_oss_disabled {
             let value = if telemetry_oss_disabled { "off" } else { "on" };
             config.insert(

@@ -20,7 +20,11 @@ static LAST_METRICS_UPLOAD_STARTED_AT: OnceLock<Mutex<Option<Instant>>> = OnceLo
 /// Without credentials the request will be rejected with 401, so we skip
 /// the upload entirely to avoid wasteful retries and memory pressure.
 pub fn metrics_upload_allowed(_api_base_url: &str, client: &ApiClient) -> bool {
-    client.is_logged_in() || client.has_api_key()
+    // Telemetry is off by default: no metrics or daemon-log egress unless the
+    // user enabled the master `telemetry` switch, on top of the existing
+    // login/API-key requirement.
+    crate::config::Config::fresh().telemetry_enabled()
+        && (client.is_logged_in() || client.has_api_key())
 }
 
 fn wait_for_metrics_upload_rate_limit() -> Result<(), GitAiError> {

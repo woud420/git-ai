@@ -125,6 +125,7 @@ mod show_prompt;
 mod simple_additions;
 mod simple_benchmark;
 mod sqlite_connection_policy;
+mod sqlite_notes_backend;
 mod squash_merge;
 mod stale_prompt_carry;
 mod stash_attribution;

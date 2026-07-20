@@ -245,6 +245,8 @@ Uses `insta` crate. Snapshots live in `tests/integration/snapshots/` and `tests/
 
 - **Feature flag debug/release divergence**: Some flags have different debug/release defaults (see `define_feature_flags!` macro). Tests run debug builds, so a test passing in debug may behave differently in release if it depends on a flag that diverges.
 
+- **Notes backend test default diverges**: the unconfigured `notes_backend.kind` is `sqlite` in production but `git_notes` in test builds (in-process test code asserts against `refs/notes/ai` and cannot set per-test config without racing on process env). `TestRepo`'s default patch also pins `git_notes` explicitly for subprocesses/daemons. Sqlite-backend behavior is covered by `tests/integration/sqlite_notes_backend.rs`, which pins `sqlite` per test.
+
 - **Working log base commit**: Working logs are keyed by the HEAD commit at checkpoint time (`.git/ai/working_logs/<sha>/`). Git AI must ensure that HEAD changes update/copy over the working log accordingly.
 
 - **Large source files**: Several core files exceed 5-10k lines. Navigate with grep, not scrolling.

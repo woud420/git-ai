@@ -1,8 +1,8 @@
 pub mod agent_detection;
 pub mod attribution_recovery;
 pub mod attribution_tracker;
-pub mod authorship_log;
-pub mod authorship_log_serialization;
+pub use crate::model::authorship_log;
+pub use crate::model::authorship_log_serialization;
 pub mod background_agent;
 pub mod conflict_resolution;
 pub mod diff_ai_accepted;
@@ -11,7 +11,7 @@ pub mod git_ai_hooks;
 pub mod hunk_shift;
 pub mod ignore;
 pub mod imara_diff_utils;
-pub mod internal_db;
+pub use crate::model::repository::internal_db;
 pub mod move_detection;
 pub mod post_commit;
 
@@ -26,4 +26,4 @@ pub mod secrets;
 pub mod stats;
 pub mod transcript;
 pub mod virtual_attribution;
-pub mod working_log;
+pub use crate::model::working_log;

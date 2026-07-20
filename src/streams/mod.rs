@@ -42,10 +42,10 @@
 
 pub mod agent;
 pub mod agents;
-pub mod db;
+pub use crate::model::repository::streams_db as db;
 pub mod model_extraction;
 pub mod sweep;
-pub mod types;
+pub use crate::model::stream_types as types;
 pub mod watermark;
 
 // Re-export main types for convenient access

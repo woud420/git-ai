@@ -6,7 +6,7 @@
 //! All public types are re-exported for external use (e.g., ingestion server).
 
 pub mod attrs;
-pub mod db;
+pub use crate::model::repository::metrics_db as db;
 pub mod events;
 pub mod local_stats;
 pub mod pos_encoded;

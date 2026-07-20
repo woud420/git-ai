@@ -3,7 +3,7 @@
 Status: authoritative spec for how the git-ai daemon establishes exact
 ownership of git ref transitions from trace2 event streams. Companion docs:
 
-- `docs/rewrite-ops-spec.md` — what happens once exact transitions are known.
+- `docs/architecture/rewrite-ops-spec.md` — what happens once exact transitions are known.
 - `docs/attribution-fuzzer-spec.md` — correctness pressure.
 
 ## The problem: exact command ownership

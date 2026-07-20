@@ -2,7 +2,7 @@
 
 **Last Updated**: 2026-04-29  
 **Status**: Complete, ready for review  
-**Related**: `docs/superpowers/specs/2026-04-29-telemetry-streams-design.md`
+**Related**: `docs/decisions/2026-04-29-telemetry-streams-design.md`
 
 ## What Was Built
 
@@ -242,11 +242,11 @@ If issues arise, revert to previous binary. Old internal_db remains intact (read
 
 ## References
 
-- **Design Spec**: `docs/superpowers/specs/2026-04-29-telemetry-streams-design.md`
-- **Implementation Plan**: `docs/superpowers/plans/2026-04-29-telemetry-streams-reimplement.md`
+- **Design Spec**: `docs/decisions/2026-04-29-telemetry-streams-design.md`
+- **Implementation Plan**: `docs/decisions/2026-04-29-telemetry-streams-reimplement.md`
 - **CHANGELOG**: See "Unreleased" section
 - **PR Description**: `PR_DESCRIPTION.md` (in repository root)
 
 ## Credits
 
-Designed and implemented following the specification in `docs/superpowers/specs/2026-04-29-telemetry-streams-design.md`. Implementation completed in phases over multiple development sessions with comprehensive testing at each stage.
+Designed and implemented following the specification in `docs/decisions/2026-04-29-telemetry-streams-design.md`. Implementation completed in phases over multiple development sessions with comprehensive testing at each stage.

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024 edition, serde for serialization, local Unix sockets for daemon communication, existing `discover_repository_in_path_no_git_exec` for repo discovery.
 
-**Spec:** `docs/superpowers/specs/2026-05-03-checkpoint-rewrite-design.md`
+**Spec:** `docs/decisions/2026-05-03-checkpoint-rewrite-design.md`
 
 ---
 

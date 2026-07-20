@@ -8,14 +8,14 @@
 
 **Tech Stack:** Rust (all installers), TypeScript/Python/Java/Swift/Vimscript/Lua/C# per IDE, HookInstaller trait (src/mdm/hook_installer.rs).
 
-**Spec:** docs/superpowers/specs/2026-04-11-multi-ide-known-human-design.md
+**Spec:** docs/decisions/2026-04-11-multi-ide-known-human-design.md
 
 ---
 
 ## Common Pattern (applies to all 9 tasks)
 
 ### Reference files to read first (every subagent):
-- `docs/superpowers/specs/2026-04-11-multi-ide-known-human-design.md` — full spec
+- `docs/decisions/2026-04-11-multi-ide-known-human-design.md` — full spec
 - `agent-support/vscode/src/known-human-checkpoint-manager.ts` — TypeScript reference
 - `agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/listener/DocumentSaveListener.kt` — Kotlin reference
 - `src/mdm/agents/cursor.rs` — extension-based installer with auto-install pattern

@@ -1,4 +1,3 @@
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::checkpoint_content_budget::CheckpointContentBudget;
 use crate::config;
 use crate::daemon::git_backend::GitBackend;
@@ -14,11 +13,11 @@ use crate::git::repository::{
     Repository, discover_repository_in_path_no_git_exec, exec_git, exec_git_stdin,
 };
 use crate::git::sync_authorship::{fetch_authorship_notes, fetch_remote_from_args};
+use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::utils::LockFile;
 use crate::{
-    authorship::working_log::CheckpointKind,
     commands::checkpoint_agent::orchestrator::CheckpointRequest,
-    daemon::checkpoint::PreparedPathRole,
+    daemon::checkpoint::PreparedPathRole, model::working_log::CheckpointKind,
 };
 #[cfg(not(windows))]
 use interprocess::local_socket::ConnectOptions;
@@ -52,13 +51,11 @@ use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, oneshot};
 use tokio::time::Duration;
 
 pub mod analyzers;
-pub use crate::model::repository::bash_history_db;
 pub mod bash_sessions;
 pub mod checkpoint;
 pub mod control_api;
 pub mod coordinator;
 pub mod daemon_log_layer;
-pub use crate::model::domain;
 pub mod family_actor;
 pub mod git_backend;
 pub mod global_actor;
@@ -678,7 +675,7 @@ fn matches_any_pathspec(file: &str, pathspecs: &[String]) -> bool {
     })
 }
 
-fn resolve_stash_sha(cmd: &crate::daemon::domain::NormalizedCommand) -> Option<&str> {
+fn resolve_stash_sha(cmd: &crate::model::domain::NormalizedCommand) -> Option<&str> {
     cmd.stash_target_oid.as_deref().or_else(|| {
         cmd.ref_changes
             .iter()
@@ -1058,7 +1055,7 @@ fn parsed_invocation_for_side_effect(
 }
 
 fn parsed_invocation_for_normalized_command(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> ParsedGitInvocation {
     if !cmd.raw_argv.is_empty() {
         return parse_git_cli_args(trace_invocation_args(&cmd.raw_argv));
@@ -1116,15 +1113,15 @@ fn apply_push_side_effect(
 }
 
 fn transcript_sweep_triggers_for_events(
-    events: &[crate::daemon::domain::SemanticEvent],
+    events: &[crate::model::domain::SemanticEvent],
 ) -> Vec<crate::daemon::stream_worker::SweepTrigger> {
     let mut triggers = Vec::new();
 
     if events.iter().any(|event| {
         matches!(
             event,
-            crate::daemon::domain::SemanticEvent::CommitCreated { .. }
-                | crate::daemon::domain::SemanticEvent::CommitAmended { .. }
+            crate::model::domain::SemanticEvent::CommitCreated { .. }
+                | crate::model::domain::SemanticEvent::CommitAmended { .. }
         )
     }) {
         triggers.push(crate::daemon::stream_worker::SweepTrigger::PostCommit);
@@ -1133,7 +1130,7 @@ fn transcript_sweep_triggers_for_events(
     if events.iter().any(|event| {
         matches!(
             event,
-            crate::daemon::domain::SemanticEvent::PushCompleted { .. }
+            crate::model::domain::SemanticEvent::PushCompleted { .. }
         )
     }) {
         triggers.push(crate::daemon::stream_worker::SweepTrigger::PostPush);
@@ -1244,7 +1241,7 @@ fn remove_working_log_attributions_for_pathspecs(
 }
 
 fn apply_checkout_switch_working_log_side_effect(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> Result<(), GitAiError> {
     let Some(worktree) = cmd.worktree.as_ref() else {
         return Ok(());
@@ -1309,7 +1306,7 @@ fn apply_checkout_switch_working_log_side_effect(
 }
 
 fn recent_checkout_switch_prerequisite_from_command(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> Option<RecentReplayPrerequisite> {
     let parsed = parsed_invocation_for_normalized_command(cmd);
     let (old_head, new_head) = ActorDaemonCoordinator::resolve_heads_for_command(cmd);
@@ -1390,12 +1387,12 @@ fn repo_is_ancestor(
     exec_git(&args).is_ok()
 }
 
-fn rebase_is_control_mode(cmd: &crate::daemon::domain::NormalizedCommand) -> bool {
+fn rebase_is_control_mode(cmd: &crate::model::domain::NormalizedCommand) -> bool {
     summarize_rebase_args(&cmd.invoked_args).is_control_mode
 }
 
 fn rebase_onto_from_command(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
     repository: &Repository,
     original_head: &str,
     new_tip: &str,
@@ -1434,7 +1431,7 @@ fn rebase_onto_from_command(
         })
 }
 
-fn valid_non_zero_ref_change(change: &crate::daemon::domain::RefChange) -> bool {
+fn valid_non_zero_ref_change(change: &crate::model::domain::RefChange) -> bool {
     is_valid_oid(&change.old)
         && !is_zero_oid(&change.old)
         && is_valid_oid(&change.new)
@@ -1447,7 +1444,7 @@ fn rewrite_metric_branch_for_ref(reference: &str) -> Option<String> {
 }
 
 fn rewrite_metric_branch_for_transition(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
     old_tip: &str,
     new_tip: &str,
     reference_hint: Option<&str>,
@@ -1481,7 +1478,7 @@ fn rewrite_metric_commits_with_branch(
 }
 
 fn rebase_new_tip_from_command(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
     original_head: &str,
 ) -> Option<String> {
     if let Some(new_tip) = cmd
@@ -1530,7 +1527,7 @@ fn rebase_new_tip_from_command(
         .map(|change| change.new.clone())
 }
 
-fn cherry_pick_destination_commits(cmd: &crate::daemon::domain::NormalizedCommand) -> Vec<String> {
+fn cherry_pick_destination_commits(cmd: &crate::model::domain::NormalizedCommand) -> Vec<String> {
     cmd.ref_changes
         .iter()
         .filter(|change| change.reference == "HEAD")
@@ -1545,7 +1542,7 @@ fn cherry_pick_destination_commits(cmd: &crate::daemon::domain::NormalizedComman
         .collect()
 }
 
-fn first_head_transition_old(cmd: &crate::daemon::domain::NormalizedCommand) -> Option<String> {
+fn first_head_transition_old(cmd: &crate::model::domain::NormalizedCommand) -> Option<String> {
     cmd.ref_changes
         .iter()
         .find(|change| {
@@ -1559,16 +1556,16 @@ fn first_head_transition_old(cmd: &crate::daemon::domain::NormalizedCommand) -> 
         .map(|change| change.old.clone())
 }
 
-fn cherry_pick_original_head(cmd: &crate::daemon::domain::NormalizedCommand) -> Option<String> {
+fn cherry_pick_original_head(cmd: &crate::model::domain::NormalizedCommand) -> Option<String> {
     first_head_transition_old(cmd)
 }
 
-fn revert_original_head(cmd: &crate::daemon::domain::NormalizedCommand) -> Option<String> {
+fn revert_original_head(cmd: &crate::model::domain::NormalizedCommand) -> Option<String> {
     first_head_transition_old(cmd)
 }
 
 fn cherry_pick_source_args_for_side_effect(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> Vec<String> {
     let parsed = parsed_invocation_for_normalized_command(cmd);
     if parsed.command.as_deref() != Some("cherry-pick")
@@ -1583,10 +1580,7 @@ fn cherry_pick_source_args_for_side_effect(
         .collect()
 }
 
-fn cherry_pick_command_has_flag(
-    cmd: &crate::daemon::domain::NormalizedCommand,
-    flag: &str,
-) -> bool {
+fn cherry_pick_command_has_flag(cmd: &crate::model::domain::NormalizedCommand, flag: &str) -> bool {
     let parsed = parsed_invocation_for_normalized_command(cmd);
     if parsed.command.as_deref() != Some("cherry-pick")
         && cmd.primary_command.as_deref() != Some("cherry-pick")
@@ -1766,7 +1760,7 @@ fn resolve_cherry_pick_range_source_with_git(
 
 fn resolve_explicit_cherry_pick_sources_for_side_effect(
     repo: &Repository,
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> Result<Vec<String>, GitAiError> {
     let source_args = cherry_pick_source_args_for_side_effect(cmd);
     if source_args.is_empty() {
@@ -1781,7 +1775,7 @@ fn resolve_explicit_cherry_pick_sources_for_side_effect(
 }
 
 fn revert_source_args_for_side_effect(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> Vec<String> {
     let parsed = parsed_invocation_for_normalized_command(cmd);
     if parsed.command.as_deref() != Some("revert")
@@ -1843,7 +1837,7 @@ fn revert_source_args_from_command_args(args: &[String]) -> Vec<&str> {
 
 fn resolve_explicit_revert_sources_for_side_effect(
     repo: &Repository,
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> Result<Vec<String>, GitAiError> {
     let source_args = revert_source_args_for_side_effect(cmd);
     if source_args.is_empty() {
@@ -1864,8 +1858,8 @@ fn cherry_pick_state_exists_for_worktree(worktree: &Path) -> bool {
 }
 
 fn revert_destination_changes(
-    cmd: &crate::daemon::domain::NormalizedCommand,
-) -> Vec<&crate::daemon::domain::RefChange> {
+    cmd: &crate::model::domain::NormalizedCommand,
+) -> Vec<&crate::model::domain::RefChange> {
     cmd.ref_changes
         .iter()
         .filter(|change| {
@@ -1881,7 +1875,7 @@ fn revert_destination_changes(
 
 fn apply_revert_complete_rewrite(
     repo: &crate::git::repository::Repository,
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
     source_oids: &[String],
 ) -> Result<(), GitAiError> {
     let specs: Vec<crate::authorship::rewrite_revert::RevertSpec> = revert_destination_changes(cmd)
@@ -2034,7 +2028,7 @@ fn apply_cherry_pick_no_commit_rewrite(
 }
 
 fn strict_rebase_original_head_from_command(
-    cmd: &crate::daemon::domain::NormalizedCommand,
+    cmd: &crate::model::domain::NormalizedCommand,
     semantic_old_head: &str,
 ) -> Option<String> {
     if let Some(branch_spec) = explicit_rebase_branch_arg(&cmd.invoked_args)
@@ -2418,7 +2412,7 @@ fn read_json_line<R: BufRead>(reader: &mut R) -> Result<Option<String>, GitAiErr
 #[derive(Debug)]
 enum FamilySequencerEntry {
     PendingRoot,
-    ReadyCommand(Box<crate::daemon::domain::NormalizedCommand>),
+    ReadyCommand(Box<crate::model::domain::NormalizedCommand>),
     Checkpoint {
         request: Box<CheckpointRequest>,
         respond_to: Option<oneshot::Sender<Result<u64, GitAiError>>>,
@@ -2541,7 +2535,7 @@ pub struct ActorDaemonCoordinator {
     telemetry_worker: Option<crate::daemon::telemetry_worker::DaemonTelemetryWorkerHandle>,
     stream_worker: Option<crate::daemon::stream_worker::StreamWorkerHandle>,
     transcript_shutdown_notify: std::sync::OnceLock<Arc<tokio::sync::Notify>>,
-    streams_db: Option<Arc<crate::streams::db::StreamsDatabase>>,
+    streams_db: Option<Arc<crate::model::repository::streams_db::StreamsDatabase>>,
     next_trace_ingest_seq: AtomicUsize,
     queued_trace_payloads: AtomicUsize,
     queued_trace_payloads_by_root: Mutex<HashMap<String, usize>>,
@@ -2589,7 +2583,7 @@ impl DaemonExitAction {
 
 enum TracePayloadApplyOutcome {
     None,
-    Applied(Box<crate::daemon::domain::AppliedCommand>),
+    Applied(Box<crate::model::domain::AppliedCommand>),
     QueuedFamily,
 }
 
@@ -3121,7 +3115,7 @@ impl ActorDaemonCoordinator {
     async fn append_ready_command_entry(
         &self,
         family: &str,
-        command: crate::daemon::domain::NormalizedCommand,
+        command: crate::model::domain::NormalizedCommand,
     ) -> Result<(), GitAiError> {
         let exec_lock = self.side_effect_exec_lock(family)?;
         let _guard = exec_lock.lock().await;
@@ -3347,7 +3341,7 @@ impl ActorDaemonCoordinator {
     fn append_command_completion_log(
         &self,
         family: &str,
-        applied: &crate::daemon::domain::AppliedCommand,
+        applied: &crate::model::domain::AppliedCommand,
         result: &Result<(), GitAiError>,
         error_order: u64,
     ) -> Result<(), GitAiError> {
@@ -4366,7 +4360,7 @@ impl ActorDaemonCoordinator {
                                 .coordinator
                                 .update_watermarks_family(
                                     Path::new(&repo_wd),
-                                    crate::daemon::domain::WatermarkState {
+                                    crate::model::domain::WatermarkState {
                                         per_file,
                                         per_worktree,
                                     },
@@ -4624,7 +4618,7 @@ impl ActorDaemonCoordinator {
     }
 
     fn resolve_heads_for_command(
-        cmd: &crate::daemon::domain::NormalizedCommand,
+        cmd: &crate::model::domain::NormalizedCommand,
     ) -> (String, String) {
         let old = cmd
             .ref_changes
@@ -4665,7 +4659,7 @@ impl ActorDaemonCoordinator {
         (old, new)
     }
 
-    fn stash_pathspecs_from_command(cmd: &crate::daemon::domain::NormalizedCommand) -> Vec<String> {
+    fn stash_pathspecs_from_command(cmd: &crate::model::domain::NormalizedCommand) -> Vec<String> {
         let parsed = parsed_invocation_for_normalized_command(cmd);
         if parsed.command.as_deref() != Some("stash") {
             return Vec::new();
@@ -4713,7 +4707,7 @@ impl ActorDaemonCoordinator {
     /// Detects non-fast-forward ref moves and fires handle_rewrite_event.
     fn detect_and_handle_non_ff_rewrites(
         &self,
-        cmd: &crate::daemon::domain::NormalizedCommand,
+        cmd: &crate::model::domain::NormalizedCommand,
     ) -> Result<(), GitAiError> {
         let worktree = match cmd.worktree.as_ref() {
             Some(w) => w,
@@ -4890,7 +4884,7 @@ impl ActorDaemonCoordinator {
     }
 
     fn start_commit_file_timestamp_snapshots_for_command(
-        command: &crate::daemon::domain::NormalizedCommand,
+        command: &crate::model::domain::NormalizedCommand,
     ) -> CommitFileTimestampSnapshotHandles {
         let Some(worktree) = command.worktree.clone() else {
             return HashMap::new();
@@ -4926,7 +4920,7 @@ impl ActorDaemonCoordinator {
 
     fn cache_commit_file_timestamp_snapshots_for_command(
         &self,
-        command: &crate::daemon::domain::NormalizedCommand,
+        command: &crate::model::domain::NormalizedCommand,
     ) -> Result<(), GitAiError> {
         let handles = Self::start_commit_file_timestamp_snapshots_for_command(command);
         if handles.is_empty() {
@@ -4988,7 +4982,7 @@ impl ActorDaemonCoordinator {
     async fn maybe_apply_side_effects_for_applied_command(
         &self,
         family: Option<&str>,
-        applied: &crate::daemon::domain::AppliedCommand,
+        applied: &crate::model::domain::AppliedCommand,
         commit_file_timestamp_snapshots: &mut CommitFileTimestampSnapshotHandles,
     ) -> Result<(), GitAiError> {
         // Test-only: allow inducing a panic in the side-effect pipeline to verify
@@ -5058,15 +5052,15 @@ impl ActorDaemonCoordinator {
         let saw_pull_event = events.iter().any(|event| {
             matches!(
                 event,
-                crate::daemon::domain::SemanticEvent::PullCompleted { .. }
+                crate::model::domain::SemanticEvent::PullCompleted { .. }
             )
         });
         let pull_uses_rebase = events.iter().any(|event| {
             matches!(
                 event,
-                crate::daemon::domain::SemanticEvent::PullCompleted {
-                    strategy: crate::daemon::domain::PullStrategy::Rebase
-                        | crate::daemon::domain::PullStrategy::RebaseMerges,
+                crate::model::domain::SemanticEvent::PullCompleted {
+                    strategy: crate::model::domain::PullStrategy::Rebase
+                        | crate::model::domain::PullStrategy::RebaseMerges,
                     ..
                 }
             )
@@ -5110,10 +5104,10 @@ impl ActorDaemonCoordinator {
             events.iter().any(|event| {
                 matches!(
                     event,
-                    crate::daemon::domain::SemanticEvent::CommitAmended { .. }
-                        | crate::daemon::domain::SemanticEvent::CommitCreated { .. }
-                        | crate::daemon::domain::SemanticEvent::CherryPickComplete { .. }
-                        | crate::daemon::domain::SemanticEvent::Reset { .. }
+                    crate::model::domain::SemanticEvent::CommitAmended { .. }
+                        | crate::model::domain::SemanticEvent::CommitCreated { .. }
+                        | crate::model::domain::SemanticEvent::CherryPickComplete { .. }
+                        | crate::model::domain::SemanticEvent::Reset { .. }
                 )
             }) || matches!(
                 cmd.primary_command.as_deref(),
@@ -5262,10 +5256,10 @@ impl ActorDaemonCoordinator {
                 && events.iter().any(|event| {
                     matches!(
                         event,
-                        crate::daemon::domain::SemanticEvent::StashOperation {
-                            kind: crate::daemon::domain::StashOpKind::Pop
-                                | crate::daemon::domain::StashOpKind::Apply
-                                | crate::daemon::domain::StashOpKind::Branch,
+                        crate::model::domain::SemanticEvent::StashOperation {
+                            kind: crate::model::domain::StashOpKind::Pop
+                                | crate::model::domain::StashOpKind::Apply
+                                | crate::model::domain::StashOpKind::Branch,
                             ..
                         }
                     )
@@ -5274,7 +5268,7 @@ impl ActorDaemonCoordinator {
                 && events.iter().any(|event| {
                     matches!(
                         event,
-                        crate::daemon::domain::SemanticEvent::MergeSquash { .. }
+                        crate::model::domain::SemanticEvent::MergeSquash { .. }
                     )
                 });
             if !is_merge_checkout && !is_stash_restore && !is_merge_squash {
@@ -5293,24 +5287,24 @@ impl ActorDaemonCoordinator {
             let mut handled_revert_commits = false;
             for event in events {
                 match event {
-                    crate::daemon::domain::SemanticEvent::CloneCompleted { .. } => {
+                    crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
                         apply_clone_notes_sync_side_effect(&worktree)?;
                     }
-                    crate::daemon::domain::SemanticEvent::PullCompleted { .. } => {
+                    crate::model::domain::SemanticEvent::PullCompleted { .. } => {
                         apply_pull_notes_sync_side_effect(
                             &worktree,
                             cmd.invoked_command.as_deref(),
                             &cmd.invoked_args,
                         )?;
                     }
-                    crate::daemon::domain::SemanticEvent::PushCompleted { .. } => {
+                    crate::model::domain::SemanticEvent::PushCompleted { .. } => {
                         apply_push_side_effect(
                             &worktree,
                             cmd.invoked_command.as_deref(),
                             &cmd.invoked_args,
                         )?;
                     }
-                    crate::daemon::domain::SemanticEvent::CherryPickComplete {
+                    crate::model::domain::SemanticEvent::CherryPickComplete {
                         original_head,
                         new_head,
                         source_commits,
@@ -5365,7 +5359,7 @@ impl ActorDaemonCoordinator {
                             }
                         }
                     }
-                    crate::daemon::domain::SemanticEvent::CherryPickNoCommit {
+                    crate::model::domain::SemanticEvent::CherryPickNoCommit {
                         source_commits,
                         head,
                     } => {
@@ -5383,18 +5377,18 @@ impl ActorDaemonCoordinator {
                             )?;
                         }
                     }
-                    crate::daemon::domain::SemanticEvent::MergeSquash { source_head, onto } => {
+                    crate::model::domain::SemanticEvent::MergeSquash { source_head, onto } => {
                         self.set_pending_squash_merge_for_worktree(
                             worktree.as_ref(),
                             source_head.clone(),
                             onto.clone(),
                         )?;
                     }
-                    crate::daemon::domain::SemanticEvent::StashOperation { kind, head } => {
+                    crate::model::domain::SemanticEvent::StashOperation { kind, head } => {
                         let repo = find_repository_in_path(&worktree)?;
                         match kind {
-                            crate::daemon::domain::StashOpKind::Push
-                            | crate::daemon::domain::StashOpKind::Unknown => {
+                            crate::model::domain::StashOpKind::Push
+                            | crate::model::domain::StashOpKind::Unknown => {
                                 let resolved_stash =
                                     cmd.stash_target_oid.as_deref().or_else(|| {
                                         cmd.ref_changes
@@ -5417,7 +5411,7 @@ impl ActorDaemonCoordinator {
                                     }
                                 }
                             }
-                            crate::daemon::domain::StashOpKind::Pop => {
+                            crate::model::domain::StashOpKind::Pop => {
                                 if let Some(stash_sha) = resolve_stash_sha(cmd) {
                                     let base_head = stash_base_head(&repo, stash_sha);
                                     let target_head = head.as_deref().or(base_head.as_deref());
@@ -5426,12 +5420,12 @@ impl ActorDaemonCoordinator {
                                     )?;
                                 }
                             }
-                            crate::daemon::domain::StashOpKind::Apply
-                            | crate::daemon::domain::StashOpKind::Branch => {
+                            crate::model::domain::StashOpKind::Apply
+                            | crate::model::domain::StashOpKind::Branch => {
                                 if let Some(stash_sha) = resolve_stash_sha(cmd) {
                                     let effective_head = if matches!(
                                         kind,
-                                        crate::daemon::domain::StashOpKind::Branch
+                                        crate::model::domain::StashOpKind::Branch
                                     ) {
                                         stash_base_head(&repo, stash_sha)
                                     } else {
@@ -5447,7 +5441,7 @@ impl ActorDaemonCoordinator {
                                     )?;
                                 }
                             }
-                            crate::daemon::domain::StashOpKind::Drop => {
+                            crate::model::domain::StashOpKind::Drop => {
                                 if let Some(stash_sha) = resolve_stash_sha(cmd) {
                                     crate::authorship::rewrite_stash::handle_stash_drop(
                                         &repo, stash_sha,
@@ -5457,7 +5451,7 @@ impl ActorDaemonCoordinator {
                             _ => {}
                         }
                     }
-                    crate::daemon::domain::SemanticEvent::CommitCreated { base, new_head } => {
+                    crate::model::domain::SemanticEvent::CommitCreated { base, new_head } => {
                         let mut handled_as_squash_merge = false;
                         // DEFERRED (code-review #4): a pending `merge --squash` is
                         // matched to the next commit by `base == pending.onto`
@@ -5594,7 +5588,7 @@ impl ActorDaemonCoordinator {
                             }
                         }
                     }
-                    crate::daemon::domain::SemanticEvent::CommitAmended { old_head, new_head } => {
+                    crate::model::domain::SemanticEvent::CommitAmended { old_head, new_head } => {
                         if !old_head.is_empty()
                             && !new_head.is_empty()
                             && old_head != new_head
@@ -5661,14 +5655,14 @@ impl ActorDaemonCoordinator {
                             }
                         }
                     }
-                    crate::daemon::domain::SemanticEvent::Reset {
+                    crate::model::domain::SemanticEvent::Reset {
                         kind,
                         old_head,
                         new_head,
                     } if !old_head.is_empty() && !new_head.is_empty() && old_head != new_head => {
                         let repo = find_repository_in_path(&worktree)?;
                         match kind {
-                            crate::daemon::domain::ResetKind::Hard => {
+                            crate::model::domain::ResetKind::Hard => {
                                 repo.storage.delete_working_log_for_base_commit(old_head)?;
                             }
                             _ => {
@@ -5735,7 +5729,7 @@ impl ActorDaemonCoordinator {
             && let Some(worktree) = cmd.worktree.as_ref()
         {
             for event in events {
-                if let crate::daemon::domain::SemanticEvent::RefUpdated {
+                if let crate::model::domain::SemanticEvent::RefUpdated {
                     reference,
                     old,
                     new,
@@ -5964,7 +5958,7 @@ impl ActorDaemonCoordinator {
     async fn watermarks_for_family(
         &self,
         repo_working_dir: String,
-    ) -> Result<crate::daemon::domain::WatermarkState, GitAiError> {
+    ) -> Result<crate::model::domain::WatermarkState, GitAiError> {
         self.coordinator
             .watermarks_family(Path::new(&repo_working_dir))
             .await
@@ -6260,10 +6254,11 @@ impl ActorDaemonCoordinator {
             } => {
                 let worktree_key = Self::worktree_state_key(Path::new(&repo_work_dir));
                 let original_cwd = original_cwd.unwrap_or_else(|| repo_work_dir.clone());
-                if let Ok(db) = crate::daemon::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) =
+                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
                     && let Ok(mut db_lock) = db.lock()
-                    && let Err(e) =
-                        db_lock.record_start(&crate::daemon::bash_history_db::BashCallStart {
+                    && let Err(e) = db_lock.record_start(
+                        &crate::model::repository::bash_history_db::BashCallStart {
                             original_cwd: Self::worktree_state_key(Path::new(&original_cwd)),
                             repo_work_dir: Some(worktree_key.clone()),
                             repo_discovery_error: None,
@@ -6274,7 +6269,8 @@ impl ActorDaemonCoordinator {
                             started_at_ns,
                             command: command.clone(),
                             metadata: metadata.clone(),
-                        })
+                        },
+                    )
                 {
                     tracing::debug!("failed to persist bash session start: {}", e);
                 }
@@ -6330,10 +6326,11 @@ impl ActorDaemonCoordinator {
                 } else {
                     metadata
                 };
-                if let Ok(db) = crate::daemon::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) =
+                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
                     && let Ok(mut db_lock) = db.lock()
-                    && let Err(e) =
-                        db_lock.record_end(&crate::daemon::bash_history_db::BashCallEnd {
+                    && let Err(e) = db_lock.record_end(
+                        &crate::model::repository::bash_history_db::BashCallEnd {
                             original_cwd,
                             repo_work_dir: Some(worktree_key),
                             repo_discovery_error: None,
@@ -6346,7 +6343,8 @@ impl ActorDaemonCoordinator {
                             ended_at_ns,
                             command,
                             metadata,
-                        })
+                        },
+                    )
                 {
                     tracing::debug!("failed to persist bash session end: {}", e);
                 }
@@ -6368,10 +6366,11 @@ impl ActorDaemonCoordinator {
                     .as_deref()
                     .map(Path::new)
                     .map(Self::worktree_state_key);
-                if let Ok(db) = crate::daemon::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) =
+                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
                     && let Ok(mut db_lock) = db.lock()
-                    && let Err(e) =
-                        db_lock.record_start(&crate::daemon::bash_history_db::BashCallStart {
+                    && let Err(e) = db_lock.record_start(
+                        &crate::model::repository::bash_history_db::BashCallStart {
                             original_cwd: Self::worktree_state_key(Path::new(&original_cwd)),
                             repo_work_dir: discovered_repo_work_dir,
                             repo_discovery_error,
@@ -6382,7 +6381,8 @@ impl ActorDaemonCoordinator {
                             started_at_ns,
                             command,
                             metadata,
-                        })
+                        },
+                    )
                 {
                     tracing::debug!("failed to persist bash hook attempt start: {}", e);
                 }
@@ -6404,10 +6404,11 @@ impl ActorDaemonCoordinator {
                     .as_deref()
                     .map(Path::new)
                     .map(Self::worktree_state_key);
-                if let Ok(db) = crate::daemon::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) =
+                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
                     && let Ok(mut db_lock) = db.lock()
-                    && let Err(e) =
-                        db_lock.record_end(&crate::daemon::bash_history_db::BashCallEnd {
+                    && let Err(e) = db_lock.record_end(
+                        &crate::model::repository::bash_history_db::BashCallEnd {
                             original_cwd: Self::worktree_state_key(Path::new(&original_cwd)),
                             repo_work_dir: discovered_repo_work_dir,
                             repo_discovery_error,
@@ -6420,7 +6421,8 @@ impl ActorDaemonCoordinator {
                             ended_at_ns,
                             command,
                             metadata,
-                        })
+                        },
+                    )
                 {
                     tracing::debug!("failed to persist bash hook attempt end: {}", e);
                 }
@@ -7438,7 +7440,7 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
         // Named "transcripts-db" for backwards compatibility with existing installations.
         // TODO: rename to "streams-db" with a migration that moves the file.
         let streams_db_path = config.internal_dir.join("transcripts-db");
-        match crate::streams::db::StreamsDatabase::open(&streams_db_path) {
+        match crate::model::repository::streams_db::StreamsDatabase::open(&streams_db_path) {
             Ok(streams_db) => {
                 let streams_db = std::sync::Arc::new(streams_db);
                 let shutdown_notify = Arc::new(tokio::sync::Notify::new());
@@ -8177,8 +8179,8 @@ mod tests {
 
     #[test]
     fn transcript_sweep_triggers_for_commit_amend_and_push_events() {
-        use crate::daemon::domain::SemanticEvent;
         use crate::daemon::stream_worker::SweepTrigger;
+        use crate::model::domain::SemanticEvent;
 
         assert_eq!(
             transcript_sweep_triggers_for_events(&[SemanticEvent::CommitCreated {
@@ -8216,13 +8218,13 @@ mod tests {
 
     fn test_rebase_command(
         invoked_args: &[&str],
-        ref_changes: Vec<crate::daemon::domain::RefChange>,
-    ) -> crate::daemon::domain::NormalizedCommand {
-        crate::daemon::domain::NormalizedCommand {
-            scope: crate::daemon::domain::CommandScope::Family(crate::daemon::domain::FamilyKey(
+        ref_changes: Vec<crate::model::domain::RefChange>,
+    ) -> crate::model::domain::NormalizedCommand {
+        crate::model::domain::NormalizedCommand {
+            scope: crate::model::domain::CommandScope::Family(crate::model::domain::FamilyKey(
                 "/repo/.git".to_string(),
             )),
-            family_key: Some(crate::daemon::domain::FamilyKey("/repo/.git".to_string())),
+            family_key: Some(crate::model::domain::FamilyKey("/repo/.git".to_string())),
             worktree: Some(PathBuf::from("/repo")),
             root_sid: "rebase-test".to_string(),
             raw_argv: std::iter::once("git")
@@ -8242,12 +8244,12 @@ mod tests {
             cherry_pick_source_oids: Vec::new(),
             revert_source_oids: Vec::new(),
             ref_changes,
-            confidence: crate::daemon::domain::Confidence::High,
+            confidence: crate::model::domain::Confidence::High,
         }
     }
 
-    fn ref_change(reference: &str, old: &str, new: &str) -> crate::daemon::domain::RefChange {
-        crate::daemon::domain::RefChange {
+    fn ref_change(reference: &str, old: &str, new: &str) -> crate::model::domain::RefChange {
+        crate::model::domain::RefChange {
             reference: reference.to_string(),
             old: old.to_string(),
             new: new.to_string(),

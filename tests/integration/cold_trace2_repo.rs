@@ -1,4 +1,4 @@
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};

@@ -54,7 +54,7 @@ fn test_claude_file_edit_checkpoint_propagates_tool_use_id_to_metadata() {
     let checkpoints = repo.current_working_logs().read_all_checkpoints().unwrap();
     let ai_checkpoint = checkpoints
         .iter()
-        .find(|c| c.kind == git_ai::authorship::working_log::CheckpointKind::AiAgent)
+        .find(|c| c.kind == git_ai::model::working_log::CheckpointKind::AiAgent)
         .expect("Should have an AI agent checkpoint");
 
     let metadata = ai_checkpoint
@@ -120,7 +120,7 @@ fn test_codex_bash_checkpoint_propagates_tool_use_id_to_metadata() {
     let checkpoints = repo.current_working_logs().read_all_checkpoints().unwrap();
     let ai_checkpoint = checkpoints
         .iter()
-        .find(|c| c.kind == git_ai::authorship::working_log::CheckpointKind::AiAgent)
+        .find(|c| c.kind == git_ai::model::working_log::CheckpointKind::AiAgent)
         .expect("Should have an AI agent checkpoint");
 
     let metadata = ai_checkpoint
@@ -185,7 +185,7 @@ fn test_file_edit_checkpoint_has_edit_kind_metadata() {
     let checkpoints = repo.current_working_logs().read_all_checkpoints().unwrap();
     let ai_checkpoint = checkpoints
         .iter()
-        .find(|c| c.kind == git_ai::authorship::working_log::CheckpointKind::AiAgent)
+        .find(|c| c.kind == git_ai::model::working_log::CheckpointKind::AiAgent)
         .expect("Should have an AI agent checkpoint");
 
     let metadata = ai_checkpoint
@@ -251,7 +251,7 @@ fn test_bash_checkpoint_has_edit_kind_metadata() {
     let checkpoints = repo.current_working_logs().read_all_checkpoints().unwrap();
     let ai_checkpoint = checkpoints
         .iter()
-        .find(|c| c.kind == git_ai::authorship::working_log::CheckpointKind::AiAgent)
+        .find(|c| c.kind == git_ai::model::working_log::CheckpointKind::AiAgent)
         .expect("Should have an AI agent checkpoint");
 
     let metadata = ai_checkpoint
@@ -316,7 +316,7 @@ fn test_gemini_file_edit_checkpoint_propagates_tool_use_id_to_metadata() {
     let checkpoints = repo.current_working_logs().read_all_checkpoints().unwrap();
     let ai_checkpoint = checkpoints
         .iter()
-        .find(|c| c.kind == git_ai::authorship::working_log::CheckpointKind::AiAgent)
+        .find(|c| c.kind == git_ai::model::working_log::CheckpointKind::AiAgent)
         .expect("Should have an AI agent checkpoint");
 
     let metadata = ai_checkpoint

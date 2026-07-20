@@ -1,7 +1,7 @@
 use crate::daemon::analyzers::AnalyzerRegistry;
-use crate::daemon::domain::{AppliedCommand, GlobalState, NormalizedCommand};
 use crate::daemon::reducer;
 use crate::error::GitAiError;
+use crate::model::domain::{AppliedCommand, GlobalState, NormalizedCommand};
 use tokio::sync::{mpsc, oneshot};
 
 pub enum GlobalMsg {
@@ -62,7 +62,7 @@ pub fn spawn_global_actor() -> GlobalActorHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::{CommandScope, Confidence, NormalizedCommand};
+    use crate::model::domain::{CommandScope, Confidence, NormalizedCommand};
 
     fn global_cmd(seq: u128) -> NormalizedCommand {
         NormalizedCommand {

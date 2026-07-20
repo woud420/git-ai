@@ -1,6 +1,6 @@
 //! Transcripts database for tracking stream cursors and watermarks.
 
-use crate::streams::types::StreamError;
+use crate::model::stream_types::StreamError;
 use crate::streams::watermark::WatermarkStrategy;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -149,11 +149,10 @@ pub struct StreamsDatabase {
 impl StreamsDatabase {
     /// Open or create the transcripts database at the given path.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StreamError> {
-        let conn = crate::sqlite::open_with_memory_limits(path.as_ref()).map_err(|e| {
-            StreamError::Fatal {
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(path.as_ref())
+            .map_err(|e| StreamError::Fatal {
                 message: format!("Failed to open database: {}", e),
-            }
-        })?;
+            })?;
 
         // Enable WAL mode for better concurrency and crash resistance
         conn.pragma_update(None, "journal_mode", "WAL")
@@ -995,7 +994,7 @@ mod tests {
 
         // Manually create a v3 database
         {
-            let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+            let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
             // Run migrations 0..=2 (versions 1, 2, 3)
             for migration in &MIGRATIONS[..3] {
                 conn.execute_batch(migration).unwrap();
@@ -1066,7 +1065,7 @@ mod tests {
 
         // Create v3 DB with multiple sessions
         {
-            let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+            let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
             for migration in &MIGRATIONS[..3] {
                 conn.execute_batch(migration).unwrap();
             }

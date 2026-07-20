@@ -173,7 +173,7 @@ fn create_authorship_log_for_range(
     end_sha: &str,
     commit_shas: &[String],
     ignore_patterns: &[String],
-) -> Result<crate::authorship::authorship_log_serialization::AuthorshipLog, GitAiError> {
+) -> Result<crate::model::authorship_log_serialization::AuthorshipLog, GitAiError> {
     use crate::authorship::virtual_attribution::{
         VirtualAttributions, merge_attributions_favoring_first,
     };
@@ -202,15 +202,13 @@ fn create_authorship_log_for_range(
     if changed_files.is_empty() {
         // No files changed, return empty authorship log
         tracing::debug!("No files changed in range");
-        return Ok(
-            crate::authorship::authorship_log_serialization::AuthorshipLog {
-                attestations: Vec::new(),
-                metadata: crate::authorship::authorship_log_serialization::AuthorshipMetadata {
-                    base_commit_sha: end_sha.to_string(),
-                    ..crate::authorship::authorship_log_serialization::AuthorshipMetadata::new()
-                },
+        return Ok(crate::model::authorship_log_serialization::AuthorshipLog {
+            attestations: Vec::new(),
+            metadata: crate::model::authorship_log_serialization::AuthorshipMetadata {
+                base_commit_sha: end_sha.to_string(),
+                ..crate::model::authorship_log_serialization::AuthorshipMetadata::new()
             },
-        );
+        });
     }
 
     tracing::debug!(

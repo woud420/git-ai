@@ -7,10 +7,10 @@ use crate::authorship::ignore::{
     default_ignore_patterns, load_git_ai_ignore_patterns_from_path,
     load_linguist_generated_patterns_from_path,
 };
-use crate::authorship::working_log::AgentId;
 use crate::daemon::control_api::{BashSnapshotQueryResponse, ControlRequest};
 use crate::daemon::{DaemonConfig, send_control_request, send_control_request_with_timeout};
 use crate::error::GitAiError;
+use crate::model::working_log::AgentId;
 use crate::utils::normalize_to_posix;
 use ignore::WalkBuilder;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
@@ -1063,7 +1063,7 @@ pub fn handle_bash_pre_tool_use_with_context_and_cwd(
     original_cwd: &Path,
     context: BashToolHookContext<'_>,
 ) -> Result<BashPreHookResult, GitAiError> {
-    let started_at_ns = crate::daemon::bash_history_db::unix_time_ns();
+    let started_at_ns = crate::model::repository::bash_history_db::unix_time_ns();
     let repo_working_dir = repo_root.to_string_lossy().to_string();
 
     let wm = query_daemon_watermarks(&repo_working_dir).or_else(|| {
@@ -1152,7 +1152,7 @@ pub fn handle_bash_post_tool_use_with_cwd(
     let invocation_key = format!("{}:{}", context.session_id, context.tool_use_id);
 
     let hook_start = Instant::now();
-    let ended_at_ns = crate::daemon::bash_history_db::unix_time_ns();
+    let ended_at_ns = crate::model::repository::bash_history_db::unix_time_ns();
     let hook_timeout = Duration::from_millis(effective_hook_timeout_ms());
     let repo_working_dir = repo_root.to_string_lossy().to_string();
     let metadata = context.agent_metadata.cloned().unwrap_or_default();

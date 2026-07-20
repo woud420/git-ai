@@ -1,8 +1,8 @@
-use crate::authorship::authorship_log::{LineRange, SessionRecord};
-use crate::authorship::authorship_log_serialization::{
+use crate::model::authorship_log::{LineRange, SessionRecord};
+use crate::model::authorship_log_serialization::{
     AttestationEntry, AuthorshipLog, generate_session_id, generate_trace_id,
 };
-use crate::authorship::working_log::AgentId;
+use crate::model::working_log::AgentId;
 use std::collections::{HashMap, HashSet};
 
 const DEVIN_ID_PATH: &str = "/opt/.devin/devin_id";

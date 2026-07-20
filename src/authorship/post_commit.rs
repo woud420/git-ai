@@ -1,7 +1,6 @@
 use crate::authorship::attribution_recovery::{
     AttributionRecoveryContext, FileTimestampsByPath, UnknownLinesByFile,
 };
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::authorship::diff_base::single_commit_diff_base;
 use crate::authorship::ignore::{
     build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
@@ -9,11 +8,12 @@ use crate::authorship::ignore::{
 use crate::authorship::rewrite::DiffTreeResult;
 use crate::authorship::stats::{stats_for_commit_stats_from_hunks, write_stats_to_terminal};
 use crate::authorship::virtual_attribution::{AuthorshipLogDiffContext, VirtualAttributions};
-use crate::authorship::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry};
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::git::notes_api::write_note;
 use crate::git::repository::{Repository, batch_read_paths_at_treeishes, exec_git};
+use crate::model::authorship_log_serialization::AuthorshipLog;
+use crate::model::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 
@@ -341,38 +341,35 @@ where
     ) {
         // Prefer the batched parent→commit diff when supplied (no extra spawn);
         // otherwise fall back to a per-commit `git diff`.
-        let committed_hunks: Option<
-            HashMap<String, Vec<crate::authorship::authorship_log::LineRange>>,
-        > = if let Some(diff) = context.precomputed_parent_diff {
-            Some(
-                crate::authorship::virtual_attribution::committed_hunks_from_diff_result(
-                    diff, None,
-                ),
-            )
-        } else {
-            // Same bounding as recovery: on the daemon fast-forward `update-ref`
-            // path `parent_sha` is the far-behind old branch tip, so diff against
-            // the finalized commit's immediate parent to avoid buffering the whole
-            // pulled range (PD-23 / #1677). No-hooks agents (Devin/Codex Cloud)
-            // can be active during a pull, so this path is exposed too.
-            let diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
-            repo.diff_added_lines(&diff_base, &commit_sha, None)
-                .ok()
-                .map(|added_lines| {
-                    added_lines
-                        .into_iter()
-                        .filter(|(_, lines)| !lines.is_empty())
-                        .map(|(path, lines)| {
-                            (
-                                path,
-                                crate::authorship::authorship_log::LineRange::compress_lines(
-                                    &lines,
-                                ),
-                            )
-                        })
-                        .collect()
-                })
-        };
+        let committed_hunks: Option<HashMap<String, Vec<crate::model::authorship_log::LineRange>>> =
+            if let Some(diff) = context.precomputed_parent_diff {
+                Some(
+                    crate::authorship::virtual_attribution::committed_hunks_from_diff_result(
+                        diff, None,
+                    ),
+                )
+            } else {
+                // Same bounding as recovery: on the daemon fast-forward `update-ref`
+                // path `parent_sha` is the far-behind old branch tip, so diff against
+                // the finalized commit's immediate parent to avoid buffering the whole
+                // pulled range (PD-23 / #1677). No-hooks agents (Devin/Codex Cloud)
+                // can be active during a pull, so this path is exposed too.
+                let diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
+                repo.diff_added_lines(&diff_base, &commit_sha, None)
+                    .ok()
+                    .map(|added_lines| {
+                        added_lines
+                            .into_iter()
+                            .filter(|(_, lines)| !lines.is_empty())
+                            .map(|(path, lines)| {
+                                (
+                                    path,
+                                    crate::model::authorship_log::LineRange::compress_lines(&lines),
+                                )
+                            })
+                            .collect()
+                    })
+            };
         if let Some(committed_hunks) = committed_hunks {
             crate::authorship::background_agent::fill_unattributed_lines(
                 &mut authorship_log,
@@ -594,7 +591,7 @@ fn recovery_committed_hunks(
     parent_sha: &str,
     commit_sha: &str,
     precomputed_parent_diff: Option<&crate::authorship::rewrite::DiffTreeResult>,
-) -> Result<HashMap<String, Vec<crate::authorship::authorship_log::LineRange>>, GitAiError> {
+) -> Result<HashMap<String, Vec<crate::model::authorship_log::LineRange>>, GitAiError> {
     if let Some(diff) = precomputed_parent_diff {
         return Ok(
             crate::authorship::virtual_attribution::committed_hunks_from_diff_result(diff, None),
@@ -611,7 +608,7 @@ fn recovery_committed_hunks(
         .map(|(path, lines)| {
             (
                 path,
-                crate::authorship::authorship_log::LineRange::compress_lines(&lines),
+                crate::model::authorship_log::LineRange::compress_lines(&lines),
             )
         })
         .collect())
@@ -748,19 +745,17 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
             &parent_sha
         };
         if let Ok(added_lines) = repo.diff_added_lines(diff_base, amended_commit, None) {
-            let committed_hunks: HashMap<
-                String,
-                Vec<crate::authorship::authorship_log::LineRange>,
-            > = added_lines
-                .into_iter()
-                .filter(|(_, lines)| !lines.is_empty())
-                .map(|(path, lines)| {
-                    (
-                        path,
-                        crate::authorship::authorship_log::LineRange::compress_lines(&lines),
-                    )
-                })
-                .collect();
+            let committed_hunks: HashMap<String, Vec<crate::model::authorship_log::LineRange>> =
+                added_lines
+                    .into_iter()
+                    .filter(|(_, lines)| !lines.is_empty())
+                    .map(|(path, lines)| {
+                        (
+                            path,
+                            crate::model::authorship_log::LineRange::compress_lines(&lines),
+                        )
+                    })
+                    .collect();
             crate::authorship::background_agent::fill_unattributed_lines(
                 &mut authorship_log,
                 &committed_hunks,

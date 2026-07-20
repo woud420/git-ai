@@ -1,15 +1,15 @@
-use crate::authorship::authorship_log::{LineRange, SessionRecord};
-use crate::authorship::authorship_log_serialization::{
-    AuthorshipLog, generate_session_id, generate_trace_id,
-};
-use crate::authorship::working_log::{AgentId, CheckpointKind};
 use crate::commands::checkpoint_agent::bash_tool::StatEntry;
-use crate::daemon::bash_history_db::{BashCheckpointCall, distance_to_call_window};
 use crate::error::GitAiError;
 use crate::git::repo_state::worktree_root_for_path;
 use crate::git::repository::{Repository, exec_git};
-use crate::metrics::db::SessionEventRecoveryCandidate;
 use crate::metrics::{CheckpointValues, EventAttributes, MetricEvent, PosEncoded};
+use crate::model::authorship_log::{LineRange, SessionRecord};
+use crate::model::authorship_log_serialization::{
+    AuthorshipLog, generate_session_id, generate_trace_id,
+};
+use crate::model::repository::bash_history_db::{BashCheckpointCall, distance_to_call_window};
+use crate::model::repository::metrics_db::SessionEventRecoveryCandidate;
+use crate::model::working_log::{AgentId, CheckpointKind};
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -272,7 +272,7 @@ pub(crate) fn matching_session_event_candidate_exists(
         return Ok(false);
     }
 
-    let candidates = match crate::metrics::db::MetricsDatabase::global() {
+    let candidates = match crate::model::repository::metrics_db::MetricsDatabase::global() {
         Ok(db) => match db.lock() {
             Ok(db) => db.session_event_candidates_near_timestamps(
                 timestamps_ns,
@@ -321,7 +321,8 @@ fn recover_bash_mtime(
     all_timestamps.sort_unstable();
     all_timestamps.dedup();
 
-    let candidates = match crate::daemon::bash_history_db::BashHistoryDatabase::global() {
+    let candidates = match crate::model::repository::bash_history_db::BashHistoryDatabase::global()
+    {
         Ok(db) => match db.lock() {
             Ok(db) => db.candidates_near_timestamps(&all_timestamps, BASH_RECOVERY_WINDOW_NS)?,
             Err(_) => Vec::new(),
@@ -435,7 +436,7 @@ fn recover_session_event_mtime(
     all_timestamps.sort_unstable();
     all_timestamps.dedup();
 
-    let candidates = match crate::metrics::db::MetricsDatabase::global() {
+    let candidates = match crate::model::repository::metrics_db::MetricsDatabase::global() {
         Ok(db) => match db.lock() {
             Ok(db) => db.session_event_candidates_near_timestamps(
                 &all_timestamps,
@@ -958,7 +959,7 @@ fn select_nearest_commit_metadata_metric_session(
         return Ok(None);
     }
 
-    let candidates = match crate::metrics::db::MetricsDatabase::global() {
+    let candidates = match crate::model::repository::metrics_db::MetricsDatabase::global() {
         Ok(db) => match db.lock() {
             Ok(db) => db.session_event_candidates_near_timestamps(
                 latest_timestamps,
@@ -1028,7 +1029,7 @@ fn select_latest_commit_metadata_metric_session(
     detections: &[CommitAgentDetection],
     target_repo_url: Option<&str>,
 ) -> Result<Option<CommitMetadataSessionSelection>, GitAiError> {
-    let db = match crate::metrics::db::MetricsDatabase::global() {
+    let db = match crate::model::repository::metrics_db::MetricsDatabase::global() {
         Ok(db) => db,
         Err(_) => return Ok(None),
     };
@@ -1664,7 +1665,7 @@ fn add_attestation(
         return;
     }
     let ranges = LineRange::compress_lines(&sorted);
-    let entry = crate::authorship::authorship_log_serialization::AttestationEntry::new(
+    let entry = crate::model::authorship_log_serialization::AttestationEntry::new(
         author_id.to_string(),
         ranges,
     );
@@ -1750,10 +1751,10 @@ fn record_recovery_metric(input: RecoveryMetricInput<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authorship::authorship_log_serialization::{
+    use crate::model::authorship_log_serialization::{
         AttestationEntry, AuthorshipLog, FileAttestation,
     };
-    use crate::authorship::working_log::AgentId;
+    use crate::model::working_log::AgentId;
 
     fn test_agent(external_session_id: &str) -> AgentId {
         AgentId {
@@ -1821,8 +1822,8 @@ mod tests {
         external_session_id: &str,
         event_ts: u32,
         repo_url: Option<&str>,
-    ) -> crate::metrics::db::SessionEventRecoveryCandidate {
-        crate::metrics::db::SessionEventRecoveryCandidate {
+    ) -> crate::model::repository::metrics_db::SessionEventRecoveryCandidate {
+        crate::model::repository::metrics_db::SessionEventRecoveryCandidate {
             row_id,
             event_ts,
             session_id: session_id.to_string(),

@@ -1,8 +1,8 @@
-use crate::daemon::domain::FamilyKey;
 use crate::error::GitAiError;
 use crate::git::cli_parser::parse_git_cli_args;
 use crate::git::repo_state::{common_dir_for_repo_path, common_dir_for_worktree};
 use crate::git::repository::discover_repository_in_path_no_git_exec;
+use crate::model::domain::FamilyKey;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

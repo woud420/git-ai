@@ -1,5 +1,4 @@
 use crate::authorship::ignore::effective_ignore_patterns;
-use crate::authorship::internal_db::InternalDatabase;
 use crate::authorship::range_authorship;
 use crate::authorship::stats::stats_command;
 use crate::commands;
@@ -9,6 +8,7 @@ use crate::git::find_repository;
 use crate::git::find_repository_in_path;
 use crate::git::repository::{CommitRange, Repository};
 use crate::git::sync_authorship::{NotesExistence, fetch_authorship_notes, push_authorship_notes};
+use crate::model::repository::internal_db::InternalDatabase;
 use crate::observability::log_message;
 use crate::utils::is_interactive_terminal;
 use serde::{Deserialize, Serialize};

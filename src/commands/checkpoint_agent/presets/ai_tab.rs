@@ -1,7 +1,7 @@
 use super::parse;
 use super::{AgentPreset, ParsedHookEvent, PostFileEdit, PreFileEdit, PresetContext};
-use crate::authorship::working_log::AgentId;
 use crate::error::GitAiError;
+use crate::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

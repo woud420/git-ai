@@ -1,7 +1,7 @@
-use crate::authorship::authorship_log::PromptRecord;
 use crate::error::GitAiError;
 use crate::git::notes_api::{read_authorship, search_notes};
 use crate::git::repository::Repository;
+use crate::model::authorship_log::PromptRecord;
 
 /// Find a prompt in the repository history
 ///

@@ -6,7 +6,7 @@
 //! DTOs. SQLite access lives in [`repository`].
 //!
 //! The previous module locations re-export from here (e.g.
-//! `crate::authorship::working_log`, `crate::api::types`), so both paths are
+//! `crate::model::working_log`, `crate::model::api_types`), so both paths are
 //! valid during the migration.
 
 pub mod api_types;

@@ -3,10 +3,10 @@ use super::super::{
     ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit, PresetContext,
     StreamFormat, StreamSource,
 };
-use crate::authorship::authorship_log_serialization::generate_session_id;
-use crate::authorship::working_log::AgentId;
 use crate::commands::checkpoint_agent::bash_tool::ToolClass;
 use crate::error::GitAiError;
+use crate::model::authorship_log_serialization::generate_session_id;
+use crate::model::working_log::AgentId;
 use crate::streams::model_extraction;
 use std::collections::HashMap;
 use std::path::PathBuf;

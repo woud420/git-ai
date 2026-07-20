@@ -1,18 +1,18 @@
 use crate::authorship::attribution_tracker::{
     Attribution, AttributionTracker, INITIAL_ATTRIBUTION_TS, LineAttribution,
 };
-use crate::authorship::authorship_log_serialization::generate_session_id;
-#[cfg(not(any(test, feature = "test-support")))]
-use crate::authorship::authorship_log_serialization::generate_short_hash;
 use crate::authorship::imara_diff_utils::{
     LineChangeTag, compute_line_changes, normalize_line_endings,
 };
-use crate::authorship::working_log::CheckpointKind;
-use crate::authorship::working_log::{Checkpoint, WorkingLogEntry};
 use crate::commands::checkpoint_agent::orchestrator::CheckpointRequest;
 use crate::error::GitAiError;
 use crate::git::repo_storage::PersistedWorkingLog;
 use crate::git::repository::Repository;
+use crate::model::authorship_log_serialization::generate_session_id;
+#[cfg(not(any(test, feature = "test-support")))]
+use crate::model::authorship_log_serialization::generate_short_hash;
+use crate::model::working_log::CheckpointKind;
+use crate::model::working_log::{Checkpoint, WorkingLogEntry};
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -39,7 +39,7 @@ struct PreviousFileState {
     attributions: Vec<Attribution>,
 }
 
-use crate::authorship::working_log::AgentId;
+use crate::model::working_log::AgentId;
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 const AGENT_USAGE_MIN_INTERVAL_SECS: u64 = 150;
@@ -55,7 +55,7 @@ pub(crate) fn should_emit_agent_usage(agent_id: &AgentId) -> bool {
         .unwrap_or_default()
         .as_secs();
 
-    let Ok(db) = crate::metrics::db::MetricsDatabase::global() else {
+    let Ok(db) = crate::model::repository::metrics_db::MetricsDatabase::global() else {
         return true;
     };
     let Ok(mut db_lock) = db.lock() else {
@@ -319,7 +319,7 @@ fn execute_resolved_checkpoint(
                 .cloned()
                 .unwrap_or_default();
             if !editor.is_empty() {
-                use crate::authorship::working_log::KnownHumanMetadata;
+                use crate::model::working_log::KnownHumanMetadata;
                 checkpoint.known_human_metadata = Some(KnownHumanMetadata {
                     editor,
                     editor_version,
@@ -841,7 +841,7 @@ async fn get_checkpoint_entries(
     let author_id = match kind {
         CheckpointKind::Human => kind.to_str(), // "human" — stripped, never attested
         CheckpointKind::KnownHuman => {
-            crate::authorship::authorship_log_serialization::generate_human_short_hash(author)
+            crate::model::authorship_log_serialization::generate_human_short_hash(author)
         }
         _ => {
             // AI kinds: compose session_id::trace_id
@@ -1108,8 +1108,8 @@ pub fn compute_file_line_stats(previous_content: &str, current_content: &str) ->
 /// This avoids redundant diff computation since stats are already computed during entry creation
 fn compute_line_stats(
     file_stats: &[FileLineStats],
-) -> Result<crate::authorship::working_log::CheckpointLineStats, GitAiError> {
-    let mut stats = crate::authorship::working_log::CheckpointLineStats::default();
+) -> Result<crate::model::working_log::CheckpointLineStats, GitAiError> {
+    let mut stats = crate::model::working_log::CheckpointLineStats::default();
 
     // Aggregate line stats from all files
     for file_stat in file_stats {

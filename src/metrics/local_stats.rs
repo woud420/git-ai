@@ -6,12 +6,12 @@ const YIELD_WINDOW_SECS: u32 = 4 * 3600;
 
 use crate::error::GitAiError;
 use crate::metrics::attrs::attr_pos;
-use crate::metrics::db::{MetricHistoryRecord, MetricsDatabase};
 use crate::metrics::events::{checkpoint_pos, committed_pos, session_event_pos};
 use crate::metrics::pos_encoded::{
     sparse_get_string, sparse_get_u32, sparse_get_vec_string, sparse_get_vec_u32,
 };
 use crate::metrics::types::MetricEvent;
+use crate::model::repository::metrics_db::{MetricHistoryRecord, MetricsDatabase};
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
 use serde::Serialize;
 use std::cmp::Reverse;

@@ -1,10 +1,10 @@
 use crate::daemon::analyzers::{AnalysisView, CommandAnalyzer, command_args};
-use crate::daemon::domain::{
-    AnalysisResult, CommandClass, Confidence, NormalizedCommand, ResetKind, SemanticEvent,
-};
 use crate::error::GitAiError;
 use crate::git::cli_parser::explicit_rebase_branch_arg;
 use crate::git::repo_state::is_valid_git_oid;
+use crate::model::domain::{
+    AnalysisResult, CommandClass, Confidence, NormalizedCommand, ResetKind, SemanticEvent,
+};
 
 #[derive(Default)]
 pub struct HistoryAnalyzer;
@@ -212,7 +212,7 @@ fn resolve_revision_from_ref_state(
     None
 }
 
-fn valid_ref_transition(change: &crate::daemon::domain::RefChange) -> Option<(String, String)> {
+fn valid_ref_transition(change: &crate::model::domain::RefChange) -> Option<(String, String)> {
     let old = change.old.trim();
     let new = change.new.trim();
     if old == new || !valid_non_zero_oid(old) || !valid_non_zero_oid(new) {
@@ -364,7 +364,7 @@ fn explicit_rebase_branch_change(cmd: &NormalizedCommand) -> Option<(String, Str
         .map(|change| (change.old.trim().to_string(), change.new.trim().to_string()))
 }
 
-fn change_span(changes: &[&crate::daemon::domain::RefChange]) -> Option<(String, String)> {
+fn change_span(changes: &[&crate::model::domain::RefChange]) -> Option<(String, String)> {
     let first = changes.first()?;
     let last = changes.last()?;
     let old_head = first.old.trim();
@@ -397,7 +397,7 @@ fn infer_reset_kind(args: &[String]) -> ResetKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::{CommandScope, RefChange};
+    use crate::model::domain::{CommandScope, RefChange};
 
     fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {

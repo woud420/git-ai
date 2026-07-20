@@ -3,12 +3,12 @@ use crate::authorship::ignore::{
 };
 use crate::authorship::stats::{CommitStats, stats_from_authorship_log, write_stats_to_terminal};
 use crate::authorship::virtual_attribution::VirtualAttributions;
-use crate::authorship::working_log::CheckpointKind;
 use crate::error::GitAiError;
 use crate::git::find_repository;
 use crate::git::repo_storage::InitialAttributions;
 use crate::git::repository::{InternalGitProfile, Repository, exec_git_with_profile};
 use crate::git::status::MAX_PATHSPEC_ARGS;
+use crate::model::working_log::CheckpointKind;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};

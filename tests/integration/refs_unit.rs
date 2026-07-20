@@ -1,5 +1,4 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
 use git_ai::error::GitAiError;
 use git_ai::git::notes_api;
 use git_ai::git::notes_api::{read_authorship_v3, read_note, write_note};
@@ -13,6 +12,7 @@ use git_ai::git::refs::{
     note_blob_oids_for_commits_from_ref, ref_exists,
 };
 use git_ai::git::repository::{exec_git, exec_git_stdin, find_repository_in_path};
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use std::fs;
 
 // ---------------------------------------------------------------------------

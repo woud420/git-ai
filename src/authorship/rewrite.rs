@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::authorship::hunk_shift::{DiffHunk, parse_hunk_header};
 use crate::config::Config;
 use crate::error::GitAiError;
@@ -9,6 +8,7 @@ use crate::git::repo_state::is_valid_git_oid;
 use crate::git::repository::{
     Repository, exec_git, exec_git_allow_nonzero, exec_git_stdin_streaming,
 };
+use crate::model::authorship_log_serialization::AuthorshipLog;
 
 const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 

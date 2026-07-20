@@ -1,8 +1,8 @@
 use crate::daemon::analyzers::{AnalysisView, CommandAnalyzer, command_args, normalized_args};
-use crate::daemon::domain::{
+use crate::error::GitAiError;
+use crate::model::domain::{
     AnalysisResult, CommandClass, Confidence, NormalizedCommand, PullStrategy, SemanticEvent,
 };
-use crate::error::GitAiError;
 use std::path::PathBuf;
 
 #[derive(Default)]
@@ -123,7 +123,7 @@ fn infer_clone_target(args: &[String]) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::CommandScope;
+    use crate::model::domain::CommandScope;
 
     fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {

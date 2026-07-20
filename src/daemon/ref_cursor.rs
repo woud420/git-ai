@@ -1,11 +1,11 @@
 use crate::daemon::analyzers::{command_args, normalized_args};
-use crate::daemon::domain::{Confidence, FamilyKey, FamilyState, NormalizedCommand, RefChange};
 use crate::error::GitAiError;
 use crate::git::cli_parser::{
     explicit_rebase_branch_arg, parse_git_cli_args, summarize_rebase_args,
 };
 use crate::git::find_repository_in_path;
 use crate::git::repo_state::{common_dir_for_worktree, git_dir_for_worktree, is_valid_git_oid};
+use crate::model::domain::{Confidence, FamilyKey, FamilyState, NormalizedCommand, RefChange};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -3628,7 +3628,7 @@ fn head_key(git_dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::{
+    use crate::model::domain::{
         CommandScope, Confidence, FamilyKey, FamilyState, NormalizedCommand, WatermarkState,
         WorktreeState,
     };

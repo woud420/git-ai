@@ -1,4 +1,3 @@
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::authorship::ignore::effective_ignore_patterns;
 use crate::authorship::stats::{
     stats_for_commit_stats_with_parent_and_authorship, write_stats_to_terminal,
@@ -6,6 +5,7 @@ use crate::authorship::stats::{
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::git::repository::Repository;
+use crate::model::authorship_log_serialization::AuthorshipLog;
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
     event::{self, Event, KeyCode},

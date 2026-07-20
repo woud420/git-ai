@@ -1,6 +1,6 @@
 use crate::authorship::attribution_tracker::LineAttribution;
-use crate::authorship::authorship_log::LineRange;
-use crate::authorship::authorship_log_serialization::{AttestationEntry, FileAttestation};
+use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log_serialization::{AttestationEntry, FileAttestation};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffHunk {

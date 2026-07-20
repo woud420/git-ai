@@ -1,6 +1,6 @@
 use crate::api::client::ApiClient;
-use crate::api::types::{ApiErrorResponse, CreateBundleRequest, CreateBundleResponse};
 use crate::error::GitAiError;
+use crate::model::api_types::{ApiErrorResponse, CreateBundleRequest, CreateBundleResponse};
 
 /// Bundle API endpoints
 impl ApiClient {

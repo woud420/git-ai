@@ -19,7 +19,6 @@ pub mod notes;
 pub mod observability;
 pub mod process_timeout;
 pub mod repo_url;
-pub use crate::model::repository::sqlite;
 pub mod streams;
 pub mod tokio_runtime;
 pub mod utils;

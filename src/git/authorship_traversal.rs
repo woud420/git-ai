@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::error::GitAiError;
 use crate::git::notes_api::{commits_with_notes, read_note_blob_oids};
 #[cfg(test)]
 use crate::git::repository::exec_git;
 use crate::git::repository::{Repository, exec_git_stdin};
+use crate::model::authorship_log_serialization::AuthorshipLog;
 
 pub async fn load_ai_touched_files_for_commits(
     repo: &Repository,

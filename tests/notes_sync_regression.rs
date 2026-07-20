@@ -2,7 +2,7 @@
 #[path = "integration/repos/mod.rs"]
 mod repos;
 
-use git_ai::notes::db::NotesDatabase;
+use git_ai::model::repository::notes_db::NotesDatabase;
 use git_ai::notes::reference_server::ReferenceServer;
 use repos::test_repo::{DaemonTestScope, TestRepo, real_git_executable};
 use std::fs;

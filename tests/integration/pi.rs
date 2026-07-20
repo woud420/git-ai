@@ -1,7 +1,7 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::fixture_path;
-use git_ai::authorship::working_log::{Checkpoint, CheckpointKind};
+use git_ai::model::working_log::{Checkpoint, CheckpointKind};
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};

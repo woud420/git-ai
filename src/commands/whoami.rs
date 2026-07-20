@@ -2,7 +2,7 @@ use crate::api::{ApiClient, ApiContext};
 use crate::auth::state::AuthStatus;
 use crate::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
-use crate::metrics::db::{MetricsDatabase, MetricsStatus};
+use crate::model::repository::metrics_db::{MetricsDatabase, MetricsStatus};
 use std::fmt::Write as _;
 
 pub fn handle_whoami(args: &[String]) {

@@ -1,8 +1,8 @@
-use crate::authorship::authorship_log::LineRange;
 use crate::authorship::ignore::{build_ignore_matcher, should_ignore_file_with_matcher};
 use crate::error::GitAiError;
 use crate::git::notes_api::read_authorship;
 use crate::git::repository::Repository;
+use crate::model::authorship_log::LineRange;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -329,7 +329,7 @@ pub fn write_stats_to_markdown(stats: &CommitStats) -> String {
 /// Calculate commit stats from an authorship log
 /// This helper can work with both fetched and in-memory authorship logs
 pub fn stats_from_authorship_log(
-    _authorship_log: Option<&crate::authorship::authorship_log_serialization::AuthorshipLog>,
+    _authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
     git_diff_added_lines: u32,
     git_diff_deleted_lines: u32,
     ai_accepted: u32,
@@ -392,7 +392,7 @@ pub fn stats_for_commit_stats_with_authorship(
     repo: &Repository,
     commit_sha: &str,
     ignore_patterns: &[String],
-    authorship_log: Option<&crate::authorship::authorship_log_serialization::AuthorshipLog>,
+    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
 ) -> Result<CommitStats, GitAiError> {
     let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
     let parent_count = commit_obj.parent_count()?;
@@ -427,7 +427,7 @@ pub fn stats_for_commit_stats_with_parent_and_authorship(
     commit_sha: &str,
     parent_sha: Option<&str>,
     ignore_patterns: &[String],
-    authorship_log: Option<&crate::authorship::authorship_log_serialization::AuthorshipLog>,
+    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
 ) -> Result<CommitStats, GitAiError> {
     use crate::commands::diff::get_diff_with_line_numbers;
 
@@ -438,7 +438,7 @@ pub fn stats_for_commit_stats_with_parent_and_authorship(
 
 #[doc(hidden)]
 pub fn accepted_lines_from_attestations(
-    authorship_log: Option<&crate::authorship::authorship_log_serialization::AuthorshipLog>,
+    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
     added_lines_by_file: &HashMap<String, Vec<u32>>,
     is_merge_commit: bool,
 ) -> (u32, u32, BTreeMap<String, u32>) {
@@ -528,7 +528,7 @@ pub fn stats_for_commit_stats_from_hunks(
     commit_sha: &str,
     ignore_patterns: &[String],
     hunks: &[crate::commands::diff::DiffHunk],
-    authorship_log: Option<&crate::authorship::authorship_log_serialization::AuthorshipLog>,
+    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
 ) -> Result<CommitStats, GitAiError> {
     let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
     let parent_count = commit_obj.parent_count()?;
@@ -545,7 +545,7 @@ pub fn stats_for_commit_stats_from_hunks(
 pub(crate) fn stats_for_commit_stats_from_hunks_with_merge_flag(
     ignore_patterns: &[String],
     hunks: &[crate::commands::diff::DiffHunk],
-    authorship_log: Option<&crate::authorship::authorship_log_serialization::AuthorshipLog>,
+    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
     is_merge_commit: bool,
 ) -> CommitStats {
     let ignore_matcher = build_ignore_matcher(ignore_patterns);

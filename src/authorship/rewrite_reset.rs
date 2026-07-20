@@ -1,11 +1,11 @@
 use crate::authorship::attribution_tracker::LineAttribution;
-use crate::authorship::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::authorship::hunk_shift::{DiffHunk, apply_hunk_shifts_to_line_attributions};
 use crate::authorship::rewrite::compute_diff_trees_batch;
 use crate::error::GitAiError;
 use crate::git::notes_api;
 use crate::git::repository::{Repository, batch_read_paths_at_treeishes};
+use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
+use crate::model::authorship_log_serialization::AuthorshipLog;
 use std::collections::HashMap;
 
 /// Handles working log reconstruction after a backward reset (e.g. git reset --mixed HEAD~N).
@@ -248,7 +248,7 @@ fn list_commits_in_range(repo: &Repository, base: &str, tip: &str) -> Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authorship::authorship_log_serialization::{AttestationEntry, FileAttestation};
+    use crate::model::authorship_log_serialization::{AttestationEntry, FileAttestation};
 
     fn log_with_single_entry(file: &str, hash: &str, start: u32, end: u32) -> AuthorshipLog {
         let mut log = AuthorshipLog::new();

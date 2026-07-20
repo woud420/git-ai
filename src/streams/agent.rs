@@ -1,8 +1,8 @@
 // src/streams/agent.rs
 
 use super::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use super::types::{StreamBatch, StreamError};
 use super::watermark::WatermarkStrategy;
+use crate::model::stream_types::{StreamBatch, StreamError};
 use std::path::{Path, PathBuf};
 
 /// Sentinel session_id for shared stream watermark rows.

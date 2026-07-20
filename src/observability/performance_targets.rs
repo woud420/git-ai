@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::{authorship::working_log::CheckpointKind, observability::log_performance};
+use crate::{model::working_log::CheckpointKind, observability::log_performance};
 
 pub fn log_performance_for_checkpoint(
     files_edited: usize,

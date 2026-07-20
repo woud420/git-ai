@@ -1,7 +1,5 @@
-use crate::authorship::authorship_log::{
-    Author, HumanRecord, LineRange, PromptRecord, SessionRecord,
-};
 use crate::git::repository::Repository;
+use crate::model::authorship_log::{Author, HumanRecord, LineRange, PromptRecord, SessionRecord};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -634,7 +632,7 @@ mod tests {
         let mut log = AuthorshipLog::new();
 
         // Add a prompt to the metadata
-        let agent_id = crate::authorship::working_log::AgentId {
+        let agent_id = crate::model::working_log::AgentId {
             tool: "cursor".to_string(),
             id: "session_123".to_string(),
             model: "claude-3-sonnet".to_string(),
@@ -642,7 +640,7 @@ mod tests {
         let prompt_hash = generate_short_hash(&agent_id.id, &agent_id.tool);
         log.metadata.prompts.insert(
             prompt_hash.clone(),
-            crate::authorship::authorship_log::PromptRecord {
+            crate::model::authorship_log::PromptRecord {
                 agent_id,
                 human_author: None,
                 total_additions: 0,
@@ -701,7 +699,7 @@ mod tests {
         let mut log = AuthorshipLog::new();
 
         // Add a prompt to the metadata
-        let agent_id = crate::authorship::working_log::AgentId {
+        let agent_id = crate::model::working_log::AgentId {
             tool: "cursor".to_string(),
             id: "session_123".to_string(),
             model: "claude-3-sonnet".to_string(),
@@ -709,7 +707,7 @@ mod tests {
         let prompt_hash = generate_short_hash(&agent_id.id, &agent_id.tool);
         log.metadata.prompts.insert(
             prompt_hash.clone(),
-            crate::authorship::authorship_log::PromptRecord {
+            crate::model::authorship_log::PromptRecord {
                 agent_id,
                 human_author: None,
                 total_additions: 0,
@@ -753,7 +751,7 @@ mod tests {
         let mut log = AuthorshipLog::new();
         log.metadata.base_commit_sha = "abc123".to_string();
 
-        let agent_id = crate::authorship::working_log::AgentId {
+        let agent_id = crate::model::working_log::AgentId {
             tool: "cursor".to_string(),
             id: "session_123".to_string(),
             model: "claude-3-sonnet".to_string(),
@@ -761,7 +759,7 @@ mod tests {
         let prompt_hash = generate_short_hash(&agent_id.id, &agent_id.tool);
         log.metadata.prompts.insert(
             prompt_hash,
-            crate::authorship::authorship_log::PromptRecord {
+            crate::model::authorship_log::PromptRecord {
                 agent_id,
                 human_author: None,
                 total_additions: 0,

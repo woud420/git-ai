@@ -3,8 +3,8 @@
 //! Uploads pending metrics database rows to the API.
 
 use crate::api::{ApiClient, ApiContext, metrics_upload_allowed, upload_metrics_with_retry};
-use crate::metrics::db::MetricsDatabase;
 use crate::metrics::{MetricEvent, MetricsBatch};
+use crate::model::repository::metrics_db::MetricsDatabase;
 
 /// Max events per batch upload
 const MAX_BATCH_SIZE: usize = 1000;

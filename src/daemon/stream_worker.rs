@@ -4,16 +4,16 @@
 //! 1. **Checkpoint notifications** (Immediate priority, <100ms) - fired when `git-ai checkpoint` is called
 //! 2. **Periodic sweeps** (Low priority, every 30min) - agent-specific discovery of all sessions
 
-use crate::authorship::authorship_log_serialization::{generate_session_id, generate_trace_id};
 use crate::config;
 use crate::daemon::telemetry_worker::DaemonTelemetryWorkerHandle;
 use crate::daemon::transcript_redaction::redact_json_secrets;
 use crate::metrics::{
     EventAttributes, MetricEvent, OtelTraceValues, PosEncoded, SessionEventValues,
 };
+use crate::model::authorship_log_serialization::{generate_session_id, generate_trace_id};
+use crate::model::repository::streams_db::{StreamRecord, StreamsDatabase};
+use crate::model::stream_types::StreamError;
 use crate::streams::agent::{SHARED_STREAM_SESSION_ID, StreamDescriptor};
-use crate::streams::db::{StreamRecord, StreamsDatabase};
-use crate::streams::types::StreamError;
 use crate::streams::watermark::{WatermarkStrategy, WatermarkType};
 use chrono::{TimeZone, Utc};
 use std::collections::{BinaryHeap, HashSet};

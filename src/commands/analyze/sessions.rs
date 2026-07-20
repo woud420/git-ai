@@ -738,7 +738,7 @@ fn merge_filters(mut convenience: Vec<Value>, raw: Option<&str>) -> Result<Optio
 // ---------------------------------------------------------------------------
 
 fn open_db(path: &Path) -> Result<Connection, rusqlite::Error> {
-    let conn = crate::sqlite::open_with_memory_limits(path)?;
+    let conn = crate::model::repository::sqlite::open_with_memory_limits(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
     conn.execute_batch(SCHEMA)?;
     ensure_derived_columns(&conn)?;
@@ -1533,7 +1533,7 @@ mod tests {
     fn temp_db() -> (Connection, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("analyze-sessions.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         conn.execute_batch(SCHEMA).unwrap();
         // Mirror open_db so the derived funnel-gap columns are present in tests.
         ensure_derived_columns(&conn).unwrap();

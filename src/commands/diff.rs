@@ -1,5 +1,3 @@
-use crate::authorship::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::authorship::ignore::{
     build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
@@ -7,6 +5,8 @@ use crate::commands::blame::GitAiBlameOptions;
 use crate::error::GitAiError;
 use crate::git::notes_api::{read_authorship, read_note};
 use crate::git::repository::{InternalGitProfile, Repository, exec_git_with_profile};
+use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
+use crate::model::authorship_log_serialization::AuthorshipLog;
 use serde::{Deserialize, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -2241,7 +2241,7 @@ pub fn get_diff_json_filtered(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authorship::working_log::AgentId;
+    use crate::model::working_log::AgentId;
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     #[test]

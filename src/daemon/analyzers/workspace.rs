@@ -1,8 +1,8 @@
 use crate::daemon::analyzers::{AnalysisView, CommandAnalyzer, command_args, normalized_args};
-use crate::daemon::domain::{
+use crate::error::GitAiError;
+use crate::model::domain::{
     AnalysisResult, CommandClass, Confidence, NormalizedCommand, SemanticEvent, StashOpKind,
 };
-use crate::error::GitAiError;
 
 #[derive(Default)]
 pub struct WorkspaceAnalyzer;
@@ -117,7 +117,7 @@ fn current_branch_ref(_cmd: &NormalizedCommand) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::CommandScope;
+    use crate::model::domain::CommandScope;
 
     fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {

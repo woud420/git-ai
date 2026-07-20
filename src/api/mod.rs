@@ -4,9 +4,8 @@ pub mod client;
 pub mod logs;
 pub mod metrics;
 pub mod notes;
-pub use crate::model::api_types as types;
 
+pub use crate::model::api_types::*;
 pub use client::{ApiClient, ApiContext};
 pub use logs::daemon_logs_upload_allowed;
 pub use metrics::{metrics_upload_allowed, upload_metrics_with_retry};
-pub use types::*;

@@ -119,7 +119,7 @@ fn test_claude_reader_file_not_found() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            git_ai::streams::types::StreamError::Fatal { message } => {
+            git_ai::model::stream_types::StreamError::Fatal { message } => {
                 assert!(message.contains("not found"));
             }
             _ => panic!("Expected Fatal error, got {:?}", e),

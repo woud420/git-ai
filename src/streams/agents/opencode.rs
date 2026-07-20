@@ -1,8 +1,8 @@
 //! OpenCode agent implementation (SQLite-only).
 
+use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::streams::types::{StreamBatch, StreamError};
 use crate::streams::watermark::{TimestampWatermark, WatermarkStrategy};
 use chrono::DateTime;
 use rusqlite::{Connection, OpenFlags};
@@ -27,11 +27,13 @@ impl OpenCodeAgent {
 }
 
 pub fn open_sqlite_readonly(path: &Path) -> Result<Connection, StreamError> {
-    let conn =
-        crate::sqlite::open_with_flags_and_memory_limits(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to open OpenCode database {}: {}", path.display(), e),
-            })?;
+    let conn = crate::model::repository::sqlite::open_with_flags_and_memory_limits(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| StreamError::Fatal {
+        message: format!("Failed to open OpenCode database {}: {}", path.display(), e),
+    })?;
 
     conn.execute_batch("PRAGMA busy_timeout = 5000;")
         .map_err(|e| StreamError::Fatal {
@@ -355,7 +357,7 @@ mod tests {
     }
 
     fn create_test_db(path: &std::path::Path, message_count: usize) {
-        let conn = crate::sqlite::open_with_memory_limits(path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(path).unwrap();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS message (
                 id TEXT PRIMARY KEY,
@@ -448,7 +450,7 @@ mod tests {
         assert_eq!(all.len(), 3);
 
         // Insert one more record with a later timestamp
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         let ts = 1000 + 3 * 1000i64;
         conn.execute(
             "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -480,7 +482,7 @@ mod tests {
         let (_, mut wm) = drain_all(&agent, &db_path);
 
         // Insert 3 more records
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         for i in 3..6usize {
             let ts = 1000 + (i as i64) * 1000;
             conn.execute(
@@ -528,14 +530,17 @@ mod tests {
     fn test_sqlite_open_sets_cache_size_pragma() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("opencode.db");
-        drop(crate::sqlite::open_with_memory_limits(&db_path).unwrap());
+        drop(crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap());
 
         let conn = open_sqlite_readonly(&db_path).unwrap();
 
         let cache_size: i32 = conn
             .pragma_query_value(None, "cache_size", |row| row.get(0))
             .unwrap();
-        assert_eq!(cache_size, crate::sqlite::MEMORY_LIMIT_CACHE_SIZE_KIB);
+        assert_eq!(
+            cache_size,
+            crate::model::repository::sqlite::MEMORY_LIMIT_CACHE_SIZE_KIB
+        );
     }
 
     #[test]

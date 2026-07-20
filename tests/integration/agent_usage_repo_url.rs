@@ -1,7 +1,7 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::working_log::AgentId;
 use git_ai::daemon::checkpoint::build_agent_usage_attrs;
 use git_ai::git::repository as GitAiRepository;
+use git_ai::model::working_log::AgentId;
 
 /// Verifies that `build_agent_usage_attrs` includes `repo_url` when the repo has a remote
 /// with a normalizable URL (SSH or HTTPS format).

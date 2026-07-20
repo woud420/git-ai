@@ -5,11 +5,11 @@ mod repos;
 // Graphite-style restacks rewrite commits with `git commit-tree` + `git update-ref`.
 // These tests model that plumbing path directly so they do not depend on `gt`.
 
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
 use git_ai::daemon::open_local_socket_stream_with_timeout;
 use git_ai::git::find_repository_in_path;
 use git_ai::git::notes_api::read_note;
 use git_ai::git::repository::Repository as GitAiRepository;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use repos::test_file::ExpectedLineExt;
 use repos::test_repo::{TestRepo, new_daemon_test_sync_session_id, real_git_executable};
 use serde_json::{Value, json};

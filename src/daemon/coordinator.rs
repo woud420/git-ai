@@ -1,11 +1,11 @@
-use crate::daemon::domain::{
-    AppliedCommand, ApplyAck, CommandScope, FamilyKey, FamilyStatus, NormalizedCommand,
-    WatermarkState,
-};
 use crate::daemon::family_actor::{FamilyActorHandle, spawn_family_actor};
 use crate::daemon::git_backend::GitBackend;
 use crate::daemon::global_actor::{GlobalActorHandle, spawn_global_actor};
 use crate::error::GitAiError;
+use crate::model::domain::{
+    AppliedCommand, ApplyAck, CommandScope, FamilyKey, FamilyStatus, NormalizedCommand,
+    WatermarkState,
+};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -95,9 +95,9 @@ impl<B: GitBackend> Coordinator<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::{CommandScope, Confidence, FamilyKey, NormalizedCommand};
     use crate::daemon::git_backend::GitBackend;
     use crate::git::cli_parser::parse_git_cli_args;
+    use crate::model::domain::{CommandScope, Confidence, FamilyKey, NormalizedCommand};
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
 

@@ -14,10 +14,10 @@
 //!
 //! Run with: cargo test bash_tool_benchmark --release -- --nocapture --ignored
 
-use git_ai::authorship::working_log::AgentId;
 use git_ai::commands::checkpoint_agent::bash_tool;
 use git_ai::daemon::control_api::ControlRequest;
 use git_ai::daemon::send_control_request_with_timeout;
+use git_ai::model::working_log::AgentId;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};

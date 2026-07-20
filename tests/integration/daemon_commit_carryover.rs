@@ -1,7 +1,7 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
 use git_ai::daemon::DaemonConfig;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use std::fs;
 use std::time::{Duration, SystemTime};
 

@@ -5,15 +5,15 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::authorship::attribution_tracker::LineAttribution;
-use crate::authorship::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::authorship::imara_diff_utils::{DiffOp, capture_diff_slices};
-use crate::authorship::working_log::{Checkpoint, CheckpointKind};
 use crate::error::GitAiError;
 use crate::git::repo_storage::{InitialAttributions, PersistedWorkingLog};
 use crate::git::repository::{
     Repository, batch_read_paths_at_treeishes, disable_internal_git_hooks,
     exec_git_allow_nonzero_with_env,
 };
+use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
+use crate::model::working_log::{Checkpoint, CheckpointKind};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StashMetadata {

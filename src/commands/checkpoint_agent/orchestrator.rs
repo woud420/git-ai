@@ -1,5 +1,3 @@
-use crate::authorship::authorship_log_serialization::generate_trace_id;
-use crate::authorship::working_log::{AgentId, CheckpointKind};
 use crate::checkpoint_content_budget::CheckpointContentBudget;
 use crate::commands::checkpoint_agent::presets::{
     KnownHumanEdit, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
@@ -10,6 +8,8 @@ use crate::daemon::checkpoint::PreparedPathRole;
 use crate::error::GitAiError;
 use crate::git::repo_state::{read_head_state_for_worktree, worktree_root_for_path};
 use crate::git::repository::discover_repository_in_path_no_git_exec;
+use crate::model::authorship_log_serialization::generate_trace_id;
+use crate::model::working_log::{AgentId, CheckpointKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -428,7 +428,7 @@ fn execute_pre_bash_call(e: PreBashCall) -> Result<Vec<CheckpointRequest>, GitAi
         self, BashHookAttemptPhase, BashHookAttemptSignal,
     };
 
-    let started_at_ns = crate::daemon::bash_history_db::unix_time_ns();
+    let started_at_ns = crate::model::repository::bash_history_db::unix_time_ns();
     let repo_work_dir = match discover_repository_in_path_no_git_exec(e.context.cwd.as_path())
         .and_then(|repo| repo.workdir())
     {
@@ -525,7 +525,7 @@ fn execute_post_bash_call(e: PostBashCall) -> Result<Vec<CheckpointRequest>, Git
         self, BashHookAttemptPhase, BashHookAttemptSignal,
     };
 
-    let ended_at_ns = crate::daemon::bash_history_db::unix_time_ns();
+    let ended_at_ns = crate::model::repository::bash_history_db::unix_time_ns();
     let repo_work_dir = match discover_repository_in_path_no_git_exec(e.context.cwd.as_path())
         .and_then(|repo| repo.workdir())
     {

@@ -1,11 +1,11 @@
 use crate::daemon::analyzers::AnalyzerRegistry;
-use crate::daemon::domain::{
-    AppliedCommand, ApplyAck, FamilyKey, FamilyState, FamilyStatus, NormalizedCommand,
-    WatermarkState,
-};
 use crate::daemon::reducer;
 use crate::daemon::ref_cursor::RefCursor;
 use crate::error::GitAiError;
+use crate::model::domain::{
+    AppliedCommand, ApplyAck, FamilyKey, FamilyState, FamilyStatus, NormalizedCommand,
+    WatermarkState,
+};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 
@@ -170,7 +170,7 @@ pub fn spawn_family_actor(family_key: FamilyKey) -> FamilyActorHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::{CommandScope, Confidence, NormalizedCommand};
+    use crate::model::domain::{CommandScope, Confidence, NormalizedCommand};
     use std::path::PathBuf;
 
     fn sample_normalized_cmd(family_key: &str, seq: u128) -> NormalizedCommand {

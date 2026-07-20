@@ -1,8 +1,8 @@
 use crate::daemon::analyzers::{AnalysisView, CommandAnalyzer};
-use crate::daemon::domain::{
+use crate::error::GitAiError;
+use crate::model::domain::{
     AnalysisResult, CommandClass, Confidence, NormalizedCommand, SemanticEvent,
 };
-use crate::error::GitAiError;
 
 #[derive(Default)]
 pub struct GenericAnalyzer;
@@ -97,7 +97,7 @@ fn is_read_only_command(command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::domain::{CommandScope, RefChange};
+    use crate::model::domain::{CommandScope, RefChange};
 
     fn command(primary: &str) -> NormalizedCommand {
         NormalizedCommand {

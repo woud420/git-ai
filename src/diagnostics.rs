@@ -1,4 +1,3 @@
-use crate::authorship::working_log::CheckpointKind;
 use crate::commands::blame::{BlameAnalysisResult, GitAiBlameOptions};
 use crate::config::Config;
 use crate::daemon::control_api::{ControlRequest, FamilyStatus};
@@ -6,6 +5,7 @@ use crate::diagnostic_sentinels::{
     DEBUG_SELF_CHECK_REMOTE_URL, debug_self_check_root, path_is_in_debug_self_check_root,
 };
 use crate::git::repository::discover_repository_in_path_no_git_exec;
+use crate::model::working_log::CheckpointKind;
 use crate::process_timeout::run_command_with_timeout;
 use serde_json::Value;
 use std::fs;

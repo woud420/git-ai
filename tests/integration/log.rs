@@ -1,7 +1,7 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use git_ai::config::{NotesBackendConfig, NotesBackendKind};
-use git_ai::notes::db::NotesDatabase;
+use git_ai::model::repository::notes_db::NotesDatabase;
 
 #[test]
 fn log_default_shows_stats_without_raw_note() {

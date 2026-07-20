@@ -1,7 +1,7 @@
+use crate::model::repository::streams_db::{StreamRecord, StreamsDatabase};
+use crate::model::stream_types::StreamError;
 use crate::streams::agent::{Agent, StreamDescriptor, get_all_agents};
-use crate::streams::db::{StreamRecord, StreamsDatabase};
 use crate::streams::sweep::{DiscoveredSession, SweepStrategy};
-use crate::streams::types::StreamError;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

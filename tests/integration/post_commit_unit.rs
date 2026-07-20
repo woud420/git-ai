@@ -1,5 +1,5 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
 #[test]
 fn test_post_commit_empty_repo_with_checkpoint() {

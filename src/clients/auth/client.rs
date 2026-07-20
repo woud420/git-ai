@@ -1,7 +1,9 @@
-use crate::api::client::ApiContext;
-use crate::auth::types::{DeviceAuthResponse, OAuthError, StoredCredentials, TokenResponse};
+use crate::clients::api::client::ApiContext;
+use crate::clients::auth::types::{
+    DeviceAuthResponse, OAuthError, StoredCredentials, TokenResponse,
+};
+use crate::clients::http;
 use crate::config;
-use crate::http;
 use std::thread;
 use std::time::Duration;
 

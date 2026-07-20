@@ -177,7 +177,7 @@ fn daemon_log_capture_allowed_for_config(
 }
 
 fn has_unexpired_auth_credentials() -> bool {
-    crate::auth::CredentialStore::new()
+    crate::clients::auth::CredentialStore::new()
         .load()
         .ok()
         .flatten()

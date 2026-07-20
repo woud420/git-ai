@@ -1,4 +1,4 @@
-use crate::auth::{AuthState, collect_auth_status, format_unix_timestamp};
+use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
 use crate::diagnostics::{DiagnosticCheckResult, GitDiagnosticTarget};
 use crate::git::find_repository_in_path;

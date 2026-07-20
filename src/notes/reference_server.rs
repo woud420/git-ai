@@ -415,7 +415,7 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> Result<(), Git
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::client::{ApiClient, ApiContext};
+    use crate::clients::api::client::{ApiClient, ApiContext};
     use crate::model::api_types::{NoteEntry, NotesUploadRequest};
 
     fn client_for(server: &ReferenceServer) -> ApiClient {

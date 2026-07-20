@@ -11,7 +11,7 @@
 //! All refs reads use batched plumbing (`git notes list` + `git cat-file
 //! --batch`) — a constant git-spawn count regardless of note count.
 
-use crate::api::client::{ApiClient, ApiContext};
+use crate::clients::api::client::{ApiClient, ApiContext};
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::git::find_repository;

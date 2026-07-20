@@ -1,7 +1,7 @@
 //! Daemon diagnostics upload API.
 
-use crate::api::client::ApiClient;
-use crate::api::metrics::metrics_upload_allowed;
+use crate::clients::api::client::ApiClient;
+use crate::clients::api::metrics::metrics_upload_allowed;
 use crate::error::GitAiError;
 use crate::model::api_types::{
     ApiErrorResponse, DaemonLogsUploadRequest, DaemonLogsUploadResponse,

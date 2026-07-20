@@ -1,8 +1,7 @@
-pub mod api;
-pub mod auth;
 pub mod authorship;
 pub(crate) mod checkpoint_content_budget;
 pub mod ci;
+pub mod clients;
 pub mod commands;
 pub mod config;
 pub mod daemon;
@@ -11,7 +10,6 @@ pub mod diagnostics;
 pub mod error;
 pub mod feature_flags;
 pub mod git;
-pub mod http;
 pub mod mdm;
 pub mod metrics;
 pub mod model;

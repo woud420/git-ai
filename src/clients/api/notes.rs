@@ -5,7 +5,7 @@
 //! The daemon flusher should skip uploads when neither `is_logged_in()` nor
 //! `has_api_key()` is true (matching the CAS pattern).
 
-use crate::api::client::ApiClient;
+use crate::clients::api::client::ApiClient;
 use crate::error::GitAiError;
 use crate::model::api_types::{
     ApiErrorResponse, NotesReadResponse, NotesUploadRequest, NotesUploadResponse,
@@ -94,7 +94,7 @@ impl ApiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::client::{ApiClient, ApiContext};
+    use crate::clients::api::client::{ApiClient, ApiContext};
     use crate::model::api_types::NoteEntry;
 
     #[test]

@@ -7,8 +7,8 @@
 //! On failure, exits with code 1 silently so the install script can fall back
 //! to running `git-ai login`. Errors are recorded server-side for debugging.
 
-use crate::auth::CredentialStore;
-use crate::auth::client::OAuthClient;
+use crate::clients::auth::CredentialStore;
+use crate::clients::auth::client::OAuthClient;
 
 /// Handle the exchange-nonce command (internal - called by install scripts)
 ///

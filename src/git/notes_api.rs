@@ -432,7 +432,7 @@ pub fn materialize_notes_for_display(repo: &Repository, limit: usize) -> Result<
 /// This function is a best-effort operation: errors are logged but not propagated
 /// (callers should treat failure as a cache miss, not a hard error).
 pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitAiError> {
-    use crate::api::client::{ApiClient, ApiContext};
+    use crate::clients::api::client::{ApiClient, ApiContext};
     use crate::git::repository::exec_git;
 
     // 1. Walk recent history. Prefer the remote's default branch; fall back to HEAD.
@@ -691,8 +691,8 @@ fn http_fetch_and_cache_notes(commit_shas: &[String]) -> HashMap<String, String>
         return HashMap::new();
     };
 
-    let ctx = crate::api::client::ApiContext::new(Some(backend_url));
-    let client = crate::api::client::ApiClient::new(ctx);
+    let ctx = crate::clients::api::client::ApiContext::new(Some(backend_url));
+    let client = crate::clients::api::client::ApiClient::new(ctx);
     if !client.is_logged_in() && !client.has_api_key() {
         return HashMap::new();
     }

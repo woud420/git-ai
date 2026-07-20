@@ -1,4 +1,4 @@
-use crate::auth::CredentialStore;
+use crate::clients::auth::CredentialStore;
 use crate::error::GitAiError;
 use crate::git::notes_api::read_authorship_v3;
 use crate::git::repository::Repository;

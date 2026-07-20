@@ -3,9 +3,9 @@
 //! Runs inside the daemon process using tokio. Accumulates telemetry envelopes
 //! and CAS payloads, then flushes them to their destinations every 3 seconds.
 
-use crate::api::logs::daemon_logs_upload_allowed;
-use crate::api::metrics::{MetricsUploadResponse, metrics_upload_allowed};
-use crate::api::{ApiClient, ApiContext, CasObject, CasUploadRequest};
+use crate::clients::api::logs::daemon_logs_upload_allowed;
+use crate::clients::api::metrics::{MetricsUploadResponse, metrics_upload_allowed};
+use crate::clients::api::{ApiClient, ApiContext, CasObject, CasUploadRequest};
 use crate::config::{Config, get_or_create_distinct_id};
 use crate::daemon::control_api::{CasSyncPayload, TelemetryEnvelope};
 use crate::error::GitAiError;
@@ -1249,11 +1249,11 @@ fn flush_sentry_and_posthog(
             });
             ph_event["timestamp"] = json!(msg.timestamp);
 
-            let agent = crate::http::build_agent(Some(30));
+            let agent = crate::clients::http::build_agent(Some(30));
             let request = agent
                 .post(&endpoint)
                 .set("Content-Type", "application/json");
-            let _ = crate::http::send_with_body(
+            let _ = crate::clients::http::send_with_body(
                 request,
                 &serde_json::to_string(&ph_event).unwrap_or_default(),
             );
@@ -1501,12 +1501,12 @@ impl SentryClient {
         );
 
         let body = serde_json::to_string(&event)?;
-        let agent = crate::http::build_agent(Some(30));
+        let agent = crate::clients::http::build_agent(Some(30));
         let request = agent
             .post(&self.endpoint)
             .set("X-Sentry-Auth", &auth_header)
             .set("Content-Type", "application/json");
-        let response = crate::http::send_with_body(request, &body)?;
+        let response = crate::clients::http::send_with_body(request, &body)?;
 
         let status = response.status_code;
         if (200..300).contains(&status) {
@@ -1520,7 +1520,7 @@ impl SentryClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::metrics::MetricsUploadError;
+    use crate::clients::api::metrics::MetricsUploadError;
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::sync::Arc;

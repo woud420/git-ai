@@ -1,8 +1,8 @@
-use crate::auth::{CredentialStore, OAuthClient};
+use crate::clients::auth::{CredentialStore, OAuthClient};
+use crate::clients::http;
 use crate::config;
 use crate::error::GitAiError;
 use crate::git::repository::{current_git_committer_identity_resolution, parse_git_var_identity};
-use crate::http;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use url::Url;

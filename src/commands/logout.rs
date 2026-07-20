@@ -1,4 +1,4 @@
-use crate::auth::CredentialStore;
+use crate::clients::auth::CredentialStore;
 
 /// Handle the `git-ai logout` command
 pub fn handle_logout(_args: &[String]) {

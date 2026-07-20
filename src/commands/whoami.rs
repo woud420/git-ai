@@ -1,6 +1,6 @@
-use crate::api::{ApiClient, ApiContext};
-use crate::auth::state::AuthStatus;
-use crate::auth::{AuthState, collect_auth_status, format_unix_timestamp};
+use crate::clients::api::{ApiClient, ApiContext};
+use crate::clients::auth::state::AuthStatus;
+use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
 use crate::model::repository::metrics_db::{MetricsDatabase, MetricsStatus};
 use std::fmt::Write as _;
@@ -282,7 +282,7 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::identity::TokenOrg;
+    use crate::clients::auth::identity::TokenOrg;
 
     fn auth_status(state: AuthState) -> AuthStatus {
         AuthStatus {

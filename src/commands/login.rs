@@ -1,4 +1,4 @@
-use crate::auth::{CredentialStore, OAuthClient};
+use crate::clients::auth::{CredentialStore, OAuthClient};
 
 /// Handle the `git-ai login` command
 pub fn handle_login(_args: &[String]) {

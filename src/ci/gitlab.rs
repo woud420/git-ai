@@ -83,13 +83,13 @@ fn gitlab_api_get(
     endpoint: &str,
     auth_header_name: &str,
     auth_token: &str,
-) -> Result<crate::http::Response, String> {
-    let agent = crate::http::build_agent(Some(30));
+) -> Result<crate::clients::http::Response, String> {
+    let agent = crate::clients::http::build_agent(Some(30));
     let request = agent.get(endpoint).set(auth_header_name, auth_token).set(
         "User-Agent",
         &format!("git-ai/{}", env!("CARGO_PKG_VERSION")),
     );
-    crate::http::send(request)
+    crate::clients::http::send(request)
 }
 
 /// Fetch the SHA we want to feed into `CiEvent::Merge.base_sha` (the
@@ -297,7 +297,7 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
         // Use the existing ureq-based HTTP wrapper to match the rest of this file
         // (avoids pulling in the minreq crate the original PR used).
         let source_project_endpoint = format!("{}/projects/{}", api_url, mr.source_project_id);
-        let agent = crate::http::build_agent(Some(30));
+        let agent = crate::clients::http::build_agent(Some(30));
         let request = agent
             .get(&source_project_endpoint)
             .set(auth_header_name, &auth_token)
@@ -305,7 +305,7 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
                 "User-Agent",
                 &format!("git-ai/{}", env!("CARGO_PKG_VERSION")),
             );
-        match crate::http::send(request) {
+        match crate::clients::http::send(request) {
             Ok(resp) if resp.status_code == 200 => {
                 let body = String::from_utf8_lossy(resp.as_bytes());
                 match serde_json::from_str::<GitLabProject>(&body) {

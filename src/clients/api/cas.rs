@@ -1,4 +1,4 @@
-use crate::api::client::ApiClient;
+use crate::clients::api::client::ApiClient;
 use crate::error::GitAiError;
 use crate::model::api_types::{
     ApiErrorResponse, CAPromptStoreReadResponse, CasUploadRequest, CasUploadResponse,

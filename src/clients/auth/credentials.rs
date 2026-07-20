@@ -1,7 +1,7 @@
 #[cfg(all(not(test), feature = "keyring"))]
-use crate::auth::credential_backend::KeyringBackend;
-use crate::auth::credential_backend::{CredentialBackend, FileBackend};
-use crate::auth::types::StoredCredentials;
+use crate::clients::auth::credential_backend::KeyringBackend;
+use crate::clients::auth::credential_backend::{CredentialBackend, FileBackend};
+use crate::clients::auth::types::StoredCredentials;
 #[cfg(not(test))]
 use crate::config::Config;
 use std::path::PathBuf;
@@ -150,7 +150,7 @@ impl Default for CredentialStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::credential_backend::MockBackend;
+    use crate::clients::auth::credential_backend::MockBackend;
     use std::env;
     use std::fs;
 

@@ -6,8 +6,8 @@
 //! send ONLY the API key to the cube proxy — never a `git-ai login` OAuth
 //! bearer, which the proxy does not expect on this route.
 
+use crate::clients::http;
 use crate::config;
-use crate::http;
 use serde_json::{Map, Value, json};
 
 /// Cube can take a while to compile + run large queries; be generous.

@@ -173,7 +173,10 @@ fn direct_git_command_spawns_are_centralized() {
     let mut files = Vec::new();
     collect_rs_files(&src_root, &mut files);
 
-    let allowed_suffixes = ["src/operations/git/repository.rs", "src/cli/git_handlers.rs"];
+    let allowed_suffixes = [
+        "src/operations/git/repository.rs",
+        "src/cli/git_handlers.rs",
+    ];
     let pattern =
         Regex::new(r#"Command::new\((?:crate::)?config::Config::get\(\)\.git_cmd\(\)\)"#).unwrap();
 

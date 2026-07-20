@@ -249,4 +249,4 @@ Uses `insta` crate. Snapshots live in `tests/integration/snapshots/` and `tests/
 
 - **Working log base commit**: Working logs are keyed by the HEAD commit at checkpoint time (`.git/ai/working_logs/<sha>/`). Git AI must ensure that HEAD changes update/copy over the working log accordingly.
 
-- **Large source files**: Several core files exceed 5-10k lines. Navigate with grep, not scrolling.
+- **Large source files**: Several core files exceed 5-10k lines. Navigate with grep, not scrolling. A 600-line cap is enforced for `src/**/*.rs` by `tests/integration/file_length_policy.rs` as a shrinking ratchet: pre-existing offenders are listed with ceilings in `.file-length-baseline.txt` and may only shrink; new files must stay under the cap (never add baseline entries).

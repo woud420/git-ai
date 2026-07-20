@@ -1,7 +1,7 @@
 //! Transcripts database for tracking stream cursors and watermarks.
 
-use super::types::StreamError;
-use super::watermark::WatermarkStrategy;
+use crate::streams::types::StreamError;
+use crate::streams::watermark::WatermarkStrategy;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
@@ -614,7 +614,7 @@ mod tests {
         let stream = create_test_stream("session-1");
         db.insert_stream(&stream).unwrap();
 
-        use super::super::watermark::ByteOffsetWatermark;
+        use crate::streams::watermark::ByteOffsetWatermark;
         let new_watermark = ByteOffsetWatermark::new(1234);
 
         db.update_watermark(
@@ -807,7 +807,7 @@ mod tests {
     fn test_update_watermark_nonexistent_stream() {
         let (db, _temp) = create_test_db();
 
-        use super::super::watermark::ByteOffsetWatermark;
+        use crate::streams::watermark::ByteOffsetWatermark;
         let watermark = ByteOffsetWatermark::new(100);
 
         let result = db.update_watermark("nonexistent", "transcript", "/no/such/path", &watermark);
@@ -1152,7 +1152,7 @@ mod tests {
         assert_eq!(o.stream_kind, "otel_traces");
 
         // Update one without affecting the other
-        let new_watermark = super::super::watermark::ByteOffsetWatermark::new(999);
+        let new_watermark = crate::streams::watermark::ByteOffsetWatermark::new(999);
         db.update_watermark(
             "shared-session",
             "transcript",

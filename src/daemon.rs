@@ -52,13 +52,13 @@ use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, oneshot};
 use tokio::time::Duration;
 
 pub mod analyzers;
-pub mod bash_history_db;
+pub use crate::model::repository::bash_history_db;
 pub mod bash_sessions;
 pub mod checkpoint;
 pub mod control_api;
 pub mod coordinator;
 pub mod daemon_log_layer;
-pub mod domain;
+pub use crate::model::domain;
 pub mod family_actor;
 pub mod git_backend;
 pub mod global_actor;

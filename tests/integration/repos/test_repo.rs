@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
 use git_ai::authorship::stats::CommitStats;
 use git_ai::config::ConfigPatch;
 use git_ai::daemon::{
@@ -11,6 +10,7 @@ use git_ai::feature_flags::FeatureFlags;
 use git_ai::git::cli_parser::{ParsedGitInvocation, extract_clone_target_directory};
 use git_ai::git::repo_storage::PersistedWorkingLog;
 use git_ai::git::repository as GitAiRepository;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 // BenchmarkResult for performance testing
 #[derive(Debug, Clone)]
 pub struct BenchmarkResult {

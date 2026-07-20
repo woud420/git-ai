@@ -82,7 +82,7 @@ fn truncate_checkpoint_hashes(repo: &TestRepo, commit_sha: &str) {
 /// Session IDs are `s_` + 14 hex = 16 chars. Attestation hashes are either
 /// `s_14hex::t_14hex` (34 chars) for session format or 16 chars for old prompt format.
 fn verify_prompt_ids_are_16_chars(
-    authorship_log: &git_ai::authorship::authorship_log_serialization::AuthorshipLog,
+    authorship_log: &git_ai::model::authorship_log_serialization::AuthorshipLog,
 ) {
     for session_id in authorship_log.metadata.sessions.keys() {
         assert_eq!(

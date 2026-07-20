@@ -5,17 +5,19 @@
 
 use crate::api::logs::daemon_logs_upload_allowed;
 use crate::api::metrics::{MetricsUploadResponse, metrics_upload_allowed};
-use crate::api::types::{
-    DAEMON_LOGS_UPLOAD_VERSION, DaemonLogEvent, DaemonLogFieldValue, DaemonLogKind, DaemonLogLevel,
-    DaemonLogsUploadRequest,
-};
 use crate::api::{ApiClient, ApiContext, CasObject, CasUploadRequest};
-use crate::authorship::authorship_log_serialization::GIT_AI_VERSION;
 use crate::config::{Config, get_or_create_distinct_id};
 use crate::daemon::control_api::{CasSyncPayload, TelemetryEnvelope};
 use crate::error::GitAiError;
-use crate::metrics::db::{METADATA_BACKFILL_BATCH_SIZE, MetricRecord, MetricsDatabase};
 use crate::metrics::{MetricEvent, MetricsBatch};
+use crate::model::api_types::{
+    DAEMON_LOGS_UPLOAD_VERSION, DaemonLogEvent, DaemonLogFieldValue, DaemonLogKind, DaemonLogLevel,
+    DaemonLogsUploadRequest,
+};
+use crate::model::authorship_log_serialization::GIT_AI_VERSION;
+use crate::model::repository::metrics_db::{
+    METADATA_BACKFILL_BATCH_SIZE, MetricRecord, MetricsDatabase,
+};
 use crate::observability::MAX_METRICS_PER_ENVELOPE;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -1265,8 +1267,8 @@ fn flush_sentry_and_posthog(
 /// - `notes_backend.kind != Http`
 /// - Not authenticated (no API key and not logged in)
 pub fn flush_notes() {
-    use crate::api::types::{NoteEntry, NotesUploadRequest};
     use crate::config::NotesBackendKind;
+    use crate::model::api_types::{NoteEntry, NotesUploadRequest};
 
     let cfg = Config::fresh();
     if cfg.notes_backend_kind() != NotesBackendKind::Http {
@@ -1290,7 +1292,7 @@ pub fn flush_notes() {
     }
 
     // Dequeue up to 50 pending notes.
-    let pending = match crate::notes::db::NotesDatabase::global() {
+    let pending = match crate::model::repository::notes_db::NotesDatabase::global() {
         Ok(db) => match db.lock() {
             Ok(mut lock) => match lock.dequeue_pending(50) {
                 Ok(rows) => rows,
@@ -1333,7 +1335,7 @@ pub fn flush_notes() {
                 failure = resp.failure_count,
                 "notes: uploaded batch"
             );
-            if let Ok(db) = crate::notes::db::NotesDatabase::global()
+            if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
                 && let Ok(mut lock) = db.lock()
             {
                 if resp.failure_count == 0 {
@@ -1355,7 +1357,7 @@ pub fn flush_notes() {
         }
         Err(e) => {
             tracing::warn!(%e, "notes: upload error");
-            if let Ok(db) = crate::notes::db::NotesDatabase::global()
+            if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
                 && let Ok(mut lock) = db.lock()
             {
                 let _ = lock.mark_failed(&commit_shas, &e.to_string());
@@ -1369,7 +1371,7 @@ pub fn flush_notes() {
     if FLUSH_COUNT
         .fetch_add(1, Ordering::Relaxed)
         .is_multiple_of(100)
-        && let Ok(db) = crate::notes::db::NotesDatabase::global()
+        && let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
         && let Ok(mut lock) = db.lock()
     {
         let _ = lock.evict_stale_cache(10_000, 90 * 24 * 3600);
@@ -1401,7 +1403,7 @@ fn flush_notes_for_await() -> usize {
 }
 
 fn count_pending_notes_for_await() -> usize {
-    match crate::notes::db::NotesDatabase::global() {
+    match crate::model::repository::notes_db::NotesDatabase::global() {
         Ok(db) => match db.lock() {
             Ok(lock) => lock.count_pending_uploadable().unwrap_or(0),
             Err(_) => 0,
@@ -1457,7 +1459,7 @@ fn flush_cas(records: Vec<CasSyncPayload>) {
             Ok(_response) => {
                 // Delete successfully uploaded records from the internal DB queue
                 // so they don't accumulate as stale entries.
-                if let Ok(db) = crate::authorship::internal_db::InternalDatabase::global()
+                if let Ok(db) = crate::model::repository::internal_db::InternalDatabase::global()
                     && let Ok(mut db_lock) = db.lock()
                 {
                     let _ = db_lock.delete_cas_by_hashes(&hashes);

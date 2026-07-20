@@ -12,11 +12,11 @@
 //! --batch`) — a constant git-spawn count regardless of note count.
 
 use crate::api::client::{ApiClient, ApiContext};
-use crate::api::types::{NoteEntry, NotesUploadRequest};
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::git::find_repository;
-use crate::notes::db::NotesDatabase;
+use crate::model::api_types::{NoteEntry, NotesUploadRequest};
+use crate::model::repository::notes_db::NotesDatabase;
 use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -539,7 +539,7 @@ fn print_help() {
 mod tests {
     use super::*;
     use crate::git::test_utils::TmpRepo;
-    use crate::notes::db::NotesDatabase;
+    use crate::model::repository::notes_db::NotesDatabase;
     use tempfile::NamedTempFile;
 
     /// Helper to create real commits in a TmpRepo. Returns the commit SHA.

@@ -18,14 +18,14 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 
-use git_ai::authorship::authorship_log::{LineRange, PromptRecord};
-use git_ai::authorship::authorship_log_serialization::{
-    AttestationEntry, AuthorshipLog, FileAttestation,
-};
-use git_ai::authorship::working_log::AgentId;
 use git_ai::commands::blame::GitAiBlameOptions;
 use git_ai::git::notes_api::write_note;
 use git_ai::git::repository as GitAiRepository;
+use git_ai::model::authorship_log::{LineRange, PromptRecord};
+use git_ai::model::authorship_log_serialization::{
+    AttestationEntry, AuthorshipLog, FileAttestation,
+};
+use git_ai::model::working_log::AgentId;
 
 // =============================================================================
 // Happy Path Tests - Successful blame operations with AI authorship

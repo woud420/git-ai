@@ -12,10 +12,10 @@
 //! reads fall back to `refs/notes/ai` (and backfill the cache) so repositories
 //! with pre-existing git notes keep working without migration.
 
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::git::repository::Repository;
+use crate::model::authorship_log_serialization::AuthorshipLog;
 use std::collections::{HashMap, HashSet};
 
 // Re-export CommitAuthorship so callers don't need to import from refs directly.
@@ -310,7 +310,7 @@ pub fn search_notes(repo: &Repository, pattern: &str) -> Result<Vec<String>, Git
 
 fn http_search_notes(repo: &Repository, pattern: &str) -> Result<Vec<String>, GitAiError> {
     let mut shas: HashSet<String> = {
-        let db = crate::notes::db::NotesDatabase::global()?;
+        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
         let db_lock = db
             .lock()
             .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
@@ -483,7 +483,7 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
 
     // 2. Filter out SHAs already in notes-db.
     let already_cached: std::collections::HashSet<String> = {
-        match crate::notes::db::NotesDatabase::global() {
+        match crate::model::repository::notes_db::NotesDatabase::global() {
             Ok(db) => match db.lock() {
                 Ok(lock) => {
                     let refs: Vec<&str> = all_shas.iter().map(|s| s.as_str()).collect();
@@ -554,7 +554,7 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
                 }
                 // 4. Write returned entries as already-synced cache rows.
                 let entries: Vec<(String, String)> = response.notes.into_iter().collect();
-                match crate::notes::db::NotesDatabase::global() {
+                match crate::model::repository::notes_db::NotesDatabase::global() {
                     Ok(db) => match db.lock() {
                         Ok(mut lock) => {
                             if let Err(e) = lock.cache_synced_notes(&entries) {
@@ -602,7 +602,7 @@ pub fn export_notes_to_git_refs(
 
 /// Sqlite backend: write a note as local-primary storage.
 fn sqlite_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-    let db = crate::notes::db::NotesDatabase::global()?;
+    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()
         .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
@@ -611,7 +611,7 @@ fn sqlite_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> 
 
 /// Sqlite backend: write a batch of notes as local-primary storage.
 fn sqlite_write_batch(entries: &[(String, String)]) -> Result<(), GitAiError> {
-    let db = crate::notes::db::NotesDatabase::global()?;
+    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()
         .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
@@ -635,7 +635,7 @@ fn sqlite_backfill_cache(notes: &HashMap<String, String>) {
         .iter()
         .map(|(sha, content)| (sha.clone(), content.clone()))
         .collect();
-    if let Ok(db) = crate::notes::db::NotesDatabase::global()
+    if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
         && let Ok(mut db_lock) = db.lock()
     {
         let _ = db_lock.cache_synced_notes(&entries);
@@ -643,7 +643,7 @@ fn sqlite_backfill_cache(notes: &HashMap<String, String>) {
 }
 
 fn http_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-    let db = crate::notes::db::NotesDatabase::global()?;
+    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()
         .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
@@ -654,7 +654,7 @@ fn http_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
 }
 
 fn http_write_batch(entries: &[(String, String)]) -> Result<(), GitAiError> {
-    let db = crate::notes::db::NotesDatabase::global()?;
+    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()
         .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
@@ -665,13 +665,13 @@ fn http_write_batch(entries: &[(String, String)]) -> Result<(), GitAiError> {
 }
 
 fn http_read_note(commit_sha: &str) -> Option<String> {
-    let db = crate::notes::db::NotesDatabase::global().ok()?;
+    let db = crate::model::repository::notes_db::NotesDatabase::global().ok()?;
     let db_lock = db.lock().ok()?;
     db_lock.get_note(commit_sha).ok().flatten()
 }
 
 fn http_read_notes(commit_shas: &[String]) -> HashMap<String, String> {
-    let Ok(db) = crate::notes::db::NotesDatabase::global() else {
+    let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global() else {
         return HashMap::new();
     };
     let Ok(db_lock) = db.lock() else {
@@ -706,7 +706,7 @@ fn http_fetch_and_cache_notes(commit_shas: &[String]) -> HashMap<String, String>
                     continue;
                 }
                 let entries: Vec<(String, String)> = response.notes.into_iter().collect();
-                if let Ok(db) = crate::notes::db::NotesDatabase::global()
+                if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
                     && let Ok(mut lock) = db.lock()
                 {
                     let _ = lock.cache_synced_notes(&entries);
@@ -756,7 +756,7 @@ mod tests {
         assert_eq!(content, Some("test content".to_string()));
 
         // Confirm it is in the DB with synced=0.
-        let db = crate::notes::db::NotesDatabase::global().expect("global db");
+        let db = crate::model::repository::notes_db::NotesDatabase::global().expect("global db");
         let mut lock = db.lock().expect("lock");
         let pending = lock.dequeue_pending(10).expect("dequeue");
         assert!(
@@ -918,7 +918,7 @@ mod tests {
         http_write_note(&sha, "some-note-content").expect("http write");
 
         // Confirm it is in notes-db with synced=0.
-        let db = crate::notes::db::NotesDatabase::global().expect("global db");
+        let db = crate::model::repository::notes_db::NotesDatabase::global().expect("global db");
         let mut lock = db.lock().expect("lock");
         let note_in_db = lock.get_note(&sha).expect("get note");
         assert_eq!(note_in_db, Some("some-note-content".to_string()));
@@ -1068,7 +1068,7 @@ mod tests {
     #[serial_test::serial(notes_db_env)]
     fn warm_cache_for_remote_populates_db_with_synced_1() {
         use crate::git::test_utils::TmpRepo;
-        use crate::notes::db::NotesDatabase;
+        use crate::model::repository::notes_db::NotesDatabase;
         use tempfile::NamedTempFile;
 
         // Set the test DB path before the first DB call so the OnceLock picks it up.
@@ -1178,7 +1178,7 @@ mod tests {
     #[serial_test::serial(notes_db_env)]
     fn warm_cache_for_remote_skips_already_cached_shas() {
         use crate::git::test_utils::TmpRepo;
-        use crate::notes::db::NotesDatabase;
+        use crate::model::repository::notes_db::NotesDatabase;
         use tempfile::NamedTempFile;
 
         // Set the test DB path (may be ignored if OnceLock was already set by

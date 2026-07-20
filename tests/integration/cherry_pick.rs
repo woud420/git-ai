@@ -1,9 +1,9 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log::PromptRecord;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
-use git_ai::authorship::working_log::AgentId;
 use git_ai::git::notes_api::write_note;
+use git_ai::model::authorship_log::PromptRecord;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;

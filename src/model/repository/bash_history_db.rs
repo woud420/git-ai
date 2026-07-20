@@ -1,5 +1,5 @@
-use crate::authorship::working_log::AgentId;
 use crate::error::GitAiError;
+use crate::model::working_log::AgentId;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -186,7 +186,7 @@ impl BashHistoryDatabase {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).expect("Failed to create disabled bash DB directory");
         }
-        let conn = crate::sqlite::open_with_memory_limits(&db_path)
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path)
             .expect("Failed to create disabled bash DB");
         BashHistoryDatabase {
             conn,
@@ -213,7 +213,7 @@ impl BashHistoryDatabase {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = crate::sqlite::open_with_memory_limits(path)?;
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(path)?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;

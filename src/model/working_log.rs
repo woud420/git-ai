@@ -1,5 +1,5 @@
 use crate::authorship::attribution_tracker::{Attribution, LineAttribution};
-use crate::authorship::authorship_log_serialization::GIT_AI_VERSION;
+use crate::model::authorship_log_serialization::GIT_AI_VERSION;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_checkpoint_with_known_human_metadata_roundtrip() {
-        use crate::authorship::working_log::{Checkpoint, KnownHumanMetadata};
+        use crate::model::working_log::{Checkpoint, KnownHumanMetadata};
         let mut checkpoint = Checkpoint::new(
             CheckpointKind::KnownHuman,
             "diff".to_string(),

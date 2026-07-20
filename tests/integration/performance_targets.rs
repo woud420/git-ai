@@ -1,5 +1,5 @@
 /// Comprehensive tests for checkpoint performance target tracking
-use git_ai::authorship::working_log::CheckpointKind;
+use git_ai::model::working_log::CheckpointKind;
 use git_ai::observability::performance_targets::log_performance_for_checkpoint;
 use std::time::Duration;
 

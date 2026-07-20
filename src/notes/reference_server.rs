@@ -54,12 +54,12 @@
 //! otherwise (the client treats `404` as "no notes found" — equivalent to an
 //! empty map).
 //!
-//! [`NotesUploadRequest`]: crate::api::types::NotesUploadRequest
-//! [`NotesUploadResponse`]: crate::api::types::NotesUploadResponse
-//! [`NotesReadResponse`]: crate::api::types::NotesReadResponse
+//! [`NotesUploadRequest`]: crate::model::api_types::NotesUploadRequest
+//! [`NotesUploadResponse`]: crate::model::api_types::NotesUploadResponse
+//! [`NotesReadResponse`]: crate::model::api_types::NotesReadResponse
 
-use crate::api::types::{NotesReadResponse, NotesUploadRequest, NotesUploadResponse};
 use crate::error::GitAiError;
+use crate::model::api_types::{NotesReadResponse, NotesUploadRequest, NotesUploadResponse};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -416,7 +416,7 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> Result<(), Git
 mod tests {
     use super::*;
     use crate::api::client::{ApiClient, ApiContext};
-    use crate::api::types::{NoteEntry, NotesUploadRequest};
+    use crate::model::api_types::{NoteEntry, NotesUploadRequest};
 
     fn client_for(server: &ReferenceServer) -> ApiClient {
         // `ApiContext::without_auth` still picks up an API key from the

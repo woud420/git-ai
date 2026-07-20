@@ -734,7 +734,7 @@ fn test_copilot_otel_events_use_otel_trace_event_type() {
 
 #[test]
 fn test_copilot_otel_per_event_session_id_derivation() {
-    use git_ai::authorship::authorship_log_serialization::generate_session_id;
+    use git_ai::model::authorship_log_serialization::generate_session_id;
 
     let fixture = test_fixture_path("copilot-otel/traces.db");
     let agent = CopilotAgent::new();

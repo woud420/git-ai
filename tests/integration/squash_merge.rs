@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use std::collections::HashMap;
 
 fn deterministic_commit_env(timestamp: &'static str) -> [(&'static str, &'static str); 2] {

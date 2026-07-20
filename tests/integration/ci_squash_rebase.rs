@@ -1,8 +1,8 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
 use git_ai::git::notes_api::write_note;
 use git_ai::git::repository as GitAiRepository;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
 fn direct_test_repo() -> TestRepo {
     TestRepo::new()
@@ -403,7 +403,7 @@ fn test_ci_local_sync_skips_non_rebase_force_push() {
 
 #[test]
 fn test_ci_local_open_pr_rebase_single_commit() {
-    use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+    use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
     let repo = direct_test_repo();
 
@@ -484,7 +484,7 @@ fn test_ci_local_open_pr_rebase_single_commit() {
 
 #[test]
 fn test_ci_local_open_pr_rebase_two_commits() {
-    use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+    use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
     let repo = direct_test_repo();
 
@@ -873,7 +873,7 @@ fn test_ci_local_rebase_merge_with_abbreviated_merge_sha() {
 /// while new_commits were oldest-first, so each note landed on the wrong commit.
 #[test]
 fn test_ci_local_rebase_merge_two_commits() {
-    use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+    use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
     let repo = direct_test_repo();
 
@@ -1026,7 +1026,7 @@ fn test_ci_local_rebase_merge_two_commits() {
 /// (first↔last) and off-by-one shifts in the positional pairing.
 #[test]
 fn test_ci_local_rebase_merge_three_commits() {
-    use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+    use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
     let repo = direct_test_repo();
 

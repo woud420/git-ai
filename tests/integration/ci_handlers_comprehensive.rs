@@ -42,8 +42,8 @@ fn test_ci_handlers_module_exists() {
 #[test]
 fn test_ci_result_types_coverage() {
     // Test that we understand all CiRunResult variants
-    use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
     use git_ai::ci::ci_context::CiRunResult;
+    use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
     // Test variant construction
     let result1 = CiRunResult::AuthorshipRewritten {

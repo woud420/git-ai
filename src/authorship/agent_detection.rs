@@ -5,11 +5,11 @@
 //! It also provides logic for simulating authorship data for agent commits
 //! that lack explicit authorship notes.
 
-use crate::authorship::authorship_log::PromptRecord;
-use crate::authorship::authorship_log_serialization::{
+use crate::model::authorship_log::PromptRecord;
+use crate::model::authorship_log_serialization::{
     AttestationEntry, AuthorshipLog, AuthorshipMetadata, FileAttestation, generate_short_hash,
 };
-use crate::authorship::working_log::AgentId;
+use crate::model::working_log::AgentId;
 
 /// Known agent email mappings: (email_suffix, tool_name)
 /// For GitHub noreply emails, we match after the `+` to ignore numeric user ID prefixes.
@@ -105,7 +105,7 @@ pub fn simulate_agent_authorship(
     line_start: u32,
     line_end: u32,
 ) -> (AuthorshipLog, String) {
-    use crate::authorship::authorship_log::LineRange;
+    use crate::model::authorship_log::LineRange;
 
     let total_lines = if line_end >= line_start {
         line_end - line_start + 1

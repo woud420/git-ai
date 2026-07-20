@@ -42,15 +42,13 @@
 
 pub mod agent;
 pub mod agents;
-pub use crate::model::repository::streams_db as db;
 pub mod model_extraction;
 pub mod sweep;
-pub use crate::model::stream_types as types;
 pub mod watermark;
 
 // Re-export main types for convenient access
-pub use db::{StreamRecord, StreamsDatabase};
-pub use types::{StreamBatch, StreamError};
+pub use crate::model::repository::streams_db::{StreamRecord, StreamsDatabase};
+pub use crate::model::stream_types::{StreamBatch, StreamError};
 pub use watermark::{
     ByteOffsetWatermark, HybridWatermark, RecordIndexWatermark, TimestampCursorWatermark,
     TimestampWatermark, WatermarkStrategy, WatermarkType,

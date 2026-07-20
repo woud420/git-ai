@@ -1,5 +1,4 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::working_log::{AgentId, Checkpoint, CheckpointKind, WorkingLogEntry};
 use git_ai::commands::checkpoint_agent::orchestrator::{
     BaseCommit, CheckpointFile, CheckpointRequest,
 };
@@ -8,6 +7,7 @@ use git_ai::daemon::checkpoint::{
     execute_resolved_checkpoint_from_daemon, is_ai_author_id,
 };
 use git_ai::git::repository::find_repository_in_path;
+use git_ai::model::working_log::{AgentId, Checkpoint, CheckpointKind, WorkingLogEntry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

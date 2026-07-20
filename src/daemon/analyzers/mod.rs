@@ -1,5 +1,5 @@
-use crate::daemon::domain::{AnalysisResult, NormalizedCommand};
 use crate::error::GitAiError;
+use crate::model::domain::{AnalysisResult, NormalizedCommand};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;

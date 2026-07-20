@@ -1,9 +1,9 @@
 //! Metrics API endpoints
 
 use crate::api::client::ApiClient;
-use crate::api::types::ApiErrorResponse;
 use crate::error::GitAiError;
 use crate::metrics::MetricsBatch;
+use crate::model::api_types::ApiErrorResponse;
 use crate::observability::log_error;
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, OnceLock};

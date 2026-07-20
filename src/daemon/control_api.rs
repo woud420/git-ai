@@ -1,7 +1,7 @@
-use crate::authorship::working_log::AgentId;
 use crate::commands::checkpoint_agent::bash_tool::StatSnapshot;
 use crate::commands::checkpoint_agent::orchestrator::CheckpointRequest;
 use crate::metrics::MetricEvent;
+use crate::model::working_log::AgentId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

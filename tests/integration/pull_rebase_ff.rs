@@ -1,6 +1,6 @@
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
-use git_ai::authorship::working_log::AgentId;
-use git_ai::daemon::bash_history_db::{BashCallEnd, BashCallStart, BashHistoryDatabase};
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::model::repository::bash_history_db::{BashCallEnd, BashCallStart, BashHistoryDatabase};
+use git_ai::model::working_log::AgentId;
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};

@@ -1,7 +1,7 @@
-use crate::authorship::authorship_log_serialization::{AUTHORSHIP_LOG_VERSION, AuthorshipLog};
-use crate::authorship::working_log::Checkpoint;
 use crate::error::GitAiError;
 use crate::git::repository::{Repository, exec_git, exec_git_allow_nonzero, exec_git_stdin};
+use crate::model::authorship_log_serialization::{AUTHORSHIP_LOG_VERSION, AuthorshipLog};
+use crate::model::working_log::Checkpoint;
 use serde_json;
 use std::collections::{HashMap, HashSet};
 

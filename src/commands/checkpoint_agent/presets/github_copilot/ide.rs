@@ -3,10 +3,10 @@ use super::super::{
     ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit, PresetContext,
     StreamFormat, StreamSource,
 };
-use crate::authorship::authorship_log_serialization::generate_session_id;
-use crate::authorship::working_log::AgentId;
 use crate::commands::checkpoint_agent::bash_tool::ToolClass;
 use crate::error::GitAiError;
+use crate::model::authorship_log_serialization::generate_session_id;
+use crate::model::working_log::AgentId;
 use crate::streams::model_extraction;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -637,7 +637,8 @@ mod tests {
             .join("github.copilot-chat")
             .join("agent-traces.db");
         std::fs::create_dir_all(otel_db_path.parent().unwrap()).unwrap();
-        let conn = crate::sqlite::open_with_memory_limits(&otel_db_path).unwrap();
+        let conn =
+            crate::model::repository::sqlite::open_with_memory_limits(&otel_db_path).unwrap();
         conn.execute_batch(
             "CREATE TABLE spans (
                 span_id TEXT PRIMARY KEY,

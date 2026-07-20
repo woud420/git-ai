@@ -50,7 +50,7 @@
 /// and to **PASS** once the bug is fixed.
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,8 +66,8 @@ fn total_accepted_lines(note: &str) -> u32 {
         .filter(|e| e.hash.starts_with("s_"))
         .flat_map(|e| &e.line_ranges)
         .map(|r| match r {
-            git_ai::authorship::authorship_log::LineRange::Single(_) => 1,
-            git_ai::authorship::authorship_log::LineRange::Range(s, e) => e - s + 1,
+            git_ai::model::authorship_log::LineRange::Single(_) => 1,
+            git_ai::model::authorship_log::LineRange::Range(s, e) => e - s + 1,
         })
         .sum()
 }

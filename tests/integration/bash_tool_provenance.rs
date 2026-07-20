@@ -8,11 +8,11 @@
 //! commands.
 
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::working_log::AgentId;
 use git_ai::commands::checkpoint_agent::bash_tool::{
     BashCheckpointAction, BashPostHookResult, diff, git_status_fallback, handle_bash_post_tool_use,
     handle_bash_pre_tool_use_with_context, set_daemon_socket_for_test, snapshot,
 };
+use git_ai::model::working_log::AgentId;
 use std::fs;
 use std::process::Command;
 use std::thread;

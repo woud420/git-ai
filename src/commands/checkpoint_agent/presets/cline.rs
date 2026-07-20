@@ -3,9 +3,9 @@ use super::{
     AgentPreset, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
     PresetContext,
 };
-use crate::authorship::working_log::AgentId;
 use crate::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use crate::error::GitAiError;
+use crate::model::working_log::AgentId;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};

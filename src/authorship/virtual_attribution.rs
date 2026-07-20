@@ -2,12 +2,12 @@ use crate::authorship::attribution_tracker::{
     Attribution, LineAttribution, attributions_to_line_attributions,
     line_attributions_to_attributions,
 };
-use crate::authorship::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
 use crate::authorship::hunk_shift::{DiffHunk, apply_hunk_shifts_to_line_attributions};
-use crate::authorship::working_log::CheckpointKind;
 use crate::commands::blame::{GitAiBlameOptions, OLDEST_AI_BLAME_DATE};
 use crate::error::GitAiError;
 use crate::git::repository::{Repository, batch_read_paths_at_treeishes};
+use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
+use crate::model::working_log::CheckpointKind;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -181,7 +181,7 @@ impl VirtualAttributions {
     fn find_prompt_in_history_static(
         repo: &Repository,
         prompt_id: &str,
-    ) -> Result<(String, crate::authorship::authorship_log::PromptRecord), GitAiError> {
+    ) -> Result<(String, crate::model::authorship_log::PromptRecord), GitAiError> {
         // Use git grep to search for the prompt ID in authorship notes
         let shas = crate::git::notes_api::search_notes(repo, &format!("\"{}\"", prompt_id))
             .unwrap_or_default();
@@ -456,7 +456,7 @@ impl VirtualAttributions {
                 if is_session_format {
                     // New format: derive session_id from this checkpoint's own agent_id
                     let session_id =
-                        crate::authorship::authorship_log_serialization::generate_session_id(
+                        crate::model::authorship_log_serialization::generate_session_id(
                             &agent_id.id,
                             &agent_id.tool,
                         );
@@ -476,15 +476,14 @@ impl VirtualAttributions {
                         checkpoint.line_stats.deletions;
                 } else {
                     // Old format: use existing prompts logic
-                    let author_id =
-                        crate::authorship::authorship_log_serialization::generate_short_hash(
-                            &agent_id.id,
-                            &agent_id.tool,
-                        );
+                    let author_id = crate::model::authorship_log_serialization::generate_short_hash(
+                        &agent_id.id,
+                        &agent_id.tool,
+                    );
                     // For working log checkpoints, use empty string as commit_sha since they're uncommitted
                     // Always overwrite with the latest checkpoint for this agent so refreshed
                     // transcripts/models from post-commit aren't lost.
-                    let prompt_record = crate::authorship::authorship_log::PromptRecord {
+                    let prompt_record = crate::model::authorship_log::PromptRecord {
                         agent_id: agent_id.clone(),
                         human_author: human_author.clone(),
                         total_additions: 0,
@@ -512,10 +511,9 @@ impl VirtualAttributions {
             }
 
             if checkpoint.kind == CheckpointKind::KnownHuman {
-                let hash =
-                    crate::authorship::authorship_log_serialization::generate_human_short_hash(
-                        &checkpoint.author,
-                    );
+                let hash = crate::model::authorship_log_serialization::generate_human_short_hash(
+                    &checkpoint.author,
+                );
                 humans.entry(hash).or_insert_with(|| HumanRecord {
                     author: checkpoint.author.clone(),
                 });
@@ -653,7 +651,7 @@ impl VirtualAttributions {
                 if is_session_format {
                     // New format: derive session_id from this checkpoint's own agent_id
                     let session_id =
-                        crate::authorship::authorship_log_serialization::generate_session_id(
+                        crate::model::authorship_log_serialization::generate_session_id(
                             &agent_id.id,
                             &agent_id.tool,
                         );
@@ -673,12 +671,11 @@ impl VirtualAttributions {
                         checkpoint.line_stats.deletions;
                 } else {
                     // Old format: use existing prompts logic
-                    let author_id =
-                        crate::authorship::authorship_log_serialization::generate_short_hash(
-                            &agent_id.id,
-                            &agent_id.tool,
-                        );
-                    let prompt_record = crate::authorship::authorship_log::PromptRecord {
+                    let author_id = crate::model::authorship_log_serialization::generate_short_hash(
+                        &agent_id.id,
+                        &agent_id.tool,
+                    );
+                    let prompt_record = crate::model::authorship_log::PromptRecord {
                         agent_id: agent_id.clone(),
                         human_author: human_author.clone(),
 
@@ -705,10 +702,9 @@ impl VirtualAttributions {
             }
 
             if checkpoint.kind == CheckpointKind::KnownHuman {
-                let hash =
-                    crate::authorship::authorship_log_serialization::generate_human_short_hash(
-                        &checkpoint.author,
-                    );
+                let hash = crate::model::authorship_log_serialization::generate_human_short_hash(
+                    &checkpoint.author,
+                );
                 humans.entry(hash).or_insert_with(|| HumanRecord {
                     author: checkpoint.author.clone(),
                 });
@@ -839,7 +835,7 @@ impl VirtualAttributions {
                 if is_session_format {
                     // New format: derive session_id from this checkpoint's own agent_id
                     let session_id =
-                        crate::authorship::authorship_log_serialization::generate_session_id(
+                        crate::model::authorship_log_serialization::generate_session_id(
                             &agent_id.id,
                             &agent_id.tool,
                         );
@@ -859,12 +855,11 @@ impl VirtualAttributions {
                         checkpoint.line_stats.deletions;
                 } else {
                     // Old format: use existing prompts logic
-                    let author_id =
-                        crate::authorship::authorship_log_serialization::generate_short_hash(
-                            &agent_id.id,
-                            &agent_id.tool,
-                        );
-                    let prompt_record = crate::authorship::authorship_log::PromptRecord {
+                    let author_id = crate::model::authorship_log_serialization::generate_short_hash(
+                        &agent_id.id,
+                        &agent_id.tool,
+                    );
+                    let prompt_record = crate::model::authorship_log::PromptRecord {
                         agent_id: agent_id.clone(),
                         human_author: human_author.clone(),
 
@@ -891,10 +886,9 @@ impl VirtualAttributions {
             }
 
             if checkpoint.kind == CheckpointKind::KnownHuman {
-                let hash =
-                    crate::authorship::authorship_log_serialization::generate_human_short_hash(
-                        &checkpoint.author,
-                    );
+                let hash = crate::model::authorship_log_serialization::generate_human_short_hash(
+                    &checkpoint.author,
+                );
                 humans.entry(hash).or_insert_with(|| HumanRecord {
                     author: checkpoint.author.clone(),
                 });
@@ -1067,8 +1061,8 @@ impl VirtualAttributions {
     /// Convert this VirtualAttributions to an AuthorshipLog
     pub fn to_authorship_log(
         &self,
-    ) -> Result<crate::authorship::authorship_log_serialization::AuthorshipLog, GitAiError> {
-        use crate::authorship::authorship_log_serialization::AuthorshipLog;
+    ) -> Result<crate::model::authorship_log_serialization::AuthorshipLog, GitAiError> {
+        use crate::model::authorship_log_serialization::AuthorshipLog;
 
         let mut authorship_log = AuthorshipLog::new();
         authorship_log.metadata.base_commit_sha = self.base_commit.clone();
@@ -1104,8 +1098,8 @@ impl VirtualAttributions {
 /// within an entry are already sorted+merged.
 fn build_attestations_from_attributions(
     attributions: &HashMap<String, (Vec<Attribution>, Vec<LineAttribution>)>,
-) -> Vec<crate::authorship::authorship_log_serialization::FileAttestation> {
-    use crate::authorship::authorship_log_serialization::{AttestationEntry, FileAttestation};
+) -> Vec<crate::model::authorship_log_serialization::FileAttestation> {
+    use crate::model::authorship_log_serialization::{AttestationEntry, FileAttestation};
 
     let mut files: Vec<FileAttestation> = Vec::new();
 
@@ -2068,7 +2062,7 @@ impl VirtualAttributions {
         final_state_snapshot: Option<&HashMap<String, String>>,
     ) -> Result<
         (
-            crate::authorship::authorship_log_serialization::AuthorshipLog,
+            crate::model::authorship_log_serialization::AuthorshipLog,
             crate::git::repo_storage::InitialAttributions,
             HashMap<String, String>,
         ),
@@ -2103,14 +2097,14 @@ impl VirtualAttributions {
         diff_context: AuthorshipLogDiffContext<'_>,
     ) -> Result<
         (
-            crate::authorship::authorship_log_serialization::AuthorshipLog,
+            crate::model::authorship_log_serialization::AuthorshipLog,
             crate::git::repo_storage::InitialAttributions,
             HashMap<String, String>,
         ),
         GitAiError,
     > {
-        use crate::authorship::authorship_log_serialization::AuthorshipLog;
         use crate::git::repo_storage::InitialAttributions;
+        use crate::model::authorship_log_serialization::AuthorshipLog;
         use std::collections::{HashMap as StdHashMap, HashSet};
 
         let mut authorship_log = AuthorshipLog::new();
@@ -2479,11 +2473,11 @@ impl VirtualAttributions {
                             range_end = line;
                         } else {
                             if range_start == range_end {
-                                ranges.push(crate::authorship::authorship_log::LineRange::Single(
+                                ranges.push(crate::model::authorship_log::LineRange::Single(
                                     range_start,
                                 ));
                             } else {
-                                ranges.push(crate::authorship::authorship_log::LineRange::Range(
+                                ranges.push(crate::model::authorship_log::LineRange::Range(
                                     range_start,
                                     range_end,
                                 ));
@@ -2495,20 +2489,17 @@ impl VirtualAttributions {
 
                     // Add the last range
                     if range_start == range_end {
-                        ranges.push(crate::authorship::authorship_log::LineRange::Single(
-                            range_start,
-                        ));
+                        ranges.push(crate::model::authorship_log::LineRange::Single(range_start));
                     } else {
-                        ranges.push(crate::authorship::authorship_log::LineRange::Range(
+                        ranges.push(crate::model::authorship_log::LineRange::Range(
                             range_start,
                             range_end,
                         ));
                     }
 
-                    let entry =
-                        crate::authorship::authorship_log_serialization::AttestationEntry::new(
-                            author_id, ranges,
-                        );
+                    let entry = crate::model::authorship_log_serialization::AttestationEntry::new(
+                        author_id, ranges,
+                    );
 
                     let attestation_path = rename_map.get(&nfc_file_path).unwrap_or(&nfc_file_path);
                     let file_attestation = authorship_log.get_or_create_file(attestation_path);
@@ -2692,8 +2683,8 @@ impl VirtualAttributions {
         parent_sha: &str,
         commit_sha: &str,
         pathspecs: Option<&HashSet<String>>,
-    ) -> Result<crate::authorship::authorship_log_serialization::AuthorshipLog, GitAiError> {
-        use crate::authorship::authorship_log_serialization::AuthorshipLog;
+    ) -> Result<crate::model::authorship_log_serialization::AuthorshipLog, GitAiError> {
+        use crate::model::authorship_log_serialization::AuthorshipLog;
         use std::collections::HashMap as StdHashMap;
 
         let mut authorship_log = AuthorshipLog::new();
@@ -2816,11 +2807,11 @@ impl VirtualAttributions {
                             range_end = line;
                         } else {
                             if range_start == range_end {
-                                ranges.push(crate::authorship::authorship_log::LineRange::Single(
+                                ranges.push(crate::model::authorship_log::LineRange::Single(
                                     range_start,
                                 ));
                             } else {
-                                ranges.push(crate::authorship::authorship_log::LineRange::Range(
+                                ranges.push(crate::model::authorship_log::LineRange::Range(
                                     range_start,
                                     range_end,
                                 ));
@@ -2832,20 +2823,17 @@ impl VirtualAttributions {
 
                     // Add the last range
                     if range_start == range_end {
-                        ranges.push(crate::authorship::authorship_log::LineRange::Single(
-                            range_start,
-                        ));
+                        ranges.push(crate::model::authorship_log::LineRange::Single(range_start));
                     } else {
-                        ranges.push(crate::authorship::authorship_log::LineRange::Range(
+                        ranges.push(crate::model::authorship_log::LineRange::Range(
                             range_start,
                             range_end,
                         ));
                     }
 
-                    let entry =
-                        crate::authorship::authorship_log_serialization::AttestationEntry::new(
-                            author_id, ranges,
-                        );
+                    let entry = crate::model::authorship_log_serialization::AttestationEntry::new(
+                        author_id, ranges,
+                    );
 
                     let file_attestation = authorship_log.get_or_create_file(&nfc_file_path);
                     file_attestation.add_entry(entry);

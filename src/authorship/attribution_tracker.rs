@@ -5,8 +5,8 @@
 
 use crate::authorship::imara_diff_utils::{ByteDiff, ByteDiffOp, DiffOp, capture_diff_slices};
 use crate::authorship::move_detection::{DeletedLine, InsertedLine, detect_moves};
-use crate::authorship::working_log::CheckpointKind;
 use crate::error::GitAiError;
+use crate::model::working_log::CheckpointKind;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};

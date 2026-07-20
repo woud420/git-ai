@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::authorship::authorship_log::LineRange;
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
+use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log_serialization::AuthorshipLog;
 
 fn normalize_line_ranges(ranges: &[LineRange]) -> Vec<LineRange> {
     let mut lines: Vec<u32> = ranges.iter().flat_map(LineRange::expand).collect();

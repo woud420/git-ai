@@ -1,9 +1,9 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log::PromptRecord;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
-use git_ai::authorship::working_log::AgentId;
 use git_ai::git::notes_api::write_note;
+use git_ai::model::authorship_log::PromptRecord;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::model::working_log::AgentId;
 use std::collections::HashMap;
 
 /// Test simple rebase with no conflicts where trees are identical - multiple commits
@@ -1645,8 +1645,8 @@ fn test_rebase_prompt_metrics_update_per_commit() {
         .flat_map(|a| &a.entries)
         .flat_map(|e| &e.line_ranges)
         .map(|r| match r {
-            git_ai::authorship::authorship_log::LineRange::Single(_) => 1,
-            git_ai::authorship::authorship_log::LineRange::Range(s, e) => e - s + 1,
+            git_ai::model::authorship_log::LineRange::Single(_) => 1,
+            git_ai::model::authorship_log::LineRange::Range(s, e) => e - s + 1,
         })
         .sum();
     let pre_lines_2: u32 = log2
@@ -1655,8 +1655,8 @@ fn test_rebase_prompt_metrics_update_per_commit() {
         .flat_map(|a| &a.entries)
         .flat_map(|e| &e.line_ranges)
         .map(|r| match r {
-            git_ai::authorship::authorship_log::LineRange::Single(_) => 1,
-            git_ai::authorship::authorship_log::LineRange::Range(s, e) => e - s + 1,
+            git_ai::model::authorship_log::LineRange::Single(_) => 1,
+            git_ai::model::authorship_log::LineRange::Range(s, e) => e - s + 1,
         })
         .sum();
     assert!(
@@ -1719,8 +1719,8 @@ fn test_rebase_prompt_metrics_update_per_commit() {
         .flat_map(|a| &a.entries)
         .flat_map(|e| &e.line_ranges)
         .map(|r| match r {
-            git_ai::authorship::authorship_log::LineRange::Single(_) => 1,
-            git_ai::authorship::authorship_log::LineRange::Range(s, e) => e - s + 1,
+            git_ai::model::authorship_log::LineRange::Single(_) => 1,
+            git_ai::model::authorship_log::LineRange::Range(s, e) => e - s + 1,
         })
         .sum();
     let post_lines_2: u32 = rebased_log2
@@ -1729,8 +1729,8 @@ fn test_rebase_prompt_metrics_update_per_commit() {
         .flat_map(|a| &a.entries)
         .flat_map(|e| &e.line_ranges)
         .map(|r| match r {
-            git_ai::authorship::authorship_log::LineRange::Single(_) => 1,
-            git_ai::authorship::authorship_log::LineRange::Range(s, e) => e - s + 1,
+            git_ai::model::authorship_log::LineRange::Single(_) => 1,
+            git_ai::model::authorship_log::LineRange::Range(s, e) => e - s + 1,
         })
         .sum();
     assert!(

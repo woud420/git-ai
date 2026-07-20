@@ -2,7 +2,6 @@
 #[path = "integration/repos/mod.rs"]
 mod repos;
 
-use git_ai::authorship::working_log::CheckpointKind;
 #[cfg(not(windows))]
 use git_ai::commands::checkpoint_agent::orchestrator::{
     BaseCommit, CheckpointFile, CheckpointRequest,
@@ -16,6 +15,7 @@ use git_ai::daemon::{
     ControlRequest, DaemonConfig, DaemonLock, local_socket_connects_with_timeout,
     open_local_socket_stream_with_timeout, read_daemon_pid, send_control_request,
 };
+use git_ai::model::working_log::CheckpointKind;
 use repos::test_file::ExpectedLineExt;
 use repos::test_repo::{
     DAEMON_SPAWN_LOADER_RETRY_ATTEMPTS, DaemonTestCompletionLogEntry, DaemonTestScope, TestRepo,
@@ -844,10 +844,8 @@ fn assert_post_commit_uploads_prompt_cas() {
         .read_authorship_note(&commit.commit_sha)
         .expect("commit should have authorship note");
     let log =
-        git_ai::authorship::authorship_log_serialization::AuthorshipLog::deserialize_from_string(
-            &note,
-        )
-        .expect("authorship note should deserialize");
+        git_ai::model::authorship_log_serialization::AuthorshipLog::deserialize_from_string(&note)
+            .expect("authorship note should deserialize");
     // AI checkpoints now produce sessions (not prompts)
     let _session = log
         .metadata

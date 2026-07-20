@@ -1,9 +1,9 @@
 //! Continue CLI agent implementation with sweep discovery.
 
-use crate::authorship::authorship_log_serialization::generate_session_id;
+use crate::model::authorship_log_serialization::generate_session_id;
+use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::streams::types::{StreamBatch, StreamError};
 use crate::streams::watermark::{RecordIndexWatermark, WatermarkStrategy};
 use std::path::{Path, PathBuf};
 use std::time::Duration;

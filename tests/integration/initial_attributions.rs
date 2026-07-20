@@ -1,7 +1,7 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::authorship::attribution_tracker::LineAttribution;
-use git_ai::authorship::authorship_log::PromptRecord;
-use git_ai::authorship::working_log::AgentId;
+use git_ai::model::authorship_log::PromptRecord;
+use git_ai::model::working_log::AgentId;
 use insta::assert_debug_snapshot;
 use regex::Regex;
 use std::collections::{BTreeMap, HashMap};

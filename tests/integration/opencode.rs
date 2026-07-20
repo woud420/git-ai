@@ -32,7 +32,7 @@ fn test_opencode_raw_event_fidelity() {
         .unwrap();
 
     // Independently query the SQLite DB to construct the same expected events.
-    let conn = git_ai::sqlite::open_with_flags_and_memory_limits(
+    let conn = git_ai::model::repository::sqlite::open_with_flags_and_memory_limits(
         &fixture,
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )

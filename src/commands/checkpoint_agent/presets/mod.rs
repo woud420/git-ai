@@ -20,8 +20,8 @@ mod opencode;
 mod pi;
 mod windsurf;
 
-use crate::authorship::working_log::AgentId;
 use crate::error::GitAiError;
+use crate::model::working_log::AgentId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -80,7 +80,7 @@ impl NotesDatabase {
                 eprintln!("[Error] Failed to initialize notes database: {}", e);
                 // Fall back to a temp file so the process can continue running.
                 let temp_path = std::env::temp_dir().join("git-ai-notes-db-failed");
-                let conn = crate::sqlite::open_with_memory_limits(&temp_path)
+                let conn = crate::model::repository::sqlite::open_with_memory_limits(&temp_path)
                     .expect("Failed to create temp DB");
                 Mutex::new(NotesDatabase { conn })
             }
@@ -94,7 +94,7 @@ impl NotesDatabase {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = crate::sqlite::open_with_memory_limits(path)?;
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(path)?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;
@@ -115,7 +115,7 @@ impl NotesDatabase {
             std::fs::create_dir_all(parent)?;
         }
 
-        let conn = crate::sqlite::open_with_memory_limits(&db_path)?;
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path)?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;
@@ -683,7 +683,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test-notes.db");
 
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;
@@ -1098,7 +1098,7 @@ mod tests {
 
         // Create a v1 database by hand.
         {
-            let conn = crate::sqlite::open_with_memory_limits(&path).unwrap();
+            let conn = crate::model::repository::sqlite::open_with_memory_limits(&path).unwrap();
             conn.execute_batch(
                 r#"
                 CREATE TABLE schema_metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);

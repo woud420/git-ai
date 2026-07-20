@@ -6,10 +6,10 @@
 //! `has_api_key()` is true (matching the CAS pattern).
 
 use crate::api::client::ApiClient;
-use crate::api::types::{
+use crate::error::GitAiError;
+use crate::model::api_types::{
     ApiErrorResponse, NotesReadResponse, NotesUploadRequest, NotesUploadResponse,
 };
-use crate::error::GitAiError;
 
 impl ApiClient {
     /// Upload a batch of authorship notes to the remote backend.
@@ -95,7 +95,7 @@ impl ApiClient {
 mod tests {
     use super::*;
     use crate::api::client::{ApiClient, ApiContext};
-    use crate::api::types::NoteEntry;
+    use crate::model::api_types::NoteEntry;
 
     #[test]
     fn test_read_notes_rejects_non_hex_sha() {

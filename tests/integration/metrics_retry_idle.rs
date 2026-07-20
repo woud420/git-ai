@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::sqlite::open_with_memory_limits;
+use git_ai::model::repository::sqlite::open_with_memory_limits;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};

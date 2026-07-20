@@ -1,4 +1,4 @@
-use crate::authorship::working_log::AgentId;
+use crate::model::working_log::AgentId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;

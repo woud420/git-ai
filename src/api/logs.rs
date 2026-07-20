@@ -2,8 +2,10 @@
 
 use crate::api::client::ApiClient;
 use crate::api::metrics::metrics_upload_allowed;
-use crate::api::types::{ApiErrorResponse, DaemonLogsUploadRequest, DaemonLogsUploadResponse};
 use crate::error::GitAiError;
+use crate::model::api_types::{
+    ApiErrorResponse, DaemonLogsUploadRequest, DaemonLogsUploadResponse,
+};
 
 /// Returns whether daemon log uploads are allowed for the current API context.
 ///

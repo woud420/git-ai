@@ -1,10 +1,10 @@
-use crate::daemon::domain::{CommandScope, Confidence, FamilyKey, NormalizedCommand};
 use crate::daemon::git_backend::GitBackend;
 use crate::error::GitAiError;
 use crate::git::cli_parser::parse_git_cli_args;
 use crate::git::repo_state::{
     common_dir_for_repo_path, common_dir_for_worktree, worktree_root_for_path,
 };
+use crate::model::domain::{CommandScope, Confidence, FamilyKey, NormalizedCommand};
 use crate::observability;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};

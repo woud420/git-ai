@@ -1,5 +1,5 @@
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};
-use git_ai::authorship::working_log::CheckpointKind;
+use git_ai::model::working_log::CheckpointKind;
 use std::fs;
 use std::time::{Duration, Instant};
 

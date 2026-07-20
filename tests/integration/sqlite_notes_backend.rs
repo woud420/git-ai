@@ -7,7 +7,7 @@
 
 use crate::repos::test_repo::TestRepo;
 use git_ai::config::{ConfigPatch, NotesBackendConfig, NotesBackendKind};
-use git_ai::notes::db::NotesDatabase;
+use git_ai::model::repository::notes_db::NotesDatabase;
 use std::fs;
 
 fn sqlite_backend_repo() -> (TestRepo, tempfile::TempDir, std::path::PathBuf) {

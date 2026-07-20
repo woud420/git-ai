@@ -1,6 +1,6 @@
 //! Watermarking strategies for tracking transcript processing progress.
 
-use super::types::StreamError;
+use crate::model::stream_types::StreamError;
 use chrono::{DateTime, Utc};
 use std::fmt;
 use std::str::FromStr;

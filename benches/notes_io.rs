@@ -62,7 +62,7 @@
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use git_ai::git::test_utils::{TmpRepo, init_test_git_config};
-use git_ai::notes::db::NotesDatabase;
+use git_ai::model::repository::notes_db::NotesDatabase;
 use std::sync::OnceLock;
 use std::time::Duration;
 

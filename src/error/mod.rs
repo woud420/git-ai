@@ -175,7 +175,7 @@ mod tests {
     fn test_error_display_sqlite_error() {
         let temp_dir = tempfile::tempdir().unwrap();
         let db_path = temp_dir.path().join("error.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         let sql_err = conn.execute("INVALID SQL", []).unwrap_err();
         let err = GitAiError::from(sql_err);
         let display = format!("{}", err);
@@ -278,7 +278,7 @@ mod tests {
     fn test_error_clone_sqlite_converts_to_generic() {
         let temp_dir = tempfile::tempdir().unwrap();
         let db_path = temp_dir.path().join("error.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         let sql_err = conn.execute("BAD SQL", []).unwrap_err();
         let err = GitAiError::from(sql_err);
         let cloned = err.clone();

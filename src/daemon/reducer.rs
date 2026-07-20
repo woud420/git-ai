@@ -1,8 +1,8 @@
 use crate::daemon::analyzers::{AnalysisView, AnalyzerRegistry};
-use crate::daemon::domain::{
+use crate::error::GitAiError;
+use crate::model::domain::{
     AnalysisResult, AppliedCommand, FamilyState, GlobalState, NormalizedCommand, WorktreeState,
 };
-use crate::error::GitAiError;
 use std::path::{Path, PathBuf};
 
 pub fn reduce_family_command(
@@ -149,7 +149,7 @@ fn apply_worktree_state(state: &mut FamilyState, cmd: &NormalizedCommand) {
 
 fn unique_branch_for_head_change(
     cmd: &NormalizedCommand,
-    head_change: &crate::daemon::domain::RefChange,
+    head_change: &crate::model::domain::RefChange,
 ) -> Option<String> {
     let mut matches = cmd
         .ref_changes
@@ -253,7 +253,7 @@ fn canonicalize_path(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use crate::daemon::analyzers::AnalyzerRegistry;
-    use crate::daemon::domain::{
+    use crate::model::domain::{
         CommandScope, Confidence, FamilyKey, FamilyState, GlobalState, RefChange, WatermarkState,
         WorktreeState,
     };
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(applied.seq, 1);
         assert!(matches!(
             analysis.class,
-            crate::daemon::domain::CommandClass::HistoryRewrite
+            crate::model::domain::CommandClass::HistoryRewrite
         ));
         assert_eq!(
             state.refs.get("refs/heads/main").map(String::as_str),

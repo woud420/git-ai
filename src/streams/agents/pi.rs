@@ -1,8 +1,8 @@
 //! Pi agent implementation with sweep discovery.
 
+use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::streams::types::{StreamBatch, StreamError};
 use crate::streams::watermark::{ByteOffsetWatermark, WatermarkStrategy};
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
@@ -96,15 +96,15 @@ impl Agent for PiAgent {
 
         let mut line = String::new();
         loop {
-            match crate::streams::types::read_jsonl_line(&mut reader, &mut line).map_err(|e| {
-                StreamError::Transient {
+            match crate::model::stream_types::read_jsonl_line(&mut reader, &mut line).map_err(
+                |e| StreamError::Transient {
                     message: format!("I/O error reading line: {}", e),
                     retry_after: Duration::from_secs(5),
-                }
-            })? {
-                crate::streams::types::JsonlLineState::Eof => break,
-                crate::streams::types::JsonlLineState::Partial => break,
-                crate::streams::types::JsonlLineState::Complete(bytes_read) => {
+                },
+            )? {
+                crate::model::stream_types::JsonlLineState::Eof => break,
+                crate::model::stream_types::JsonlLineState::Partial => break,
+                crate::model::stream_types::JsonlLineState::Complete(bytes_read) => {
                     line_number += 1;
                     current_offset += bytes_read as u64;
                 }

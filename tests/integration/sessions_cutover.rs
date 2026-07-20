@@ -9,8 +9,8 @@
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log_serialization::AuthorshipLog;
 use git_ai::git::notes_api::write_note;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use serde_json::Value;
 use std::fs;
 
@@ -831,11 +831,10 @@ fn test_mixed_working_log_old_and_new_checkpoints_produce_both_prompts_and_sessi
                 .and_then(|a| a.get("id"))
                 .and_then(|i| i.as_str())
                 .unwrap_or("");
-            let old_author_id =
-                git_ai::authorship::authorship_log_serialization::generate_short_hash(
-                    agent_id_str,
-                    agent_tool,
-                );
+            let old_author_id = git_ai::model::authorship_log_serialization::generate_short_hash(
+                agent_id_str,
+                agent_tool,
+            );
 
             // Downgrade: remove trace_id, replace s_::t_ author_ids with old-format hash
             checkpoint["trace_id"] = Value::Null;
@@ -1205,11 +1204,10 @@ fn test_stash_pop_mixed_format_working_log() {
                 .and_then(|a| a.get("id"))
                 .and_then(|i| i.as_str())
                 .unwrap_or("");
-            let old_author_id =
-                git_ai::authorship::authorship_log_serialization::generate_short_hash(
-                    agent_id_str,
-                    agent_tool,
-                );
+            let old_author_id = git_ai::model::authorship_log_serialization::generate_short_hash(
+                agent_id_str,
+                agent_tool,
+            );
             checkpoint["trace_id"] = Value::Null;
             if let Some(entries) = checkpoint.get_mut("entries").and_then(|e| e.as_array_mut()) {
                 for entry in entries {
@@ -2640,7 +2638,7 @@ fn test_diff_json_stats_with_old_format_note_only() {
 #[test]
 fn test_amend_preserves_sessions_under_http_notes_backend() {
     use git_ai::config::{ConfigPatch, NotesBackendConfig, NotesBackendKind};
-    use git_ai::notes::db::NotesDatabase;
+    use git_ai::model::repository::notes_db::NotesDatabase;
 
     // The daemon owns note writes and the amend rebuild, so the DAEMON must run
     // with the HTTP backend. The test-home config.json writer does not cover

@@ -1,11 +1,11 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::authorship_log::LineRange;
-use git_ai::authorship::authorship_log_serialization::{AuthorshipLog, generate_session_id};
-use git_ai::authorship::working_log::AgentId;
-use git_ai::daemon::bash_history_db::{BashCallEnd, BashCallStart, BashHistoryDatabase};
-use git_ai::metrics::db::MetricsDatabase;
 use git_ai::metrics::{EventAttributes, MetricEvent, PosEncoded, SessionEventValues};
+use git_ai::model::authorship_log::LineRange;
+use git_ai::model::authorship_log_serialization::{AuthorshipLog, generate_session_id};
+use git_ai::model::repository::bash_history_db::{BashCallEnd, BashCallStart, BashHistoryDatabase};
+use git_ai::model::repository::metrics_db::MetricsDatabase;
+use git_ai::model::working_log::AgentId;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;

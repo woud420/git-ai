@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::authorship::ignore::effective_ignore_patterns;
 use crate::authorship::post_commit::metric_tool_model_breakdown;
 use crate::authorship::rewrite::{DiffTreeResult, RewriteMetricCommit};
@@ -8,6 +7,7 @@ use crate::config::Config;
 use crate::error::GitAiError;
 use crate::git::repository::Repository;
 use crate::metrics::{EventAttributes, MetricEvent, PosEncoded, RewriteCommittedValues};
+use crate::model::authorship_log_serialization::AuthorshipLog;
 
 pub(crate) fn spawn_rewrite_commit_metrics(
     repo: &Repository,
@@ -407,12 +407,12 @@ fn apply_rewrite_metric_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authorship::authorship_log::LineRange;
-    use crate::authorship::authorship_log_serialization::AttestationEntry;
     use crate::authorship::rewrite::RewriteMetricOperation;
-    use crate::authorship::working_log::AgentId;
     use crate::metrics::EventValues;
     use crate::metrics::events::rewrite_committed_pos;
+    use crate::model::authorship_log::LineRange;
+    use crate::model::authorship_log_serialization::AttestationEntry;
+    use crate::model::working_log::AgentId;
     use std::collections::HashMap;
 
     fn metric_commit(
@@ -432,7 +432,7 @@ mod tests {
         let mut log = AuthorshipLog::new();
         log.metadata.prompts.insert(
             prompt_id.clone(),
-            crate::authorship::authorship_log::PromptRecord {
+            crate::model::authorship_log::PromptRecord {
                 agent_id: AgentId {
                     tool: "codex".to_string(),
                     id: "session".to_string(),

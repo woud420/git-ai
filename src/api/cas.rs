@@ -1,8 +1,8 @@
 use crate::api::client::ApiClient;
-use crate::api::types::{
+use crate::error::GitAiError;
+use crate::model::api_types::{
     ApiErrorResponse, CAPromptStoreReadResponse, CasUploadRequest, CasUploadResponse,
 };
-use crate::error::GitAiError;
 
 /// CAS API endpoints
 impl ApiClient {

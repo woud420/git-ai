@@ -1,5 +1,5 @@
-use crate::authorship::working_log::AgentId;
 use crate::commands::checkpoint_agent::bash_tool::StatSnapshot;
+use crate::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

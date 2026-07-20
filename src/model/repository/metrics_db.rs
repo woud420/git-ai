@@ -197,7 +197,7 @@ impl MetricsDatabase {
         }
 
         // Open with WAL mode and performance optimizations
-        let conn = crate::sqlite::open_with_memory_limits(&db_path)?;
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path)?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;
@@ -218,7 +218,7 @@ impl MetricsDatabase {
     }
 
     fn new_fallback_at_path(path: &std::path::Path) -> Result<Self, GitAiError> {
-        let conn = crate::sqlite::open_with_memory_limits(path)?;
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(path)?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;
@@ -236,7 +236,7 @@ impl MetricsDatabase {
     pub(crate) fn new_temp_for_tests() -> Result<(Self, tempfile::TempDir), GitAiError> {
         let temp_dir = tempfile::TempDir::new()?;
         let db_path = temp_dir.path().join("metrics.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path)?;
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path)?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;
@@ -255,7 +255,7 @@ impl MetricsDatabase {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = crate::sqlite::open_with_memory_limits(path)?;
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(path)?;
         conn.execute_batch(
             r#"
             PRAGMA journal_mode=WAL;
@@ -1513,7 +1513,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test-metrics.db");
 
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
 
         let mut db = MetricsDatabase { conn };
@@ -1733,7 +1733,7 @@ mod tests {
     fn test_initialize_schema_handles_preexisting_agent_usage_table() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("concurrent-init.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
 
         // Simulate a partial migration state from a concurrent process:
         // schema version indicates agent_usage_throttle is missing, but it already exists.
@@ -1775,7 +1775,7 @@ mod tests {
     fn test_migrates_version_2_to_row_level_retry_schema() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("v2.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         conn.execute_batch(
             r#"
             CREATE TABLE schema_metadata (
@@ -1816,7 +1816,7 @@ mod tests {
     fn test_migrates_version_2_with_preexisting_retry_columns() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("v2-partial-retry.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         conn.execute_batch(
             r#"
             CREATE TABLE schema_metadata (
@@ -1880,7 +1880,7 @@ mod tests {
     fn test_migrates_version_3_to_event_metadata_schema_without_sync_backfill() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("v3.db");
-        let conn = crate::sqlite::open_with_memory_limits(&db_path).unwrap();
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
         conn.execute_batch(
             r#"
             CREATE TABLE schema_metadata (

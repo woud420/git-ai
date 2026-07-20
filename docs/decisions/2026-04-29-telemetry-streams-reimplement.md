@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, tokio async, SQLite (rusqlite with WAL mode), position-encoded telemetry schema, polling-based modification detection.
 
-**Reference:** See `docs/superpowers/specs/2026-04-29-telemetry-streams-design.md` for detailed design decisions and rationale.
+**Reference:** See `docs/decisions/2026-04-29-telemetry-streams-design.md` for detailed design decisions and rationale.
 
 ---
 

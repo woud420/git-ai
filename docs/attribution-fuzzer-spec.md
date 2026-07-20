@@ -2,8 +2,8 @@
 
 Status: authoritative spec for the attribution fuzzer. Companion docs:
 
-- `docs/rewrite-ops-spec.md` — the semantics under test.
-- `docs/daemon-trace2-ingestion-spec.md` — the ownership model under test.
+- `docs/architecture/rewrite-ops-spec.md` — the semantics under test.
+- `docs/architecture/daemon-trace2-ingestion-spec.md` — the ownership model under test.
 
 ## Purpose
 
@@ -40,7 +40,7 @@ expectations — notes and blame are the implementation under test.
   first-principles expected outcomes.
 
 Expected attribution under each operation is derived from the invariants in
-`docs/rewrite-ops-spec.md` (I1–I4), notably: surviving lines keep their
+`docs/architecture/rewrite-ops-spec.md` (I1–I4), notably: surviving lines keep their
 class; lines rewritten in conflict hunks take the resolution checkpoint's
 class or become untracked; uncommitted work follows reset/stash per spec.
 

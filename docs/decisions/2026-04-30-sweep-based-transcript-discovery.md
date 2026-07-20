@@ -2761,7 +2761,7 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 
 ## Execution Complete
 
-Plan complete and saved to `docs/superpowers/plans/2026-04-30-sweep-based-transcript-discovery.md`.
+Plan complete and saved to `docs/decisions/2026-04-30-sweep-based-transcript-discovery.md`.
 
 **Two execution options:**
 

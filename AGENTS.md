@@ -69,7 +69,7 @@ A single binary serves two roles based on `argv[0]`:
 
 3. **Post-commit authorship**: After `git commit`, the daemon reads working logs, generates an `AuthorshipLog` (schema version `authorship/3.0.0`), and stores it as a Git Note under `refs/notes/ai`. The authorship log contains attestation entries (hash --> line ranges) and a metadata section with prompt records.
 
-4. **Rewrite tracking**: The daemon ingests git trace2 event streams to learn which git commands ran, establishes exact ref transitions via a reflog cursor model (`src/daemon/ref_cursor.rs`), and migrates authorship notes/working logs through `src/authorship/rewrite.rs` (`RewriteEvent` + `handle_rewrite_event`) plus the per-operation modules (`rewrite_reset.rs`, `rewrite_stash.rs`, `rewrite_revert.rs`, `rewrite_cherry_pick.rs`). See `docs/rewrite-ops-spec.md` and `docs/daemon-trace2-ingestion-spec.md`.
+4. **Rewrite tracking**: The daemon ingests git trace2 event streams to learn which git commands ran, establishes exact ref transitions via a reflog cursor model (`src/daemon/ref_cursor.rs`), and migrates authorship notes/working logs through `src/authorship/rewrite.rs` (`RewriteEvent` + `handle_rewrite_event`) plus the per-operation modules (`rewrite_reset.rs`, `rewrite_stash.rs`, `rewrite_revert.rs`, `rewrite_cherry_pick.rs`). See `docs/architecture/rewrite-ops-spec.md` and `docs/architecture/daemon-trace2-ingestion-spec.md`.
 
 ### Daemon trace2 ingestion (src/daemon.rs, src/daemon/)
 

@@ -3,7 +3,7 @@
 Status: authoritative spec for how git-ai migrates authorship attribution
 across history-rewriting git operations. Companion docs:
 
-- `docs/daemon-trace2-ingestion-spec.md` — how the daemon learns *which*
+- `docs/architecture/daemon-trace2-ingestion-spec.md` — how the daemon learns *which*
   operation ran and its exact ref transitions.
 - `docs/attribution-fuzzer-spec.md` — how correctness is pressured beyond the
   deterministic suite.

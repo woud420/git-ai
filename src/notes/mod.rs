@@ -7,5 +7,5 @@
 //! HTTP wire contract — used for local testing, benchmarking, and as
 //! documentation of what a real backend must implement.
 
-pub mod db;
+pub use crate::model::repository::notes_db as db;
 pub mod reference_server;

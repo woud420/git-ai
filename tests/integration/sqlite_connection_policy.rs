@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const ALLOWED_RAW_OPEN_FILE: &str = "src/sqlite.rs";
+const ALLOWED_RAW_OPEN_FILE: &str = "src/model/repository/sqlite.rs";
 const POLICY_TEST_FILE: &str = "tests/integration/sqlite_connection_policy.rs";
 
 #[test]
@@ -41,7 +41,7 @@ fn sqlite_connections_go_through_memory_limited_helpers() {
 
     assert!(
         violations.is_empty(),
-        "SQLite connections must use src/sqlite.rs helpers so every open applies memory limits:\n{}",
+        "SQLite connections must use src/model/repository/sqlite.rs helpers so every open applies memory limits:\n{}",
         violations.join("\n")
     );
 }

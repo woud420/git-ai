@@ -54,13 +54,13 @@ When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are
 ### Binary dispatch (src/main.rs)
 
 A single binary serves two roles based on `argv[0]`:
-- **`argv[0] == "git"`** --> `commands::git_handlers::handle_git()` -- proxies to real git with pre/post hooks per subcommand
-- **`argv[0] == "git-ai"`** --> `commands::git_ai_handlers::handle_git_ai()` -- direct subcommands (checkpoint, blame, diff, status, search, etc.)
+- **`argv[0] == "git"`** --> `cli::git_handlers::handle_git()` -- proxies to real git with pre/post hooks per subcommand
+- **`argv[0] == "git-ai"`** --> `cli::git_ai_handlers::handle_git_ai()` -- direct subcommands (checkpoint, blame, diff, status, search, etc.)
 - **Debug-only shortcut**: When `cfg!(debug_assertions)` and `GIT_AI=git` env var is set, forces git proxy mode regardless of binary name. Most integration tests no longer rely on this: they run the real git binary with trace2 wired to a per-test daemon (production-like), using the proxy env only in a few special cases.
 
 ### Core data flow: checkpoint --> working log --> authorship note
 
-1. **Checkpoint**: An AI coding agent calls `git-ai checkpoint <agent>` with hook input (typically JSON via stdin) before AND after it edits a file. The corresponding agent preset (`src/commands/checkpoint_agent/agent_presets.rs`) extracts edited file paths, transcript, and model info. The checkpoint processor diffs the file against HEAD's version or the last-checkpointed value of that file and compute character-level attributions. The combination of pre and post file edit checkpoints is what allows us to know exactly what the AI changed (since we can compare the before and after). There are 3 main types of checkpoints in git-ai:
+1. **Checkpoint**: An AI coding agent calls `git-ai checkpoint <agent>` with hook input (typically JSON via stdin) before AND after it edits a file. The corresponding agent preset (`src/operations/commands/checkpoint_agent/agent_presets.rs`) extracts edited file paths, transcript, and model info. The checkpoint processor diffs the file against HEAD's version or the last-checkpointed value of that file and compute character-level attributions. The combination of pre and post file edit checkpoints is what allows us to know exactly what the AI changed (since we can compare the before and after). There are 3 main types of checkpoints in git-ai:
     * Plain or legacy `human`: only due to legacy, it's still called `human` as it used to mean "human" edited files, but since we migrated to an explicit Human checkpoint (now called `known_human`), this checkpoint represents 'untracked' changes. This is the checkpoint that AI agent presets invoke to take the before edit snapshots. Changes caught by these checkpoints do get explicit attestations in the final authorship notes (they are basically holes in the data) and stats recognize them as untracked. For testing, invoke by calling `git-ai checkpoint human` (for unscoped) or `git-ai checkpoint human /path/to/file` (for scoped).
     * Known human (`known_human`) checkpoints: this is the 'real' Human checkpoint. These are never called by the AI agent presets and are only invoked by our IDE/editor extensions that recognize when a change has actually been made by the human by typing, etc. For testing, invoke via `git-ai checkpoint mock_known_human` (for unscoped) or `git-ai checkpoint mock_known_human /path/to/file` (for scoped).
     * AI checkpoint (`ai_agent`) checkpoints: this is the AI checkpoint that explicitly associates the captured changes with the particular AI agent and session. This is the checkpoint taht AI agent presets invoke to take the after edit snapshots. For testing, invoke via `git-ai checkpoint mock_ai` (for unscoped) or `git-ai checkpoint mock_ai /path/to/file` (for scoped).
@@ -69,17 +69,17 @@ A single binary serves two roles based on `argv[0]`:
 
 3. **Post-commit authorship**: After `git commit`, the daemon reads working logs, generates an `AuthorshipLog` (schema version `authorship/3.0.0`), and stores it as a Git Note under `refs/notes/ai`. The authorship log contains attestation entries (hash --> line ranges) and a metadata section with prompt records.
 
-4. **Rewrite tracking**: The daemon ingests git trace2 event streams to learn which git commands ran, establishes exact ref transitions via a reflog cursor model (`src/daemon/ref_cursor.rs`), and migrates authorship notes/working logs through `src/authorship/rewrite.rs` (`RewriteEvent` + `handle_rewrite_event`) plus the per-operation modules (`rewrite_reset.rs`, `rewrite_stash.rs`, `rewrite_revert.rs`, `rewrite_cherry_pick.rs`). See `docs/architecture/rewrite-ops-spec.md` and `docs/architecture/daemon-trace2-ingestion-spec.md`.
+4. **Rewrite tracking**: The daemon ingests git trace2 event streams to learn which git commands ran, establishes exact ref transitions via a reflog cursor model (`src/operations/daemon/ref_cursor.rs`), and migrates authorship notes/working logs through `src/operations/authorship/rewrite.rs` (`RewriteEvent` + `handle_rewrite_event`) plus the per-operation modules (`rewrite_reset.rs`, `rewrite_stash.rs`, `rewrite_revert.rs`, `rewrite_cherry_pick.rs`). See `docs/architecture/rewrite-ops-spec.md` and `docs/architecture/daemon-trace2-ingestion-spec.md`.
 
-### Daemon trace2 ingestion (src/daemon.rs, src/daemon/)
+### Daemon trace2 ingestion (src/operations/daemon.rs, src/operations/daemon/)
 
-The git proxy is a thin passthrough (`src/commands/git_handlers.rs`); all attribution side effects run in the shared daemon, driven by trace2:
+The git proxy is a thin passthrough (`src/cli/git_handlers.rs`); all attribution side effects run in the shared daemon, driven by trace2:
 
 - Socket listener receives trace2 JSON frames; definitely-read-only roots are filtered out
-- `TraceNormalizer` (src/daemon/trace_normalizer.rs) groups frames by root sid into a `NormalizedCommand`
-- A per-repo-family actor (src/daemon/family_actor.rs) sequences commands and checkpoints in order
-- `RefCursor::enrich_command` (src/daemon/ref_cursor.rs) consumes cursor-bounded reflog entries to fill exact `ref_changes`; commands without a cursor or immutable argv OIDs fail closed for attribution
-- Analyzers (src/daemon/analyzers/history.rs) classify enriched commands into semantic events that drive post-commit authorship and rewrite-note migration
+- `TraceNormalizer` (src/operations/daemon/trace_normalizer.rs) groups frames by root sid into a `NormalizedCommand`
+- A per-repo-family actor (src/operations/daemon/family_actor.rs) sequences commands and checkpoints in order
+- `RefCursor::enrich_command` (src/operations/daemon/ref_cursor.rs) consumes cursor-bounded reflog entries to fill exact `ref_changes`; commands without a cursor or immutable argv OIDs fail closed for attribution
+- Analyzers (src/operations/daemon/analyzers/history.rs) classify enriched commands into semantic events that drive post-commit authorship and rewrite-note migration
 
 Signal forwarding: On Unix, the git proxy installs signal handlers (SIGTERM, SIGINT, SIGHUP, SIGQUIT) that forward to the child git process group.
 

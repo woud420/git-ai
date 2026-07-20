@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
+use git_ai::operations::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;

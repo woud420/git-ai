@@ -1,5 +1,5 @@
 /// Comprehensive tests for JetBrains IDE type definitions and compatibility checking
-use git_ai::mdm::jetbrains::ide_types::{
+use git_ai::operations::mdm::jetbrains::ide_types::{
     DetectedIde, JETBRAINS_IDES, MARKETPLACE_URL, MIN_INTELLIJ_BUILD, PLUGIN_ID,
 };
 use std::path::PathBuf;

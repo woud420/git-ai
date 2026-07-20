@@ -1,9 +1,9 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::prompt_utils::{
+use git_ai::operations::authorship::prompt_utils::{
     find_prompt, find_prompt_in_commit, find_prompt_in_history,
 };
-use git_ai::git::notes_api::read_authorship;
-use git_ai::git::repository::find_repository_in_path;
+use git_ai::operations::git::notes_api::read_authorship;
+use git_ai::operations::git::repository::find_repository_in_path;
 
 // mock_ai preset does not produce transcript/prompt records — these tests
 // need a preset that generates prompts (e.g. codex with a transcript fixture).

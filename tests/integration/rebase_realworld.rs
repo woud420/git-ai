@@ -22,9 +22,9 @@ use std::fs;
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::commands::blame::GitAiBlameOptions;
-use git_ai::git::repository as GitAiRepository;
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
+use git_ai::operations::commands::blame::GitAiBlameOptions;
+use git_ai::operations::git::repository as GitAiRepository;
 
 // ============================================================================
 // Shared helpers — ALL note/blame reads go through TestRepo helpers

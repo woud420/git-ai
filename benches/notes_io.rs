@@ -32,10 +32,10 @@
 //! rather than routing through `notes_api`. This is more accurate (no dispatch
 //! overhead) and avoids the singleton constraint.
 //!
-//!   - git_notes write  : `git_ai::git::refs::git_backend_for_tests::notes_add`
-//!   - git_notes read   : `git_ai::git::refs::git_backend_for_tests::show_authorship_note`
-//!   - git_notes batch  : `git_ai::git::refs::git_backend_for_tests::notes_add_batch`
-//!   - git_notes commits_with_notes: `git_ai::git::refs::git_backend_for_tests::commits_with_authorship_notes`
+//!   - git_notes write  : `git_ai::operations::git::refs::git_backend_for_tests::notes_add`
+//!   - git_notes read   : `git_ai::operations::git::refs::git_backend_for_tests::show_authorship_note`
+//!   - git_notes batch  : `git_ai::operations::git::refs::git_backend_for_tests::notes_add_batch`
+//!   - git_notes commits_with_notes: `git_ai::operations::git::refs::git_backend_for_tests::commits_with_authorship_notes`
 //!   - http write       : `NotesDatabase::upsert_note`
 //!   - http read        : `NotesDatabase::get_note`
 //!   - http batch write : `NotesDatabase::upsert_notes_batch`
@@ -51,7 +51,7 @@
 //!
 //! Each benchmark function creates its own `TmpRepo` during the *setup* phase
 //! (not the measured iteration), so setup cost is amortised by Criterion's many
-//! iterations. `TmpRepo` owns a `tempfile::TempDir` and a `git_ai::git::Repository`
+//! iterations. `TmpRepo` owns a `tempfile::TempDir` and a `git_ai::operations::git::Repository`
 //! and is dropped at the end of the bench.
 //!
 //! # Sample sizes
@@ -61,8 +61,8 @@
 //! need tighter confidence intervals.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use git_ai::git::test_utils::{TmpRepo, init_test_git_config};
 use git_ai::model::repository::notes_db::NotesDatabase;
+use git_ai::operations::git::test_utils::{TmpRepo, init_test_git_config};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -165,7 +165,7 @@ impl BenchRepo {
 
         // Pre-write into git-notes (for git_notes read benchmarks).
         for sha in &shas {
-            git_ai::git::refs::git_backend_for_tests::notes_add(
+            git_ai::operations::git::refs::git_backend_for_tests::notes_add(
                 repo.gitai_repo(),
                 sha,
                 NOTE_CONTENT,
@@ -208,7 +208,7 @@ fn bench_write_single(c: &mut Criterion) {
         &target_sha,
         |b, sha| {
             b.iter(|| {
-                git_ai::git::refs::git_backend_for_tests::notes_add(
+                git_ai::operations::git::refs::git_backend_for_tests::notes_add(
                     bench.repo.gitai_repo(),
                     sha,
                     NOTE_CONTENT,
@@ -253,7 +253,7 @@ fn bench_write_batch_100(c: &mut Criterion) {
     // --- git_notes backend ---
     group.bench_function(BenchmarkId::new("git_notes", "100_notes"), |b| {
         b.iter(|| {
-            git_ai::git::refs::git_backend_for_tests::notes_add_batch(
+            git_ai::operations::git::refs::git_backend_for_tests::notes_add_batch(
                 bench.repo.gitai_repo(),
                 &batch,
             )
@@ -293,7 +293,7 @@ fn bench_read_single_hot(c: &mut Criterion) {
         &hot_sha,
         |b, sha| {
             b.iter(|| {
-                let _ = git_ai::git::refs::git_backend_for_tests::show_authorship_note(
+                let _ = git_ai::operations::git::refs::git_backend_for_tests::show_authorship_note(
                     bench.repo.gitai_repo(),
                     sha,
                 );
@@ -340,7 +340,7 @@ fn bench_read_single_cold(c: &mut Criterion) {
         &cold_sha,
         |b, sha| {
             b.iter(|| {
-                let _ = git_ai::git::refs::git_backend_for_tests::show_authorship_note(
+                let _ = git_ai::operations::git::refs::git_backend_for_tests::show_authorship_note(
                     bench.repo.gitai_repo(),
                     sha,
                 );
@@ -377,11 +377,12 @@ fn bench_read_batch_100(c: &mut Criterion) {
     // --- git_notes backend ---
     group.bench_function(BenchmarkId::new("git_notes", "100_reads"), |b| {
         b.iter(|| {
-            let _ = git_ai::git::refs::git_backend_for_tests::note_blob_oids_for_commits(
-                bench.repo.gitai_repo(),
-                &batch_shas,
-            )
-            .expect("note_blob_oids_for_commits failed");
+            let _ =
+                git_ai::operations::git::refs::git_backend_for_tests::note_blob_oids_for_commits(
+                    bench.repo.gitai_repo(),
+                    &batch_shas,
+                )
+                .expect("note_blob_oids_for_commits failed");
         });
     });
 
@@ -420,7 +421,7 @@ fn bench_commits_with_notes_500(c: &mut Criterion) {
     // --- git_notes backend ---
     group.bench_function(BenchmarkId::new("git_notes", "500_shas"), |b| {
         b.iter(|| {
-            let _ = git_ai::git::refs::git_backend_for_tests::commits_with_authorship_notes(
+            let _ = git_ai::operations::git::refs::git_backend_for_tests::commits_with_authorship_notes(
                 bench.repo.gitai_repo(),
                 &check_shas,
             )

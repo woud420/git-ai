@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use git_ai::git::notes_api::write_note;
+use git_ai::operations::git::notes_api::write_note;
 use serde_json::Value;
 
 // Local helper mirroring the CLI arg vector used by main
@@ -9,7 +9,7 @@ fn args(list: &[&str]) -> Vec<String> {
 }
 
 // Reimport the parsing function from the show_prompt command module
-use git_ai::commands::show_prompt::parse_args;
+use git_ai::operations::commands::show_prompt::parse_args;
 
 #[test]
 fn parse_args_requires_prompt_id() {
@@ -216,8 +216,9 @@ fn show_prompt_commit_flag_scopes_to_requested_commit() {
         )
     };
 
-    let git_ai_repo = git_ai::git::find_repository_in_path(repo.path().to_str().unwrap())
-        .expect("find repository");
+    let git_ai_repo =
+        git_ai::operations::git::find_repository_in_path(repo.path().to_str().unwrap())
+            .expect("find repository");
     write_note(
         &git_ai_repo,
         &first_commit.commit_sha,

@@ -2,8 +2,8 @@
 #[path = "integration/repos/mod.rs"]
 mod repos;
 
-use git_ai::daemon::control_api::CasSyncPayload;
-use git_ai::daemon::{
+use git_ai::operations::daemon::control_api::CasSyncPayload;
+use git_ai::operations::daemon::{
     ControlRequest, ControlResponse, DaemonConfig, TelemetryEnvelope,
     local_socket_connects_with_timeout, open_local_socket_stream_with_timeout,
     send_control_request,

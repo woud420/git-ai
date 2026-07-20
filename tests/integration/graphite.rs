@@ -289,7 +289,7 @@ fn gt(repo: &TestRepo, args: &[&str]) -> Result<String, String> {
     let nesting = std::env::var("GIT_AI_TEST_TRACE2_NESTING").unwrap_or_else(|_| "0".to_string());
     command.env(
         "GIT_TRACE2_EVENT",
-        git_ai::daemon::DaemonConfig::trace2_event_target_for_path(&trace_socket),
+        git_ai::operations::daemon::DaemonConfig::trace2_event_target_for_path(&trace_socket),
     );
     command.env("GIT_TRACE2_EVENT_NESTING", nesting);
     command.env("GIT_AI_TEST_DB_PATH", repo.test_db_path().to_str().unwrap());

@@ -1,6 +1,8 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::range_authorship::{EMPTY_TREE_HASH, range_authorship, should_ignore_file};
-use git_ai::git::repository::{CommitRange, find_repository_in_path};
+use git_ai::operations::authorship::range_authorship::{
+    EMPTY_TREE_HASH, range_authorship, should_ignore_file,
+};
+use git_ai::operations::git::repository::{CommitRange, find_repository_in_path};
 
 #[test]
 fn test_range_authorship_simple_range() {

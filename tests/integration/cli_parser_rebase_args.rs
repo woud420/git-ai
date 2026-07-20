@@ -6,7 +6,7 @@
 //! tests cover `summarize_rebase_args`, which is still live in
 //! `src/git/cli_parser.rs`.
 
-use git_ai::git::cli_parser::summarize_rebase_args;
+use git_ai::operations::git::cli_parser::summarize_rebase_args;
 
 /// Build a `command_args` slice as `summarize_rebase_args` expects (args after
 /// the "rebase" command word).

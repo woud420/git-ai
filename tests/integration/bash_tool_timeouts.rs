@@ -10,12 +10,12 @@
 //! modules are never affected.
 
 use crate::repos::test_repo::TestRepo;
-use git_ai::commands::checkpoint_agent::bash_tool::{
+use git_ai::model::working_log::AgentId;
+use git_ai::operations::commands::checkpoint_agent::bash_tool::{
     BashCheckpointAction, handle_bash_post_tool_use, handle_bash_pre_tool_use_with_context,
     reset_timeout_overrides_for_test, set_daemon_socket_for_test, set_hook_timeout_ms_for_test,
     set_walk_timeout_ms_for_test, snapshot,
 };
-use git_ai::model::working_log::AgentId;
 use std::fs;
 
 // ---------------------------------------------------------------------------

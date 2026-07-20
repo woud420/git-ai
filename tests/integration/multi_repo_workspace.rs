@@ -12,7 +12,7 @@
 use crate::repos::test_repo::TestRepo;
 
 use git_ai::error::GitAiError;
-use git_ai::git::repository::{
+use git_ai::operations::git::repository::{
     find_repository_for_file, find_repository_in_path, group_files_by_repository,
 };
 use std::fs;

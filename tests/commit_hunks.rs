@@ -2,18 +2,18 @@
 #[path = "integration/repos/mod.rs"]
 mod repos;
 
-use git_ai::commands::diff::{
+use git_ai::operations::commands::diff::{
     DiffCommandOptions, DiffJsonHunk, build_diff_artifacts_from_hunks,
     build_diff_artifacts_with_note, get_diff_with_line_numbers,
 };
-use git_ai::git::repository::Repository as GitAiRepository;
+use git_ai::operations::git::repository::Repository as GitAiRepository;
 use repos::test_file::ExpectedLineExt;
 use repos::test_repo::TestRepo;
 use sha2::{Digest, Sha256};
 use std::fs;
 
 fn get_repo(test_repo: &TestRepo) -> GitAiRepository {
-    git_ai::git::find_repository_in_path(test_repo.path().to_str().unwrap())
+    git_ai::operations::git::find_repository_in_path(test_repo.path().to_str().unwrap())
         .expect("Failed to find repository")
 }
 

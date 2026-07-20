@@ -8,7 +8,9 @@
 //! The benchmark uses realistic data sizes based on actual Claude Code transcripts
 //! (~329KB of text across 92 messages).
 
-use git_ai::authorship::secrets::{extract_tokens, is_random, p_random, redact_secrets_in_text};
+use git_ai::operations::authorship::secrets::{
+    extract_tokens, is_random, p_random, redact_secrets_in_text,
+};
 use std::time::{Duration, Instant};
 
 /// Statistics for a set of duration measurements

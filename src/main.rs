@@ -1,6 +1,6 @@
 use clap::Parser;
-use git_ai::commands;
 use git_ai::utils::{SuperuserCheckResult, check_superuser_guard, print_superuser_warning};
+use git_ai::{cli, operations};
 
 #[derive(Parser)]
 #[command(name = "git-ai")]
@@ -47,7 +47,7 @@ fn main() {
         })
         .unwrap_or("git-ai".to_string());
 
-    if commands::git_hook_handlers::is_git_hook_binary_name(&binary_name) {
+    if operations::commands::git_hook_handlers::is_git_hook_binary_name(&binary_name) {
         eprintln!(
             "git-ai: the git core hooks feature has been sunset.\n\
              To remove the deprecated git-ai hook symlinks from this repository, run:\n\
@@ -62,7 +62,7 @@ fn main() {
     #[cfg(debug_assertions)]
     {
         if std::env::var("GIT_AI").as_deref() == Ok("git") {
-            commands::git_handlers::handle_git(&cli.args);
+            cli::git_handlers::handle_git(&cli.args);
             return;
         }
     }
@@ -83,9 +83,9 @@ fn main() {
                 SuperuserCheckResult::Allowed => {}
             }
         }
-        commands::git_ai_handlers::handle_git_ai(&cli.args);
+        cli::git_ai_handlers::handle_git_ai(&cli.args);
         std::process::exit(0);
     }
 
-    commands::git_handlers::handle_git(&cli.args);
+    cli::git_handlers::handle_git(&cli.args);
 }

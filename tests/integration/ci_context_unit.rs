@@ -1,6 +1,6 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::ci::ci_context::{CiContext, CiEvent};
-use git_ai::git::repository::find_repository_in_path;
+use git_ai::operations::ci::ci_context::{CiContext, CiEvent};
+use git_ai::operations::git::repository::find_repository_in_path;
 use std::fs;
 
 #[test]

@@ -1,5 +1,5 @@
 use crate::repos::test_repo::TestRepo;
-use git_ai::authorship::stats::CommitStats;
+use git_ai::operations::authorship::stats::CommitStats;
 use serde::Deserialize;
 use std::fs;
 #[cfg(unix)]

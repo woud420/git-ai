@@ -59,7 +59,7 @@ fn internal_background_subcommands_must_use_spawn_helper() {
 #[test]
 fn critical_background_spawners_call_spawn_helper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let files = [root.join("src/commands/upgrade.rs")];
+    let files = [root.join("src/operations/commands/upgrade.rs")];
 
     for file in files {
         let content = fs::read_to_string(&file).unwrap();
@@ -173,7 +173,7 @@ fn direct_git_command_spawns_are_centralized() {
     let mut files = Vec::new();
     collect_rs_files(&src_root, &mut files);
 
-    let allowed_suffixes = ["src/git/repository.rs", "src/commands/git_handlers.rs"];
+    let allowed_suffixes = ["src/operations/git/repository.rs", "src/cli/git_handlers.rs"];
     let pattern =
         Regex::new(r#"Command::new\((?:crate::)?config::Config::get\(\)\.git_cmd\(\)\)"#).unwrap();
 
@@ -201,6 +201,7 @@ fn direct_git_command_spawns_are_centralized() {
 fn ref_cursor_does_not_spawn_git_on_trace_ingestion_path() {
     let file = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
+        .join("operations")
         .join("daemon")
         .join("ref_cursor.rs");
     let content = fs::read_to_string(&file).unwrap();

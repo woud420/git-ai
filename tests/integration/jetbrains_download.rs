@@ -1,5 +1,5 @@
 /// Tests for JetBrains plugin download and installation functionality
-use git_ai::mdm::jetbrains::download::{
+use git_ai::operations::mdm::jetbrains::download::{
     download_plugin_from_marketplace, install_plugin_to_directory, install_plugin_via_cli,
 };
 use std::fs;

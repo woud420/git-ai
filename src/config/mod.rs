@@ -9,8 +9,8 @@ use glob::Pattern;
 use serde::Serialize;
 
 use crate::feature_flags::FeatureFlags;
-use crate::git::repository::Repository;
-use crate::mdm::utils::home_dir;
+use crate::operations::git::repository::Repository;
+use crate::operations::mdm::utils::home_dir;
 
 mod author;
 mod file;

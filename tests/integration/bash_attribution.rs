@@ -1,12 +1,12 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::fixture_path;
-use git_ai::commands::checkpoint_agent::bash_tool::{
+use git_ai::model::repository::bash_history_db::BashHistoryDatabase;
+use git_ai::model::working_log::AgentId;
+use git_ai::operations::commands::checkpoint_agent::bash_tool::{
     BashCheckpointAction, handle_bash_post_tool_use, handle_bash_pre_tool_use_with_context,
     reset_timeout_overrides_for_test, set_daemon_socket_for_test, set_walk_timeout_ms_for_test,
 };
-use git_ai::model::repository::bash_history_db::BashHistoryDatabase;
-use git_ai::model::working_log::AgentId;
 use serde_json::json;
 use std::fs;
 use std::thread;

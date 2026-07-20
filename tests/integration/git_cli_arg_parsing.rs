@@ -1,4 +1,4 @@
-use git_ai::git::cli_parser::parse_git_cli_args;
+use git_ai::operations::git::cli_parser::parse_git_cli_args;
 
 fn s(v: &[&str]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()

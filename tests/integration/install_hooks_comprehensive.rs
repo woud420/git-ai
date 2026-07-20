@@ -3,7 +3,7 @@
 //! This module tests the git-ai install-hooks and uninstall-hooks commands,
 //! which handle installation of git hooks for various IDEs and coding agents.
 
-use git_ai::commands::install_hooks::{
+use git_ai::operations::commands::install_hooks::{
     InstallResult, InstallStatus, run, run_uninstall, to_hashmap,
 };
 use std::collections::HashMap;

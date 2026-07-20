@@ -95,7 +95,7 @@ macro_rules! subdir_test_variants {
                             .unwrap_or_else(|_| "0".to_string());
                         command.env(
                             "GIT_TRACE2_EVENT",
-                            git_ai::daemon::DaemonConfig::trace2_event_target_for_path(
+                            git_ai::operations::daemon::DaemonConfig::trace2_event_target_for_path(
                                 &trace_socket,
                             ),
                         );
@@ -206,7 +206,7 @@ macro_rules! subdir_test_variants {
                                 .unwrap_or_else(|_| "0".to_string());
                             command.env(
                                 "GIT_TRACE2_EVENT",
-                                git_ai::daemon::DaemonConfig::trace2_event_target_for_path(
+                                git_ai::operations::daemon::DaemonConfig::trace2_event_target_for_path(
                                     &trace_socket,
                                 ),
                             );

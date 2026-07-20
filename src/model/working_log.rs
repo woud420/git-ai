@@ -1,5 +1,5 @@
-use crate::authorship::attribution_tracker::{Attribution, LineAttribution};
 use crate::model::authorship_log_serialization::GIT_AI_VERSION;
+use crate::operations::authorship::attribution_tracker::{Attribution, LineAttribution};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;

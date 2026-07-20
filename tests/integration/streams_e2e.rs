@@ -7,12 +7,12 @@
 use git_ai::metrics::{
     EventAttributes, MetricEvent, OtelTraceValues, PosEncoded, SessionEventValues,
 };
-use git_ai::streams::agent::Agent;
-use git_ai::streams::agents::{ClaudeAgent, CopilotAgent, OpenCodeAgent};
-use git_ai::streams::watermark::{
+use git_ai::operations::streams::agent::Agent;
+use git_ai::operations::streams::agents::{ClaudeAgent, CopilotAgent, OpenCodeAgent};
+use git_ai::operations::streams::watermark::{
     ByteOffsetWatermark, TimestampCursorWatermark, TimestampWatermark, WatermarkStrategy,
 };
-use git_ai::streams::{StreamRecord, StreamsDatabase};
+use git_ai::operations::streams::{StreamRecord, StreamsDatabase};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
@@ -473,7 +473,7 @@ fn test_full_pipeline_opencode_session_ids_flow_through() {
 
 #[test]
 fn test_subagent_session_record_has_parent_link() {
-    use git_ai::streams::agents::claude::ClaudeAgent as ClaudeAgentImpl;
+    use git_ai::operations::streams::agents::claude::ClaudeAgent as ClaudeAgentImpl;
 
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("transcripts.db");
@@ -767,7 +767,7 @@ fn test_copilot_otel_per_event_session_id_derivation() {
 
 #[test]
 fn test_copilot_agent_streams_otel_path_resolution() {
-    use git_ai::streams::agent::Agent;
+    use git_ai::operations::streams::agent::Agent;
 
     let agent = CopilotAgent::new();
     let streams = agent.streams();

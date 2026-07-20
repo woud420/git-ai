@@ -1,4 +1,4 @@
-use git_ai::daemon::test_sync::{
+use git_ai::operations::daemon::test_sync::{
     TEST_SYNC_SESSION_CONFIG_KEY, tracked_parsed_git_invocation_for_test_sync,
     tracks_parsed_git_invocation_for_test_sync,
 };

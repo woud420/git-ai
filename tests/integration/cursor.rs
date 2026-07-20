@@ -1,11 +1,11 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{TestRepo, real_git_executable};
 use crate::test_utils::fixture_path;
-use git_ai::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
 use git_ai::error::GitAiError;
-use git_ai::streams::agent::Agent;
-use git_ai::streams::agents::CursorAgent;
-use git_ai::streams::watermark::ByteOffsetWatermark;
+use git_ai::operations::commands::checkpoint_agent::presets::{ParsedHookEvent, resolve_preset};
+use git_ai::operations::streams::agent::Agent;
+use git_ai::operations::streams::agents::CursorAgent;
+use git_ai::operations::streams::watermark::ByteOffsetWatermark;
 use std::path::PathBuf;
 
 const TEST_CONVERSATION_ID: &str = "de751938-f32b-4441-8239-a31d60aa4cf0";
@@ -464,7 +464,7 @@ fn test_cursor_e2e_with_resync() {
 
 #[test]
 fn test_cursor_checkpoint_routes_nested_worktree_file_to_worktree_repo() {
-    use git_ai::git::repository::find_repository_in_path;
+    use git_ai::operations::git::repository::find_repository_in_path;
     use std::fs;
     use std::process::Command;
 

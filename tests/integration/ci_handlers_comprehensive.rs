@@ -42,8 +42,8 @@ fn test_ci_handlers_module_exists() {
 #[test]
 fn test_ci_result_types_coverage() {
     // Test that we understand all CiRunResult variants
-    use git_ai::ci::ci_context::CiRunResult;
     use git_ai::model::authorship_log_serialization::AuthorshipLog;
+    use git_ai::operations::ci::ci_context::CiRunResult;
 
     // Test variant construction
     let result1 = CiRunResult::AuthorshipRewritten {
@@ -250,7 +250,7 @@ fn test_ci_github_run_fetches_missing_previous_head_after_force_push() {
 
 #[test]
 fn test_ci_event_merge_structure() {
-    use git_ai::ci::ci_context::CiEvent;
+    use git_ai::operations::ci::ci_context::CiEvent;
 
     let event = CiEvent::Merge {
         merge_commit_sha: "abc123".to_string(),
@@ -508,8 +508,8 @@ fn test_ci_requires_valid_repository() {
 
 #[test]
 fn test_ci_context_with_temp_dir() {
-    use git_ai::ci::ci_context::{CiContext, CiEvent};
-    use git_ai::git::repository::find_repository_in_path;
+    use git_ai::operations::ci::ci_context::{CiContext, CiEvent};
+    use git_ai::operations::git::repository::find_repository_in_path;
 
     let test_repo = TestRepo::new();
 

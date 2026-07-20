@@ -1,4 +1,4 @@
-use git_ai::git::repository::{
+use git_ai::operations::git::repository::{
     find_repository_in_path, parse_diff_added_lines_with_insertions, resolve_command_base_dir,
     worktree_storage_ai_dir,
 };
@@ -304,8 +304,9 @@ fn find_repository_in_path_supports_bare_repositories() {
         bare.canonicalize().expect("canonical path")
     );
 
-    let discovered = git_ai::git::repository::discover_repository_in_path_no_git_exec(&bare)
-        .expect("discover bare repo");
+    let discovered =
+        git_ai::operations::git::repository::discover_repository_in_path_no_git_exec(&bare)
+            .expect("discover bare repo");
     assert_eq!(
         discovered.path().canonicalize().expect("canonical bare"),
         bare.canonicalize().expect("canonical path")
@@ -382,8 +383,9 @@ fn find_repository_in_path_worktree_uses_common_dir_for_isolated_storage() {
         repo.storage.working_logs.display()
     );
 
-    let discovered = git_ai::git::repository::discover_repository_in_path_no_git_exec(&worktree)
-        .expect("discover worktree repo");
+    let discovered =
+        git_ai::operations::git::repository::discover_repository_in_path_no_git_exec(&worktree)
+            .expect("discover worktree repo");
     assert_eq!(
         discovered
             .common_dir()

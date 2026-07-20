@@ -1214,6 +1214,13 @@ impl TestRepo {
                 serde_json::Value::Array(values),
             );
         }
+        if let Some(notes_backend) = &patch.notes_backend {
+            config.insert(
+                "notes_backend".to_string(),
+                serde_json::to_value(notes_backend)
+                    .expect("failed to serialize test notes_backend config"),
+            );
+        }
         if let Some(telemetry) = &patch.telemetry {
             config.insert(
                 "telemetry".to_string(),
@@ -1310,6 +1317,13 @@ impl TestRepo {
             patch.allowed_repositories = Some(vec![temp_root.to_string_lossy().replace('\\', "/")]);
             patch.exclude_prompts_in_repositories = Some(vec![]); // No exclusions = share everywhere
             patch.prompt_storage = Some("notes".to_string()); // Use notes mode for tests
+            // Pin the git-notes backend: the production default is sqlite, but
+            // the bulk of the suite asserts against refs/notes/ai directly.
+            // Sqlite-backend behavior is covered by dedicated tests.
+            patch.notes_backend = Some(git_ai::config::NotesBackendConfig {
+                kind: git_ai::config::NotesBackendKind::GitNotes,
+                backend_url: None,
+            });
         });
     }
 

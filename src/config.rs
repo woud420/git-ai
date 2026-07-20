@@ -26,8 +26,12 @@ pub const DEFAULT_MAX_CHECKPOINT_TOTAL_LINES: usize = 500_000;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NotesBackendKind {
-    /// Default: store notes in git refs/notes/ai (existing behavior)
+    /// Default: store notes in the local SQLite notes database. Reads fall
+    /// back to refs/notes/ai so pre-existing repos keep working.
     #[default]
+    Sqlite,
+    /// Store notes in git refs/notes/ai (shareable with teammates via
+    /// push/fetch of the notes ref).
     GitNotes,
     /// HTTP backend: queue writes to notes-db, flush via daemon, reads from cache
     Http,
@@ -36,6 +40,7 @@ pub enum NotesBackendKind {
 impl NotesBackendKind {
     pub fn as_str(&self) -> &'static str {
         match self {
+            NotesBackendKind::Sqlite => "sqlite",
             NotesBackendKind::GitNotes => "git_notes",
             NotesBackendKind::Http => "http",
         }
@@ -1216,14 +1221,25 @@ fn build_config() -> Config {
         .and_then(|s| match s.as_str() {
             "http" => Some(NotesBackendKind::Http),
             "git_notes" | "git-notes" => Some(NotesBackendKind::GitNotes),
+            "sqlite" => Some(NotesBackendKind::Sqlite),
             _ => None,
         });
     let url_from_env = env::var("GIT_AI_NOTES_BACKEND_URL").ok();
 
+    // Unconfigured default: sqlite in production. Test builds default to
+    // git_notes because in-process test code (which cannot use per-test config
+    // patches without racing on process env) predates the sqlite backend and
+    // asserts against refs/notes/ai; sqlite-backend behavior is covered by
+    // tests that pin the kind explicitly.
+    #[cfg(any(test, feature = "test-support"))]
+    let unconfigured_kind = NotesBackendKind::GitNotes;
+    #[cfg(not(any(test, feature = "test-support")))]
+    let unconfigured_kind = NotesBackendKind::default();
+
     let notes_backend = NotesBackendConfig {
         kind: kind_from_env
             .or_else(|| file_backend.as_ref().map(|b| b.kind))
-            .unwrap_or(NotesBackendKind::GitNotes),
+            .unwrap_or(unconfigured_kind),
         backend_url: url_from_env
             .or_else(|| file_backend.as_ref().and_then(|b| b.backend_url.clone())),
     };
@@ -2823,9 +2839,9 @@ mod tests {
     // --- NotesBackendConfig tests ---
 
     #[test]
-    fn test_notes_backend_config_default_is_git_notes() {
+    fn test_notes_backend_config_default_is_sqlite() {
         let cfg = NotesBackendConfig::default();
-        assert_eq!(cfg.kind, NotesBackendKind::GitNotes);
+        assert_eq!(cfg.kind, NotesBackendKind::Sqlite);
         assert!(cfg.backend_url.is_none());
     }
 
@@ -2894,10 +2910,12 @@ mod tests {
             match s {
                 "http" => Some(NotesBackendKind::Http),
                 "git_notes" | "git-notes" => Some(NotesBackendKind::GitNotes),
+                "sqlite" => Some(NotesBackendKind::Sqlite),
                 _ => None,
             }
         };
 
+        assert_eq!(parse_kind("sqlite"), Some(NotesBackendKind::Sqlite));
         assert_eq!(parse_kind("http"), Some(NotesBackendKind::Http));
         assert_eq!(parse_kind("git_notes"), Some(NotesBackendKind::GitNotes));
         assert_eq!(parse_kind("git-notes"), Some(NotesBackendKind::GitNotes));

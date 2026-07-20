@@ -5,7 +5,11 @@ payloads that other systems (servers, CI, teammates' clones) depend on.
 
 - [notes-backend-spec.md](notes-backend-spec.md) — HTTP contract a remote
   notes backend server must implement (bulk read/write of authorship notes
-  keyed by commit SHA).
+  keyed by commit SHA). Local backends: `sqlite` (default — notes live in
+  `~/.git-ai/internal/notes-db` as local-primary rows, with read fallback to
+  `refs/notes/ai`) and `git_notes` (notes in the shareable
+  `refs/notes/ai` ref); `git-ai notes migrate --to <backend>` moves between
+  them.
 - [telemetry-streams-summary.md](telemetry-streams-summary.md) — summary of
   the telemetry stream pipeline and its event payloads.
 - [telemetry-examples.md](telemetry-examples.md) — example telemetry payloads.

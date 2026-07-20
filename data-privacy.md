@@ -16,9 +16,9 @@ Telemetry is **off by default**. If you want to help us improve the tool you can
 
 - **Prompts** are captured only in repositories listed in `allowed_repositories` and are stored locally on the developer's laptop (`prompt_storage` defaults to `local`). They are never shared with teammates or Git AI unless you explicitly change `prompt_storage`.
 
-### Data written to your git repository
+### Attribution data
 
-AI attribution data is written to git notes and is readable by anyone with repo access:
+By default attribution notes are stored in a local SQLite database on your machine (`notes_backend.kind = sqlite`). If you opt into the `git_notes` backend (or export via `git-ai notes migrate --to git-notes`), attribution is written to git notes and is readable by anyone with repo access:
 
 - Model, agent, and accepted-rate percentages
 - Which lines are AI-generated

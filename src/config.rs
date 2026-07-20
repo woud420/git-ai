@@ -597,7 +597,7 @@ impl Config {
             return self
                 .prompt_storage
                 .parse::<PromptStorageMode>()
-                .unwrap_or(PromptStorageMode::Default);
+                .unwrap_or(PromptStorageMode::Local);
         }
 
         // Step 3: Check if repo matches include list
@@ -624,7 +624,7 @@ impl Config {
             // Step 3a: Repo is in include list → use primary prompt_storage
             self.prompt_storage
                 .parse::<PromptStorageMode>()
-                .unwrap_or(PromptStorageMode::Default)
+                .unwrap_or(PromptStorageMode::Local)
         } else {
             // Step 4: Repo not in include list → use fallback
             self.default_prompt_storage
@@ -1089,20 +1089,21 @@ fn build_config() -> Config {
         .or_else(|| env::var("GIT_AI_API_BASE_URL").ok())
         .unwrap_or_else(|| DEFAULT_API_BASE_URL.to_string());
 
-    // Get prompt_storage setting (defaults to "default")
+    // Get prompt_storage setting (defaults to "local": prompts stay on this
+    // machine unless the user explicitly opts into "notes" or "default"/CAS)
     // Valid values: "default", "notes", "local"
     let prompt_storage = file_cfg
         .as_ref()
         .and_then(|c| c.prompt_storage.clone())
-        .unwrap_or_else(|| "default".to_string());
+        .unwrap_or_else(|| "local".to_string());
     let prompt_storage = match prompt_storage.as_str() {
         "default" | "notes" | "local" => prompt_storage,
         other => {
             eprintln!(
-                "Warning: Invalid prompt_storage value '{}', using 'default'",
+                "Warning: Invalid prompt_storage value '{}', using 'local'",
                 other
             );
-            "default".to_string()
+            "local".to_string()
         }
     };
 

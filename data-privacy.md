@@ -14,7 +14,7 @@ The only data Git AI sends externally in open source mode is error and exception
 
 ### Local-only data
 
-- **Prompts** are stored locally on the developer's laptop. They are never shared with teammates or Git AI.
+- **Prompts** are captured only in repositories listed in `allowed_repositories` and are stored locally on the developer's laptop (`prompt_storage` defaults to `local`). They are never shared with teammates or Git AI unless you explicitly change `prompt_storage`.
 
 ### Data written to your git repository
 

@@ -74,11 +74,12 @@ fn resolve_path_to_remotes(path: &str) -> Result<Vec<String>, String> {
         .remotes_with_urls()
         .map_err(|e| format!("Failed to get remotes for repository at '{}': {}", path, e))?;
 
+    // A repository without remotes is stored by its canonical root path,
+    // which is matched as a path pattern.
     if remotes.is_empty() {
-        return Err(format!(
-            "Repository at '{}' has no remotes configured. Add a remote first or use a glob pattern.",
-            path
-        ));
+        return Ok(vec![crate::utils::normalize_to_posix(
+            &repo.canonical_workdir().to_string_lossy(),
+        )]);
     }
 
     // Return all remote URLs
@@ -99,9 +100,12 @@ fn print_config_help() {
     println!("Configuration Keys:");
     println!("  git_path                     Path to git binary");
     println!("  exclude_prompts_in_repositories  Repos to exclude prompts from (array)");
-    println!("  allow_repositories           Allowed repos (array)");
+    println!(
+        "  allowed_repositories         Repositories where collection is enabled (array; empty = collect nothing)"
+    );
     println!("  exclude_repositories         Excluded repos (array)");
-    println!("  telemetry_oss                OSS telemetry setting (on/off)");
+    println!("  telemetry                    Master telemetry switch (on/off; default off)");
+    println!("  telemetry_oss                Legacy OSS telemetry setting (on/off)");
     println!("  telemetry_enterprise_dsn     Enterprise telemetry DSN");
     println!("  disable_version_checks       Disable version checks (bool)");
     println!("  disable_auto_updates         Disable auto updates (bool)");
@@ -150,7 +154,7 @@ fn print_config_help() {
     println!("  git-ai config set exclude_repositories \"private/*\"");
     println!("  git-ai config set exclude_repositories .         # Uses current repo's remotes");
     println!("  git-ai config --add exclude_repositories \"temp/*\"");
-    println!("  git-ai config --add allow_repositories ~/projects/my-repo");
+    println!("  git-ai config --add allowed_repositories ~/projects/my-repo");
     println!("  git-ai config --add feature_flags.my_flag true");
     println!("  git-ai config --add git_ai_hooks.post_notes_updated \"./my-hook.sh\"");
     println!("  git-ai config set codex_hooks_format hooks_json");
@@ -275,13 +279,13 @@ fn show_all_config() -> Result<(), String> {
         );
     }
 
-    if let Some(ref repos) = file_config.allow_repositories {
+    if let Some(ref repos) = file_config.allowed_repositories {
         effective_config.insert(
-            "allow_repositories".to_string(),
+            "allowed_repositories".to_string(),
             serde_json::to_value(repos).unwrap(),
         );
     } else {
-        effective_config.insert("allow_repositories".to_string(), Value::Array(vec![]));
+        effective_config.insert("allowed_repositories".to_string(), Value::Array(vec![]));
     }
 
     if let Some(ref repos) = file_config.exclude_repositories {
@@ -294,6 +298,14 @@ fn show_all_config() -> Result<(), String> {
     }
 
     // Booleans with runtime values
+    effective_config.insert(
+        "telemetry".to_string(),
+        Value::String(if runtime_config.telemetry_enabled() {
+            "on".to_string()
+        } else {
+            "off".to_string()
+        }),
+    );
     effective_config.insert(
         "telemetry_oss_disabled".to_string(),
         Value::Bool(runtime_config.is_telemetry_oss_disabled()),
@@ -451,8 +463,8 @@ fn get_config_value(key: &str) -> Result<(), String> {
                     Value::Array(vec![])
                 }
             }
-            "allow_repositories" => {
-                if let Some(ref repos) = file_config.allow_repositories {
+            "allowed_repositories" | "allow_repositories" => {
+                if let Some(ref repos) = file_config.allowed_repositories {
                     serde_json::to_value(repos).unwrap()
                 } else {
                     Value::Array(vec![])
@@ -465,6 +477,11 @@ fn get_config_value(key: &str) -> Result<(), String> {
                     Value::Array(vec![])
                 }
             }
+            "telemetry" => Value::String(if runtime_config.telemetry_enabled() {
+                "on".to_string()
+            } else {
+                "off".to_string()
+            }),
             "telemetry_oss_disabled" => Value::Bool(runtime_config.is_telemetry_oss_disabled()),
             "telemetry_enterprise_dsn" => {
                 if let Some(ref dsn) = file_config.telemetry_enterprise_dsn {
@@ -667,9 +684,9 @@ fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String
                 crate::config::save_file_config(&file_config)?;
                 log_array_changes(&added, add_mode);
             }
-            "allow_repositories" => {
+            "allowed_repositories" | "allow_repositories" => {
                 let added = set_repository_array_field(
-                    &mut file_config.allow_repositories,
+                    &mut file_config.allowed_repositories,
                     value,
                     add_mode,
                 )?;
@@ -684,6 +701,17 @@ fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String
                 )?;
                 crate::config::save_file_config(&file_config)?;
                 log_array_changes(&added, add_mode);
+            }
+            "telemetry" => {
+                if !matches!(value.trim(), "on" | "off") {
+                    return Err(format!(
+                        "Invalid telemetry value '{}': expected 'on' or 'off'",
+                        value
+                    ));
+                }
+                file_config.telemetry = Some(value.trim().to_string());
+                crate::config::save_file_config(&file_config)?;
+                println!("[telemetry]: {}", value.trim());
             }
             "telemetry_oss" => {
                 file_config.telemetry_oss = Some(value.to_string());
@@ -1067,8 +1095,8 @@ fn unset_config_value(key: &str) -> Result<(), String> {
                     log_array_removals(&items);
                 }
             }
-            "allow_repositories" => {
-                let old_values = file_config.allow_repositories.take();
+            "allowed_repositories" | "allow_repositories" => {
+                let old_values = file_config.allowed_repositories.take();
                 crate::config::save_file_config(&file_config)?;
                 if let Some(items) = old_values {
                     log_array_removals(&items);
@@ -1079,6 +1107,13 @@ fn unset_config_value(key: &str) -> Result<(), String> {
                 crate::config::save_file_config(&file_config)?;
                 if let Some(items) = old_values {
                     log_array_removals(&items);
+                }
+            }
+            "telemetry" => {
+                let old_value = file_config.telemetry.take();
+                crate::config::save_file_config(&file_config)?;
+                if let Some(v) = old_value {
+                    println!("- [telemetry]: {}", v);
                 }
             }
             "telemetry_oss" => {
@@ -1414,7 +1449,7 @@ fn parse_key_path(key: &str) -> Vec<String> {
     key.split('.').map(|s| s.to_string()).collect()
 }
 
-/// Set array field for repository patterns (exclude_repositories, allow_repositories, exclude_prompts_in_repositories)
+/// Set array field for repository patterns (exclude_repositories, allowed_repositories, exclude_prompts_in_repositories)
 /// This function handles the special logic of detecting if a value is:
 ///  - A global wildcard pattern like "*"
 ///  - A URL or git protocol pattern

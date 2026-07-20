@@ -1,8 +1,12 @@
 //! Dedicated notes-backend storage at `~/.git-ai/internal/notes-db`.
 //!
-//! Single `notes` table that doubles as cache and sync queue:
-//!  - `synced = 0` — the row is pending upload to the remote backend
-//!  - `synced = 1` — the row has been uploaded (kept for local read cache)
+//! Single `notes` table that serves three roles, distinguished by `origin`:
+//!  - `origin = 'local'` — primary storage for the sqlite notes backend; these
+//!    rows are never uploaded and never evicted
+//!  - `origin = 'queue'` — HTTP-backend rows: `synced = 0` pending upload,
+//!    `synced = 1` uploaded (kept as read cache)
+//!  - `origin = 'cache'` — read-cache rows imported from the remote backend or
+//!    from `refs/notes/ai`; evictable
 //!
 //! Rows are NEVER deleted on successful upload — they are retained as the local
 //! read cache so that subsequent reads can be served without git or a network call.
@@ -17,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 /// Current schema version (must equal MIGRATIONS.len()).
-const SCHEMA_VERSION: usize = 1;
+const SCHEMA_VERSION: usize = 2;
 
 /// Database migrations — each entry upgrades the schema by one version.
 const MIGRATIONS: &[&str] = &[
@@ -38,6 +42,12 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX IF NOT EXISTS idx_notes_pending
         ON notes(synced, next_retry_at) WHERE synced = 0;
+    "#,
+    // Migration 1 → 2: origin column distinguishing local-primary rows
+    // (sqlite backend), HTTP queue rows, and evictable cache rows. Existing
+    // rows were all written by the HTTP queue path.
+    r#"
+    ALTER TABLE notes ADD COLUMN origin TEXT NOT NULL DEFAULT 'queue';
     "#,
 ];
 
@@ -278,10 +288,64 @@ impl NotesDatabase {
         Ok(())
     }
 
+    /// Upsert a note as sqlite-backend primary storage (`origin = 'local'`).
+    ///
+    /// Local-primary rows are terminal: never enqueued for upload and never
+    /// evicted by cache maintenance.
+    pub fn upsert_local_note(&mut self, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
+        self.upsert_local_notes_batch(&[(commit_sha.to_string(), content.to_string())])
+    }
+
+    /// Upsert a batch of local-primary notes inside a single transaction.
+    pub fn upsert_local_notes_batch(
+        &mut self,
+        entries: &[(String, String)],
+    ) -> Result<(), GitAiError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let now = unix_now();
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                r#"
+                INSERT INTO notes (commit_sha, content, synced, origin, created_at, updated_at, next_retry_at)
+                VALUES (?1, ?2, 1, 'local', ?3, ?3, 0)
+                ON CONFLICT(commit_sha) DO UPDATE SET
+                    content    = excluded.content,
+                    origin     = 'local',
+                    synced     = 1,
+                    updated_at = excluded.updated_at
+                "#,
+            )?;
+            for (sha, content) in entries {
+                stmt.execute(params![sha, content, now])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Read all local-primary notes (used by `git-ai notes migrate --to git-notes`).
+    pub fn get_local_notes(&self) -> Result<Vec<(String, String)>, GitAiError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT commit_sha, content FROM notes WHERE origin = 'local'")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Insert already-synced rows (used for cache-warming on pull and migration).
     ///
-    /// Rows are inserted with `synced = 1`; they act as read cache but are not
-    /// enqueued for upload.
+    /// Rows are inserted with `synced = 1` and `origin = 'cache'`; they act as
+    /// read cache but are not enqueued for upload. Local-primary rows are never
+    /// overwritten by cache imports.
     pub fn cache_synced_notes(&mut self, entries: &[(String, String)]) -> Result<(), GitAiError> {
         if entries.is_empty() {
             return Ok(());
@@ -291,13 +355,14 @@ impl NotesDatabase {
         {
             let mut stmt = tx.prepare_cached(
                 r#"
-                INSERT INTO notes (commit_sha, content, synced, created_at, updated_at, last_sync_at, next_retry_at)
-                VALUES (?1, ?2, 1, ?3, ?3, ?3, 0)
+                INSERT INTO notes (commit_sha, content, synced, origin, created_at, updated_at, last_sync_at, next_retry_at)
+                VALUES (?1, ?2, 1, 'cache', ?3, ?3, ?3, 0)
                 ON CONFLICT(commit_sha) DO UPDATE SET
                     content      = excluded.content,
                     synced       = 1,
                     last_sync_at = excluded.last_sync_at,
                     updated_at   = excluded.updated_at
+                WHERE notes.origin != 'local'
                 "#,
             )?;
             for (sha, content) in entries {
@@ -337,6 +402,7 @@ impl NotesDatabase {
             let mut stmt = self.conn.prepare(
                 r#"SELECT commit_sha FROM notes
                    WHERE synced = 0
+                     AND origin = 'queue'
                      AND processing_started_at IS NULL
                      AND next_retry_at <= ?1
                      AND attempts < 6
@@ -582,17 +648,18 @@ impl NotesDatabase {
         max_rows: usize,
         max_age_secs: i64,
     ) -> Result<usize, GitAiError> {
-        let count: i64 =
-            self.conn
-                .query_row("SELECT COUNT(*) FROM notes WHERE synced = 1", [], |row| {
-                    row.get(0)
-                })?;
+        // Local-primary rows (sqlite backend) are never counted or evicted.
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM notes WHERE synced = 1 AND origin != 'local'",
+            [],
+            |row| row.get(0),
+        )?;
         if (count as usize) <= max_rows {
             return Ok(0);
         }
         let cutoff = unix_now() - max_age_secs;
         let deleted = self.conn.execute(
-            "DELETE FROM notes WHERE synced = 1 AND last_sync_at < ?1",
+            "DELETE FROM notes WHERE synced = 1 AND origin != 'local' AND last_sync_at < ?1",
             params![cutoff],
         )?;
         Ok(deleted)
@@ -655,7 +722,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "1");
+        assert_eq!(version, "2");
     }
 
     #[test]
@@ -969,5 +1036,101 @@ mod tests {
             "path should end with notes-db: {}",
             path_str
         );
+    }
+
+    #[test]
+    fn test_local_notes_are_not_dequeued_or_evicted() {
+        let (mut db, _tmp) = create_test_db();
+
+        db.upsert_local_note("a".repeat(40).as_str(), "local-note")
+            .unwrap();
+        db.upsert_note("b".repeat(40).as_str(), "queued-note")
+            .unwrap();
+
+        // Only the queue-origin row is dequeued for upload.
+        let pending = db.dequeue_pending(10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].commit_sha, "b".repeat(40));
+
+        // Eviction never touches local-primary rows even at zero thresholds.
+        let evicted = db.evict_stale_cache(0, -1).unwrap();
+        assert_eq!(evicted, 0);
+        assert_eq!(
+            db.get_note("a".repeat(40).as_str()).unwrap().as_deref(),
+            Some("local-note")
+        );
+    }
+
+    #[test]
+    fn test_cache_import_does_not_clobber_local_note() {
+        let (mut db, _tmp) = create_test_db();
+        let sha = "c".repeat(40);
+
+        db.upsert_local_note(&sha, "local-truth").unwrap();
+        db.cache_synced_notes(&[(sha.clone(), "stale-remote-copy".to_string())])
+            .unwrap();
+
+        assert_eq!(
+            db.get_note(&sha).unwrap().as_deref(),
+            Some("local-truth"),
+            "cache imports must not overwrite local-primary rows"
+        );
+    }
+
+    #[test]
+    fn test_get_local_notes_returns_only_local_rows() {
+        let (mut db, _tmp) = create_test_db();
+        db.upsert_local_note("d".repeat(40).as_str(), "local")
+            .unwrap();
+        db.upsert_note("e".repeat(40).as_str(), "queued").unwrap();
+        db.cache_synced_notes(&[("f".repeat(40), "cached".to_string())])
+            .unwrap();
+
+        let local = db.get_local_notes().unwrap();
+        assert_eq!(local.len(), 1);
+        assert_eq!(local[0].0, "d".repeat(40));
+    }
+
+    #[test]
+    fn test_migration_v1_to_v2_marks_existing_rows_as_queue() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("notes-db");
+
+        // Create a v1 database by hand.
+        {
+            let conn = crate::sqlite::open_with_memory_limits(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE schema_metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+                INSERT INTO schema_metadata (key, value) VALUES ('version', '1');
+                CREATE TABLE notes (
+                    commit_sha              TEXT PRIMARY KEY NOT NULL,
+                    content                 TEXT NOT NULL,
+                    synced                  INTEGER NOT NULL DEFAULT 0,
+                    attempts                INTEGER NOT NULL DEFAULT 0,
+                    last_sync_error         TEXT,
+                    last_sync_at            INTEGER,
+                    next_retry_at           INTEGER NOT NULL DEFAULT 0,
+                    processing_started_at   INTEGER,
+                    created_at              INTEGER NOT NULL,
+                    updated_at              INTEGER NOT NULL
+                );
+                INSERT INTO notes (commit_sha, content, synced, created_at, updated_at)
+                VALUES ('legacy-sha', 'legacy-content', 0, 1, 1);
+                "#,
+            )
+            .unwrap();
+        }
+
+        let db = NotesDatabase::open_at_path(&path).unwrap();
+        let origin: String = db
+            .conn
+            .query_row(
+                "SELECT origin FROM notes WHERE commit_sha = 'legacy-sha'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(origin, "queue", "legacy rows belong to the HTTP queue");
     }
 }

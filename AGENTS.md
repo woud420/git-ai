@@ -237,11 +237,15 @@ Uses `insta` crate. Snapshots live in `tests/integration/snapshots/` and `tests/
 
 ## Gotchas
 
+- **Collection is opt-in per repository**: an empty `allowed_repositories` config denies every repo (checkpoints are refused and the daemon skips post-commit authorship). `TestRepo`'s default config patch allows the OS temp root so tests collect normally; a test that clears the allowlist must use a dedicated daemon (`TestRepo::new_dedicated_daemon()`) so it cannot rewrite the shared daemon's config out from under concurrently running tests.
+
 - **Test binary auto-compilation**: Integration tests trigger `cargo build --bin git-ai` on first test run via `OnceLock`. If you change code and run tests, the test harness recompiles. This can cause confusion if you're debugging -- the test binary is always a debug build at `target/debug/git-ai`.
 
 - **argv[0] dispatch is load-bearing**: The binary's behavior is entirely determined by how it's invoked. In production, symlinking as `git` makes it a proxy. The `GIT_AI=git` env var forces proxy mode (debug builds only). Breaking this dispatch breaks everything.
 
 - **Feature flag debug/release divergence**: Some flags have different debug/release defaults (see `define_feature_flags!` macro). Tests run debug builds, so a test passing in debug may behave differently in release if it depends on a flag that diverges.
+
+- **Notes backend test default diverges**: the unconfigured `notes_backend.kind` is `sqlite` in production but `git_notes` in test builds (in-process test code asserts against `refs/notes/ai` and cannot set per-test config without racing on process env). `TestRepo`'s default patch also pins `git_notes` explicitly for subprocesses/daemons. Sqlite-backend behavior is covered by `tests/integration/sqlite_notes_backend.rs`, which pins `sqlite` per test.
 
 - **Working log base commit**: Working logs are keyed by the HEAD commit at checkpoint time (`.git/ai/working_logs/<sha>/`). Git AI must ensure that HEAD changes update/copy over the working log accordingly.
 

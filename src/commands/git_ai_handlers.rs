@@ -168,6 +168,12 @@ pub fn handle_git_ai(args: &[String]) {
                 std::process::exit(1);
             }
         },
+        "uninstall" => {
+            if let Err(e) = commands::uninstall::run_uninstall_all(&args[1..]) {
+                eprintln!("Uninstall failed: {}", e);
+                std::process::exit(1);
+            }
+        }
         "uninstall-hooks" => match commands::install_hooks::run_uninstall(&args[1..]) {
             Ok(statuses) => {
                 if let Ok(statuses_value) = serde_json::to_value(&statuses) {
@@ -370,6 +376,10 @@ fn print_help() {
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
     eprintln!("                           Also install the Visual Studio extension on Windows");
+    eprintln!(
+        "  uninstall          Remove git-ai from this machine (hooks, git config, daemon, binaries; --purge for data)"
+    );
+    eprintln!("  uninstall          Remove git-ai from this machine (add --purge to delete data)");
     eprintln!("  uninstall-hooks    Remove git-ai hooks from all detected tools");
     eprintln!("  ci                 Continuous integration utilities");
     eprintln!("    github                 GitHub CI helpers");
@@ -499,28 +509,32 @@ fn handle_checkpoint(args: &[String]) {
         }
     }
 
-    // Check repository allowlist before sending to daemon.
-    // Skip entirely when no allow/exclude filters are configured (common case)
-    // to avoid spawning a `git remote -v` subprocess.
+    // Check the repository allowlist before sending to the daemon. Collection
+    // is opt-in: with an empty allowlist we deny immediately, without repo
+    // discovery or reading remotes.
     let t_allowlist = std::time::Instant::now();
     {
         let config = config::Config::get();
-        if config.has_repository_filters() {
-            let mut checked_repos = std::collections::HashSet::new();
-            for request in &requests {
-                for file in &request.files {
-                    if checked_repos.insert(file.repo_work_dir.clone())
-                        && let Ok(repo) =
-                            crate::git::repository::discover_repository_in_path_no_git_exec(
-                                &file.repo_work_dir,
-                            )
-                        && !config.is_allowed_repository(&Some(repo))
-                    {
-                        eprintln!(
-                            "Skipping checkpoint because repository is excluded or not in allow_repositories list"
-                        );
-                        std::process::exit(0);
-                    }
+        if !config.has_allowed_repositories() {
+            eprintln!(
+                "Skipping checkpoint because no repositories are allowed; add one with `git-ai config --add allowed_repositories <path-or-url>`"
+            );
+            std::process::exit(0);
+        }
+        let mut checked_repos = std::collections::HashSet::new();
+        for request in &requests {
+            for file in &request.files {
+                if checked_repos.insert(file.repo_work_dir.clone())
+                    && let Ok(repo) =
+                        crate::git::repository::discover_repository_in_path_no_git_exec(
+                            &file.repo_work_dir,
+                        )
+                    && !config.is_allowed_repository(Some(&repo))
+                {
+                    eprintln!(
+                        "Skipping checkpoint because repository is excluded or not in the allowed_repositories list"
+                    );
+                    std::process::exit(0);
                 }
             }
         }

@@ -916,7 +916,10 @@ fn current_unix_ts() -> u64 {
 }
 
 fn daemon_log_upload_enabled() -> bool {
-    Config::fresh().get_feature_flags().daemon_log_upload
+    let config = Config::fresh();
+    // The feature flag is a granular kill-switch under the master telemetry
+    // switch: both must be on for heartbeats and daemon-log uploads.
+    config.telemetry_enabled() && config.get_feature_flags().daemon_log_upload
 }
 
 fn daemon_heartbeat_event(uptime: std::time::Duration) -> DaemonLogEvent {
@@ -1089,7 +1092,7 @@ fn flush_sentry_and_posthog(
         });
 
     // Check for OSS DSN
-    let oss_dsn = if config.is_telemetry_oss_disabled() {
+    let oss_dsn = if !config.telemetry_enabled() {
         None
     } else {
         std::env::var("SENTRY_OSS")
@@ -1099,7 +1102,7 @@ fn flush_sentry_and_posthog(
     };
 
     // Check for PostHog configuration
-    let posthog_api_key = if config.is_telemetry_oss_disabled() {
+    let posthog_api_key = if !config.telemetry_enabled() {
         None
     } else {
         std::env::var("POSTHOG_API_KEY")

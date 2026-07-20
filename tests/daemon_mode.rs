@@ -5067,6 +5067,9 @@ fn await_waits_for_metrics_and_notes_flush() {
     repo.patch_git_ai_config(|patch| {
         patch.exclude_prompts_in_repositories = Some(vec![]);
         patch.prompt_storage = Some("default".to_string());
+        // This test exercises upload delivery; opt into the master telemetry
+        // switch (off by default) while keeping Sentry/PostHog OSS paths off.
+        patch.telemetry = Some("on".to_string());
         patch.telemetry_oss_disabled = Some(true);
         patch.notes_backend = Some(NotesBackendConfig {
             kind: NotesBackendKind::Http,

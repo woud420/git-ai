@@ -29,6 +29,20 @@ const TRIGGERED_SWEEP_COOLDOWN: Duration = Duration::from_secs(30);
 /// Extract a Unix-epoch u32 timestamp from a raw JSON event's "timestamp" field.
 /// Handles both ISO 8601 strings (e.g. "2026-05-11T23:13:12.819Z") and numeric
 /// milliseconds (e.g. 1759845073835). Returns None if the field is missing or unparseable.
+/// Collection is opt-in per repository: a session's transcript may only be
+/// processed when its working directory resolves to a repository allowed by
+/// `allowed_repositories`. Sessions with no resolvable git repository are
+/// skipped as well (fail closed).
+pub(crate) fn transcript_collection_allowed(work_dir: Option<&Path>) -> bool {
+    let Some(work_dir) = work_dir else {
+        return false;
+    };
+    match crate::git::repository::discover_repository_in_path_no_git_exec(work_dir) {
+        Ok(repo) => crate::config::Config::fresh().is_allowed_repository(Some(&repo)),
+        Err(_) => false,
+    }
+}
+
 pub fn extract_event_timestamp(event: &serde_json::Value) -> Option<u32> {
     let ts_val = event.get("timestamp")?;
     if let Some(s) = ts_val.as_str() {
@@ -1057,6 +1071,18 @@ impl StreamWorker {
                 .or_else(|| stream.repo_work_dir.as_ref().map(PathBuf::from))
                 .or_else(|| agent.infer_cwd(&path))
         };
+
+        // Collection is opt-in per repository: transcript content for sessions
+        // outside allowed_repositories is never read or persisted. Shared
+        // streams (multi-repo OTEL traces) have no batch-level repo and are
+        // handled by their per-event session scoping instead.
+        if !is_shared_stream && !transcript_collection_allowed(resolved_work_dir.as_deref()) {
+            tracing::debug!(
+                session_id = %task.session_id,
+                "skipping transcript processing: repository not in allowed_repositories"
+            );
+            return Ok(());
+        }
 
         // Persist inferred cwd to DB if stream didn't already have one
         if !is_shared_stream

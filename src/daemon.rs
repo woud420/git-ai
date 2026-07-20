@@ -5528,6 +5528,12 @@ impl ActorDaemonCoordinator {
                             }
                         } else if !new_head.is_empty() {
                             let repo = find_repository_in_path(&worktree)?;
+                            // Collection is opt-in per repository: never generate new
+                            // authorship notes for repos outside allowed_repositories.
+                            // Preservation of pre-existing notes (cherry-pick rewrite
+                            // below) still runs.
+                            let repo_allowed =
+                                crate::config::Config::fresh().is_allowed_repository(Some(&repo));
                             let author = repo.effective_author_identity().formatted_or_unknown();
                             let base_opt = base.clone().filter(|b| !b.is_empty() && b != "initial");
                             let recovery_file_timestamps = Self::take_commit_file_timestamps(
@@ -5547,17 +5553,23 @@ impl ActorDaemonCoordinator {
                             // Post-commit note generation does synchronous git/filesystem work
                             // and may briefly wait for transcript recovery. Mark it as blocking
                             // so the transcript worker can process the recovery sweep promptly.
-                            run_blocking_side_effect(|| {
-                                crate::authorship::post_commit::post_commit_from_working_log_with_recovery_timestamps(
-                                    &repo,
-                                    base_opt.clone(),
-                                    new_head.clone(),
-                                    author,
-                                    true,
-                                    recovery_file_timestamps.as_ref(),
-                                    Some(&recovery_preflight),
-                                )
-                            })?;
+                            if repo_allowed {
+                                run_blocking_side_effect(|| {
+                                    crate::authorship::post_commit::post_commit_from_working_log_with_recovery_timestamps(
+                                        &repo,
+                                        base_opt.clone(),
+                                        new_head.clone(),
+                                        author,
+                                        true,
+                                        recovery_file_timestamps.as_ref(),
+                                        Some(&recovery_preflight),
+                                    )
+                                })?;
+                            } else {
+                                tracing::debug!(
+                                    "skipping post-commit authorship: repository not in allowed_repositories"
+                                );
+                            }
 
                             if cmd.primary_command.as_deref() == Some("commit")
                                 && let Some(pending) = self
@@ -5592,6 +5604,20 @@ impl ActorDaemonCoordinator {
                             && !is_zero_oid(new_head)
                         {
                             let repo = find_repository_in_path(&worktree)?;
+                            // Collection is opt-in per repository. Amends still run when
+                            // the old head carries a note so existing attribution is
+                            // migrated (preservation), but denied repos never gain new
+                            // notes.
+                            let repo_allowed =
+                                crate::config::Config::fresh().is_allowed_repository(Some(&repo));
+                            if !repo_allowed
+                                && crate::git::notes_api::read_note(&repo, old_head).is_none()
+                            {
+                                tracing::debug!(
+                                    "skipping amend authorship: repository not in allowed_repositories"
+                                );
+                                continue;
+                            }
                             let author = repo.effective_author_identity().formatted_or_unknown();
                             let recovery_file_timestamps = Self::take_commit_file_timestamps(
                                 commit_file_timestamp_snapshots,

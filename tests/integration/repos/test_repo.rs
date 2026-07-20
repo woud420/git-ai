@@ -1194,6 +1194,16 @@ impl TestRepo {
 
         let mut config = serde_json::Map::new();
 
+        if let Some(allowed) = &patch.allowed_repositories {
+            let values = allowed
+                .iter()
+                .map(|pattern| serde_json::Value::String(pattern.clone()))
+                .collect();
+            config.insert(
+                "allowed_repositories".to_string(),
+                serde_json::Value::Array(values),
+            );
+        }
         if let Some(exclude) = &patch.exclude_prompts_in_repositories {
             let values = exclude
                 .iter()
@@ -1202,6 +1212,19 @@ impl TestRepo {
             config.insert(
                 "exclude_prompts_in_repositories".to_string(),
                 serde_json::Value::Array(values),
+            );
+        }
+        if let Some(notes_backend) = &patch.notes_backend {
+            config.insert(
+                "notes_backend".to_string(),
+                serde_json::to_value(notes_backend)
+                    .expect("failed to serialize test notes_backend config"),
+            );
+        }
+        if let Some(telemetry) = &patch.telemetry {
+            config.insert(
+                "telemetry".to_string(),
+                serde_json::Value::String(telemetry.clone()),
             );
         }
         if let Some(telemetry_oss_disabled) = patch.telemetry_oss_disabled {
@@ -1284,9 +1307,23 @@ impl TestRepo {
     }
 
     fn apply_default_config_patch(&mut self) {
+        // Collection is opt-in (empty allowlist = collect nothing), so allow the
+        // OS temp root: every TestRepo, worktree variant, and mirror lives under
+        // it. Canonicalized because repo roots are matched symlink-resolved
+        // (macOS: /var/folders -> /private/var/folders).
+        let temp_root = std::env::temp_dir();
+        let temp_root = temp_root.canonicalize().unwrap_or(temp_root);
         self.patch_git_ai_config(|patch| {
+            patch.allowed_repositories = Some(vec![temp_root.to_string_lossy().replace('\\', "/")]);
             patch.exclude_prompts_in_repositories = Some(vec![]); // No exclusions = share everywhere
             patch.prompt_storage = Some("notes".to_string()); // Use notes mode for tests
+            // Pin the git-notes backend: the production default is sqlite, but
+            // the bulk of the suite asserts against refs/notes/ai directly.
+            // Sqlite-backend behavior is covered by dedicated tests.
+            patch.notes_backend = Some(git_ai::config::NotesBackendConfig {
+                kind: git_ai::config::NotesBackendKind::GitNotes,
+                backend_url: None,
+            });
         });
     }
 

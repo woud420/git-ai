@@ -180,3 +180,48 @@ fn test_retry_delay_allows_processing_after_delay() {
         "Task with past retry time should be ready for processing"
     );
 }
+
+#[test]
+#[serial_test::serial]
+fn test_transcript_collection_allowed_respects_allowlist() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo_dir = dir.path().join("repo");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&repo_dir)
+        .status()
+        .expect("git init should run");
+    assert!(status.success());
+    let canonical = repo_dir.canonicalize().unwrap();
+    let allow_entry = canonical.to_string_lossy().replace('\\', "/");
+
+    unsafe {
+        std::env::set_var(
+            "GIT_AI_TEST_CONFIG_PATCH",
+            format!(r#"{{"allowed_repositories":["{}"]}}"#, allow_entry),
+        );
+    }
+    assert!(super::stream_worker::transcript_collection_allowed(Some(
+        &canonical
+    )));
+
+    unsafe {
+        std::env::set_var("GIT_AI_TEST_CONFIG_PATCH", r#"{"allowed_repositories":[]}"#);
+    }
+    assert!(!super::stream_worker::transcript_collection_allowed(Some(
+        &canonical
+    )));
+    assert!(!super::stream_worker::transcript_collection_allowed(None));
+
+    // A directory that is not a git repository fails closed.
+    let non_repo = dir.path().join("plain");
+    std::fs::create_dir_all(&non_repo).unwrap();
+    assert!(!super::stream_worker::transcript_collection_allowed(Some(
+        &non_repo
+    )));
+
+    unsafe {
+        std::env::remove_var("GIT_AI_TEST_CONFIG_PATCH");
+    }
+}

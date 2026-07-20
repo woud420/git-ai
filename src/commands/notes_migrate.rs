@@ -1,12 +1,15 @@
-//! `git-ai notes migrate` — bulk-upload existing git notes to the HTTP backend.
+//! `git-ai notes migrate` — move existing notes between backends.
 //!
-//! This command reads all notes stored in `refs/notes/ai` via `git notes --ref=ai list`,
-//! fetches their content using `git cat-file --batch`, uploads them to the remote HTTP
-//! backend in chunks of 50, and persists them locally in `notes-db` with `synced = 1`
-//! so the cache is warm immediately after migration.
+//! Targets (`--to <backend>`, defaulting to the configured backend):
+//! - `sqlite`: import `refs/notes/ai` into the local notes database as
+//!   local-primary rows (idempotent; safe to re-run).
+//! - `git-notes`: export local-primary rows from the notes database into
+//!   `refs/notes/ai` so attribution can be shared via push/fetch.
+//! - `http`: bulk-upload `refs/notes/ai` to the remote HTTP backend in chunks
+//!   of 50 and warm the local cache (`synced = 1`).
 //!
-//! The command refuses to run unless `notes_backend.kind == http` because migrating
-//! notes to the git-notes backend (the default) is a no-op.
+//! All refs reads use batched plumbing (`git notes list` + `git cat-file
+//! --batch`) — a constant git-spawn count regardless of note count.
 
 use crate::api::client::{ApiClient, ApiContext};
 use crate::api::types::{NoteEntry, NotesUploadRequest};
@@ -21,8 +24,10 @@ use std::process::{Command, Stdio};
 /// Entry point for `git-ai notes migrate`.
 pub fn handle_notes_migrate(args: &[String]) {
     let mut force = false;
-    for arg in args {
-        match arg.as_str() {
+    let mut target: Option<NotesBackendKind> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             "--help" | "-h" => {
                 print_help();
                 return;
@@ -30,30 +35,34 @@ pub fn handle_notes_migrate(args: &[String]) {
             "--force" | "--all" => {
                 force = true;
             }
+            "--to" => {
+                i += 1;
+                let value = args.get(i).map(String::as_str).unwrap_or_default();
+                target = Some(match value {
+                    "sqlite" => NotesBackendKind::Sqlite,
+                    "git_notes" | "git-notes" => NotesBackendKind::GitNotes,
+                    "http" => NotesBackendKind::Http,
+                    other => {
+                        eprintln!(
+                            "error: invalid --to target '{}': expected sqlite, git-notes, or http",
+                            other
+                        );
+                        std::process::exit(1);
+                    }
+                });
+            }
             other => {
                 eprintln!("error: unknown option '{}'", other);
                 eprintln!("Run 'git ai notes migrate --help' for usage");
                 std::process::exit(1);
             }
         }
+        i += 1;
     }
 
-    // 1. Refuse to run unless notes_backend.kind == http.
     let cfg = Config::fresh();
-    if cfg.notes_backend_kind() != NotesBackendKind::Http {
-        eprintln!(
-            "error: `git-ai notes migrate` requires notes_backend.kind = http.\n\
-             Current backend: {}\n\
-             \n\
-             To enable the HTTP backend, run:\n\
-             \n\
-             \x20 git-ai config set notes_backend.kind http",
-            cfg.notes_backend_kind()
-        );
-        std::process::exit(1);
-    }
+    let target = target.unwrap_or_else(|| cfg.notes_backend_kind());
 
-    // 2. Find the repository.
     let repo = match find_repository(&Vec::<String>::new()) {
         Ok(r) => r,
         Err(e) => {
@@ -62,6 +71,113 @@ pub fn handle_notes_migrate(args: &[String]) {
         }
     };
 
+    match target {
+        NotesBackendKind::Sqlite => migrate_refs_to_sqlite(&repo),
+        NotesBackendKind::GitNotes => migrate_sqlite_to_git_notes(&repo),
+        NotesBackendKind::Http => migrate_refs_to_http(&repo, &cfg, force),
+    }
+}
+
+/// Import `refs/notes/ai` into the notes database as local-primary rows.
+fn migrate_refs_to_sqlite(repo: &crate::git::repository::Repository) {
+    eprintln!("Listing notes from refs/notes/ai ...");
+    let entries = match read_all_ref_notes(repo) {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("error: failed to read notes: {}", e);
+            std::process::exit(1);
+        }
+    };
+    if entries.is_empty() {
+        eprintln!("No notes found in refs/notes/ai. Nothing to migrate.");
+        return;
+    }
+
+    match NotesDatabase::global() {
+        Ok(db) => match db.lock() {
+            Ok(mut lock) => {
+                if let Err(e) = lock.upsert_local_notes_batch(&entries) {
+                    eprintln!("error: failed to write notes database: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("error: notes-db lock poisoned: {}", e);
+                std::process::exit(1);
+            }
+        },
+        Err(e) => {
+            eprintln!("error: failed to open notes-db: {}", e);
+            std::process::exit(1);
+        }
+    }
+    eprintln!(
+        "Migration complete: {} note(s) imported into the local notes database.",
+        entries.len()
+    );
+}
+
+/// Export local-primary rows from the notes database into `refs/notes/ai`.
+fn migrate_sqlite_to_git_notes(repo: &crate::git::repository::Repository) {
+    let entries = match NotesDatabase::global() {
+        Ok(db) => match db.lock() {
+            Ok(lock) => match lock.get_local_notes() {
+                Ok(entries) => entries,
+                Err(e) => {
+                    eprintln!("error: failed to read notes database: {}", e);
+                    std::process::exit(1);
+                }
+            },
+            Err(e) => {
+                eprintln!("error: notes-db lock poisoned: {}", e);
+                std::process::exit(1);
+            }
+        },
+        Err(e) => {
+            eprintln!("error: failed to open notes-db: {}", e);
+            std::process::exit(1);
+        }
+    };
+    if entries.is_empty() {
+        eprintln!("No local notes found in the notes database. Nothing to export.");
+        return;
+    }
+
+    if let Err(e) = crate::git::notes_api::export_notes_to_git_refs(repo, &entries) {
+        eprintln!("error: failed to write refs/notes/ai: {}", e);
+        std::process::exit(1);
+    }
+    eprintln!(
+        "Migration complete: {} note(s) exported to refs/notes/ai.",
+        entries.len()
+    );
+}
+
+/// Read every note in `refs/notes/ai` as `(commit_sha, content)` pairs.
+fn read_all_ref_notes(
+    repo: &crate::git::repository::Repository,
+) -> Result<Vec<(String, String)>, GitAiError> {
+    let note_pairs = list_notes(repo)?;
+    if note_pairs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let blob_to_commit: HashMap<String, String> = note_pairs
+        .iter()
+        .map(|(blob, commit)| (blob.clone(), commit.clone()))
+        .collect();
+    let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
+    let blob_contents = cat_file_batch(repo, &blob_shas)?;
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for (blob_sha, content) in &blob_contents {
+        if let Some(commit_sha) = blob_to_commit.get(blob_sha) {
+            entries.push((commit_sha.clone(), content.clone()));
+        }
+    }
+    Ok(entries)
+}
+
+/// Bulk-upload `refs/notes/ai` to the remote HTTP backend and warm the cache.
+fn migrate_refs_to_http(repo: &crate::git::repository::Repository, cfg: &Config, force: bool) {
     // 3. Build the API client.
     let backend_url = match cfg.notes_backend_url() {
         Some(url) => url.to_string(),
@@ -88,7 +204,7 @@ pub fn handle_notes_migrate(args: &[String]) {
     eprintln!("Listing notes from refs/notes/ai ...");
 
     // 4. List notes: `git notes --ref=ai list` → "blob_sha commit_sha\n" lines.
-    let note_pairs = match list_notes(&repo) {
+    let note_pairs = match list_notes(repo) {
         Ok(pairs) => pairs,
         Err(e) => {
             eprintln!("error: failed to list notes: {}", e);
@@ -110,7 +226,7 @@ pub fn handle_notes_migrate(args: &[String]) {
         .collect();
 
     let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
-    let blob_contents = match cat_file_batch(&repo, &blob_shas) {
+    let blob_contents = match cat_file_batch(repo, &blob_shas) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: failed to read note content: {}", e);

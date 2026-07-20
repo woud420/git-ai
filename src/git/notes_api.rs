@@ -1,11 +1,16 @@
 //! Centralized notes I/O API.
 //!
 //! All authorship-note reads and writes flow through this module. The implementation
-//! dispatches to either the git-notes backend (default) or the HTTP backend based on
-//! `Config::get().notes_backend().kind`.
+//! dispatches to the sqlite backend (default), the git-notes backend, or the HTTP
+//! backend based on `Config::get().notes_backend().kind`.
 //!
-//! Phase 0: pure pass-through to `crate::git::refs` (no behavioral change).
-//! Phase 2: kind-aware dispatch to either git or the HTTP backend.
+//! Dispatch reads a fresh config snapshot (`Config::fresh()`) rather than the
+//! process-lifetime `Config::get()` singleton: the daemon is long-lived and must
+//! observe backend changes made after it started.
+//!
+//! The sqlite backend stores notes as local-primary rows in the notes database;
+//! reads fall back to `refs/notes/ai` (and backfill the cache) so repositories
+//! with pre-existing git notes keep working without migration.
 
 use crate::authorship::authorship_log_serialization::AuthorshipLog;
 use crate::config::{Config, NotesBackendKind};
@@ -19,7 +24,8 @@ pub use crate::git::refs::CommitAuthorship;
 // --- Writes ---
 
 pub fn write_note(repo: &Repository, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-    match Config::get().notes_backend_kind() {
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite => sqlite_write_note(commit_sha, content),
         NotesBackendKind::Http => http_write_note(commit_sha, content),
         NotesBackendKind::GitNotes => crate::git::refs::notes_add(repo, commit_sha, content),
     }
@@ -32,7 +38,8 @@ pub fn write_notes_batch(
     if entries.is_empty() {
         return Ok(());
     }
-    match Config::get().notes_backend_kind() {
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite => sqlite_write_batch(entries),
         NotesBackendKind::Http => http_write_batch(entries),
         NotesBackendKind::GitNotes => crate::git::refs::notes_add_batch(repo, entries),
     }
@@ -41,7 +48,10 @@ pub fn write_notes_batch(
 // --- Reads ---
 
 pub fn read_note(repo: &Repository, commit_sha: &str) -> Option<String> {
-    match Config::get().notes_backend_kind() {
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite => {
+            http_read_note(commit_sha).or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
+        }
         NotesBackendKind::Http => http_read_note(commit_sha)
             .or_else(|| crate::git::refs::show_authorship_note(repo, commit_sha)),
         NotesBackendKind::GitNotes => crate::git::refs::show_authorship_note(repo, commit_sha),
@@ -62,7 +72,27 @@ pub fn read_notes_batch(
         return Ok(HashMap::new());
     }
 
-    match Config::get().notes_backend_kind() {
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite => {
+            let mut notes = http_read_notes(commit_shas);
+
+            // Fall back to refs/notes/ai for misses and backfill the cache so
+            // subsequent reads are served from the database. Refs read errors
+            // (e.g. corrupt note blobs) propagate — callers such as rewrite
+            // migration must fail closed rather than treat notes as absent.
+            let missing: Vec<String> = commit_shas
+                .iter()
+                .filter(|sha| !notes.contains_key(*sha))
+                .cloned()
+                .collect();
+            if !missing.is_empty() {
+                let git_notes = crate::git::refs::notes_for_commits(repo, &missing)?;
+                sqlite_backfill_cache(&git_notes);
+                notes.extend(git_notes);
+            }
+
+            Ok(notes)
+        }
         NotesBackendKind::Http => {
             let mut notes = http_read_notes(commit_shas);
 
@@ -94,7 +124,18 @@ pub fn read_notes_batch(
 }
 
 pub fn read_authorship(repo: &Repository, commit_sha: &str) -> Option<AuthorshipLog> {
-    match Config::get().notes_backend_kind() {
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite => {
+            // Check the database first; fall through to git notes on miss and
+            // backfill the raw content so the next read is served locally.
+            http_read_note(commit_sha)
+                .or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
+                .and_then(|content| {
+                    AuthorshipLog::deserialize_from_string(&content)
+                        .map_err(|e| tracing::debug!("notes deserialization error: {}", e))
+                        .ok()
+                })
+        }
         NotesBackendKind::Http => {
             // Check the cache first; fall through to git notes on miss.
             if let Some(content) = http_read_note(commit_sha) {
@@ -113,7 +154,17 @@ pub fn read_authorship_v3(
     repo: &Repository,
     commit_sha: &str,
 ) -> Result<AuthorshipLog, GitAiError> {
-    match Config::get().notes_backend_kind() {
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite => {
+            if let Some(content) = http_read_note(commit_sha)
+                .or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
+            {
+                AuthorshipLog::deserialize_from_string(&content)
+                    .map_err(|e| GitAiError::Generic(format!("notes deserialization error: {}", e)))
+            } else {
+                crate::git::refs::get_reference_as_authorship_log_v3(repo, commit_sha)
+            }
+        }
         NotesBackendKind::Http => {
             if let Some(content) = http_read_note(commit_sha) {
                 AuthorshipLog::deserialize_from_string(&content)
@@ -152,10 +203,10 @@ pub fn read_note_blob_oids(
     repo: &Repository,
     commit_shas: &[String],
 ) -> Result<HashMap<String, String>, GitAiError> {
-    match Config::get().notes_backend_kind() {
-        // For Http, notes are in notes-db not in git — no blob OIDs exist.
+    match Config::fresh().notes_backend_kind() {
+        // For Sqlite/Http, notes are in notes-db not in git — no blob OIDs exist.
         // Return an empty map; callers handle this as "no notes in git".
-        NotesBackendKind::Http => Ok(HashMap::new()),
+        NotesBackendKind::Sqlite | NotesBackendKind::Http => Ok(HashMap::new()),
         NotesBackendKind::GitNotes => {
             crate::git::refs::note_blob_oids_for_commits(repo, commit_shas)
         }
@@ -166,9 +217,9 @@ pub fn commits_with_notes(
     repo: &Repository,
     commit_shas: &[String],
 ) -> Result<HashSet<String>, GitAiError> {
-    match Config::get().notes_backend_kind() {
-        NotesBackendKind::Http => {
-            // Check the cache first; fall through to git notes for misses.
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite | NotesBackendKind::Http => {
+            // Check the database first; fall through to git notes for misses.
             let cached = http_check_exists(commit_shas);
             if cached.len() == commit_shas.len() {
                 return Ok(cached);
@@ -192,8 +243,8 @@ pub fn filter_commits_with_notes(
     repo: &Repository,
     commit_shas: &[String],
 ) -> Result<Vec<CommitAuthorship>, GitAiError> {
-    match Config::get().notes_backend_kind() {
-        NotesBackendKind::Http => {
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite | NotesBackendKind::Http => {
             // `CommitAuthorship` requires a git_author that is only available from
             // `git rev-list`. Call the underlying git function which handles author
             // lookup, then patch in cache hits for commits whose `authorship_log`
@@ -251,8 +302,8 @@ pub fn filter_commits_with_notes(
 /// matches from local git notes (transition-period repos may have both); on
 /// the GitNotes backend it greps `refs/notes/ai` directly.
 pub fn search_notes(repo: &Repository, pattern: &str) -> Result<Vec<String>, GitAiError> {
-    match Config::get().notes_backend_kind() {
-        NotesBackendKind::Http => http_search_notes(repo, pattern),
+    match Config::fresh().notes_backend_kind() {
+        NotesBackendKind::Sqlite | NotesBackendKind::Http => http_search_notes(repo, pattern),
         NotesBackendKind::GitNotes => crate::git::refs::grep_ai_notes(repo, pattern),
     }
 }
@@ -539,6 +590,58 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
 
 // --- HTTP backend helpers (private) ---
 
+/// Export entries directly into `refs/notes/ai` regardless of the configured
+/// backend. Used by `git-ai notes migrate --to git-notes` to share sqlite-backed
+/// attribution via the notes ref.
+pub fn export_notes_to_git_refs(
+    repo: &Repository,
+    entries: &[(String, String)],
+) -> Result<(), GitAiError> {
+    crate::git::refs::notes_add_batch(repo, entries)
+}
+
+/// Sqlite backend: write a note as local-primary storage.
+fn sqlite_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
+    let db = crate::notes::db::NotesDatabase::global()?;
+    let mut db_lock = db
+        .lock()
+        .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
+    db_lock.upsert_local_note(commit_sha, content)
+}
+
+/// Sqlite backend: write a batch of notes as local-primary storage.
+fn sqlite_write_batch(entries: &[(String, String)]) -> Result<(), GitAiError> {
+    let db = crate::notes::db::NotesDatabase::global()?;
+    let mut db_lock = db
+        .lock()
+        .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
+    db_lock.upsert_local_notes_batch(entries)
+}
+
+/// Sqlite backend: read a single note from refs/notes/ai on database miss and
+/// backfill it into the cache so the next read is served from the database.
+fn sqlite_fallback_read_from_refs(repo: &Repository, commit_sha: &str) -> Option<String> {
+    let content = crate::git::refs::show_authorship_note(repo, commit_sha)?;
+    sqlite_backfill_cache(&HashMap::from([(commit_sha.to_string(), content.clone())]));
+    Some(content)
+}
+
+/// Best-effort backfill of refs/notes/ai fallback reads into the cache.
+fn sqlite_backfill_cache(notes: &HashMap<String, String>) {
+    if notes.is_empty() {
+        return;
+    }
+    let entries: Vec<(String, String)> = notes
+        .iter()
+        .map(|(sha, content)| (sha.clone(), content.clone()))
+        .collect();
+    if let Ok(db) = crate::notes::db::NotesDatabase::global()
+        && let Ok(mut db_lock) = db.lock()
+    {
+        let _ = db_lock.cache_synced_notes(&entries);
+    }
+}
+
 fn http_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
     let db = crate::notes::db::NotesDatabase::global()?;
     let mut db_lock = db
@@ -766,7 +869,9 @@ mod tests {
         // through the kind check inline.
         let kind = crate::config::Config::fresh().notes_backend_kind();
         let result: Result<HashMap<String, String>, _> = match kind {
-            crate::config::NotesBackendKind::Http => Ok(HashMap::new()),
+            crate::config::NotesBackendKind::Sqlite | crate::config::NotesBackendKind::Http => {
+                Ok(HashMap::new())
+            }
             crate::config::NotesBackendKind::GitNotes => {
                 crate::git::refs::note_blob_oids_for_commits(tmp.gitai_repo(), &["abc".to_string()])
             }

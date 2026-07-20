@@ -162,7 +162,7 @@ pub struct Config {
     #[serde(serialize_with = "serialize_patterns")]
     include_prompts_in_repositories: Vec<Pattern>,
     #[serde(serialize_with = "serialize_patterns")]
-    allow_repositories: Vec<Pattern>,
+    allowed_repositories: Vec<Pattern>,
     #[serde(serialize_with = "serialize_patterns")]
     exclude_repositories: Vec<Pattern>,
     telemetry_oss_disabled: bool,
@@ -228,8 +228,12 @@ pub struct FileConfig {
     pub exclude_prompts_in_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_prompts_in_repositories: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allow_repositories: Option<Vec<String>>,
+    #[serde(
+        default,
+        alias = "allow_repositories",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub allowed_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -313,6 +317,12 @@ static TEST_FEATURE_FLAGS_OVERRIDE: RwLock<Option<FeatureFlags>> = RwLock::new(N
 pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude_prompts_in_repositories: Option<Vec<String>>,
+    #[serde(
+        default,
+        alias = "allow_repositories",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub allowed_repositories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry_oss_disabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -405,24 +415,30 @@ impl Config {
         &self.git_path
     }
 
-    pub fn has_repository_filters(&self) -> bool {
-        !self.allow_repositories.is_empty() || !self.exclude_repositories.is_empty()
+    /// True when at least one repository is allowed for collection.
+    /// Collection is opt-in: with an empty allowlist git-ai collects nothing.
+    pub fn has_allowed_repositories(&self) -> bool {
+        !self.allowed_repositories.is_empty()
     }
 
-    pub fn is_allowed_repository(&self, repository: &Option<Repository>) -> bool {
+    pub fn is_allowed_repository(&self, repository: Option<&Repository>) -> bool {
         // Fetch remotes once and reuse for both exclude and allow checks
-        let remotes = repository
-            .as_ref()
-            .and_then(|repo| repo.remotes_with_urls().ok());
+        let remotes = repository.and_then(|repo| repo.remotes_with_urls().ok());
+        let repo_root = repository.map(|repo| repo.canonical_workdir());
 
-        self.is_allowed_repository_with_remotes(remotes.as_ref())
+        self.is_allowed_repository_with_context(remotes.as_ref(), repo_root)
     }
 
-    /// Helper that accepts pre-fetched remotes to avoid multiple git operations
+    /// Helper that accepts pre-fetched remotes and the repository root to avoid
+    /// repeated git operations. Collection is opt-in: an empty
+    /// `allowed_repositories` list denies every repository. Entries match
+    /// either a remote URL or the repository root path (glob patterns; a plain
+    /// directory entry also matches every repository beneath it).
     #[cfg_attr(test, allow(dead_code))]
-    pub(crate) fn is_allowed_repository_with_remotes(
+    pub(crate) fn is_allowed_repository_with_context(
         &self,
         remotes: Option<&Vec<(String, String)>>,
+        repo_root: Option<&Path>,
     ) -> bool {
         if remotes.is_some_and(|remotes| {
             remotes.iter().any(|(_, remote_url)| {
@@ -432,31 +448,36 @@ impl Config {
             return true;
         }
 
-        // First check if repository is in exclusion list - exclusions take precedence
-        if !self.exclude_repositories.is_empty()
-            && let Some(remotes) = remotes
-        {
-            // If any remote matches the exclusion patterns, deny access
-            if remotes
-                .iter()
-                .any(|remote| remote_matches_patterns(&self.exclude_repositories, &remote.1))
+        // Exclusions take precedence over the allowlist.
+        if !self.exclude_repositories.is_empty() {
+            if let Some(remotes) = remotes
+                && remotes
+                    .iter()
+                    .any(|remote| remote_matches_patterns(&self.exclude_repositories, &remote.1))
+            {
+                return false;
+            }
+            if let Some(root) = repo_root
+                && repo_root_matches_patterns(&self.exclude_repositories, root)
             {
                 return false;
             }
         }
 
-        // If allowlist is empty, allow everything (unless excluded above)
-        if self.allow_repositories.is_empty() {
-            return true;
+        // Collection is opt-in: an empty allowlist denies everything.
+        if self.allowed_repositories.is_empty() {
+            return false;
         }
 
-        // If allowlist is defined, only allow repos whose remotes match the patterns
-        match remotes {
-            Some(remotes) => remotes
+        let remote_allowed = remotes.is_some_and(|remotes| {
+            remotes
                 .iter()
-                .any(|remote| remote_matches_patterns(&self.allow_repositories, &remote.1)),
-            None => false, // Can't verify, deny by default when allowlist is active
-        }
+                .any(|remote| remote_matches_patterns(&self.allowed_repositories, &remote.1))
+        });
+
+        remote_allowed
+            || repo_root
+                .is_some_and(|root| repo_root_matches_patterns(&self.allowed_repositories, root))
     }
 
     /// Returns true if prompts should be excluded (not shared) for the given repository.
@@ -563,7 +584,7 @@ impl Config {
     /// This enables two use cases:
     /// - User A: git-ai everywhere, CAS for work repos, notes for others
     ///   (prompt_storage="default", include_prompts=["positron-ai/*"], default_prompt_storage="notes")
-    /// - User B: git-ai only in work repos (via allow_repositories), CAS there
+    /// - User B: git-ai only in work repos (via allowed_repositories), CAS there
     ///   (prompt_storage="default", no include list needed)
     pub fn effective_prompt_storage(&self, repository: &Option<Repository>) -> PromptStorageMode {
         // Step 1: Check exclusion list first (deny always wins)
@@ -749,6 +770,22 @@ where
 {
     let as_strings: Vec<&str> = patterns.iter().map(Pattern::as_str).collect();
     as_strings.serialize(serializer)
+}
+
+/// Match a repository root path against allow/exclude patterns.
+/// Both the root and the pattern are POSIX-normalized. A pattern matches when
+/// it equals the root, glob-matches it, or names a parent directory of it
+/// (an entry `/work/repos` matches every repository beneath `/work/repos`).
+fn repo_root_matches_patterns(patterns: &[Pattern], repo_root: &Path) -> bool {
+    let root = crate::utils::normalize_to_posix(&repo_root.to_string_lossy());
+    let root = root.trim_end_matches('/');
+    patterns.iter().any(|pattern| {
+        let normalized = crate::utils::normalize_to_posix(pattern.as_str());
+        let pattern_str = normalized.trim_end_matches('/');
+        pattern_str == root
+            || Pattern::new(pattern_str).is_ok_and(|glob| glob.matches(root))
+            || Pattern::new(&format!("{}/**", pattern_str)).is_ok_and(|glob| glob.matches(root))
+    })
 }
 
 fn remote_matches_patterns(patterns: &[Pattern], remote_url: &str) -> bool {
@@ -980,16 +1017,16 @@ fn build_config() -> Config {
                 .ok()
         })
         .collect();
-    let allow_repositories = file_cfg
+    let allowed_repositories = file_cfg
         .as_ref()
-        .and_then(|c| c.allow_repositories.clone())
+        .and_then(|c| c.allowed_repositories.clone())
         .unwrap_or_default()
         .into_iter()
         .filter_map(|pattern_str| {
             Pattern::new(&pattern_str)
                 .map_err(|e| {
                     eprintln!(
-                        "Warning: Invalid glob pattern in allow_repositories '{}': {}",
+                        "Warning: Invalid glob pattern in allowed_repositories '{}': {}",
                         pattern_str, e
                     );
                 })
@@ -1217,7 +1254,7 @@ fn build_config() -> Config {
             git_path,
             exclude_prompts_in_repositories,
             include_prompts_in_repositories,
-            allow_repositories,
+            allowed_repositories,
             exclude_repositories,
             telemetry_oss_disabled,
             telemetry_enterprise_dsn,
@@ -1250,7 +1287,7 @@ fn build_config() -> Config {
         git_path,
         exclude_prompts_in_repositories,
         include_prompts_in_repositories,
-        allow_repositories,
+        allowed_repositories,
         exclude_repositories,
         telemetry_oss_disabled,
         telemetry_enterprise_dsn,
@@ -1649,6 +1686,21 @@ fn apply_test_config_patch(config: &mut Config) {
     if let Ok(patch_json) = env::var("GIT_AI_TEST_CONFIG_PATCH")
         && let Ok(patch) = serde_json::from_str::<ConfigPatch>(&patch_json)
     {
+        if let Some(patterns) = patch.allowed_repositories {
+            config.allowed_repositories = patterns
+                .into_iter()
+                .filter_map(|pattern_str| {
+                    Pattern::new(&pattern_str)
+                        .map_err(|e| {
+                            eprintln!(
+                                "Warning: Invalid test pattern in allowed_repositories '{}': {}",
+                                pattern_str, e
+                            );
+                        })
+                        .ok()
+                })
+                .collect();
+        }
         if let Some(patterns) = patch.exclude_prompts_in_repositories {
             config.exclude_prompts_in_repositories = patterns
                     .into_iter()
@@ -1736,14 +1788,14 @@ mod tests {
     use super::*;
 
     fn create_test_config(
-        allow_repositories: Vec<String>,
+        allowed_repositories: Vec<String>,
         exclude_repositories: Vec<String>,
     ) -> Config {
         Config {
             git_path: "/usr/bin/git".to_string(),
             exclude_prompts_in_repositories: vec![],
             include_prompts_in_repositories: vec![],
-            allow_repositories: allow_repositories
+            allowed_repositories: allowed_repositories
                 .into_iter()
                 .filter_map(|s| Pattern::new(&s).ok())
                 .collect(),
@@ -1820,25 +1872,41 @@ mod tests {
             vec!["https://github.com/allowed/repo".to_string()],
         );
 
-        // Test with None repository - should return false when allowlist is active
-        assert!(!config.is_allowed_repository(&None));
+        let remotes = vec![(
+            "origin".to_string(),
+            "https://github.com/allowed/repo".to_string(),
+        )];
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
-    fn test_empty_allowlist_allows_everything() {
+    fn test_empty_allowlist_denies_everything() {
         let config = create_test_config(vec![], vec![]);
 
-        // With empty allowlist, should allow everything
-        assert!(config.is_allowed_repository(&None));
+        // Collection is opt-in: an empty allowlist denies everything.
+        assert!(!config.is_allowed_repository(None));
+        let remotes = vec![(
+            "origin".to_string(),
+            "https://github.com/any/repo".to_string(),
+        )];
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
+        assert!(
+            !config.is_allowed_repository_with_context(None, Some(Path::new("/work/some-repo")))
+        );
     }
 
     #[test]
-    fn test_exclude_without_allow() {
+    fn test_exclude_without_allow_still_denies() {
         let config =
             create_test_config(vec![], vec!["https://github.com/excluded/repo".to_string()]);
 
-        // With empty allowlist but exclusions, should allow everything (exclusions only matter when checking remotes)
-        assert!(config.is_allowed_repository(&None));
+        // Exclusions do not turn on collection: the allowlist is still empty.
+        assert!(!config.is_allowed_repository(None));
+        let remotes = vec![(
+            "origin".to_string(),
+            "https://github.com/unrelated/repo".to_string(),
+        )];
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
@@ -1846,8 +1914,100 @@ mod tests {
         let config =
             create_test_config(vec!["https://github.com/allowed/repo".to_string()], vec![]);
 
-        // With allowlist but no exclusions, should deny when no repository provided
-        assert!(!config.is_allowed_repository(&None));
+        // With an allowlist but no repository context, deny.
+        assert!(!config.is_allowed_repository(None));
+
+        let allowed_remotes = vec![(
+            "origin".to_string(),
+            "https://github.com/allowed/repo".to_string(),
+        )];
+        assert!(config.is_allowed_repository_with_context(Some(&allowed_remotes), None));
+
+        let other_remotes = vec![(
+            "origin".to_string(),
+            "https://github.com/other/repo".to_string(),
+        )];
+        assert!(!config.is_allowed_repository_with_context(Some(&other_remotes), None));
+    }
+
+    #[test]
+    fn test_allowlist_matches_repo_root_paths() {
+        let config = create_test_config(vec!["/work/repos".to_string()], vec![]);
+
+        // Exact directory entry allows the repo itself and everything beneath it.
+        assert!(config.is_allowed_repository_with_context(None, Some(Path::new("/work/repos"))));
+        assert!(
+            config.is_allowed_repository_with_context(None, Some(Path::new("/work/repos/project")))
+        );
+        assert!(config.is_allowed_repository_with_context(
+            None,
+            Some(Path::new("/work/repos/nested/deep/project"))
+        ));
+        assert!(!config.is_allowed_repository_with_context(None, Some(Path::new("/work/other"))));
+        assert!(!config.is_allowed_repository_with_context(
+            None,
+            Some(Path::new("/work/repos-other/project"))
+        ));
+    }
+
+    #[test]
+    fn test_allowlist_matches_repo_root_glob() {
+        let config = create_test_config(vec!["/home/*/projects".to_string()], vec![]);
+
+        assert!(
+            config.is_allowed_repository_with_context(None, Some(Path::new("/home/dev/projects")))
+        );
+        assert!(
+            config.is_allowed_repository_with_context(
+                None,
+                Some(Path::new("/home/dev/projects/repo"))
+            )
+        );
+        assert!(!config.is_allowed_repository_with_context(None, Some(Path::new("/home/dev/src"))));
+    }
+
+    #[test]
+    fn test_allowlist_matches_windows_style_path_entries() {
+        // Entries written with backslashes are normalized before matching.
+        let config = create_test_config(vec!["C:\\Users\\dev\\work".to_string()], vec![]);
+
+        assert!(
+            config.is_allowed_repository_with_context(
+                None,
+                Some(Path::new("C:/Users/dev/work/repo"))
+            )
+        );
+        assert!(
+            !config.is_allowed_repository_with_context(None, Some(Path::new("C:/Users/dev/other")))
+        );
+    }
+
+    #[test]
+    fn test_exclusion_matches_repo_root_paths() {
+        let config =
+            create_test_config(vec!["/work".to_string()], vec!["/work/secret".to_string()]);
+
+        assert!(config.is_allowed_repository_with_context(None, Some(Path::new("/work/repo"))));
+        assert!(
+            !config.is_allowed_repository_with_context(None, Some(Path::new("/work/secret/repo")))
+        );
+    }
+
+    #[test]
+    fn test_remote_allowlist_ignores_unrelated_repo_root() {
+        let config = create_test_config(vec!["https://github.com/org/*".to_string()], vec![]);
+
+        // A repo root that matches nothing does not defeat a remote match.
+        let remotes = vec![(
+            "origin".to_string(),
+            "https://github.com/org/repo".to_string(),
+        )];
+        assert!(
+            config
+                .is_allowed_repository_with_context(Some(&remotes), Some(Path::new("/tmp/clone")))
+        );
+        // And a path-only repo does not match a URL-only allowlist.
+        assert!(!config.is_allowed_repository_with_context(None, Some(Path::new("/tmp/clone"))));
     }
 
     #[test]
@@ -1856,10 +2016,10 @@ mod tests {
 
         // Test that the pattern would match (note: we can't easily test with real Repository objects,
         // but the pattern compilation is tested by the fact that create_test_config succeeds)
-        assert!(!config.allow_repositories.is_empty());
-        assert!(config.allow_repositories[0].matches("https://github.com/myorg/repo1"));
-        assert!(config.allow_repositories[0].matches("https://github.com/myorg/repo2"));
-        assert!(!config.allow_repositories[0].matches("https://github.com/other/repo"));
+        assert!(!config.allowed_repositories.is_empty());
+        assert!(config.allowed_repositories[0].matches("https://github.com/myorg/repo1"));
+        assert!(config.allowed_repositories[0].matches("https://github.com/myorg/repo2"));
+        assert!(!config.allowed_repositories[0].matches("https://github.com/other/repo"));
     }
 
     #[test]
@@ -1878,9 +2038,9 @@ mod tests {
         let config = create_test_config(vec!["https://github.com/exact/match".to_string()], vec![]);
 
         // Test that exact matches still work (glob treats them as literals)
-        assert!(!config.allow_repositories.is_empty());
-        assert!(config.allow_repositories[0].matches("https://github.com/exact/match"));
-        assert!(!config.allow_repositories[0].matches("https://github.com/exact/other"));
+        assert!(!config.allowed_repositories.is_empty());
+        assert!(config.allowed_repositories[0].matches("https://github.com/exact/match"));
+        assert!(!config.allowed_repositories[0].matches("https://github.com/exact/other"));
     }
 
     #[test]
@@ -1888,10 +2048,10 @@ mod tests {
         let config = create_test_config(vec!["*@github.com:company/*".to_string()], vec![]);
 
         // Test more complex patterns with wildcards
-        assert!(!config.allow_repositories.is_empty());
-        assert!(config.allow_repositories[0].matches("git@github.com:company/repo"));
-        assert!(config.allow_repositories[0].matches("user@github.com:company/project"));
-        assert!(!config.allow_repositories[0].matches("git@github.com:other/repo"));
+        assert!(!config.allowed_repositories.is_empty());
+        assert!(config.allowed_repositories[0].matches("git@github.com:company/repo"));
+        assert!(config.allowed_repositories[0].matches("user@github.com:company/project"));
+        assert!(!config.allowed_repositories[0].matches("git@github.com:other/repo"));
     }
 
     #[test]
@@ -1994,7 +2154,7 @@ mod tests {
                 .filter_map(|s| Pattern::new(&s).ok())
                 .collect(),
             include_prompts_in_repositories: vec![],
-            allow_repositories: vec![],
+            allowed_repositories: vec![],
             exclude_repositories: vec![],
             telemetry_oss_disabled: false,
             telemetry_enterprise_dsn: None,
@@ -2142,7 +2302,7 @@ mod tests {
                 .into_iter()
                 .filter_map(|s| Pattern::new(&s).ok())
                 .collect(),
-            allow_repositories: vec![],
+            allowed_repositories: vec![],
             exclude_repositories: vec![],
             telemetry_oss_disabled: false,
             telemetry_enterprise_dsn: None,
@@ -2384,17 +2544,20 @@ mod tests {
             "origin".to_string(),
             "https://github.com/excluded/repo".to_string(),
         )];
-        assert!(!config.is_allowed_repository_with_remotes(Some(&remotes)));
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
     fn test_allowed_repo_not_excluded_with_remotes() {
-        let config = create_test_config(vec![], vec!["https://github.com/excluded/*".to_string()]);
+        let config = create_test_config(
+            vec!["https://github.com/allowed/*".to_string()],
+            vec!["https://github.com/excluded/*".to_string()],
+        );
         let remotes = vec![(
             "origin".to_string(),
             "https://github.com/allowed/repo".to_string(),
         )];
-        assert!(config.is_allowed_repository_with_remotes(Some(&remotes)));
+        assert!(config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
@@ -2404,7 +2567,7 @@ mod tests {
             "origin".to_string(),
             "https://github.com/myorg/project".to_string(),
         )];
-        assert!(config.is_allowed_repository_with_remotes(Some(&remotes)));
+        assert!(config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
@@ -2414,7 +2577,7 @@ mod tests {
             "origin".to_string(),
             "ssh://git@github.com/myorg/project".to_string(),
         )];
-        assert!(config.is_allowed_repository_with_remotes(Some(&remotes)));
+        assert!(config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
@@ -2424,7 +2587,7 @@ mod tests {
             "origin".to_string(),
             "https://github.com/other/project".to_string(),
         )];
-        assert!(!config.is_allowed_repository_with_remotes(Some(&remotes)));
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
@@ -2437,42 +2600,55 @@ mod tests {
             "origin".to_string(),
             "https://github.com/myorg/secret".to_string(),
         )];
-        assert!(!config.is_allowed_repository_with_remotes(Some(&remotes)));
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
     fn test_exclusion_matches_scp_remote_with_ssh_url_pattern() {
-        let config =
-            create_test_config(vec![], vec!["ssh://git@github.com/excluded/*".to_string()]);
+        let config = create_test_config(
+            vec!["git@github.com:excluded/*".to_string()],
+            vec!["ssh://git@github.com/excluded/*".to_string()],
+        );
         let remotes = vec![(
             "origin".to_string(),
             "git@github.com:excluded/repo".to_string(),
         )];
-        assert!(!config.is_allowed_repository_with_remotes(Some(&remotes)));
+        // The remote matches the allowlist, but the normalized exclusion wins.
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
-    fn test_no_remotes_allowed_when_only_excludes() {
+    fn test_no_remotes_denied_with_empty_allowlist() {
         let config = create_test_config(vec![], vec!["https://github.com/excluded/*".to_string()]);
-        assert!(config.is_allowed_repository_with_remotes(None));
+        assert!(!config.is_allowed_repository_with_context(None, None));
     }
 
     #[test]
     fn test_no_remotes_denied_when_allowlist_active() {
         let config = create_test_config(vec!["https://github.com/myorg/*".to_string()], vec![]);
-        assert!(!config.is_allowed_repository_with_remotes(None));
+        assert!(!config.is_allowed_repository_with_context(None, None));
     }
 
     #[test]
     fn test_empty_remotes_treated_as_no_match_for_exclusion() {
-        let config = create_test_config(vec![], vec!["https://github.com/excluded/*".to_string()]);
+        let config = create_test_config(
+            vec!["/work".to_string()],
+            vec!["https://github.com/excluded/*".to_string()],
+        );
         let remotes: Vec<(String, String)> = vec![];
-        assert!(config.is_allowed_repository_with_remotes(Some(&remotes)));
+        // No remotes to exclude; the repo root still satisfies the allowlist.
+        assert!(
+            config
+                .is_allowed_repository_with_context(Some(&remotes), Some(Path::new("/work/repo")))
+        );
     }
 
     #[test]
     fn test_multiple_remotes_one_excluded() {
-        let config = create_test_config(vec![], vec!["https://github.com/excluded/*".to_string()]);
+        let config = create_test_config(
+            vec!["https://github.com/allowed/*".to_string()],
+            vec!["https://github.com/excluded/*".to_string()],
+        );
         let remotes = vec![
             (
                 "origin".to_string(),
@@ -2483,7 +2659,7 @@ mod tests {
                 "https://github.com/excluded/repo".to_string(),
             ),
         ];
-        assert!(!config.is_allowed_repository_with_remotes(Some(&remotes)));
+        assert!(!config.is_allowed_repository_with_context(Some(&remotes), None));
     }
 
     #[test]
@@ -2504,6 +2680,38 @@ mod tests {
 
         let parsed = parse_file_config_bytes(data).expect("regular config should parse");
         assert_eq!(parsed.git_path.as_deref(), Some("/usr/bin/git"));
+    }
+
+    #[test]
+    fn test_file_config_accepts_legacy_allow_repositories_key() {
+        let data = br#"{"allow_repositories":["https://github.com/org/*"]}"#;
+
+        let parsed = parse_file_config_bytes(data).expect("legacy key should parse");
+        assert_eq!(
+            parsed.allowed_repositories,
+            Some(vec!["https://github.com/org/*".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_file_config_accepts_allowed_repositories_key() {
+        let data = br#"{"allowed_repositories":["/work/repos"]}"#;
+
+        let parsed = parse_file_config_bytes(data).expect("canonical key should parse");
+        assert_eq!(
+            parsed.allowed_repositories,
+            Some(vec!["/work/repos".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_config_patch_accepts_both_allowlist_keys() {
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"allowed_repositories":["/a"]}"#).unwrap();
+        assert_eq!(patch.allowed_repositories, Some(vec!["/a".to_string()]));
+
+        let legacy: ConfigPatch = serde_json::from_str(r#"{"allow_repositories":["/b"]}"#).unwrap();
+        assert_eq!(legacy.allowed_repositories, Some(vec!["/b".to_string()]));
     }
 
     #[test]

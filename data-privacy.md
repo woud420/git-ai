@@ -1,5 +1,9 @@
 # Data Privacy
 
+## Collection is opt-in per repository
+
+Git AI collects nothing by default. Attribution and prompt collection run only in repositories you explicitly list in the `allowed_repositories` setting (`git-ai config --add allowed_repositories <path-or-url>`); every other repository is left untouched — no working logs, no notes, no prompt capture.
+
 ## OSS Mode
 
 If you install Git AI open source and don't login **no code, prompts, or agent usage data is ever sent to Git AI**. Git AI runs entirely on your machine and writes attribution data into your local git repository and prompts to a local SQLite.

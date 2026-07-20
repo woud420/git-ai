@@ -237,6 +237,8 @@ Uses `insta` crate. Snapshots live in `tests/integration/snapshots/` and `tests/
 
 ## Gotchas
 
+- **Collection is opt-in per repository**: an empty `allowed_repositories` config denies every repo (checkpoints are refused and the daemon skips post-commit authorship). `TestRepo`'s default config patch allows the OS temp root so tests collect normally; a test that clears the allowlist must use a dedicated daemon (`TestRepo::new_dedicated_daemon()`) so it cannot rewrite the shared daemon's config out from under concurrently running tests.
+
 - **Test binary auto-compilation**: Integration tests trigger `cargo build --bin git-ai` on first test run via `OnceLock`. If you change code and run tests, the test harness recompiles. This can cause confusion if you're debugging -- the test binary is always a debug build at `target/debug/git-ai`.
 
 - **argv[0] dispatch is load-bearing**: The binary's behavior is entirely determined by how it's invoked. In production, symlinking as `git` makes it a proxy. The `GIT_AI=git` env var forces proxy mode (debug builds only). Breaking this dispatch breaks everything.

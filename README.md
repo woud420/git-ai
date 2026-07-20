@@ -46,7 +46,14 @@ curl -sSL https://usegitai.com/install.sh | bash
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://usegitai.com/install.ps1 | iex"
 ```
 
-**No per-repo setup or git hooks required.** Commit with the Agent, git, or your favorite git client. Attribution will be linked to commits automatically.
+**Collection is opt-in per repository.** After installing, allow the repositories you want git-ai to track — everything else is left untouched:
+
+```bash
+git-ai config --add allowed_repositories ~/work/my-repo   # a local path…
+git-ai config --add allowed_repositories "https://github.com/my-org/*"  # …or a remote URL glob
+```
+
+**No per-repo setup or git hooks required.** Commit with the Agent, git, or your favorite git client. In allowed repositories, attribution will be linked to commits automatically.
 
 **The [Git AI standard](https://github.com/git-ai-project/git-ai/blob/main/specs/git_ai_standard_v3.0.0.md) is supported by:**
 <table>

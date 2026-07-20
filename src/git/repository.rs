@@ -1195,6 +1195,11 @@ impl Repository {
         Ok(self.workdir.clone())
     }
 
+    /// Canonical (symlink-resolved) working directory root.
+    pub fn canonical_workdir(&self) -> &Path {
+        self.canonical_workdir.as_path()
+    }
+
     /// Returns true when this repository is bare.
     pub fn is_bare_repository(&self) -> Result<bool, GitAiError> {
         let mut args = self.global_args_for_exec();

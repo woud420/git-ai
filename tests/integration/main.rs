@@ -11,6 +11,7 @@ mod agent_usage_repo_url;
 mod agent_v1;
 mod ai_reflow_attribution;
 mod ai_tab;
+mod allowed_repositories;
 mod amend;
 mod amp;
 mod attribution_tracker_comprehensive;

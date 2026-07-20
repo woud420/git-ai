@@ -2646,7 +2646,10 @@ fn test_amend_preserves_sessions_under_http_notes_backend() {
     // with the HTTP backend. The test-home config.json writer does not cover
     // notes_backend and the daemon caches config at startup, so pass the patch
     // via env at daemon spawn.
+    let temp_root = std::env::temp_dir();
+    let temp_root = temp_root.canonicalize().unwrap_or(temp_root);
     let daemon_patch = ConfigPatch {
+        allowed_repositories: Some(vec![temp_root.to_string_lossy().replace('\\', "/")]),
         exclude_prompts_in_repositories: Some(vec![]),
         prompt_storage: Some("notes".to_string()),
         notes_backend: Some(NotesBackendConfig {

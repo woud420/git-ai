@@ -22,6 +22,7 @@ pub mod personal_dashboard;
 pub mod show;
 pub mod show_prompt;
 pub mod status;
+pub mod uninstall;
 pub mod upgrade;
 pub mod usage;
 pub mod whoami;

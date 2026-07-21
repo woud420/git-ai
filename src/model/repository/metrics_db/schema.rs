@@ -1,4 +1,5 @@
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use rusqlite::params;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -186,8 +187,7 @@ impl MetricsDatabase {
             return Ok(PathBuf::from(test_path));
         }
 
-        let home = dirs::home_dir()
-            .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
+        let home = dirs::home_dir().ok_or_else(PersistenceError::home_dir_not_found)?;
         Ok(home.join(".git-ai").join("internal").join("metrics-db"))
     }
 
@@ -210,11 +210,11 @@ impl MetricsDatabase {
                 return Ok(());
             }
             if current_version > SCHEMA_VERSION {
-                return Err(GitAiError::Generic(format!(
-                    "Metrics database schema version {} is newer than supported version {}. \
-                     Please upgrade git-ai to the latest version.",
-                    current_version, SCHEMA_VERSION
-                )));
+                return Err(PersistenceError::schema_version(
+                    "metrics",
+                    current_version,
+                    SCHEMA_VERSION,
+                ));
             }
         }
 
@@ -266,11 +266,11 @@ impl MetricsDatabase {
     /// Apply a single migration
     fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
         if from_version >= MIGRATIONS.len() {
-            return Err(GitAiError::Generic(format!(
-                "No migration defined for version {} -> {}",
+            return Err(PersistenceError::no_migration_path(
+                "metrics",
                 from_version,
-                from_version + 1
-            )));
+                from_version + 1,
+            ));
         }
 
         if from_version == 2 {

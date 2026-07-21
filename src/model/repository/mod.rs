@@ -14,6 +14,7 @@
 //! - [`bash_history_db`] — bash tool-use checkpoint provenance
 
 pub mod bash_history_db;
+pub mod error;
 pub mod internal_db;
 pub mod metrics_db;
 pub mod notes_db;

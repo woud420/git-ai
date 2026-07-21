@@ -2,6 +2,7 @@
 // It has been superseded by use-case-specific databases.
 
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use dirs;
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
@@ -185,8 +186,7 @@ impl InternalDatabase {
             return Ok(PathBuf::from(test_path));
         }
 
-        let home = dirs::home_dir()
-            .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
+        let home = dirs::home_dir().ok_or_else(PersistenceError::home_dir_not_found)?;
         Ok(home.join(".git-ai").join("internal").join("db"))
     }
 
@@ -302,11 +302,11 @@ impl InternalDatabase {
     /// Migration failures are FATAL - the program cannot continue with a partially migrated database
     fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
         if from_version >= MIGRATIONS.len() {
-            return Err(GitAiError::Generic(format!(
-                "No migration defined for version {} -> {}",
+            return Err(PersistenceError::no_migration_path(
+                "internal",
                 from_version,
-                from_version + 1
-            )));
+                from_version + 1,
+            ));
         }
 
         let migration_sql = MIGRATIONS[from_version];

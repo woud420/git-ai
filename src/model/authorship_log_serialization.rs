@@ -165,7 +165,7 @@ impl AuthorshipLog {
         for file_attestation in &self.attestations {
             // Quote file names that contain spaces or whitespace
             let file_path = if needs_quoting(&file_attestation.file_path) {
-                format!("\"{}\"", &file_attestation.file_path)
+                format!("\"{}\"", file_attestation.file_path)
             } else {
                 file_attestation.file_path.clone()
             };

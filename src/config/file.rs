@@ -513,7 +513,7 @@ pub(crate) fn build_config() -> Config {
                 .and_then(|c| c.transcript_streaming_lookback_days)
         })
         .or(Some(7))
-        .and_then(|v| if v == 0 { None } else { Some(v) });
+        .filter(|&v| v != 0);
 
     // Checkpoint content limits: env > file > defaults.
     let max_checkpoint_file_size_bytes = env::var("GIT_AI_MAX_CHECKPOINT_FILE_SIZE_BYTES")

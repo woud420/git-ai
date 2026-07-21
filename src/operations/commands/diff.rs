@@ -1915,25 +1915,19 @@ fn parse_hunk_header_for_line_nums(line: &str) -> Option<(u32, u32)> {
     let new_part = parts[2];
 
     // Extract old_start
-    let old_start = if let Some(old_str) = old_part.strip_prefix('-') {
-        if let Some((start_str, _)) = old_str.split_once(',') {
-            start_str.parse::<u32>().ok()?
-        } else {
-            old_str.parse::<u32>().ok()?
-        }
+    let old_str = old_part.strip_prefix('-')?;
+    let old_start = if let Some((start_str, _)) = old_str.split_once(',') {
+        start_str.parse::<u32>().ok()?
     } else {
-        return None;
+        old_str.parse::<u32>().ok()?
     };
 
     // Extract new_start
-    let new_start = if let Some(new_str) = new_part.strip_prefix('+') {
-        if let Some((start_str, _)) = new_str.split_once(',') {
-            start_str.parse::<u32>().ok()?
-        } else {
-            new_str.parse::<u32>().ok()?
-        }
+    let new_str = new_part.strip_prefix('+')?;
+    let new_start = if let Some((start_str, _)) = new_str.split_once(',') {
+        start_str.parse::<u32>().ok()?
     } else {
-        return None;
+        new_str.parse::<u32>().ok()?
     };
 
     Some((old_start, new_start))

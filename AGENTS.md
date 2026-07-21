@@ -221,7 +221,7 @@ Uses `insta` crate. Snapshots live in `tests/integration/snapshots/` and `tests/
 
 ## Key Conventions
 
-- **Rust 2024 edition** with Rust 1.93.0 -- uses let-chains (`if let Some(x) = foo && condition`), which are stable in edition 2024.
+- **Rust 2024 edition** with Rust 1.97+ -- uses let-chains (`if let Some(x) = foo && condition`), which are stable in edition 2024.
 - **Git CLI only**: All git operations use `std::process::Command` to call the real git binary. The `git2`/libgit2 dependency has been fully removed. The binary acts as a transparent git proxy.
 - **`debug_log()`** for conditional debug output: prints `[git-ai]` prefixed messages to stderr when `cfg!(debug_assertions)` or `GIT_AI_DEBUG=1`. Set `GIT_AI_DEBUG=0` to suppress in debug builds.
 - **`GIT_AI_DEBUG_PERFORMANCE=1`** (or `=2` for JSON) enables performance timing output.

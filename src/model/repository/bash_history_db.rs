@@ -1,4 +1,5 @@
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::AgentId;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
@@ -244,9 +245,7 @@ impl BashHistoryDatabase {
         if let Ok(test_path) = std::env::var("GIT_AI_TEST_BASH_CHECKPOINT_DB_PATH") {
             return Ok(PathBuf::from(test_path));
         }
-
-        let home = dirs::home_dir()
-            .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
+        let home = dirs::home_dir().ok_or_else(PersistenceError::home_dir_not_found)?;
         Ok(home
             .join(".git-ai")
             .join("internal")
@@ -270,10 +269,11 @@ impl BashHistoryDatabase {
                 return Ok(());
             }
             if current_version > SCHEMA_VERSION {
-                return Err(GitAiError::Generic(format!(
-                    "Bash history database schema version {} is newer than supported version {}. Please upgrade git-ai.",
-                    current_version, SCHEMA_VERSION
-                )));
+                return Err(PersistenceError::schema_version(
+                    "bash history",
+                    current_version,
+                    SCHEMA_VERSION,
+                ));
             }
         }
 
@@ -319,11 +319,11 @@ impl BashHistoryDatabase {
 
     fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
         if from_version >= MIGRATIONS.len() {
-            return Err(GitAiError::Generic(format!(
-                "No bash history migration defined for version {} -> {}",
+            return Err(PersistenceError::no_migration_path(
+                "bash history",
                 from_version,
-                from_version + 1
-            )));
+                from_version + 1,
+            ));
         }
 
         let tx = self.conn.transaction()?;

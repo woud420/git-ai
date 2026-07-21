@@ -751,7 +751,7 @@ fn flush_pending_metrics(stores: TelemetryStores) {
 // Fall back to global() when stores is None (noop/test handles only).
 fn metrics_store(stores: Option<TelemetryStores>) -> Result<MetricsDbHandle, GitAiError> {
     stores.map_or_else(
-        || crate::model::repository::metrics_db::MetricsDatabase::global(),
+        crate::model::repository::metrics_db::MetricsDatabase::global,
         |s| Ok(s.metrics),
     )
 }

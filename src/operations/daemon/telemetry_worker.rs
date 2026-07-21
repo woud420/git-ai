@@ -14,9 +14,9 @@ use crate::model::api_types::{
     DaemonLogsUploadRequest,
 };
 use crate::model::authorship_log_serialization::GIT_AI_VERSION;
-use crate::model::repository::metrics_db::{
-    METADATA_BACKFILL_BATCH_SIZE, MetricRecord, MetricsDatabase,
-};
+#[cfg(test)]
+use crate::model::repository::metrics_db::MetricsDatabase;
+use crate::model::repository::metrics_db::{METADATA_BACKFILL_BATCH_SIZE, MetricRecord};
 use crate::model::telemetry::TelemetryEnvelope;
 use crate::observability::MAX_METRICS_PER_ENVELOPE;
 use crate::operations::daemon::control_api::CasSyncPayload;
@@ -37,6 +37,13 @@ static METRICS_UPLOAD_AVAILABLE: AtomicBool = AtomicBool::new(false);
 static METRICS_METADATA_BACKFILL_STARTED: AtomicBool = AtomicBool::new(false);
 static DAEMON_LOG_UPLOAD_IN_FLIGHT: std::sync::OnceLock<Arc<AtomicBool>> =
     std::sync::OnceLock::new();
+
+// Type aliases for the static mutex handles used throughout this module.
+type MetricsDbHandle =
+    &'static std::sync::Mutex<crate::model::repository::metrics_db::MetricsDatabase>;
+type NotesDbHandle = &'static std::sync::Mutex<crate::model::repository::notes_db::NotesDatabase>;
+type InternalDbHandle =
+    &'static std::sync::Mutex<crate::model::repository::internal_db::InternalDatabase>;
 
 /// Result of a telemetry flush cycle.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -195,11 +202,24 @@ impl TelemetryBuffer {
     }
 }
 
+/// Resolved store handles passed to `spawn_telemetry_worker`.
+///
+/// Constructed once in `run_daemon` so the flush loop never calls `::global()`.
+/// `Copy` because all fields are `'static` references.
+#[derive(Clone, Copy)]
+pub struct TelemetryStores {
+    pub metrics: MetricsDbHandle,
+    pub notes: NotesDbHandle,
+    pub internal: InternalDbHandle,
+}
+
 /// Handle for submitting telemetry directly within the daemon process.
 #[derive(Clone)]
 pub struct DaemonTelemetryWorkerHandle {
     buffer: Arc<Mutex<TelemetryBuffer>>,
     flush_tx: tokio::sync::mpsc::UnboundedSender<FlushRequest>,
+    // None only for new_noop() in tests; production always sets Some.
+    stores: Option<TelemetryStores>,
 }
 
 impl DaemonTelemetryWorkerHandle {
@@ -209,6 +229,7 @@ impl DaemonTelemetryWorkerHandle {
         Self {
             buffer: Arc::new(Mutex::new(TelemetryBuffer::new())),
             flush_tx,
+            stores: None,
         }
     }
 
@@ -223,8 +244,9 @@ impl DaemonTelemetryWorkerHandle {
         }
 
         if !metric_events.is_empty() {
+            let stores = self.stores;
             std::mem::drop(tokio::task::spawn_blocking(move || {
-                if let Err(e) = store_metrics_in_db(&metric_events) {
+                if let Err(e) = store_metrics_in_db_with(metrics_store(stores), &metric_events) {
                     tracing::warn!(%e, "telemetry: failed to persist metrics locally");
                 }
             }));
@@ -277,7 +299,7 @@ impl DaemonTelemetryWorkerHandle {
             return buffered;
         }
 
-        let pending = match MetricsDatabase::global() {
+        let pending = match metrics_store(self.stores) {
             Ok(db) => match db.try_lock() {
                 Ok(db) => db.count_retryable().unwrap_or(usize::MAX),
                 Err(_) => usize::MAX,
@@ -295,7 +317,12 @@ impl DaemonTelemetryWorkerHandle {
     /// transcript events while SQLite writes catch up. This path keeps the
     /// producer coupled to the metrics DB write and bounds peak memory.
     pub fn persist_metrics_blocking(&self, events: &[MetricEvent]) -> Result<Vec<i64>, GitAiError> {
-        store_metrics_in_db(events)
+        store_metrics_in_db_with(metrics_store(self.stores), events)
+    }
+
+    /// Flush pending notes synchronously (for the FlushNotes control-request arm).
+    pub fn flush_notes_sync(&self) {
+        flush_notes_with(self.stores);
     }
 
     /// Submit telemetry envelopes synchronously (best-effort, non-blocking).
@@ -312,7 +339,7 @@ impl DaemonTelemetryWorkerHandle {
         }
 
         if !metric_events.is_empty()
-            && let Err(e) = store_metrics_in_db(&metric_events)
+            && let Err(e) = store_metrics_in_db_with(metrics_store(self.stores), &metric_events)
         {
             tracing::warn!(%e, "telemetry: failed to persist daemon metrics locally");
         }
@@ -431,40 +458,40 @@ pub fn submit_daemon_internal_daemon_logs(events: Vec<DaemonLogEvent>) -> bool {
 
 /// Spawn the telemetry worker task. Returns a handle for submitting events.
 ///
-/// The worker runs a flush loop every 3 seconds, sending accumulated events
-/// to their respective destinations (Sentry, PostHog, metrics API, CAS API).
-pub fn spawn_telemetry_worker() -> DaemonTelemetryWorkerHandle {
+/// The worker flushes every 3 seconds. `stores` is resolved once by the caller
+/// so the flush loop never calls `::global()` at runtime.
+pub fn spawn_telemetry_worker(stores: TelemetryStores) -> DaemonTelemetryWorkerHandle {
     let buffer = Arc::new(Mutex::new(TelemetryBuffer::new()));
     let (flush_tx, flush_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = DaemonTelemetryWorkerHandle {
         buffer: buffer.clone(),
         flush_tx,
+        stores: Some(stores),
     };
     let daemon_id = crate::uuid::generate_v4();
 
-    spawn_metrics_metadata_backfill();
+    spawn_metrics_metadata_backfill(stores);
 
     tokio::spawn(async move {
-        telemetry_flush_loop(buffer, daemon_id, flush_rx).await;
+        telemetry_flush_loop(buffer, daemon_id, flush_rx, stores).await;
     });
 
     handle
 }
 
-fn spawn_metrics_metadata_backfill() {
+fn spawn_metrics_metadata_backfill(stores: TelemetryStores) {
     if METRICS_METADATA_BACKFILL_STARTED.swap(true, Ordering::Relaxed) {
         return;
     }
 
-    std::mem::drop(tokio::task::spawn_blocking(|| {
-        if let Err(e) = backfill_metrics_event_metadata() {
+    std::mem::drop(tokio::task::spawn_blocking(move || {
+        if let Err(e) = backfill_metrics_event_metadata(stores.metrics) {
             tracing::warn!(%e, "telemetry: failed to backfill metrics event metadata");
         }
     }));
 }
 
-fn backfill_metrics_event_metadata() -> Result<(), GitAiError> {
-    let db = MetricsDatabase::global()?;
+fn backfill_metrics_event_metadata(db: MetricsDbHandle) -> Result<(), GitAiError> {
     let mut after_id = 0;
 
     loop {
@@ -492,6 +519,7 @@ async fn telemetry_flush_loop(
     buffer: Arc<Mutex<TelemetryBuffer>>,
     daemon_id: String,
     mut flush_rx: tokio::sync::mpsc::UnboundedReceiver<FlushRequest>,
+    stores: TelemetryStores,
 ) {
     let started_at = std::time::Instant::now();
     let mut next_heartbeat_at = started_at + DAEMON_LOG_HEARTBEAT_INTERVAL;
@@ -533,12 +561,12 @@ async fn telemetry_flush_loop(
         let flush_started_at = std::time::Instant::now();
         let flush_result = tokio::task::spawn_blocking(move || {
             let requeue_daemon_logs = if let Some(snapshot) = snapshot {
-                flush_telemetry_batch(snapshot, &daemon_id_for_flush)
+                flush_telemetry_batch(snapshot, &daemon_id_for_flush, stores)
             } else {
-                flush_pending_metrics();
+                flush_pending_metrics(stores);
                 Vec::new()
             };
-            let await_status = collect_await_flush_status(flush_mode);
+            let await_status = collect_await_flush_status(flush_mode, stores);
             (requeue_daemon_logs, await_status)
         })
         .await
@@ -585,13 +613,17 @@ fn next_telemetry_flush_at(completed_at: Instant) -> Instant {
     completed_at + FLUSH_INTERVAL
 }
 
-fn flush_telemetry_batch(batch: TelemetryBuffer, daemon_id: &str) -> Vec<DaemonLogEvent> {
+fn flush_telemetry_batch(
+    batch: TelemetryBuffer,
+    daemon_id: &str,
+    stores: TelemetryStores,
+) -> Vec<DaemonLogEvent> {
     let config = Config::get();
     let distinct_id = get_or_create_distinct_id();
 
     // Flush metrics (always processed — uploaded or stored in SQLite)
     if !batch.metrics.is_empty() {
-        flush_metrics(&batch.metrics);
+        flush_metrics(&batch.metrics, stores);
     }
 
     // Flush Sentry events (errors, performance, messages)
@@ -610,13 +642,13 @@ fn flush_telemetry_batch(batch: TelemetryBuffer, daemon_id: &str) -> Vec<DaemonL
 
     // Flush CAS records
     if !batch.cas_records.is_empty() {
-        flush_cas(batch.cas_records);
+        flush_cas(batch.cas_records, stores);
     }
 
     // Flush pending notes (reads directly from notes-db; no-op when kind != Http).
-    flush_notes();
+    flush_notes_with(Some(stores));
 
-    flush_pending_metrics();
+    flush_pending_metrics(stores);
 
     if batch.daemon_logs.is_empty() {
         Vec::new()
@@ -625,11 +657,14 @@ fn flush_telemetry_batch(batch: TelemetryBuffer, daemon_id: &str) -> Vec<DaemonL
     }
 }
 
-fn collect_await_flush_status(flush_mode: FlushMode) -> Option<FlushStatus> {
+fn collect_await_flush_status(
+    flush_mode: FlushMode,
+    stores: TelemetryStores,
+) -> Option<FlushStatus> {
     collect_await_flush_status_with(
         flush_mode,
-        flush_notes_for_await,
-        count_pending_metrics_for_await,
+        || flush_notes_for_await(stores),
+        || count_pending_metrics_for_await(stores),
     )
 }
 
@@ -652,16 +687,15 @@ where
     })
 }
 
-fn count_pending_metrics_for_await() -> usize {
+fn count_pending_metrics_for_await(stores: TelemetryStores) -> usize {
     if !METRICS_UPLOAD_AVAILABLE.load(Ordering::Relaxed) {
         return 0;
     }
 
-    MetricsDatabase::global()
-        .and_then(|db| {
-            db.lock()
-                .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))
-        })
+    stores
+        .metrics
+        .lock()
+        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))
         .and_then(|db| db.count_retryable())
         .unwrap_or(0)
 }
@@ -672,7 +706,7 @@ fn default_api_base_and_client() -> (String, ApiClient) {
     (context.base_url.clone(), ApiClient::new(context))
 }
 
-fn flush_metrics(events: &[MetricEvent]) {
+fn flush_metrics(events: &[MetricEvent], stores: TelemetryStores) {
     let (api_base_url, client) = default_api_base_and_client();
 
     let should_upload = metrics_upload_allowed(&api_base_url, &client);
@@ -682,13 +716,13 @@ fn flush_metrics(events: &[MetricEvent]) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
 
     for chunk in events.chunks(MAX_METRICS_PER_ENVELOPE) {
-        if let Err(e) = store_metrics_in_db(chunk) {
+        if let Err(e) = store_metrics_in_db_with(Ok(stores.metrics), chunk) {
             tracing::warn!(%e, "telemetry: failed to persist metrics before upload");
             continue;
         }
 
         if should_upload && !upload_failed && std::time::Instant::now() < deadline {
-            match flush_pending_metrics_from_db(&client, deadline) {
+            match flush_pending_metrics_from_db(&client, deadline, stores) {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::warn!(%e, "telemetry: failed to upload pending metrics");
@@ -699,7 +733,7 @@ fn flush_metrics(events: &[MetricEvent]) {
     }
 }
 
-fn flush_pending_metrics() {
+fn flush_pending_metrics(stores: TelemetryStores) {
     let (api_base_url, client) = default_api_base_and_client();
 
     let should_upload = metrics_upload_allowed(&api_base_url, &client);
@@ -709,27 +743,31 @@ fn flush_pending_metrics() {
     }
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    if let Err(e) = flush_pending_metrics_from_db(&client, deadline) {
+    if let Err(e) = flush_pending_metrics_from_db(&client, deadline, stores) {
         tracing::warn!(%e, "telemetry: failed to upload pending metrics");
     }
 }
 
-fn store_metrics_in_db(events: &[MetricEvent]) -> Result<Vec<i64>, GitAiError> {
+// Fall back to global() when stores is None (noop/test handles only).
+fn metrics_store(stores: Option<TelemetryStores>) -> Result<MetricsDbHandle, GitAiError> {
+    stores.map_or_else(
+        || crate::model::repository::metrics_db::MetricsDatabase::global(),
+        |s| Ok(s.metrics),
+    )
+}
+
+fn store_metrics_in_db_with(
+    db: Result<MetricsDbHandle, GitAiError>,
+    events: &[MetricEvent],
+) -> Result<Vec<i64>, GitAiError> {
     if events.is_empty() {
         return Ok(Vec::new());
     }
-
     let event_jsons: Vec<String> = events
         .iter()
         .map(serde_json::to_string)
         .collect::<Result<_, _>>()?;
-
-    if event_jsons.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let db = MetricsDatabase::global()?;
-    let mut db_lock = db
+    let mut db_lock = db?
         .lock()
         .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
     db_lock.insert_events(&event_jsons)
@@ -745,49 +783,27 @@ struct PendingMetricsFlushResult {
 fn flush_pending_metrics_from_db(
     client: &ApiClient,
     deadline: std::time::Instant,
+    stores: TelemetryStores,
 ) -> Result<PendingMetricsFlushResult, GitAiError> {
+    let db = stores.metrics;
+    let lock_db = || {
+        db.lock()
+            .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))
+    };
     flush_pending_metric_records_with(
-        read_pending_metrics_batch,
-        mark_metric_records_delivered,
-        mark_metric_records_failed,
-        mark_metric_records_undeliverable,
+        |limit| lock_db().and_then(|mut l| l.dequeue_pending_batch(limit)),
+        |ids| lock_db().and_then(|mut l| l.mark_records_delivered(ids, current_unix_ts())),
+        |ids, error| {
+            let now = current_unix_ts();
+            lock_db().and_then(|mut l| l.mark_records_failed(ids, &error.to_string(), now))
+        },
+        |records| {
+            lock_db().and_then(|mut l| l.mark_records_undeliverable(records, current_unix_ts()))
+        },
         |batch| client.upload_metrics(batch),
         deadline,
         MAX_METRICS_PER_ENVELOPE,
     )
-}
-
-fn read_pending_metrics_batch(limit: usize) -> Result<Vec<MetricRecord>, GitAiError> {
-    let db = MetricsDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
-    db_lock.dequeue_pending_batch(limit)
-}
-
-fn mark_metric_records_delivered(ids: &[i64]) -> Result<(), GitAiError> {
-    let db = MetricsDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
-    db_lock.mark_records_delivered(ids, current_unix_ts())
-}
-
-fn mark_metric_records_failed(ids: &[i64], error: &GitAiError) -> Result<(), GitAiError> {
-    let db = MetricsDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
-    let now = current_unix_ts();
-    db_lock.mark_records_failed(ids, &error.to_string(), now)
-}
-
-fn mark_metric_records_undeliverable(records: &[(i64, String)]) -> Result<(), GitAiError> {
-    let db = MetricsDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
-    db_lock.mark_records_undeliverable(records, current_unix_ts())
 }
 
 fn flush_pending_metric_records_with<
@@ -1263,15 +1279,19 @@ fn flush_sentry_and_posthog(
     }
 }
 
-/// Flush pending notes from `notes-db` to the remote HTTP backend.
-///
-/// Skips silently when:
-/// - `notes_backend.kind != Http`
-/// - Not authenticated (no API key and not logged in)
-pub fn flush_notes() {
-    use crate::config::NotesBackendKind;
-    use crate::model::api_types::{NoteEntry, NotesUploadRequest};
+impl From<crate::model::repository::notes_db::PendingNote> for crate::model::api_types::NoteEntry {
+    fn from(p: crate::model::repository::notes_db::PendingNote) -> Self {
+        Self {
+            commit_sha: p.commit_sha,
+            content: p.content,
+        }
+    }
+}
 
+/// Flush pending notes from `notes-db` to the remote HTTP backend.
+fn flush_notes_with(stores: Option<TelemetryStores>) {
+    use crate::config::NotesBackendKind;
+    use crate::model::api_types::NotesUploadRequest;
     let cfg = Config::fresh();
     if cfg.notes_backend_kind() != NotesBackendKind::Http {
         tracing::debug!("notes: skipping flush, backend is not Http");
@@ -1289,44 +1309,34 @@ pub fn flush_notes() {
         tracing::debug!("notes: skipping flush, not authenticated");
         return;
     }
-
-    // Dequeue up to 50 pending notes.
-    let pending = match crate::model::repository::notes_db::NotesDatabase::global() {
-        Ok(db) => match db.lock() {
-            Ok(mut lock) => match lock.dequeue_pending(50) {
-                Ok(rows) => rows,
-                Err(e) => {
-                    tracing::warn!(%e, "notes: failed to dequeue pending rows");
-                    return;
-                }
-            },
+    let notes_db = if let Some(s) = stores {
+        s.notes
+    } else {
+        match crate::model::repository::notes_db::NotesDatabase::global() {
+            Ok(db) => db,
             Err(e) => {
-                tracing::warn!("notes: DB lock poisoned: {}", e);
+                tracing::warn!(%e, "notes: failed to get notes DB");
                 return;
             }
-        },
+        }
+    };
+    // Collect shas before consuming rows to avoid double-cloning the payloads.
+    let Ok(mut lock) = notes_db.lock() else {
+        return;
+    };
+    let pending = match lock.dequeue_pending(50) {
+        Ok(rows) if !rows.is_empty() => rows,
+        Ok(_) => return,
         Err(e) => {
-            tracing::warn!(%e, "notes: failed to get notes DB");
+            tracing::warn!("notes: failed to dequeue pending rows: {e}");
             return;
         }
     };
-
-    if pending.is_empty() {
-        return;
-    }
-
+    drop(lock);
     let commit_shas: Vec<String> = pending.iter().map(|p| p.commit_sha.clone()).collect();
-
-    let entries: Vec<NoteEntry> = pending
-        .iter()
-        .map(|p| NoteEntry {
-            commit_sha: p.commit_sha.clone(),
-            content: p.content.clone(),
-        })
-        .collect();
-
-    let request = NotesUploadRequest { entries };
-
+    let request = NotesUploadRequest {
+        entries: pending.into_iter().map(Into::into).collect(),
+    };
     match client.upload_notes(request) {
         Ok(resp) => {
             tracing::debug!(
@@ -1334,15 +1344,11 @@ pub fn flush_notes() {
                 failure = resp.failure_count,
                 "notes: uploaded batch"
             );
-            if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
-                && let Ok(mut lock) = db.lock()
-            {
+            if let Ok(mut lock) = notes_db.lock() {
                 if resp.failure_count == 0 {
                     let _ = lock.mark_synced(&commit_shas);
                 } else {
-                    // Server reported partial failures but doesn't identify which
-                    // entries failed. Mark the entire batch as failed so all entries
-                    // are retried on the next flush cycle.
+                    // Server reported partial failures; retry the entire batch next cycle.
                     let _ = lock.mark_failed(
                         &commit_shas,
                         &format!(
@@ -1356,9 +1362,7 @@ pub fn flush_notes() {
         }
         Err(e) => {
             tracing::warn!(%e, "notes: upload error");
-            if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
-                && let Ok(mut lock) = db.lock()
-            {
+            if let Ok(mut lock) = notes_db.lock() {
                 let _ = lock.mark_failed(&commit_shas, &e.to_string());
             }
         }
@@ -1370,49 +1374,45 @@ pub fn flush_notes() {
     if FLUSH_COUNT
         .fetch_add(1, Ordering::Relaxed)
         .is_multiple_of(100)
-        && let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
-        && let Ok(mut lock) = db.lock()
+        && let Ok(mut lock) = notes_db.lock()
     {
         let _ = lock.evict_stale_cache(10_000, 90 * 24 * 3600);
     }
 }
 
-fn flush_notes_for_await() -> usize {
-    use crate::config::NotesBackendKind;
+/// Flush notes via the global singleton (fallback for the FlushNotes control handler).
+pub fn flush_notes_global() {
+    flush_notes_with(None);
+}
 
+fn flush_notes_for_await(stores: TelemetryStores) -> usize {
+    use crate::config::NotesBackendKind;
     let cfg = Config::fresh();
     if cfg.notes_backend_kind() != NotesBackendKind::Http || cfg.notes_backend_url().is_none() {
         return 0;
     }
-
     let backend_url = cfg.notes_backend_url().map(str::to_string);
     let client = ApiClient::new(ApiContext::new(backend_url, resolve_api_author_identity));
     if !client.is_logged_in() && !client.has_api_key() {
         return 0;
     }
-
     for _ in 0..1_000 {
-        let remaining = count_pending_notes_for_await();
-        if remaining == 0 {
+        if count_pending_notes_for_await(stores) == 0 {
             return 0;
         }
-        flush_notes();
+        flush_notes_with(Some(stores));
     }
-
-    count_pending_notes_for_await()
+    count_pending_notes_for_await(stores)
 }
 
-fn count_pending_notes_for_await() -> usize {
-    match crate::model::repository::notes_db::NotesDatabase::global() {
-        Ok(db) => match db.lock() {
-            Ok(lock) => lock.count_pending_uploadable().unwrap_or(0),
-            Err(_) => 0,
-        },
-        Err(_) => 0,
-    }
+fn count_pending_notes_for_await(stores: TelemetryStores) -> usize {
+    let Ok(lock) = stores.notes.lock() else {
+        return 0;
+    };
+    lock.count_pending_uploadable().unwrap_or(0)
 }
 
-fn flush_cas(records: Vec<CasSyncPayload>) {
+fn flush_cas(records: Vec<CasSyncPayload>, stores: TelemetryStores) {
     let (api_base_url, client) = default_api_base_and_client();
 
     let using_default_api = api_base_url == crate::config::DEFAULT_API_BASE_URL;
@@ -1457,9 +1457,7 @@ fn flush_cas(records: Vec<CasSyncPayload>) {
             Ok(_response) => {
                 // Delete successfully uploaded records from the internal DB queue
                 // so they don't accumulate as stale entries.
-                if let Ok(db) = crate::model::repository::internal_db::InternalDatabase::global()
-                    && let Ok(mut db_lock) = db.lock()
-                {
+                if let Ok(mut db_lock) = stores.internal.lock() {
                     let _ = db_lock.delete_cas_by_hashes(&hashes);
                 }
                 tracing::debug!(count = chunk.len(), "telemetry: uploaded CAS objects");

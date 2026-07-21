@@ -54,6 +54,7 @@ impl ActorDaemonCoordinator {
             stream_worker: None,
             transcript_shutdown_notify: std::sync::OnceLock::new(),
             streams_db: None,
+            bash_history_db: None,
             next_trace_ingest_seq: AtomicUsize::new(0),
             queued_trace_payloads: AtomicUsize::new(0),
             queued_trace_payloads_by_root: Mutex::new(HashMap::new()),
@@ -72,6 +73,20 @@ impl ActorDaemonCoordinator {
         // Acquire pairs with the Release store in request_shutdown so all
         // writes made before shutdown is requested are visible to the caller.
         self.shutting_down.load(Ordering::Acquire)
+    }
+
+    /// Return the injected bash-history handle, falling back to global() for unit tests
+    /// (where the field is None because new() initializes it to None).
+    pub(crate) fn bash_history_db(
+        &self,
+    ) -> Result<
+        &'static std::sync::Mutex<crate::model::repository::bash_history_db::BashHistoryDatabase>,
+        crate::error::GitAiError,
+    > {
+        match self.bash_history_db {
+            Some(db) => Ok(db),
+            None => crate::model::repository::bash_history_db::BashHistoryDatabase::global(),
+        }
     }
 
     pub(crate) fn trigger_transcript_sweep(

@@ -166,6 +166,10 @@ pub struct ActorDaemonCoordinator {
     pub(crate) stream_worker: Option<crate::operations::daemon::stream_worker::StreamWorkerHandle>,
     pub(crate) transcript_shutdown_notify: std::sync::OnceLock<Arc<tokio::sync::Notify>>,
     pub(crate) streams_db: Option<Arc<crate::model::repository::streams_db::StreamsDatabase>>,
+    // Resolved once at daemon init; None in unit-test constructions (global() is the fallback).
+    pub(crate) bash_history_db: Option<
+        &'static std::sync::Mutex<crate::model::repository::bash_history_db::BashHistoryDatabase>,
+    >,
     pub(crate) next_trace_ingest_seq: AtomicUsize,
     pub(crate) queued_trace_payloads: AtomicUsize,
     pub(crate) queued_trace_payloads_by_root: Mutex<HashMap<String, usize>>,

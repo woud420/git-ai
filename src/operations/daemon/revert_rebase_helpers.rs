@@ -1,5 +1,4 @@
 use crate::error::GitAiError;
-use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::git::cli_parser::explicit_rebase_branch_arg;
 use std::collections::HashMap;
 
@@ -102,19 +101,13 @@ pub(crate) fn apply_cherry_pick_complete_rewrite(
             .map(|((commit_sha, _), result)| (commit_sha.as_str(), result))
             .collect();
 
-    for (commit_sha, parent_sha) in &commit_parent_pairs {
-        let existing_shifted_log = existing_notes
-            .get(commit_sha)
-            .and_then(|raw| AuthorshipLog::deserialize_from_string(raw).ok());
-        super::post_conflict_resolution_working_log(
-            repo,
-            parent_sha,
-            commit_sha,
-            author.clone(),
-            existing_shifted_log,
-            diff_by_commit.get(commit_sha.as_str()).copied(),
-        )?;
-    }
+    super::flush_pending_note_writes(
+        repo,
+        &commit_parent_pairs,
+        &existing_notes,
+        author,
+        &diff_by_commit,
+    )?;
 
     let rewrite_metric_commits = if rewrite_metric_commits.is_empty() {
         rewrite_metric_commits

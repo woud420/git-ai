@@ -121,19 +121,13 @@ pub fn process_conflict_resolution_working_logs(
             .collect();
     }
 
-    for (commit_sha, parent_sha) in &commit_parent_pairs {
-        let existing_shifted_log = existing_notes
-            .get(commit_sha)
-            .and_then(|raw| AuthorshipLog::deserialize_from_string(raw).ok());
-        post_conflict_resolution_working_log(
-            repo,
-            parent_sha,
-            commit_sha,
-            author.clone(),
-            existing_shifted_log,
-            diff_by_commit.get(commit_sha.as_str()).copied(),
-        )?;
-    }
+    flush_pending_note_writes(
+        repo,
+        &commit_parent_pairs,
+        &existing_notes,
+        author,
+        &diff_by_commit,
+    )?;
     Ok(metric_context)
 }
 
@@ -155,6 +149,91 @@ pub(crate) fn rewrite_metric_commits_with_context(
         .collect()
 }
 
+/// Collect deferred note-writes for conflict-resolved commits and flush them in a
+/// single `write_notes_batch` call, then delete the corresponding working logs.
+///
+/// This is the shared kernel for both the rebase and cherry-pick conflict-resolution
+/// loops.  It enforces the durability invariant: working-log deletion for commit K
+/// only occurs after K's authorship note has been durably written.
+///
+/// Error semantics: if collection fails mid-loop, any already-collected pairs are
+/// flushed before returning the original collection error (flush failures on this
+/// path are logged via `tracing::debug!` rather than promoted, so the original
+/// per-commit error is always what the caller sees).
+pub(crate) fn flush_pending_note_writes(
+    repo: &Repository,
+    commit_parent_pairs: &[(String, String)],
+    existing_notes: &std::collections::HashMap<String, String>,
+    author: String,
+    diff_by_commit: &std::collections::HashMap<
+        &str,
+        &crate::operations::authorship::rewrite::DiffTreeResult,
+    >,
+) -> Result<(), GitAiError> {
+    // Collect (note_entry, parent_sha) pairs; stop on first per-commit error.
+    let mut pending: Vec<(crate::operations::git::notes_api::NoteWriteEntry, String)> = Vec::new();
+    let mut collection_error: Option<GitAiError> = None;
+    for (commit_sha, parent_sha) in commit_parent_pairs {
+        let existing_shifted_log = existing_notes
+            .get(commit_sha)
+            .and_then(|raw| AuthorshipLog::deserialize_from_string(raw).ok());
+        match post_conflict_resolution_working_log(
+            repo,
+            parent_sha,
+            commit_sha,
+            author.clone(),
+            existing_shifted_log,
+            diff_by_commit.get(commit_sha.as_str()).copied(),
+        ) {
+            Ok(Some(entry)) => pending.push((entry, parent_sha.clone())),
+            Ok(None) => {}
+            Err(e) => {
+                collection_error = Some(e);
+                break;
+            }
+        }
+    }
+
+    // Flush whatever was collected.  On collection failure this preserves notes
+    // for commits processed before the error; on collection success this is the
+    // only flush.  Working-log deletion follows only on flush success.
+    if !pending.is_empty() {
+        let note_entries: Vec<_> = pending.iter().map(|(entry, _)| entry.clone()).collect();
+        match crate::operations::git::notes_api::write_notes_batch(repo, &note_entries) {
+            Ok(()) => {
+                // Notes are durable; it is now safe to delete the working logs.
+                for (_, parent_sha) in &pending {
+                    repo.storage
+                        .delete_working_log_for_base_commit(parent_sha)?;
+                }
+            }
+            Err(flush_err) => {
+                if let Some(ref e) = collection_error {
+                    // Original collection error takes priority; log the flush failure.
+                    tracing::debug!(
+                        "write_notes_batch failed after collection error ({}): {}",
+                        e,
+                        flush_err
+                    );
+                } else {
+                    return Err(flush_err);
+                }
+            }
+        }
+    }
+
+    if let Some(e) = collection_error {
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Reconstruct authorship for a single conflict-resolved commit and return the
+/// deferred `(commit_sha, serialized_note)` entry without writing it.
+///
+/// Returns `Ok(None)` when `parent_sha` has no working log (nothing to write).
+/// The caller is responsible for flushing collected entries and deleting working
+/// logs only after a successful flush (use `flush_pending_note_writes`).
 pub(crate) fn post_conflict_resolution_working_log(
     repo: &Repository,
     parent_sha: &str,
@@ -162,34 +241,40 @@ pub(crate) fn post_conflict_resolution_working_log(
     author: String,
     existing_shifted_log: Option<AuthorshipLog>,
     precomputed_parent_diff: Option<&crate::operations::authorship::rewrite::DiffTreeResult>,
-) -> Result<(), GitAiError> {
+) -> Result<Option<crate::operations::git::notes_api::NoteWriteEntry>, GitAiError> {
     if !repo.storage.has_working_log(parent_sha) {
-        return Ok(());
+        return Ok(None);
     }
 
     let commit_for_transform = commit_sha.to_string();
-    crate::operations::authorship::post_commit::post_commit_from_working_log_with_transform_options_and_diff(
-        repo,
-        Some(parent_sha.to_string()),
-        commit_sha.to_string(),
-        author,
-        crate::operations::authorship::post_commit::PostCommitOptions {
-            supress_output: true,
-            compute_stats: false,
-            recover_attribution: false,
-        },
-        precomputed_parent_diff,
-        move |resolution_log| {
-            Ok(
-                crate::operations::authorship::conflict_resolution::merge_conflict_resolution_authorship(
-                    existing_shifted_log,
-                    resolution_log,
-                    &commit_for_transform,
-                ),
-            )
-        },
-    )
-    .map(|_| ())
+    let result =
+        crate::operations::authorship::post_commit::post_commit_from_working_log_with_transform_context_detailed(
+            repo,
+            Some(parent_sha.to_string()),
+            commit_sha.to_string(),
+            author,
+            crate::operations::authorship::post_commit::PostCommitOptions {
+                supress_output: true,
+                compute_stats: false,
+                recover_attribution: false,
+                defer_note_write: true,
+            },
+            crate::operations::authorship::post_commit::PostCommitContext {
+                precomputed_parent_diff,
+                recovery_file_timestamps: None,
+                before_external_recovery: None,
+            },
+            move |resolution_log| {
+                Ok(
+                    crate::operations::authorship::conflict_resolution::merge_conflict_resolution_authorship(
+                        existing_shifted_log,
+                        resolution_log,
+                        &commit_for_transform,
+                    ),
+                )
+            },
+        )?;
+    Ok(Some((result.commit_sha, result.authorship_note)))
 }
 
 pub fn rfc3339_to_unix_nanos(value: &str) -> Option<u128> {

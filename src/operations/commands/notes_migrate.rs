@@ -64,6 +64,14 @@ pub fn handle_notes_migrate(args: &[String]) {
     let cfg = Config::fresh();
     let target = target.unwrap_or_else(|| cfg.notes_backend_kind());
 
+    let db = match NotesDatabase::global() {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("error: failed to open notes database: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     let repo = match find_repository(&Vec::<String>::new()) {
         Ok(r) => r,
         Err(e) => {
@@ -73,14 +81,17 @@ pub fn handle_notes_migrate(args: &[String]) {
     };
 
     match target {
-        NotesBackendKind::Sqlite => migrate_refs_to_sqlite(&repo),
-        NotesBackendKind::GitNotes => migrate_sqlite_to_git_notes(&repo),
-        NotesBackendKind::Http => migrate_refs_to_http(&repo, &cfg, force),
+        NotesBackendKind::Sqlite => migrate_refs_to_sqlite(db, &repo),
+        NotesBackendKind::GitNotes => migrate_sqlite_to_git_notes(db, &repo),
+        NotesBackendKind::Http => migrate_refs_to_http(db, &repo, &cfg, force),
     }
 }
 
 /// Import `refs/notes/ai` into the notes database as local-primary rows.
-fn migrate_refs_to_sqlite(repo: &crate::operations::git::repository::Repository) {
+fn migrate_refs_to_sqlite(
+    db: &'static std::sync::Mutex<NotesDatabase>,
+    repo: &crate::operations::git::repository::Repository,
+) {
     eprintln!("Listing notes from refs/notes/ai ...");
     let entries = match read_all_ref_notes(repo) {
         Ok(entries) => entries,
@@ -94,21 +105,15 @@ fn migrate_refs_to_sqlite(repo: &crate::operations::git::repository::Repository)
         return;
     }
 
-    match NotesDatabase::global() {
-        Ok(db) => match db.lock() {
-            Ok(mut lock) => {
-                if let Err(e) = lock.upsert_local_notes_batch(&entries) {
-                    eprintln!("error: failed to write notes database: {}", e);
-                    std::process::exit(1);
-                }
-            }
-            Err(e) => {
-                eprintln!("error: notes-db lock poisoned: {}", e);
+    match db.lock() {
+        Ok(mut lock) => {
+            if let Err(e) = lock.upsert_local_notes_batch(&entries) {
+                eprintln!("error: failed to write notes database: {}", e);
                 std::process::exit(1);
             }
-        },
+        }
         Err(e) => {
-            eprintln!("error: failed to open notes-db: {}", e);
+            eprintln!("error: notes-db lock poisoned: {}", e);
             std::process::exit(1);
         }
     }
@@ -119,23 +124,20 @@ fn migrate_refs_to_sqlite(repo: &crate::operations::git::repository::Repository)
 }
 
 /// Export local-primary rows from the notes database into `refs/notes/ai`.
-fn migrate_sqlite_to_git_notes(repo: &crate::operations::git::repository::Repository) {
-    let entries = match NotesDatabase::global() {
-        Ok(db) => match db.lock() {
-            Ok(lock) => match lock.get_local_notes() {
-                Ok(entries) => entries,
-                Err(e) => {
-                    eprintln!("error: failed to read notes database: {}", e);
-                    std::process::exit(1);
-                }
-            },
+fn migrate_sqlite_to_git_notes(
+    db: &'static std::sync::Mutex<NotesDatabase>,
+    repo: &crate::operations::git::repository::Repository,
+) {
+    let entries = match db.lock() {
+        Ok(lock) => match lock.get_local_notes() {
+            Ok(entries) => entries,
             Err(e) => {
-                eprintln!("error: notes-db lock poisoned: {}", e);
+                eprintln!("error: failed to read notes database: {}", e);
                 std::process::exit(1);
             }
         },
         Err(e) => {
-            eprintln!("error: failed to open notes-db: {}", e);
+            eprintln!("error: notes-db lock poisoned: {}", e);
             std::process::exit(1);
         }
     };
@@ -179,6 +181,7 @@ fn read_all_ref_notes(
 
 /// Bulk-upload `refs/notes/ai` to the remote HTTP backend and warm the cache.
 fn migrate_refs_to_http(
+    db: &'static std::sync::Mutex<NotesDatabase>,
     repo: &crate::operations::git::repository::Repository,
     cfg: &Config,
     force: bool,
@@ -248,9 +251,7 @@ fn migrate_refs_to_http(
     // Only skip synced=1 entries — pending (synced=0) entries still need uploading.
     if !force {
         let pre_cached_count = entries.len();
-        if let Ok(db) = NotesDatabase::global()
-            && let Ok(lock) = db.lock()
-        {
+        if let Ok(lock) = db.lock() {
             let all_shas: Vec<&str> = entries.iter().map(|(s, _)| s.as_str()).collect();
             if let Ok(synced) = lock.get_synced_shas(&all_shas) {
                 entries.retain(|(sha, _)| !synced.contains(sha));
@@ -315,21 +316,16 @@ fn migrate_refs_to_http(
 
     // Write all successfully-uploaded notes to local notes-db with synced = 1.
     if !cached_entries.is_empty() {
-        match NotesDatabase::global() {
-            Ok(db) => match db.lock() {
-                Ok(mut lock) => {
-                    if let Err(e) = lock.cache_synced_notes(&cached_entries) {
-                        eprintln!("warning: failed to cache notes locally: {}", e);
-                    } else {
-                        eprintln!("Cached {} note(s) in local notes-db.", cached_entries.len());
-                    }
+        match db.lock() {
+            Ok(mut lock) => {
+                if let Err(e) = lock.cache_synced_notes(&cached_entries) {
+                    eprintln!("warning: failed to cache notes locally: {}", e);
+                } else {
+                    eprintln!("Cached {} note(s) in local notes-db.", cached_entries.len());
                 }
-                Err(e) => {
-                    eprintln!("warning: notes-db lock poisoned: {}", e);
-                }
-            },
+            }
             Err(e) => {
-                eprintln!("warning: failed to open notes-db: {}", e);
+                eprintln!("warning: notes-db lock poisoned: {}", e);
             }
         }
     }

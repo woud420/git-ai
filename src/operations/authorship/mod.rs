@@ -9,6 +9,7 @@ pub mod git_ai_hooks;
 pub mod hunk_shift;
 pub mod ignore;
 pub mod imara_diff_utils;
+pub mod line_lookup;
 pub mod move_detection;
 pub mod post_commit;
 

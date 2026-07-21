@@ -258,6 +258,17 @@ impl Repository {
         Ok(remotes)
     }
 
+    /// Whether git-ai collection is allowed for this repository under `config`.
+    ///
+    /// Fetches the repository's remotes and root once and delegates to the pure
+    /// [`config::Config::is_allowed_repository_with_context`] policy. Collection
+    /// is opt-in: an empty `allowed_repositories` list denies every repository.
+    pub fn is_collection_allowed(&self, config: &config::Config) -> bool {
+        let remotes = self.remotes_with_urls().ok();
+        let repo_root = self.canonical_workdir();
+        config.is_allowed_repository_with_context(remotes.as_ref(), Some(repo_root))
+    }
+
     pub(super) fn load_optional_config_file(
         path: &Path,
         source: gix_config::Source,

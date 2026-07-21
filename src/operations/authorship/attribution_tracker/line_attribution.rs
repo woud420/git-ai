@@ -4,9 +4,8 @@
 //! `LineAttribution` ranges.  All logic is pure algebra over the content
 //! string and attribution slices; no I/O or git calls occur here.
 
+use crate::model::attribution::{Attribution, LineAttribution};
 use crate::model::working_log::CheckpointKind;
-
-use super::types::{Attribution, LineAttribution};
 
 /// Helper struct to track line boundaries in content
 struct LineBoundaries {

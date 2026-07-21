@@ -16,7 +16,7 @@
 //!
 //! ```ignore
 //! use crate::operations::streams::{StreamsDatabase, StreamRecord};
-//! use crate::operations::streams::watermark::{ByteOffsetWatermark, WatermarkStrategy};
+//! use crate::model::stream_watermark::{ByteOffsetWatermark, WatermarkStrategy};
 //!
 //! // Open database
 //! // Note: the file is still named "transcripts-db" for backwards compatibility.
@@ -44,12 +44,12 @@ pub mod agent;
 pub mod agents;
 pub mod model_extraction;
 pub mod sweep;
-pub mod watermark;
 
-// Re-export main types for convenient access
+// Re-export main types for convenient access. Watermark strategies are pure
+// value types owned by `model`; re-exported here for convenient stream access.
 pub use crate::model::repository::streams_db::{StreamRecord, StreamsDatabase};
 pub use crate::model::stream_types::{StreamBatch, StreamError};
-pub use watermark::{
+pub use crate::model::stream_watermark::{
     ByteOffsetWatermark, HybridWatermark, RecordIndexWatermark, TimestampCursorWatermark,
     TimestampWatermark, WatermarkStrategy, WatermarkType,
 };

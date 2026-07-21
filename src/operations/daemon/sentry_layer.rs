@@ -82,7 +82,7 @@ impl<S: Subscriber> Layer<S> for SentryLayer {
             Some(serde_json::Value::Object(visitor.fields))
         };
 
-        let envelope = crate::operations::daemon::control_api::TelemetryEnvelope::Error {
+        let envelope = crate::model::telemetry::TelemetryEnvelope::Error {
             timestamp: chrono::Utc::now().to_rfc3339(),
             message: visitor.message,
             context,

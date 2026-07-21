@@ -71,8 +71,11 @@ pub use trace_helpers::*;
 // Public re-exports (original, unchanged).
 pub use control_api::{
     BashSessionQueryResponse, BashSnapshotQueryResponse, ControlRequest, ControlResponse,
-    FamilyStatus, TelemetryEnvelope,
+    FamilyStatus,
 };
+// `TelemetryEnvelope` is a pure DTO owned by `model`; re-exported here so the
+// existing `operations::daemon::TelemetryEnvelope` path keeps resolving.
+pub use crate::model::telemetry::TelemetryEnvelope;
 
 // Test modules.
 #[cfg(test)]

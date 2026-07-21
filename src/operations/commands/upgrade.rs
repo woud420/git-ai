@@ -1,6 +1,7 @@
 use crate::clients::api::client::ApiContext;
 use crate::config::{self, UpdateChannel};
 use crate::observability::log_message;
+use crate::operations::git::repository::resolve_api_author_identity;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -437,9 +438,8 @@ fn fetch_release_for_channel(
     if let Some(result) = try_mock_releases(api_base_url, channel) {
         return result;
     }
-
-    let context = ApiContext::new(Some(api_base_url.to_string())).with_timeout(5);
-
+    let url = Some(api_base_url.to_string());
+    let context = ApiContext::new(url, resolve_api_author_identity).with_timeout(5);
     let response = context
         .get(releases_endpoint())
         .map_err(|e| format!("Failed to check for updates: {}", e))?;

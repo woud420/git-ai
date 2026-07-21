@@ -12,7 +12,7 @@ pub const MAX_METRICS_PER_ENVELOPE: usize = 1000;
 /// 1. External daemon control socket (wrapper processes)
 /// 2. In-process daemon telemetry worker (daemon process itself)
 /// 3. Silently drop if neither is available
-fn submit_telemetry_envelope(envelopes: Vec<crate::operations::daemon::TelemetryEnvelope>) {
+fn submit_telemetry_envelope(envelopes: Vec<crate::model::telemetry::TelemetryEnvelope>) {
     if crate::operations::daemon::telemetry_handle::daemon_telemetry_available() {
         crate::operations::daemon::telemetry_handle::submit_telemetry(envelopes);
     } else if crate::operations::daemon::daemon_process_active() {
@@ -22,7 +22,7 @@ fn submit_telemetry_envelope(envelopes: Vec<crate::operations::daemon::Telemetry
 
 /// Log an error to Sentry (via daemon telemetry worker)
 pub fn log_error(error: &dyn std::error::Error, context: Option<serde_json::Value>) {
-    let envelope = crate::operations::daemon::TelemetryEnvelope::Error {
+    let envelope = crate::model::telemetry::TelemetryEnvelope::Error {
         timestamp: chrono::Utc::now().to_rfc3339(),
         message: error.to_string(),
         context,
@@ -37,7 +37,7 @@ pub fn log_performance(
     context: Option<serde_json::Value>,
     tags: Option<HashMap<String, String>>,
 ) {
-    let envelope = crate::operations::daemon::TelemetryEnvelope::Performance {
+    let envelope = crate::model::telemetry::TelemetryEnvelope::Performance {
         timestamp: chrono::Utc::now().to_rfc3339(),
         operation: operation.to_string(),
         duration_ms: duration.as_millis(),
@@ -50,7 +50,7 @@ pub fn log_performance(
 /// Log a message to Sentry (info, warning, etc.) (via daemon telemetry worker)
 #[allow(dead_code)]
 pub fn log_message(message: &str, level: &str, context: Option<serde_json::Value>) {
-    let envelope = crate::operations::daemon::TelemetryEnvelope::Message {
+    let envelope = crate::model::telemetry::TelemetryEnvelope::Message {
         timestamp: chrono::Utc::now().to_rfc3339(),
         message: message.to_string(),
         level: level.to_string(),
@@ -76,7 +76,7 @@ pub fn log_metrics(events: Vec<MetricEvent>) {
 
     // Split into chunks of MAX_METRICS_PER_ENVELOPE
     for chunk in events.chunks(MAX_METRICS_PER_ENVELOPE) {
-        let envelope = crate::operations::daemon::TelemetryEnvelope::Metrics {
+        let envelope = crate::model::telemetry::TelemetryEnvelope::Metrics {
             events: chunk.to_vec(),
         };
         submit_telemetry_envelope(vec![envelope]);

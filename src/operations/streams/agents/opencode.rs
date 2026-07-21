@@ -1,9 +1,9 @@
 //! OpenCode agent implementation (SQLite-only).
 
 use crate::model::stream_types::{StreamBatch, StreamError};
+use crate::model::stream_watermark::{TimestampWatermark, WatermarkStrategy};
 use crate::operations::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::watermark::{TimestampWatermark, WatermarkStrategy};
 use chrono::DateTime;
 use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;

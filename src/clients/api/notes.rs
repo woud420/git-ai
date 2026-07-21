@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_read_notes_rejects_non_hex_sha() {
-        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()));
+        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         let client = ApiClient::new(ctx);
 
         let result = client.read_notes(&["not-a-hex-sha"]);
@@ -116,7 +116,7 @@ mod tests {
     fn test_read_notes_accepts_valid_hex_sha() {
         // A valid hex SHA should pass validation (the actual HTTP call will fail
         // because there is no real server, but we are testing input validation only).
-        let ctx = ApiContext::without_auth(Some("https://127.0.0.1:1".to_string()));
+        let ctx = ApiContext::without_auth(Some("https://127.0.0.1:1".to_string()), || None);
         let client = ApiClient::new(ctx);
 
         let valid_sha = "abc123def456abc123def456abc123def456abc1";

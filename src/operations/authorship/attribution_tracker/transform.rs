@@ -12,7 +12,8 @@ use std::collections::HashMap;
 
 use super::diff_engine::{data_is_whitespace, ranges_intersect};
 use super::tracker::AttributionTracker;
-use super::types::{Attribution, Insertion, MoveMapping};
+use super::types::{Insertion, MoveMapping};
+use crate::model::attribution::Attribution;
 use crate::operations::authorship::imara_diff_utils::{ByteDiff, ByteDiffOp};
 
 impl AttributionTracker {

@@ -1,8 +1,8 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::metrics::{EventAttributes, MetricEvent, PosEncoded, SessionEventValues};
+use git_ai::model::stream_watermark::ByteOffsetWatermark;
 use git_ai::operations::streams::agent::Agent;
 use git_ai::operations::streams::agents::ClaudeAgent;
-use git_ai::operations::streams::watermark::ByteOffsetWatermark;
 use git_ai::operations::streams::{StreamRecord, StreamsDatabase};
 use git_ai::repo_url::resolve_repo_url_from_path;
 use serde_json::json;

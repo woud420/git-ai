@@ -4,6 +4,7 @@ use crate::error::GitAiError;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::working_log::CheckpointKind;
+use crate::operations::authorship::line_lookup::get_line_attribution;
 use crate::operations::git::notes_api::read_authorship_v3;
 use crate::operations::git::repository::Repository;
 #[cfg(windows)]
@@ -972,18 +973,15 @@ impl Repository {
 
                 for i in 0..num_lines {
                     let orig_line_num = hunk.orig_range.0 + i;
-
-                    let human_author = if let Some((_author, _prompt_hash, Some(prompt_record))) =
-                        authorship_log.get_line_attribution(
-                            self,
-                            file_path,
-                            orig_line_num,
-                            &mut foreign_prompts_cache,
-                        ) {
-                        prompt_record.human_author.clone()
-                    } else {
-                        None
-                    };
+                    let human_author = get_line_attribution(
+                        authorship_log,
+                        self,
+                        file_path,
+                        orig_line_num,
+                        &mut foreign_prompts_cache,
+                    )
+                    .and_then(|(_author, _prompt_hash, prompt)| prompt)
+                    .and_then(|prompt_record| prompt_record.human_author);
                     line_authors.push(human_author);
                 }
 
@@ -1114,7 +1112,8 @@ fn overlay_ai_authorship(
                 let current_line_num = hunk.range.0 + i;
                 let orig_line_num = hunk.orig_range.0 + i;
 
-                if let Some((author, prompt_hash, prompt)) = authorship_log.get_line_attribution(
+                if let Some((author, prompt_hash, prompt)) = get_line_attribution(
+                    authorship_log,
                     repo,
                     lookup_path,
                     orig_line_num,

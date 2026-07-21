@@ -34,5 +34,5 @@ pub use git_objects::{Blob, Reference, References, Tree, TreeEntry};
 pub use identity::{
     GitAuthorIdentity, GitConfigIdentityResolution, GitIdentityResolution,
     current_git_committer_identity_resolution, global_git_config_committer_identity,
-    global_git_config_identity_resolution, parse_git_var_identity,
+    global_git_config_identity_resolution, parse_git_var_identity, resolve_api_author_identity,
 };

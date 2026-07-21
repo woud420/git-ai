@@ -248,7 +248,7 @@ fn test_api_context_uses_fresh_config() {
     save_file_config(&file_config).expect("Failed to save config");
 
     // Create ApiContext - should use the first URL
-    let ctx1 = ApiContext::new(None);
+    let ctx1 = ApiContext::new(None, || None);
     assert_eq!(ctx1.base_url, "https://api1.example.com");
 
     // Change the config file
@@ -256,7 +256,7 @@ fn test_api_context_uses_fresh_config() {
     save_file_config(&file_config).expect("Failed to save updated config");
 
     // Create new ApiContext - should pick up the new URL
-    let ctx2 = ApiContext::new(None);
+    let ctx2 = ApiContext::new(None, || None);
     assert_eq!(ctx2.base_url, "https://api2.example.com");
 }
 
@@ -304,7 +304,7 @@ fn test_api_context_picks_up_api_key_changes() {
     let file_config = git_ai::config::FileConfig::default();
     save_file_config(&file_config).expect("Failed to save config");
 
-    let ctx1 = ApiContext::new(None);
+    let ctx1 = ApiContext::new(None, || None);
     assert!(ctx1.api_key.is_none());
 
     // Add API key
@@ -313,7 +313,7 @@ fn test_api_context_picks_up_api_key_changes() {
     save_file_config(&file_config).expect("Failed to save updated config");
 
     // Create new ApiContext - should pick up the API key
-    let ctx2 = ApiContext::new(None);
+    let ctx2 = ApiContext::new(None, || None);
     assert_eq!(ctx2.api_key, Some("test_key_123".to_string()));
 
     // Remove API key
@@ -322,6 +322,6 @@ fn test_api_context_picks_up_api_key_changes() {
     save_file_config(&file_config).expect("Failed to save updated config");
 
     // Create new ApiContext - should see no API key
-    let ctx3 = ApiContext::new(None);
+    let ctx3 = ApiContext::new(None, || None);
     assert!(ctx3.api_key.is_none());
 }

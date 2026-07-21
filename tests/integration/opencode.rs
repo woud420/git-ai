@@ -16,9 +16,9 @@ fn opencode_sqlite_fixture_path() -> std::path::PathBuf {
 #[test]
 fn test_opencode_raw_event_fidelity() {
     use chrono::{DateTime, Utc};
+    use git_ai::model::stream_watermark::TimestampWatermark;
     use git_ai::operations::streams::agent::Agent;
     use git_ai::operations::streams::agents::OpenCodeAgent;
-    use git_ai::operations::streams::watermark::TimestampWatermark;
     use rusqlite::OpenFlags;
 
     let opencode_root = opencode_sqlite_fixture_path();
@@ -448,9 +448,9 @@ fn test_opencode_e2e_checkpoint_and_commit() {
 #[test]
 fn test_opencode_transcript_ids_extracted_from_fixture() {
     use chrono::{DateTime, Utc};
+    use git_ai::model::stream_watermark::TimestampWatermark;
     use git_ai::operations::streams::agent::Agent;
     use git_ai::operations::streams::agents::OpenCodeAgent;
-    use git_ai::operations::streams::watermark::TimestampWatermark;
 
     let fixture = fixture_path("opencode-sqlite/opencode.db");
     let agent = OpenCodeAgent::new();
@@ -477,9 +477,9 @@ fn test_opencode_transcript_ids_extracted_from_fixture() {
 #[test]
 fn test_opencode_tool_use_id_matches_hook_and_transcript() {
     use chrono::{DateTime, Utc};
+    use git_ai::model::stream_watermark::TimestampWatermark;
     use git_ai::operations::streams::agent::Agent;
     use git_ai::operations::streams::agents::OpenCodeAgent;
-    use git_ai::operations::streams::watermark::TimestampWatermark;
 
     let fixture = fixture_path("opencode-sqlite/opencode.db");
     let agent = OpenCodeAgent::new();
@@ -504,9 +504,9 @@ fn test_opencode_tool_use_id_matches_hook_and_transcript() {
 fn test_opencode_checkpoint_tool_use_id_matches_transcript_callid() {
     use crate::repos::test_repo::TestRepo;
     use chrono::{DateTime, Utc};
+    use git_ai::model::stream_watermark::TimestampWatermark;
     use git_ai::operations::streams::agent::Agent;
     use git_ai::operations::streams::agents::OpenCodeAgent;
-    use git_ai::operations::streams::watermark::TimestampWatermark;
 
     let mut repo = TestRepo::new();
     repo.patch_git_ai_config(|patch| {

@@ -8,7 +8,7 @@
 use crate::error::GitAiError;
 use std::cmp::Ordering;
 
-use super::types::Attribution;
+use crate::model::attribution::Attribution;
 
 /// Configuration for the attribution tracker
 pub struct AttributionConfig {

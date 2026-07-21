@@ -422,7 +422,7 @@ mod tests {
         // `ApiContext::without_auth` still picks up an API key from the
         // environment if one is set. The reference server ignores headers, so
         // either way is fine.
-        ApiClient::new(ApiContext::without_auth(Some(server.base_url())))
+        ApiClient::new(ApiContext::without_auth(Some(server.base_url()), || None))
     }
 
     #[test]

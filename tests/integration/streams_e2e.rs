@@ -7,11 +7,11 @@
 use git_ai::metrics::{
     EventAttributes, MetricEvent, OtelTraceValues, PosEncoded, SessionEventValues,
 };
-use git_ai::operations::streams::agent::Agent;
-use git_ai::operations::streams::agents::{ClaudeAgent, CopilotAgent, OpenCodeAgent};
-use git_ai::operations::streams::watermark::{
+use git_ai::model::stream_watermark::{
     ByteOffsetWatermark, TimestampCursorWatermark, TimestampWatermark, WatermarkStrategy,
 };
+use git_ai::operations::streams::agent::Agent;
+use git_ai::operations::streams::agents::{ClaudeAgent, CopilotAgent, OpenCodeAgent};
 use git_ai::operations::streams::{StreamRecord, StreamsDatabase};
 use std::fs::{self, File};
 use std::io::Write;

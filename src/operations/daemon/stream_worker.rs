@@ -11,10 +11,10 @@ use crate::metrics::{
 use crate::model::authorship_log_serialization::{generate_session_id, generate_trace_id};
 use crate::model::repository::streams_db::{StreamRecord, StreamsDatabase};
 use crate::model::stream_types::StreamError;
+use crate::model::stream_watermark::{WatermarkStrategy, WatermarkType};
 use crate::operations::daemon::telemetry_worker::DaemonTelemetryWorkerHandle;
 use crate::operations::daemon::transcript_redaction::redact_json_secrets;
 use crate::operations::streams::agent::{SHARED_STREAM_SESSION_ID, StreamDescriptor};
-use crate::operations::streams::watermark::{WatermarkStrategy, WatermarkType};
 use chrono::{TimeZone, Utc};
 use std::collections::{BinaryHeap, HashSet};
 use std::path::{Path, PathBuf};
@@ -38,7 +38,7 @@ pub(crate) fn transcript_collection_allowed(work_dir: Option<&Path>) -> bool {
         return false;
     };
     match crate::operations::git::repository::discover_repository_in_path_no_git_exec(work_dir) {
-        Ok(repo) => crate::config::Config::fresh().is_allowed_repository(Some(&repo)),
+        Ok(repo) => repo.is_collection_allowed(&crate::config::Config::fresh()),
         Err(_) => false,
     }
 }
@@ -873,7 +873,7 @@ impl StreamWorker {
             return Ok(());
         }
 
-        use crate::operations::streams::watermark::ByteOffsetWatermark;
+        use crate::model::stream_watermark::ByteOffsetWatermark;
 
         let initial_watermark = ByteOffsetWatermark::new(0);
         let record = StreamRecord {
@@ -1119,7 +1119,7 @@ impl StreamWorker {
         let watermark_type_str = &stream.watermark_type;
         let is_initial_watermark = stream.watermark_value.is_empty()
             || watermark_type_str
-                .parse::<crate::operations::streams::watermark::WatermarkType>()
+                .parse::<crate::model::stream_watermark::WatermarkType>()
                 .ok()
                 .map(|wt| wt.create_initial_watermark().serialize() == stream.watermark_value)
                 .unwrap_or(false);

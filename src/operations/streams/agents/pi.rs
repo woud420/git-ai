@@ -1,9 +1,9 @@
 //! Pi agent implementation with sweep discovery.
 
 use crate::model::stream_types::{StreamBatch, StreamError};
+use crate::model::stream_watermark::{ByteOffsetWatermark, WatermarkStrategy};
 use crate::operations::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::watermark::{ByteOffsetWatermark, WatermarkStrategy};
 use std::fs::File;
 use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;

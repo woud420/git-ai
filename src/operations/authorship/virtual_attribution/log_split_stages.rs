@@ -199,10 +199,10 @@ pub(super) fn fill_committed_gaps(
                 && !prev_author.starts_with("h_")
             {
                 gap_fills.push((prev_author.to_string(), line));
-            } else if let Some(&content) = gap_file_lines.get((line - 1) as usize) {
-                if let Some(&author) = content_to_ai_author.get(content) {
-                    gap_fills.push((author.to_string(), line));
-                }
+            } else if let Some(&content) = gap_file_lines.get((line - 1) as usize)
+                && let Some(&author) = content_to_ai_author.get(content)
+            {
+                gap_fills.push((author.to_string(), line));
             }
         }
     }
@@ -282,10 +282,10 @@ impl VirtualAttributions {
                 continue;
             }
 
-            if author_id.starts_with("h_") {
-                if let Some(record) = self.humans.get(&author_id) {
-                    initial_humans.insert(author_id.clone(), record.clone());
-                }
+            if author_id.starts_with("h_")
+                && let Some(record) = self.humans.get(&author_id)
+            {
+                initial_humans.insert(author_id.clone(), record.clone());
             }
 
             if author_id.starts_with("s_") {

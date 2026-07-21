@@ -13,6 +13,7 @@ impl ActorDaemonCoordinator {
     /// event ordering.  `snapshots` is the per-actor timestamp map consumed by the
     /// async preflight.  The `continue` in the original loop becomes `return Ok(())`
     /// (handled at the call site via the event loop, not by the helper).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_commit_created(
         &self,
         cmd: &crate::model::domain::NormalizedCommand,

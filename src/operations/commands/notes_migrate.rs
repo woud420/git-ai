@@ -17,6 +17,7 @@ use crate::error::GitAiError;
 use crate::model::api_types::{NoteEntry, NotesUploadRequest};
 use crate::model::repository::notes_db::NotesDatabase;
 use crate::operations::git::find_repository;
+use crate::operations::git::repository::resolve_api_author_identity;
 use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -183,20 +184,17 @@ fn migrate_refs_to_http(
     force: bool,
 ) {
     // 3. Build the API client.
-    let backend_url = match cfg.notes_backend_url() {
-        Some(url) => url.to_string(),
-        None => {
-            eprintln!(
-                "error: notes_backend.backend_url is not configured.\n\
-                 \n\
-                 Set it before running migrate, e.g.:\n\
-                 \n\
-                 \x20 git-ai config set notes_backend.backend_url https://your-backend.example.com"
-            );
-            std::process::exit(1);
-        }
+    let Some(backend_url) = cfg.notes_backend_url().map(str::to_string) else {
+        eprintln!(
+            "error: notes_backend.backend_url is not configured.\n\
+             \n\
+             Set it before running migrate, e.g.:\n\
+             \n\
+             \x20 git-ai config set notes_backend.backend_url https://your-backend.example.com"
+        );
+        std::process::exit(1);
     };
-    let ctx = ApiContext::new(Some(backend_url));
+    let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
     let client = ApiClient::new(ctx);
 
     // Skip if not authenticated.
@@ -635,7 +633,7 @@ mod tests {
             .notes_backend_url()
             .expect("test should configure notes_backend.backend_url")
             .to_string();
-        let ctx = ApiContext::new(Some(backend_url));
+        let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
         let client = ApiClient::new(ctx);
 
         let note_entries: Vec<NoteEntry> = entries
@@ -813,7 +811,7 @@ mod tests {
 
             let cfg = crate::config::Config::fresh();
             let backend_url = cfg.notes_backend_url().unwrap().to_string();
-            let ctx = ApiContext::new(Some(backend_url));
+            let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
             let client = ApiClient::new(ctx);
 
             let note_entries: Vec<NoteEntry> = forced_entries

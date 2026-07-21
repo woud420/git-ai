@@ -2,6 +2,7 @@ use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::AuthorshipLog;
+use crate::model::diff_json::FileDiffJson;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
@@ -12,7 +13,7 @@ use crate::operations::commands::diff_header_paths::{
 };
 use crate::operations::git::notes_api::{read_authorship, read_note};
 use crate::operations::git::repository::Repository;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::IsTerminal;
@@ -125,19 +126,6 @@ pub struct DiffCommitStats {
     pub git_lines_deleted: u32,
     #[serde(default)]
     pub tool_model_breakdown: BTreeMap<String, DiffToolModelStats>,
-}
-
-/// Per-file diff information in JSON output
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDiffJson {
-    /// Annotations mapping prompt hash to line ranges
-    /// Line ranges are serialized as JSON tuples: [start, end] or single number
-    #[serde(serialize_with = "serialize_annotations")]
-    pub annotations: BTreeMap<String, Vec<LineRange>>,
-    /// The unified diff for this file
-    pub diff: String,
-    /// The base content of the file (before changes)
-    pub base_content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2024,32 +2012,6 @@ fn format_attribution(attribution: &Attribution, humans: &BTreeMap<String, Human
         }
         Attribution::NoData => "[no-data]".to_string(),
     }
-}
-
-/// Custom serializer for annotations that converts LineRange to JSON tuples
-fn serialize_annotations<S>(
-    annotations: &BTreeMap<String, Vec<LineRange>>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    use serde::ser::SerializeMap;
-    let mut map = serializer.serialize_map(Some(annotations.len()))?;
-    for (key, ranges) in annotations {
-        let json_ranges: Vec<serde_json::Value> = ranges
-            .iter()
-            .map(|range| match range {
-                LineRange::Single(line) => serde_json::Value::Number((*line).into()),
-                LineRange::Range(start, end) => serde_json::Value::Array(vec![
-                    serde_json::Value::Number((*start).into()),
-                    serde_json::Value::Number((*end).into()),
-                ]),
-            })
-            .collect();
-        map.serialize_entry(key, &json_ranges)?;
-    }
-    map.end()
 }
 
 // ============================================================================

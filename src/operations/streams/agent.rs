@@ -1,8 +1,8 @@
 // src/streams/agent.rs
 
 use super::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use super::watermark::WatermarkStrategy;
 use crate::model::stream_types::{StreamBatch, StreamError};
+use crate::model::stream_watermark::WatermarkStrategy;
 use std::path::{Path, PathBuf};
 
 /// Sentinel session_id for shared stream watermark rows.
@@ -25,13 +25,13 @@ pub enum PathResolverKind {
 
 /// Type alias for resolver functions that derive values from the resolved path.
 pub type WatermarkTypeResolverFn =
-    Box<dyn Fn(&Path) -> super::watermark::WatermarkType + Send + Sync>;
+    Box<dyn Fn(&Path) -> crate::model::stream_watermark::WatermarkType + Send + Sync>;
 pub type FormatResolverFn = Box<dyn Fn(&Path) -> StreamFormat + Send + Sync>;
 
 pub struct StreamDescriptor {
     pub stream_kind: &'static str,
     pub format: StreamFormat,
-    pub watermark_type: super::watermark::WatermarkType,
+    pub watermark_type: crate::model::stream_watermark::WatermarkType,
     pub path_resolver: PathResolverKind,
     /// When true, this stream's data source is shared across multiple sessions
     /// (e.g., a global OTEL SQLite DB). The session_id for the DB record is derived
@@ -60,7 +60,7 @@ impl StreamDescriptor {
     pub fn effective_watermark_type(
         &self,
         resolved_path: &Path,
-    ) -> super::watermark::WatermarkType {
+    ) -> crate::model::stream_watermark::WatermarkType {
         if let Some(resolver) = &self.watermark_type_resolver {
             resolver(resolved_path)
         } else {

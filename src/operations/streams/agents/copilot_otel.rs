@@ -1,6 +1,6 @@
 use crate::model::stream_types::{StreamBatch, StreamError};
+use crate::model::stream_watermark::{TimestampCursorWatermark, WatermarkStrategy};
 use crate::operations::streams::agents::opencode::open_sqlite_readonly;
-use crate::operations::streams::watermark::{TimestampCursorWatermark, WatermarkStrategy};
 use rusqlite::Connection;
 use serde_json::json;
 use std::collections::HashMap;
@@ -344,7 +344,7 @@ pub fn extract_otel_event_timestamp(event: &serde_json::Value) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operations::streams::watermark::TimestampCursorWatermark;
+    use crate::model::stream_watermark::TimestampCursorWatermark;
     use std::str::FromStr;
 
     fn create_test_otel_db() -> (tempfile::TempDir, std::path::PathBuf) {

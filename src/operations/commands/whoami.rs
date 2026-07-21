@@ -3,6 +3,7 @@ use crate::clients::auth::state::AuthStatus;
 use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
 use crate::model::repository::metrics_db::{MetricsDatabase, MetricsStatus};
+use crate::operations::git::repository::resolve_api_author_identity;
 use std::fmt::Write as _;
 
 pub fn handle_whoami(args: &[String]) {
@@ -25,7 +26,7 @@ pub fn handle_whoami(args: &[String]) {
     let api_base_url = config.api_base_url().to_string();
     let telemetry_enabled = config.telemetry_enabled();
     let auth = collect_auth_status();
-    let api_ctx = ApiContext::new(None);
+    let api_ctx = ApiContext::new(None, resolve_api_author_identity);
     let api_client = ApiClient::new(api_ctx.clone());
     let metrics_status = collect_metrics_status();
 

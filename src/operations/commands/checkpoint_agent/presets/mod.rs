@@ -127,8 +127,8 @@ pub enum StreamFormat {
 }
 
 impl StreamFormat {
-    pub fn watermark_type(self) -> crate::operations::streams::watermark::WatermarkType {
-        use crate::operations::streams::watermark::WatermarkType;
+    pub fn watermark_type(self) -> crate::model::stream_watermark::WatermarkType {
+        use crate::model::stream_watermark::WatermarkType;
         match self {
             Self::ClaudeJsonl
             | Self::CursorJsonl

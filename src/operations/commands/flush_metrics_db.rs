@@ -7,13 +7,14 @@ use crate::clients::api::{
 };
 use crate::metrics::{MetricEvent, MetricsBatch};
 use crate::model::repository::metrics_db::MetricsDatabase;
+use crate::operations::git::repository::resolve_api_author_identity;
 
 /// Max events per batch upload
 const MAX_BATCH_SIZE: usize = 1000;
 
 /// Handle the flush-metrics-db command
 pub fn handle_flush_metrics_db(_args: &[String]) {
-    let context = ApiContext::new(None);
+    let context = ApiContext::new(None, resolve_api_author_identity);
     let api_base_url = context.base_url.clone();
     let client = ApiClient::new(context);
 

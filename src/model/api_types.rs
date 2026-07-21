@@ -1,5 +1,5 @@
 use crate::model::authorship_log::{LineRange, PromptRecord};
-use crate::operations::commands::diff::FileDiffJson;
+use crate::model::diff_json::FileDiffJson;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -281,7 +281,7 @@ pub struct DaemonLogsUploadResponse {
 mod tests {
     use super::*;
     use crate::model::authorship_log::LineRange;
-    use crate::operations::commands::diff::FileDiffJson;
+    use crate::model::diff_json::FileDiffJson;
     use std::collections::BTreeMap;
 
     #[test]

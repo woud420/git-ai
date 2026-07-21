@@ -8,10 +8,10 @@
 //! 5. Sweep never double processes files (in_flight deduplication)
 
 use git_ai::model::repository::streams_db::StreamsDatabase;
+use git_ai::model::stream_watermark::ByteOffsetWatermark;
 use git_ai::operations::streams::agent::Agent;
 use git_ai::operations::streams::agents::ClaudeAgent;
 use git_ai::operations::streams::sweep::SweepStrategy;
-use git_ai::operations::streams::watermark::ByteOffsetWatermark;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;

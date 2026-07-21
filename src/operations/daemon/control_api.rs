@@ -1,4 +1,4 @@
-use crate::metrics::MetricEvent;
+use crate::model::telemetry::TelemetryEnvelope;
 use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::StatSnapshot;
 use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
@@ -142,37 +142,6 @@ pub struct FamilyStatus {
     pub family_key: String,
     pub latest_seq: u64,
     pub last_error: Option<String>,
-}
-
-/// A telemetry envelope sent from client to daemon.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TelemetryEnvelope {
-    Error {
-        timestamp: String,
-        message: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        context: Option<Value>,
-    },
-    Performance {
-        timestamp: String,
-        operation: String,
-        duration_ms: u128,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        context: Option<Value>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        tags: Option<std::collections::HashMap<String, String>>,
-    },
-    Message {
-        timestamp: String,
-        message: String,
-        level: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        context: Option<Value>,
-    },
-    Metrics {
-        events: Vec<MetricEvent>,
-    },
 }
 
 /// A CAS object payload sent from client to daemon for background upload.

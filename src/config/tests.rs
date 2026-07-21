@@ -119,7 +119,7 @@ fn test_empty_allowlist_denies_everything() {
     let config = create_test_config(vec![], vec![]);
 
     // Collection is opt-in: an empty allowlist denies everything.
-    assert!(!config.is_allowed_repository(None));
+    assert!(!config.is_allowed_repository_with_context(None, None));
     let remotes = vec![(
         "origin".to_string(),
         "https://github.com/any/repo".to_string(),
@@ -133,7 +133,7 @@ fn test_exclude_without_allow_still_denies() {
     let config = create_test_config(vec![], vec!["https://github.com/excluded/repo".to_string()]);
 
     // Exclusions do not turn on collection: the allowlist is still empty.
-    assert!(!config.is_allowed_repository(None));
+    assert!(!config.is_allowed_repository_with_context(None, None));
     let remotes = vec![(
         "origin".to_string(),
         "https://github.com/unrelated/repo".to_string(),
@@ -146,7 +146,7 @@ fn test_allow_without_exclude() {
     let config = create_test_config(vec!["https://github.com/allowed/repo".to_string()], vec![]);
 
     // With an allowlist but no repository context, deny.
-    assert!(!config.is_allowed_repository(None));
+    assert!(!config.is_allowed_repository_with_context(None, None));
 
     let allowed_remotes = vec![(
         "origin".to_string(),

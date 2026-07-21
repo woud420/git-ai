@@ -2,10 +2,10 @@
 
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::stream_types::{StreamBatch, StreamError};
+use crate::model::stream_watermark::{ByteOffsetWatermark, WatermarkStrategy};
 use crate::operations::mdm::utils::codex_home_dir;
 use crate::operations::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::watermark::{ByteOffsetWatermark, WatermarkStrategy};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};

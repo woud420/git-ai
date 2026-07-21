@@ -2,9 +2,6 @@ use crate::clients::auth::{CredentialStore, OAuthClient};
 use crate::clients::http;
 use crate::config;
 use crate::error::GitAiError;
-use crate::operations::git::repository::{
-    current_git_committer_identity_resolution, parse_git_var_identity,
-};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use url::Url;
@@ -63,92 +60,12 @@ fn try_load_auth_token() -> Option<String> {
     // Mutex guard is automatically released when _guard is dropped
 }
 
-/// Resolve the git-ai effective author identity without requiring a Repository instance.
-///
-/// Uses the shared git identity helper to get the current user's identity,
-/// respecting the full git precedence chain (env vars > config > system defaults),
-/// then overlays any configured git-ai author fields.
-/// Falls back to the system hostname if git identity is unavailable.
-fn resolve_git_identity() -> Option<String> {
-    let author_config = config::Config::fresh_author_cached();
-    let identity = current_git_committer_identity_resolution()
-        .identity
-        .with_author_config(&author_config);
-    if let Some(formatted) = identity.formatted() {
-        return Some(encode_for_header(&formatted));
-    }
-
-    resolve_fallback_identity()
-        .map(|id| parse_git_var_identity(&id).with_author_config(&author_config))
-        .and_then(|identity| identity.formatted())
-        .map(|id| encode_for_header(&id))
-}
-
-/// Build a fallback identity matching git's format: `"Username <username@hostname>"`.
-fn resolve_fallback_identity() -> Option<String> {
-    let username = resolve_username()?;
-    let hostname = resolve_hostname().unwrap_or_else(|| "localhost".to_string());
-    Some(format!("{} <{}@{}>", username, username, hostname))
-}
-
-fn resolve_username() -> Option<String> {
-    #[cfg(windows)]
-    if let Ok(u) = std::env::var("USERNAME")
-        && !u.trim().is_empty()
-    {
-        return Some(u.trim().to_string());
-    }
-    #[cfg(not(windows))]
-    if let Ok(u) = std::env::var("USER")
-        && !u.trim().is_empty()
-    {
-        return Some(u.trim().to_string());
-    }
-    None
-}
-
-fn resolve_hostname() -> Option<String> {
-    #[cfg(windows)]
-    if let Ok(h) = std::env::var("COMPUTERNAME")
-        && !h.trim().is_empty()
-    {
-        return Some(h.trim().to_string());
-    }
-    if let Ok(h) = std::env::var("HOSTNAME")
-        && !h.trim().is_empty()
-    {
-        return Some(h.trim().to_string());
-    }
-    let mut cmd = std::process::Command::new("hostname");
-    #[cfg(windows)]
-    {
-        use crate::utils::CREATE_NO_WINDOW;
-        std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NO_WINDOW);
-    }
-    let output = cmd.output().ok()?;
-    let h = String::from_utf8(output.stdout).ok()?;
-    let h = h.trim();
-    if h.is_empty() {
-        None
-    } else {
-        Some(h.to_string())
-    }
-}
-
-/// Percent-encode non-ASCII and control bytes so the value is safe for HTTP headers.
-/// ureq 2.x accepts only visible ASCII (0x21..=0x7E) and space/tab in header values.
-fn encode_for_header(value: &str) -> String {
-    use std::fmt::Write;
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'%' => encoded.push_str("%25"),
-            0x20..=0x7E => encoded.push(byte as char),
-            _ => write!(encoded, "%{:02X}", byte).unwrap(),
-        }
-    }
-    encoded
-}
+/// Resolver for the git-ai author identity sent as the `X-Author-Identity`
+/// header. The concrete implementation lives in the git adapter
+/// (`operations::git::repository::resolve_api_author_identity`); the client
+/// accepts it as a function pointer so `clients/api` stays free of any
+/// `operations` dependency.
+pub type AuthorIdentityResolver = fn() -> Option<String>;
 
 /// API client context with optional authentication
 #[derive(Clone)]
@@ -220,11 +137,15 @@ impl ApiContext {
     /// Create a new API context, automatically using stored credentials if available
     /// If base_url is None, uses api_base_url from config (which can be set via config file, env var, or defaults)
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
-    pub fn new(base_url: Option<String>) -> Self {
+    ///
+    /// `identity_resolver` produces the `X-Author-Identity` header value; it is
+    /// only invoked when an API key is configured. Pass
+    /// [`crate::operations::git::repository::resolve_api_author_identity`].
+    pub fn new(base_url: Option<String>, identity_resolver: AuthorIdentityResolver) -> Self {
         let cfg = config::Config::fresh();
         let api_key = cfg.api_key().map(|s| s.to_string());
         let author_identity = if api_key.is_some() {
-            resolve_git_identity()
+            identity_resolver()
         } else {
             None
         };
@@ -241,11 +162,14 @@ impl ApiContext {
     /// Use this when you need to ensure no auth token is sent
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
     #[allow(dead_code)]
-    pub fn without_auth(base_url: Option<String>) -> Self {
+    pub fn without_auth(
+        base_url: Option<String>,
+        identity_resolver: AuthorIdentityResolver,
+    ) -> Self {
         let cfg = config::Config::fresh();
         let api_key = cfg.api_key().map(|s| s.to_string());
         let author_identity = if api_key.is_some() {
-            resolve_git_identity()
+            identity_resolver()
         } else {
             None
         };
@@ -262,11 +186,15 @@ impl ApiContext {
     /// If base_url is None, uses api_base_url from config (which can be set via config file, env var, or defaults)
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
     #[allow(dead_code)]
-    pub fn with_auth(base_url: Option<String>, auth_token: String) -> Self {
+    pub fn with_auth(
+        base_url: Option<String>,
+        auth_token: String,
+        identity_resolver: AuthorIdentityResolver,
+    ) -> Self {
         let cfg = config::Config::fresh();
         let api_key = cfg.api_key().map(|s| s.to_string());
         let author_identity = if api_key.is_some() {
-            resolve_git_identity()
+            identity_resolver()
         } else {
             None
         };
@@ -395,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_api_context_without_auth() {
-        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()));
+        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         assert!(ctx.auth_token.is_none());
         assert_eq!(ctx.base_url, "https://example.com");
     }
@@ -405,6 +333,7 @@ mod tests {
         let ctx = ApiContext::with_auth(
             Some("https://example.com".to_string()),
             "test_token".to_string(),
+            || None,
         );
         assert_eq!(ctx.auth_token, Some("test_token".to_string()));
         assert_eq!(ctx.base_url, "https://example.com");
@@ -412,14 +341,14 @@ mod tests {
 
     #[test]
     fn test_api_context_with_timeout() {
-        let ctx =
-            ApiContext::without_auth(Some("https://example.com".to_string())).with_timeout(60);
+        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None)
+            .with_timeout(60);
         assert_eq!(ctx.timeout_secs, Some(60));
     }
 
     #[test]
     fn test_api_context_default_timeout() {
-        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()));
+        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         assert_eq!(ctx.timeout_secs, Some(30));
     }
 
@@ -427,23 +356,29 @@ mod tests {
 
     #[test]
     fn test_api_client_is_logged_in_true() {
-        let ctx =
-            ApiContext::with_auth(Some("https://example.com".to_string()), "token".to_string());
+        let ctx = ApiContext::with_auth(
+            Some("https://example.com".to_string()),
+            "token".to_string(),
+            || None,
+        );
         let client = ApiClient::new(ctx);
         assert!(client.is_logged_in());
     }
 
     #[test]
     fn test_api_client_is_logged_in_false() {
-        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()));
+        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         let client = ApiClient::new(ctx);
         assert!(!client.is_logged_in());
     }
 
     #[test]
     fn test_api_client_context_access() {
-        let ctx =
-            ApiContext::with_auth(Some("https://example.com".to_string()), "token".to_string());
+        let ctx = ApiContext::with_auth(
+            Some("https://example.com".to_string()),
+            "token".to_string(),
+            || None,
+        );
         let client = ApiClient::new(ctx);
         assert_eq!(client.context().base_url, "https://example.com");
     }
@@ -452,42 +387,45 @@ mod tests {
 
     #[test]
     fn test_build_url_simple() {
-        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()));
+        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         let url = ctx.build_url("/api/test").unwrap();
         assert_eq!(url, "https://example.com/api/test");
     }
 
     #[test]
     fn test_build_url_with_trailing_slash() {
-        let ctx = ApiContext::without_auth(Some("https://example.com/".to_string()));
+        let ctx = ApiContext::without_auth(Some("https://example.com/".to_string()), || None);
         let url = ctx.build_url("api/test").unwrap();
         assert_eq!(url, "https://example.com/api/test");
     }
 
     #[test]
     fn test_build_url_invalid_base() {
-        let ctx = ApiContext::without_auth(Some("not-a-url".to_string()));
+        let ctx = ApiContext::without_auth(Some("not-a-url".to_string()), || None);
         let result = ctx.build_url("/api/test");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_build_url_preserves_path_prefix() {
-        let ctx = ApiContext::without_auth(Some("https://example.com/api/gitai".to_string()));
+        let ctx =
+            ApiContext::without_auth(Some("https://example.com/api/gitai".to_string()), || None);
         let url = ctx.build_url("/worker/notes/upload").unwrap();
         assert_eq!(url, "https://example.com/api/gitai/worker/notes/upload");
     }
 
     #[test]
     fn test_build_url_preserves_path_prefix_with_trailing_slash() {
-        let ctx = ApiContext::without_auth(Some("https://example.com/api/gitai/".to_string()));
+        let ctx =
+            ApiContext::without_auth(Some("https://example.com/api/gitai/".to_string()), || None);
         let url = ctx.build_url("/worker/notes/upload").unwrap();
         assert_eq!(url, "https://example.com/api/gitai/worker/notes/upload");
     }
 
     #[test]
     fn test_build_url_preserves_query_string() {
-        let ctx = ApiContext::without_auth(Some("https://example.com/api/gitai".to_string()));
+        let ctx =
+            ApiContext::without_auth(Some("https://example.com/api/gitai".to_string()), || None);
         let url = ctx.build_url("/worker/notes/?commits=abc,def").unwrap();
         assert_eq!(
             url,
@@ -529,45 +467,5 @@ mod tests {
         // All threads should have acquired the lock sequentially
         let final_count = counter.load(Ordering::SeqCst);
         assert_eq!(final_count, 5);
-    }
-
-    // ============= encode_for_header Tests =============
-
-    #[test]
-    fn test_encode_for_header_ascii_passthrough() {
-        let value = "John Doe <john@example.com>";
-        assert_eq!(encode_for_header(value), value);
-    }
-
-    #[test]
-    fn test_encode_for_header_non_ascii() {
-        assert_eq!(
-            encode_for_header("Ex\u{00f6}utf8lastname <user@example.com>"),
-            "Ex%C3%B6utf8lastname <user@example.com>"
-        );
-    }
-
-    #[test]
-    fn test_encode_for_header_percent_encoded_for_reversibility() {
-        assert_eq!(encode_for_header("100% done"), "100%25 done");
-    }
-
-    #[test]
-    fn test_encode_for_header_special_ascii_chars_passthrough() {
-        let value = "Name+Tag <user+tag@sub.example.com>";
-        assert_eq!(encode_for_header(value), value);
-    }
-
-    #[test]
-    fn test_encode_for_header_all_bytes_valid_for_ureq() {
-        let input = "Ñoño García <nono@example.com>";
-        let encoded = encode_for_header(input);
-        assert!(
-            encoded
-                .bytes()
-                .all(|b| b == b' ' || b == b'\t' || (0x21..=0x7E).contains(&b)),
-            "encoded value contains invalid header bytes: {:?}",
-            encoded
-        );
     }
 }

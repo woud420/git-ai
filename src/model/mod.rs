@@ -10,9 +10,13 @@
 //! valid during the migration.
 
 pub mod api_types;
+pub mod attribution;
 pub mod authorship_log;
 pub mod authorship_log_serialization;
+pub mod diff_json;
 pub mod domain;
 pub mod repository;
 pub mod stream_types;
+pub mod stream_watermark;
+pub mod telemetry;
 pub mod working_log;

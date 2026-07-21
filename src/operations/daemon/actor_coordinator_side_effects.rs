@@ -564,7 +564,7 @@ impl ActorDaemonCoordinator {
                             // Preservation of pre-existing notes (cherry-pick rewrite
                             // below) still runs.
                             let repo_allowed =
-                                crate::config::Config::fresh().is_allowed_repository(Some(&repo));
+                                repo.is_collection_allowed(&crate::config::Config::fresh());
                             let author = repo.effective_author_identity().formatted_or_unknown();
                             let base_opt = base.clone().filter(|b| !b.is_empty() && b != "initial");
                             let recovery_file_timestamps = Self::take_commit_file_timestamps(
@@ -640,7 +640,7 @@ impl ActorDaemonCoordinator {
                             // migrated (preservation), but denied repos never gain new
                             // notes.
                             let repo_allowed =
-                                crate::config::Config::fresh().is_allowed_repository(Some(&repo));
+                                repo.is_collection_allowed(&crate::config::Config::fresh());
                             if !repo_allowed
                                 && crate::operations::git::notes_api::read_note(&repo, old_head)
                                     .is_none()

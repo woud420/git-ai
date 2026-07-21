@@ -8,9 +8,8 @@
 //! callers (telemetry, CAS, and potentially checkpoints). This avoids the
 //! overhead of opening a new connection for every fire-and-forget event.
 
-use crate::operations::daemon::control_api::{
-    CasSyncPayload, ControlRequest, ControlResponse, TelemetryEnvelope,
-};
+use crate::model::telemetry::TelemetryEnvelope;
+use crate::operations::daemon::control_api::{CasSyncPayload, ControlRequest, ControlResponse};
 use crate::operations::daemon::{DaemonClientStream, open_local_socket_stream_with_timeout};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;

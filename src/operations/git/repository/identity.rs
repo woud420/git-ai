@@ -139,6 +139,97 @@ pub(super) fn git_config_identity_resolution_from_config(
     }
 }
 
+/// Resolve the git-ai effective author identity for the `X-Author-Identity`
+/// HTTP header, without requiring a `Repository` instance.
+///
+/// Uses the shared git identity helper (full precedence chain: env vars >
+/// config > system defaults), overlays any configured git-ai author fields,
+/// falls back to the system hostname when git identity is unavailable, and
+/// percent-encodes the result so it is safe for an HTTP header value.
+///
+/// Lives in the git adapter so the network client (`clients/api`) can accept
+/// the resolved identity as plain data instead of reaching into `operations`.
+pub fn resolve_api_author_identity() -> Option<String> {
+    let author_config = config::Config::fresh_author_cached();
+    let identity = current_git_committer_identity_resolution()
+        .identity
+        .with_author_config(&author_config);
+    if let Some(formatted) = identity.formatted() {
+        return Some(encode_for_header(&formatted));
+    }
+
+    resolve_fallback_identity()
+        .map(|id| parse_git_var_identity(&id).with_author_config(&author_config))
+        .and_then(|identity| identity.formatted())
+        .map(|id| encode_for_header(&id))
+}
+
+/// Build a fallback identity matching git's format: `"Username <username@hostname>"`.
+fn resolve_fallback_identity() -> Option<String> {
+    let username = resolve_username()?;
+    let hostname = resolve_hostname().unwrap_or_else(|| "localhost".to_string());
+    Some(format!("{} <{}@{}>", username, username, hostname))
+}
+
+fn resolve_username() -> Option<String> {
+    #[cfg(windows)]
+    if let Ok(u) = std::env::var("USERNAME")
+        && !u.trim().is_empty()
+    {
+        return Some(u.trim().to_string());
+    }
+    #[cfg(not(windows))]
+    if let Ok(u) = std::env::var("USER")
+        && !u.trim().is_empty()
+    {
+        return Some(u.trim().to_string());
+    }
+    None
+}
+
+fn resolve_hostname() -> Option<String> {
+    #[cfg(windows)]
+    if let Ok(h) = std::env::var("COMPUTERNAME")
+        && !h.trim().is_empty()
+    {
+        return Some(h.trim().to_string());
+    }
+    if let Ok(h) = std::env::var("HOSTNAME")
+        && !h.trim().is_empty()
+    {
+        return Some(h.trim().to_string());
+    }
+    let mut cmd = std::process::Command::new("hostname");
+    #[cfg(windows)]
+    {
+        use crate::utils::CREATE_NO_WINDOW;
+        std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NO_WINDOW);
+    }
+    let output = cmd.output().ok()?;
+    let h = String::from_utf8(output.stdout).ok()?;
+    let h = h.trim();
+    if h.is_empty() {
+        None
+    } else {
+        Some(h.to_string())
+    }
+}
+
+/// Percent-encode non-ASCII and control bytes so the value is safe for HTTP headers.
+/// ureq 2.x accepts only visible ASCII (0x21..=0x7E) and space/tab in header values.
+fn encode_for_header(value: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'%' => encoded.push_str("%25"),
+            0x20..=0x7E => encoded.push(byte as char),
+            _ => write!(encoded, "%{:02X}", byte).unwrap(),
+        }
+    }
+    encoded
+}
+
 pub(super) fn resolve_git_var_identity_with_args<F>(
     mut args: Vec<String>,
     git_var: &str,
@@ -221,6 +312,44 @@ mod tests {
                 .formatted()
                 .as_deref(),
             Some("Git User <config@example.com>")
+        );
+    }
+
+    #[test]
+    fn test_encode_for_header_ascii_passthrough() {
+        let value = "John Doe <john@example.com>";
+        assert_eq!(encode_for_header(value), value);
+    }
+
+    #[test]
+    fn test_encode_for_header_non_ascii() {
+        assert_eq!(
+            encode_for_header("Ex\u{00f6}utf8lastname <user@example.com>"),
+            "Ex%C3%B6utf8lastname <user@example.com>"
+        );
+    }
+
+    #[test]
+    fn test_encode_for_header_percent_encoded_for_reversibility() {
+        assert_eq!(encode_for_header("100% done"), "100%25 done");
+    }
+
+    #[test]
+    fn test_encode_for_header_special_ascii_chars_passthrough() {
+        let value = "Name+Tag <user+tag@sub.example.com>";
+        assert_eq!(encode_for_header(value), value);
+    }
+
+    #[test]
+    fn test_encode_for_header_all_bytes_valid_for_ureq() {
+        let input = "Ñoño García <nono@example.com>";
+        let encoded = encode_for_header(input);
+        assert!(
+            encoded
+                .bytes()
+                .all(|b| b == b' ' || b == b'\t' || (0x21..=0x7E).contains(&b)),
+            "encoded value contains invalid header bytes: {:?}",
+            encoded
         );
     }
 }

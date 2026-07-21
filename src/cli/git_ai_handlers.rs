@@ -535,7 +535,7 @@ fn handle_checkpoint(args: &[String]) {
                         crate::operations::git::repository::discover_repository_in_path_no_git_exec(
                             &file.repo_work_dir,
                         )
-                    && !config.is_allowed_repository(Some(&repo))
+                    && !repo.is_collection_allowed(config)
                 {
                     eprintln!(
                         "Skipping checkpoint because repository is excluded or not in the allowed_repositories list"

@@ -14,12 +14,14 @@ mod transform;
 #[cfg(test)]
 mod tests_tracker;
 
+// `Attribution` / `LineAttribution` are pure value types owned by `model`.
+// Re-exported here so the tracker keeps a single public attribution surface.
+pub use crate::model::attribution::{Attribution, LineAttribution};
 pub use line_attribution::{
     attributions_to_line_attributions, attributions_to_line_attributions_for_checkpoint,
     line_attributions_to_attributions,
 };
 pub use tracker::{AttributionConfig, AttributionTracker};
-pub use types::{Attribution, LineAttribution};
 
 mod types;
 

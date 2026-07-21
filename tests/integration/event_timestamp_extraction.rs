@@ -1,8 +1,8 @@
 use crate::test_utils::{fixture_path, load_fixture};
+use git_ai::model::stream_watermark::RecordIndexWatermark;
 use git_ai::operations::daemon::stream_worker::extract_event_timestamp;
 use git_ai::operations::streams::agent::Agent;
 use git_ai::operations::streams::agents::CopilotAgent;
-use git_ai::operations::streams::watermark::RecordIndexWatermark;
 
 #[test]
 fn test_copilot_vscode_event_stream_timestamps() {

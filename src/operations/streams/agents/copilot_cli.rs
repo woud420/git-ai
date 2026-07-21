@@ -1,8 +1,8 @@
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::stream_types::{StreamBatch, StreamError};
+use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::watermark::WatermarkStrategy;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -167,7 +167,7 @@ impl Agent for CopilotCliAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operations::streams::watermark::ByteOffsetWatermark;
+    use crate::model::stream_watermark::ByteOffsetWatermark;
 
     #[test]
     fn test_sweep_strategy() {

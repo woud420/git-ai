@@ -15,7 +15,7 @@
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::operations::git::repository::Repository;
+use crate::operations::git::repository::{Repository, resolve_api_author_identity};
 use std::collections::{HashMap, HashSet};
 
 // Re-export CommitAuthorship so callers don't need to import from refs directly.
@@ -536,16 +536,13 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
 
     // 3. Batch-fetch from the HTTP backend (chunks of 100).
     let cfg = crate::config::Config::fresh();
-    let backend_url = match cfg.notes_backend_url() {
-        Some(url) => url.to_string(),
-        None => {
-            tracing::debug!(
-                "warm_cache_for_remote: notes_backend.backend_url is not configured; skipping"
-            );
-            return Ok(());
-        }
+    let Some(backend_url) = cfg.notes_backend_url().map(str::to_string) else {
+        tracing::debug!(
+            "warm_cache_for_remote: notes_backend.backend_url is not configured; skipping"
+        );
+        return Ok(());
     };
-    let ctx = ApiContext::new(Some(backend_url));
+    let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
     let client = ApiClient::new(ctx);
 
     // Skip when not authenticated (matches daemon flush_notes pattern).
@@ -700,8 +697,9 @@ fn http_fetch_and_cache_notes(commit_shas: &[String]) -> HashMap<String, String>
         return HashMap::new();
     };
 
-    let ctx = crate::clients::api::client::ApiContext::new(Some(backend_url));
-    let client = crate::clients::api::client::ApiClient::new(ctx);
+    use crate::clients::api::client::{ApiClient, ApiContext};
+    let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
+    let client = ApiClient::new(ctx);
     if !client.is_logged_in() && !client.has_api_key() {
         return HashMap::new();
     }

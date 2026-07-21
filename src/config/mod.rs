@@ -176,14 +176,6 @@ impl Config {
         !self.allowed_repositories.is_empty()
     }
 
-    pub fn is_allowed_repository(&self, repository: Option<&Repository>) -> bool {
-        // Fetch remotes once and reuse for both exclude and allow checks
-        let remotes = repository.and_then(|repo| repo.remotes_with_urls().ok());
-        let repo_root = repository.map(|repo| repo.canonical_workdir());
-
-        self.is_allowed_repository_with_context(remotes.as_ref(), repo_root)
-    }
-
     /// Helper that accepts pre-fetched remotes and the repository root to avoid
     /// repeated git operations. Collection is opt-in: an empty
     /// `allowed_repositories` list denies every repository. Entries match

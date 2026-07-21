@@ -17,8 +17,10 @@ use crate::model::authorship_log_serialization::GIT_AI_VERSION;
 use crate::model::repository::metrics_db::{
     METADATA_BACKFILL_BATCH_SIZE, MetricRecord, MetricsDatabase,
 };
+use crate::model::telemetry::TelemetryEnvelope;
 use crate::observability::MAX_METRICS_PER_ENVELOPE;
-use crate::operations::daemon::control_api::{CasSyncPayload, TelemetryEnvelope};
+use crate::operations::daemon::control_api::CasSyncPayload;
+use crate::operations::git::repository::resolve_api_author_identity;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -664,10 +666,14 @@ fn count_pending_metrics_for_await() -> usize {
         .unwrap_or(0)
 }
 
+/// Build the default API client, returning its resolved base URL alongside it.
+fn default_api_base_and_client() -> (String, ApiClient) {
+    let context = ApiContext::new(None, resolve_api_author_identity);
+    (context.base_url.clone(), ApiClient::new(context))
+}
+
 fn flush_metrics(events: &[MetricEvent]) {
-    let context = ApiContext::new(None);
-    let api_base_url = context.base_url.clone();
-    let client = ApiClient::new(context);
+    let (api_base_url, client) = default_api_base_and_client();
 
     let should_upload = metrics_upload_allowed(&api_base_url, &client);
     METRICS_UPLOAD_AVAILABLE.store(should_upload, Ordering::Relaxed);
@@ -694,9 +700,7 @@ fn flush_metrics(events: &[MetricEvent]) {
 }
 
 fn flush_pending_metrics() {
-    let context = ApiContext::new(None);
-    let api_base_url = context.base_url.clone();
-    let client = ApiClient::new(context);
+    let (api_base_url, client) = default_api_base_and_client();
 
     let should_upload = metrics_upload_allowed(&api_base_url, &client);
     METRICS_UPLOAD_AVAILABLE.store(should_upload, Ordering::Relaxed);
@@ -1029,9 +1033,7 @@ fn flush_daemon_logs(events: Vec<DaemonLogEvent>, daemon_id: &str, install_id: &
         return 0;
     }
 
-    let context = ApiContext::new(None);
-    let api_base_url = context.base_url.clone();
-    let client = ApiClient::new(context);
+    let (api_base_url, client) = default_api_base_and_client();
 
     if !daemon_logs_upload_allowed(&api_base_url, &client) {
         // These diagnostics are intentionally best-effort and only live in memory.
@@ -1276,14 +1278,11 @@ pub fn flush_notes() {
         return;
     }
 
-    let backend_url = match cfg.notes_backend_url() {
-        Some(url) => url.to_string(),
-        None => {
-            tracing::debug!("notes: skipping flush, notes_backend.backend_url is not configured");
-            return;
-        }
+    let Some(backend_url) = cfg.notes_backend_url().map(str::to_string) else {
+        tracing::debug!("notes: skipping flush, notes_backend.backend_url is not configured");
+        return;
     };
-    let context = ApiContext::new(Some(backend_url));
+    let context = ApiContext::new(Some(backend_url), resolve_api_author_identity);
     let client = ApiClient::new(context);
 
     if !client.is_logged_in() && !client.has_api_key() {
@@ -1386,7 +1385,8 @@ fn flush_notes_for_await() -> usize {
         return 0;
     }
 
-    let client = ApiClient::new(ApiContext::new(cfg.notes_backend_url().map(str::to_string)));
+    let backend_url = cfg.notes_backend_url().map(str::to_string);
+    let client = ApiClient::new(ApiContext::new(backend_url, resolve_api_author_identity));
     if !client.is_logged_in() && !client.has_api_key() {
         return 0;
     }
@@ -1413,9 +1413,7 @@ fn count_pending_notes_for_await() -> usize {
 }
 
 fn flush_cas(records: Vec<CasSyncPayload>) {
-    let context = ApiContext::new(None);
-    let api_base_url = context.base_url.clone();
-    let client = ApiClient::new(context);
+    let (api_base_url, client) = default_api_base_and_client();
 
     let using_default_api = api_base_url == crate::config::DEFAULT_API_BASE_URL;
     if using_default_api && !client.is_logged_in() && !client.has_api_key() {

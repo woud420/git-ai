@@ -65,8 +65,8 @@ impl std::fmt::Display for StreamFormat {
 }
 
 impl StreamFormat {
-    pub fn watermark_type(self) -> super::watermark::WatermarkType {
-        use super::watermark::WatermarkType;
+    pub fn watermark_type(self) -> crate::model::stream_watermark::WatermarkType {
+        use crate::model::stream_watermark::WatermarkType;
         match self {
             Self::ClaudeJsonl
             | Self::CursorJsonl

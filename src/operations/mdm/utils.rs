@@ -1,5 +1,5 @@
 use crate::error::GitAiError;
-use crate::operations::authorship::imara_diff_utils::{LineChangeTag, compute_line_changes};
+use crate::model::imara_diff_utils::{LineChangeTag, compute_line_changes};
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::CstRootNode;
 use std::fs;

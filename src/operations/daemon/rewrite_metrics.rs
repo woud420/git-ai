@@ -554,7 +554,7 @@ mod tests {
         let mut hunks_by_file = HashMap::new();
         hunks_by_file.insert(
             "file.txt".to_string(),
-            vec![crate::operations::authorship::hunk_shift::DiffHunk {
+            vec![crate::model::hunk_shift::DiffHunk {
                 old_start: 0,
                 old_count: 0,
                 new_start: 1,

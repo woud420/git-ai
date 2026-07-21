@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use git_ai::operations::authorship::attribution_tracker::LineAttribution;
+use git_ai::model::attribution_tracker::LineAttribution;
 use git_ai::operations::git::repo_storage::InitialAttributions;
 
 use crate::repos::test_file::ExpectedLineExt;

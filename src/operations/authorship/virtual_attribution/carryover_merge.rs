@@ -1,4 +1,4 @@
-use crate::operations::authorship::hunk_shift::DiffHunk;
+use crate::model::hunk_shift::DiffHunk;
 
 pub(super) fn split_lines_preserving_terminators(s: &str) -> Vec<&str> {
     let mut lines = Vec::new();
@@ -21,10 +21,10 @@ pub(super) fn split_lines_preserving_terminators(s: &str) -> Vec<&str> {
 pub(super) fn diff_hunks_between_contents(old_content: &str, new_content: &str) -> Vec<DiffHunk> {
     let old_lines = split_lines_preserving_terminators(old_content);
     let new_lines = split_lines_preserving_terminators(new_content);
-    crate::operations::authorship::imara_diff_utils::capture_diff_slices(&old_lines, &new_lines)
+    crate::model::imara_diff_utils::capture_diff_slices(&old_lines, &new_lines)
         .into_iter()
         .filter_map(|op| match op {
-            crate::operations::authorship::imara_diff_utils::DiffOp::Insert {
+            crate::model::imara_diff_utils::DiffOp::Insert {
                 old_index,
                 new_index,
                 new_len,
@@ -34,7 +34,7 @@ pub(super) fn diff_hunks_between_contents(old_content: &str, new_content: &str) 
                 new_start: new_index as u32 + 1,
                 new_count: new_len as u32,
             }),
-            crate::operations::authorship::imara_diff_utils::DiffOp::Delete {
+            crate::model::imara_diff_utils::DiffOp::Delete {
                 old_index,
                 old_len,
                 new_index,
@@ -44,7 +44,7 @@ pub(super) fn diff_hunks_between_contents(old_content: &str, new_content: &str) 
                 new_start: new_index as u32 + 1,
                 new_count: 0,
             }),
-            crate::operations::authorship::imara_diff_utils::DiffOp::Replace {
+            crate::model::imara_diff_utils::DiffOp::Replace {
                 old_index,
                 old_len,
                 new_index,
@@ -55,7 +55,7 @@ pub(super) fn diff_hunks_between_contents(old_content: &str, new_content: &str) 
                 new_start: new_index as u32 + 1,
                 new_count: new_len as u32,
             }),
-            crate::operations::authorship::imara_diff_utils::DiffOp::Equal { .. } => None,
+            crate::model::imara_diff_utils::DiffOp::Equal { .. } => None,
         })
         .collect()
 }
@@ -113,7 +113,7 @@ pub(crate) fn merged_carryover_content_pure(
 /// git's conflict formatting is not required — only a faithful clean-merge
 /// reconstruction. Keeps the carryover snapshot build free of per-file spawns.
 pub(super) fn carryover_merge_content(parent: &str, committed: &str, observed: &str) -> String {
-    use crate::operations::authorship::imara_diff_utils::{DiffOp, capture_diff_slices};
+    use crate::model::imara_diff_utils::{DiffOp, capture_diff_slices};
 
     if committed == observed {
         return observed.to_string();
@@ -402,12 +402,9 @@ pub(crate) fn checkout_merge_rebased_content(
 
     let mut base_to_target = vec![None; base_lines.len()];
     let mut target_changes = Vec::new();
-    for op in crate::operations::authorship::imara_diff_utils::capture_diff_slices(
-        &base_lines,
-        &target_lines,
-    ) {
+    for op in crate::model::imara_diff_utils::capture_diff_slices(&base_lines, &target_lines) {
         match op {
-            crate::operations::authorship::imara_diff_utils::DiffOp::Equal {
+            crate::model::imara_diff_utils::DiffOp::Equal {
                 old_index,
                 new_index,
                 len,
@@ -416,14 +413,14 @@ pub(crate) fn checkout_merge_rebased_content(
                     base_to_target[old_index + offset] = Some(new_index + offset);
                 }
             }
-            crate::operations::authorship::imara_diff_utils::DiffOp::Delete {
+            crate::model::imara_diff_utils::DiffOp::Delete {
                 old_index,
                 old_len,
                 new_index,
             } => {
                 target_changes.push((old_index, old_index + old_len, new_index, new_index));
             }
-            crate::operations::authorship::imara_diff_utils::DiffOp::Replace {
+            crate::model::imara_diff_utils::DiffOp::Replace {
                 old_index,
                 old_len,
                 new_index,
@@ -436,19 +433,16 @@ pub(crate) fn checkout_merge_rebased_content(
                     new_index + new_len,
                 ));
             }
-            crate::operations::authorship::imara_diff_utils::DiffOp::Insert { .. } => {}
+            crate::model::imara_diff_utils::DiffOp::Insert { .. } => {}
         }
     }
     fill_line_ending_only_mappings(&base_lines, &target_lines, &mut base_to_target);
 
     let mut edits = Vec::<(usize, usize, Vec<String>)>::new();
-    for op in crate::operations::authorship::imara_diff_utils::capture_diff_slices(
-        &base_lines,
-        &observed_lines,
-    ) {
+    for op in crate::model::imara_diff_utils::capture_diff_slices(&base_lines, &observed_lines) {
         match op {
-            crate::operations::authorship::imara_diff_utils::DiffOp::Equal { .. } => {}
-            crate::operations::authorship::imara_diff_utils::DiffOp::Insert {
+            crate::model::imara_diff_utils::DiffOp::Equal { .. } => {}
+            crate::model::imara_diff_utils::DiffOp::Insert {
                 old_index,
                 new_index,
                 new_len,
@@ -464,10 +458,8 @@ pub(crate) fn checkout_merge_rebased_content(
                     ));
                 }
             }
-            crate::operations::authorship::imara_diff_utils::DiffOp::Delete {
-                old_index,
-                old_len,
-                ..
+            crate::model::imara_diff_utils::DiffOp::Delete {
+                old_index, old_len, ..
             } => {
                 if let Some((start, end)) = mapped_line_range(&base_to_target, old_index, old_len)
                     .or_else(|| mapped_conflict_range(&target_changes, old_index, old_len))
@@ -475,7 +467,7 @@ pub(crate) fn checkout_merge_rebased_content(
                     edits.push((start, end, Vec::new()));
                 }
             }
-            crate::operations::authorship::imara_diff_utils::DiffOp::Replace {
+            crate::model::imara_diff_utils::DiffOp::Replace {
                 old_index,
                 old_len,
                 new_index,

@@ -20,7 +20,7 @@ src/model/repository/streams_db.rs	1236
 src/model/stream_watermark.rs	688
 src/operations/authorship/virtual_attribution/authorship_log_split.rs	606
 src/operations/authorship/attribution_recovery.rs	2152
-src/operations/authorship/imara_diff_utils.rs	647
+src/model/imara_diff_utils.rs	647
 src/operations/authorship/post_commit.rs	1432
 src/operations/authorship/rewrite.rs	1903
 src/operations/authorship/rewrite_stash.rs	825

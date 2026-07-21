@@ -4,9 +4,7 @@
 //! phases), the hunk-classification predicates, byte-range helpers, and the
 //! token-aligned diff builder that drives fine-grained attribution.
 
-use crate::operations::authorship::imara_diff_utils::{
-    ByteDiff, ByteDiffOp, DiffOp, capture_diff_slices,
-};
+use crate::model::imara_diff_utils::{ByteDiff, ByteDiffOp, DiffOp, capture_diff_slices};
 
 use super::tokenizer::{LineMetadata, tokenize_non_whitespace};
 

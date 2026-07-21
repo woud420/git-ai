@@ -11,12 +11,17 @@
 
 pub mod api_types;
 pub mod attribution;
+pub mod attribution_tracker;
 pub mod authorship_log;
 pub mod authorship_log_serialization;
 pub mod diff_json;
 pub mod domain;
+pub mod hunk_shift;
+pub mod imara_diff_utils;
+pub mod move_detection;
 pub mod repository;
 pub mod stream_types;
 pub mod stream_watermark;
 pub mod telemetry;
+pub mod transcript;
 pub mod working_log;

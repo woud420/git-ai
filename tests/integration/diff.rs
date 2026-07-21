@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{NewCommit, TestRepo};
-use git_ai::operations::authorship::transcript::{AiTranscript, Message};
+use git_ai::model::transcript::{AiTranscript, Message};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};

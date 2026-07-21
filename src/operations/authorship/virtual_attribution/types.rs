@@ -1,5 +1,5 @@
+use crate::model::attribution_tracker::{Attribution, LineAttribution};
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
-use crate::operations::authorship::attribution_tracker::{Attribution, LineAttribution};
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
 

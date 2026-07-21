@@ -1,5 +1,5 @@
 use super::attestation::build_attestations_from_attributions;
-use crate::operations::authorship::attribution_tracker::{Attribution, LineAttribution};
+use crate::model::attribution_tracker::{Attribution, LineAttribution};
 use std::collections::HashMap;
 
 /// Regression (#11): the attestation emit order must be deterministic.

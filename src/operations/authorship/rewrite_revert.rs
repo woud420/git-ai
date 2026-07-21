@@ -6,7 +6,7 @@ use crate::model::authorship_log::LineRange;
 use crate::model::authorship_log_serialization::{
     AttestationEntry, AuthorshipLog, FileAttestation,
 };
-use crate::operations::authorship::hunk_shift::apply_hunk_shifts_to_file_attestation;
+use crate::model::hunk_shift::apply_hunk_shifts_to_file_attestation;
 use crate::operations::authorship::rewrite::compute_diff_trees_batch;
 use crate::operations::authorship::rewrite::{RewriteMetricCommit, RewriteMetricOperation};
 use crate::operations::git::notes_api;

@@ -16,7 +16,8 @@ adapter** · **Network adapter** · **Orchestration** · **Interface**
 |---|---|---|
 | `model/{authorship_log, domain, stream_types}` | Domain | pure |
 | `model/{attribution, diff_json, stream_watermark, telemetry}` | Domain | pure DTOs/value types moved in during P9.2 |
-| `model/{api_types, working_log, authorship_log_serialization}` | Domain | P9.2 leaks resolved (see below); `api_types` retains one documented residual (`transcript::Message`, P9.3) |
+| `model/{api_types, working_log, authorship_log_serialization}` | Domain | P9.2 leaks resolved; P9.3 residual resolved (`transcript::Message` now lives in `model/transcript.rs`) |
+| `model/{attribution_tracker, imara_diff_utils, move_detection, hunk_shift, transcript}` | Domain | pure attribution algebra moved in from `operations/authorship` during P9.3 |
 | `model/repository/*` (5 dbs + sqlite helpers) | Persistence | singletons by design until P9.5 |
 | `error/`, `repo_url.rs`, `uuid.rs`, `checkpoint_content_budget.rs` | Domain | pure |
 | `feature_flags.rs` | Domain/config | reads `GIT_AI_*` env by design; P9 target: fold under `config/` |
@@ -26,7 +27,7 @@ adapter** · **Network adapter** · **Orchestration** · **Interface**
 | `operations/git/*` | Git adapter | `repository/`, `refs`, `notes_api` (notes choke point), `status`, `repo_state`, `repo_storage`, `sync_authorship`, `fast_reader`, `cli_parser`, `command_classification`, `authorship_traversal` |
 | `operations/daemon/*` | Orchestration | actors/coordinator/reducer/analyzers/ref_cursor + socket listeners; reducer + analyzers are IO-free (keep it that way) |
 | `operations/commands/*` | Orchestration | command handlers; several still oversized (see `.file-length-baseline.txt`) |
-| `operations/authorship/*` | Mixed by design | `attribution_tracker/` + `hunk_shift` are pure Domain (P9.3 move candidates); `virtual_attribution/`, `range_authorship`, `rewrite*` entangle computation with git/notes IO |
+| `operations/authorship/*` | Mixed by design | `virtual_attribution/`, `range_authorship`, `rewrite*` entangle computation with git/notes IO; the pure Domain modules (`attribution_tracker/`, `hunk_shift`, `imara_diff_utils`, `move_detection`, `transcript`) moved to `model/` in P9.3 |
 | `operations/{mdm, streams, ci}` | Integration adapter | agent/IDE installers, transcript readers, CI context |
 | `cli/*`, `main.rs` | Interface | argv[0] dispatch is load-bearing |
 | `metrics/{types, events, attrs, pos_encoded, local_stats}` | Domain + Orchestration mix | event structs are model material; emission/local-stats are orchestration |
@@ -89,10 +90,9 @@ directions:
 - `src/model/repository/**`: no `use crate::{operations, cli}`.
 - `src/clients/**`: no `use crate::operations`.
 
-One documented residual is listed in the test's `ALLOWED_EXCEPTIONS`:
-`model/api_types.rs`'s `CasMessagesObject` holds
-`Vec<operations::authorship::transcript::Message>`; relocating the transcript
-`Message` type is P9.3 scope, not P9.2.
+The `ALLOWED_EXCEPTIONS` list in the test is now empty: the last residual
+(`model/api_types.rs` holding `Vec<transcript::Message>`) was resolved in P9.3
+when `transcript.rs` moved to `model/transcript.rs`.
 
 ## Ambient state access (outside `config/` and `cli/`)
 
@@ -104,9 +104,13 @@ One documented residual is listed in the test's `ALLOWED_EXCEPTIONS`:
 
 ## Duplicated / repeatedly-converted types
 
-- `DiffHunk`: `operations/authorship/hunk_shift.rs` vs `operations/commands/diff.rs:37`.
-- `ByteDiff` (`imara_diff_utils`) has no model-level representation; every consumer re-adapts.
-- `Attribution`/`LineAttribution`: now owned by `model/attribution.rs` (moved in P9.2); the tracker re-exports them for its downstream users.
+- `DiffHunk`: `model/hunk_shift.rs` (moved from operations in P9.3) vs `operations/commands/diff.rs:37`.
+  The `model/hunk_shift.rs` copy is the attribution algebra type; the `diff.rs` copy is a command-layer DTO.
+  Consolidation is deferred — both are in use.
+- `ByteDiff` (`model/imara_diff_utils.rs`, moved P9.3): now has a canonical model-level home; consumers
+  that previously re-adapted inline can import from `crate::model::imara_diff_utils`.
+- `Attribution`/`LineAttribution`: owned by `model/attribution.rs` (moved in P9.2); the
+  `model/attribution_tracker` module re-exports them for its users.
 
 ## Dissolution maps (no module may be named utils/helpers/common)
 

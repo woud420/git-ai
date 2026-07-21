@@ -17,9 +17,7 @@ use super::diff_engine::{
 use super::tokenizer::{LineMetadata, collect_line_metadata};
 use super::tracker::AttributionTracker;
 use super::types::{Deletion, Insertion};
-use crate::operations::authorship::imara_diff_utils::{
-    ByteDiff, ByteDiffOp, DiffOp, capture_diff_slices,
-};
+use crate::model::imara_diff_utils::{ByteDiff, ByteDiffOp, DiffOp, capture_diff_slices};
 
 impl AttributionTracker {
     pub(super) fn compute_diffs(

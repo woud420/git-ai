@@ -190,20 +190,16 @@ pub(super) fn collect_unstaged_hunks_from_snapshot(
 
         let committed_lines = split_lines_preserving_terminators(&committed_content);
         let final_lines = split_lines_preserving_terminators(&final_content);
-        let diff_ops = crate::operations::authorship::imara_diff_utils::capture_diff_slices(
-            &committed_lines,
-            &final_lines,
-        );
+        let diff_ops =
+            crate::model::imara_diff_utils::capture_diff_slices(&committed_lines, &final_lines);
 
         let mut all_added_lines = Vec::new();
         let mut pure_insertion_lines = Vec::new();
 
         for op in diff_ops {
             match op {
-                crate::operations::authorship::imara_diff_utils::DiffOp::Insert {
-                    new_index,
-                    new_len,
-                    ..
+                crate::model::imara_diff_utils::DiffOp::Insert {
+                    new_index, new_len, ..
                 } => {
                     let start = new_index as u32 + 1;
                     let end = start + new_len as u32;
@@ -212,10 +208,8 @@ pub(super) fn collect_unstaged_hunks_from_snapshot(
                         pure_insertion_lines.push(line);
                     }
                 }
-                crate::operations::authorship::imara_diff_utils::DiffOp::Replace {
-                    new_index,
-                    new_len,
-                    ..
+                crate::model::imara_diff_utils::DiffOp::Replace {
+                    new_index, new_len, ..
                 } => {
                     let start = new_index as u32 + 1;
                     let end = start + new_len as u32;
@@ -223,8 +217,8 @@ pub(super) fn collect_unstaged_hunks_from_snapshot(
                         all_added_lines.push(line);
                     }
                 }
-                crate::operations::authorship::imara_diff_utils::DiffOp::Equal { .. }
-                | crate::operations::authorship::imara_diff_utils::DiffOp::Delete { .. } => {}
+                crate::model::imara_diff_utils::DiffOp::Equal { .. }
+                | crate::model::imara_diff_utils::DiffOp::Delete { .. } => {}
             }
         }
 

@@ -1,9 +1,7 @@
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::{LineAttribution, line_attributions_to_attributions};
 use crate::model::working_log::CheckpointKind;
-use crate::operations::authorship::attribution_tracker::{
-    LineAttribution, line_attributions_to_attributions,
-};
 use crate::operations::commands::blame::{GitAiBlameOptions, OLDEST_AI_BLAME_DATE};
 use crate::operations::git::repository::Repository;
 use std::sync::Arc;
@@ -125,7 +123,7 @@ pub(super) fn compute_attributions_for_file(
     Option<(
         String,
         String,
-        Vec<crate::operations::authorship::attribution_tracker::Attribution>,
+        Vec<crate::model::attribution_tracker::Attribution>,
         Vec<LineAttribution>,
     )>,
     GitAiError,

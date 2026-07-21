@@ -5,7 +5,7 @@
 //! the `move_detection` module and converts its line-level output into the
 //! byte-range `MoveMapping` entries consumed by `transform_attributions`.
 
-use crate::operations::authorship::move_detection::{DeletedLine, InsertedLine, detect_moves};
+use crate::model::move_detection::{DeletedLine, InsertedLine, detect_moves};
 use std::collections::HashMap;
 
 use super::diff_engine::{MOVE_DETECTION_MAX_OPS, MOVE_DETECTION_MIN_FILE_BYTES};

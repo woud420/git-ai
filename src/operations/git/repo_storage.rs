@@ -1,8 +1,8 @@
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::generate_short_hash;
 use crate::model::working_log::{CHECKPOINT_API_VERSION, Checkpoint, CheckpointKind};
-use crate::operations::authorship::attribution_tracker::LineAttribution;
 use crate::utils::normalize_to_posix;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

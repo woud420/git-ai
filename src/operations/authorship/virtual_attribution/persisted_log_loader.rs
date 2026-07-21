@@ -1,10 +1,10 @@
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
-use crate::model::authorship_log::{HumanRecord, SessionRecord};
-use crate::model::working_log::CheckpointKind;
-use crate::operations::authorship::attribution_tracker::{
+use crate::model::attribution_tracker::{
     LineAttribution, attributions_to_line_attributions, line_attributions_to_attributions,
 };
+use crate::model::authorship_log::{HumanRecord, SessionRecord};
+use crate::model::working_log::CheckpointKind;
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -25,7 +25,7 @@ impl VirtualAttributions {
         let mut attributions: HashMap<
             String,
             (
-                Vec<crate::operations::authorship::attribution_tracker::Attribution>,
+                Vec<crate::model::attribution_tracker::Attribution>,
                 Vec<LineAttribution>,
             ),
         > = HashMap::new();

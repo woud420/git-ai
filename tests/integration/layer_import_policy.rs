@@ -61,13 +61,10 @@ const RULES: &[Rule] = &[
     },
 ];
 
-/// Known residual leaks that cannot be fixed surgically within P9.2 scope.
-/// `(src-relative file, reason)`. Each entry is one deliberate escape hatch.
-const ALLOWED_EXCEPTIONS: &[(&str, &str)] = &[(
-    "src/model/api_types.rs",
-    "CasMessagesObject holds Vec<operations::authorship::transcript::Message>; \
-     relocating the transcript Message type is P9.3 scope, not P9.2.",
-)];
+/// Known residual leaks that cannot be fixed surgically without a larger
+/// refactor. Each entry is one deliberate escape hatch; the list is empty
+/// after P9.3 moved the last exception (`transcript::Message`).
+const ALLOWED_EXCEPTIONS: &[(&str, &str)] = &[];
 
 fn rule_applies(rule: &Rule, rel: &str) -> bool {
     if !rel.starts_with(rule.applies_to) {

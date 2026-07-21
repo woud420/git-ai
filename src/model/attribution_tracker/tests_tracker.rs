@@ -8,7 +8,7 @@ mod tests {
         AttributionConfig, AttributionTracker, is_attribution_list_sorted,
     };
     use crate::model::attribution::{Attribution, LineAttribution};
-    use crate::operations::authorship::imara_diff_utils::ByteDiffOp;
+    use crate::model::imara_diff_utils::ByteDiffOp;
 
     const TEST_TS: u128 = 1234567890000;
 

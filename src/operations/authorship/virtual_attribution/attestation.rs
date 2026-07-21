@@ -1,8 +1,8 @@
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::LineRange;
 use crate::model::working_log::CheckpointKind;
-use crate::operations::authorship::attribution_tracker::LineAttribution;
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
 
@@ -49,7 +49,7 @@ pub(super) fn build_attestations_from_attributions(
     attributions: &HashMap<
         String,
         (
-            Vec<crate::operations::authorship::attribution_tracker::Attribution>,
+            Vec<crate::model::attribution_tracker::Attribution>,
             Vec<LineAttribution>,
         ),
     >,

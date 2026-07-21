@@ -1,8 +1,8 @@
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::operations::authorship::attribution_tracker::LineAttribution;
-use crate::operations::authorship::hunk_shift::{DiffHunk, apply_hunk_shifts_to_line_attributions};
+use crate::model::hunk_shift::{DiffHunk, apply_hunk_shifts_to_line_attributions};
 use crate::operations::authorship::rewrite::compute_diff_trees_batch;
 use crate::operations::git::notes_api;
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};

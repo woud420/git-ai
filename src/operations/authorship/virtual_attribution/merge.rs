@@ -1,6 +1,6 @@
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
-use crate::operations::authorship::attribution_tracker::Attribution;
+use crate::model::attribution_tracker::Attribution;
 use std::collections::HashMap;
 
 /// Merge two VirtualAttributions, favoring the primary for overlaps
@@ -9,7 +9,7 @@ pub fn merge_attributions_favoring_first(
     secondary: VirtualAttributions,
     final_state: HashMap<String, String>,
 ) -> Result<VirtualAttributions, GitAiError> {
-    use crate::operations::authorship::attribution_tracker::AttributionTracker;
+    use crate::model::attribution_tracker::AttributionTracker;
 
     let tracker = AttributionTracker::new();
     let ts = primary.ts;
@@ -85,7 +85,7 @@ pub fn merge_attributions_favoring_first(
 
         // Convert to line attributions
         let merged_line_attrs =
-            crate::operations::authorship::attribution_tracker::attributions_to_line_attributions(
+            crate::model::attribution_tracker::attributions_to_line_attributions(
                 &merged_char_attrs,
                 final_content,
             );
@@ -133,7 +133,7 @@ pub fn merge_attributions_favoring_first(
 
 /// Transform attributions from old content to new content
 fn transform_attributions_to_final(
-    tracker: &crate::operations::authorship::attribution_tracker::AttributionTracker,
+    tracker: &crate::model::attribution_tracker::AttributionTracker,
     old_content: &str,
     old_attributions: &[Attribution],
     new_content: &str,

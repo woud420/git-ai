@@ -1,8 +1,8 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
+use git_ai::model::attribution_tracker::LineAttribution;
 use git_ai::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use git_ai::model::working_log::AgentId;
-use git_ai::operations::authorship::attribution_tracker::LineAttribution;
 use git_ai::operations::git::repo_storage::InitialAttributions;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;

@@ -110,6 +110,10 @@ pub fn spawn_family_actor(family_key: FamilyKey) -> FamilyActorHandle {
             match msg {
                 FamilyMsg::Apply(cmd, respond_to) => {
                     let mut cmd = *cmd;
+                    let canonical_worktree = cmd
+                        .worktree
+                        .as_deref()
+                        .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
                     let result = ref_cursor.enrich_command(&mut cmd, &state).and_then(
                         |command_start_refs| {
                             reducer::reduce_family_command_with_ref_snapshot(
@@ -117,6 +121,7 @@ pub fn spawn_family_actor(family_key: FamilyKey) -> FamilyActorHandle {
                                 cmd,
                                 &analyzers,
                                 &command_start_refs,
+                                canonical_worktree,
                             )
                             .map(|(applied, _)| applied)
                         },

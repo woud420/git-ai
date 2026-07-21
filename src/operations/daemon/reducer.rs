@@ -3,8 +3,16 @@ use crate::model::domain::{
     AnalysisResult, AppliedCommand, FamilyState, GlobalState, NormalizedCommand, WorktreeState,
 };
 use crate::operations::daemon::analyzers::{AnalysisView, AnalyzerRegistry};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+/// Convenience wrapper around [`reduce_family_command_with_ref_snapshot`] for
+/// unit tests.
+///
+/// **Skips canonicalization** — worktrees are keyed by the raw path from
+/// `cmd.worktree` (i.e. `canonical_worktree = None`).  Production callers
+/// must use [`reduce_family_command_with_ref_snapshot`] with a
+/// pre-canonicalized path so that symlinked worktree paths (e.g. `/tmp` →
+/// `/private/tmp` on macOS) resolve to a single canonical key.
 pub fn reduce_family_command(
     state: &mut FamilyState,
     cmd: NormalizedCommand,
@@ -15,6 +23,7 @@ pub fn reduce_family_command(
         cmd,
         analyzers,
         &std::collections::HashMap::new(),
+        None,
     )
 }
 
@@ -23,6 +32,7 @@ pub fn reduce_family_command_with_ref_snapshot(
     cmd: NormalizedCommand,
     analyzers: &AnalyzerRegistry,
     command_start_refs: &std::collections::HashMap<String, String>,
+    canonical_worktree: Option<PathBuf>,
 ) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
     // Analyze against pre-command state so history/ref analyzers can infer old->new correctly.
     let refs_for_analysis;
@@ -48,7 +58,7 @@ pub fn reduce_family_command_with_ref_snapshot(
         },
     )?;
     apply_ref_changes(state, &cmd);
-    apply_worktree_state(state, &cmd);
+    apply_worktree_state(state, &cmd, canonical_worktree);
 
     state.applied_seq = state.applied_seq.saturating_add(1);
     let applied = AppliedCommand {
@@ -95,11 +105,15 @@ fn is_zero_oid(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.chars().all(|ch| ch == '0')
 }
 
-fn apply_worktree_state(state: &mut FamilyState, cmd: &NormalizedCommand) {
+fn apply_worktree_state(
+    state: &mut FamilyState,
+    cmd: &NormalizedCommand,
+    canonical_worktree: Option<PathBuf>,
+) {
     let Some(worktree) = cmd.worktree.as_ref() else {
         return;
     };
-    let key = canonicalize_path(worktree);
+    let key = canonical_worktree.unwrap_or_else(|| worktree.clone());
     let previous = state.worktrees.get(&key);
     let head_change = cmd
         .ref_changes
@@ -243,10 +257,6 @@ fn switch_branch_target(args: &[String]) -> Option<String> {
         }
     }
     None
-}
-
-fn canonicalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -485,5 +495,77 @@ mod tests {
             reduce_global_command(&mut state, normalized(), &registry).unwrap();
         assert_eq!(applied.seq, 1);
         assert_eq!(state.applied_seq, 1);
+    }
+
+    /// Pins that `canonical_worktree` drives worktree state keying:
+    /// a command whose `cmd.worktree` is a raw path (e.g. a symlink like
+    /// `/tmp/repo`) and a later command using the resolved canonical path
+    /// must both update the SAME `WorktreeState` entry — the one keyed by
+    /// the canonical path.
+    ///
+    /// This is the behavioral guarantee that `family_actor` relies on when it
+    /// calls `reduce_family_command_with_ref_snapshot` with the
+    /// canonicalized path: symlinked and resolved paths collapse to one slot.
+    #[test]
+    fn canonical_worktree_overrides_raw_path_keying() {
+        let raw_path = PathBuf::from("/tmp/repo");
+        let canonical_path = PathBuf::from("/private/tmp/repo");
+        let registry = AnalyzerRegistry::new();
+
+        // First call: raw worktree path, canonical override supplied.
+        let mut state = family_state();
+        let mut cmd = normalized();
+        cmd.ref_changes = vec![RefChange {
+            reference: "HEAD".to_string(),
+            old: "aaa".to_string(),
+            new: "bbb".to_string(),
+        }];
+        cmd.worktree = Some(raw_path.clone());
+        reduce_family_command_with_ref_snapshot(
+            &mut state,
+            cmd,
+            &registry,
+            &std::collections::HashMap::new(),
+            Some(canonical_path.clone()),
+        )
+        .unwrap();
+
+        // State must be keyed by the CANONICAL path, not the raw path.
+        assert!(
+            !state.worktrees.contains_key(&raw_path),
+            "worktree must not be keyed by raw path"
+        );
+        assert!(
+            state.worktrees.contains_key(&canonical_path),
+            "worktree must be keyed by canonical path"
+        );
+
+        // Second call: this time the caller already has the canonical path
+        // (as family_actor would after a second canonicalize call on the
+        // same real directory).
+        let mut cmd2 = normalized();
+        cmd2.ref_changes = vec![RefChange {
+            reference: "HEAD".to_string(),
+            old: "bbb".to_string(),
+            new: "ccc".to_string(),
+        }];
+        cmd2.worktree = Some(canonical_path.clone());
+        reduce_family_command_with_ref_snapshot(
+            &mut state,
+            cmd2,
+            &registry,
+            &std::collections::HashMap::new(),
+            Some(canonical_path.clone()),
+        )
+        .unwrap();
+
+        // Still exactly one entry, keyed by the canonical path.
+        assert_eq!(
+            state.worktrees.len(),
+            1,
+            "both commands must update the same WorktreeState entry"
+        );
+        let worktree = state.worktrees.get(&canonical_path).unwrap();
+        assert_eq!(worktree.head.as_deref(), Some("ccc"));
     }
 }

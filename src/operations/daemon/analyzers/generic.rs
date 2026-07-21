@@ -3,6 +3,7 @@ use crate::model::domain::{
     AnalysisResult, CommandClass, Confidence, NormalizedCommand, SemanticEvent,
 };
 use crate::operations::daemon::analyzers::{AnalysisView, CommandAnalyzer};
+use crate::operations::git::command_classification::is_definitely_read_only_command;
 
 #[derive(Default)]
 pub struct GenericAnalyzer;
@@ -91,7 +92,7 @@ fn is_repo_admin_command(command: &str) -> bool {
 }
 
 fn is_read_only_command(command: &str) -> bool {
-    crate::operations::git::command_classification::is_definitely_read_only_command(command)
+    is_definitely_read_only_command(command)
 }
 
 #[cfg(test)]

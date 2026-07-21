@@ -110,7 +110,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
             let tool_model = checkpoint
                 .agent_id
                 .as_ref()
-                .map(|a| format!("{} {}", &a.tool, &a.model))
+                .map(|a| format!("{} {}", a.tool, a.model))
                 .unwrap_or_else(|| default_user_name.clone());
 
             let is_human = checkpoint.kind == CheckpointKind::Human;

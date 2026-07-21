@@ -389,7 +389,7 @@ fn test_bash_tool_post_hook_no_changes() {
     assert!(
         matches!(post_action.action, BashCheckpointAction::NoChanges),
         "PostToolUse with no changes should return NoChanges; got {:?}",
-        &post_action.action
+        post_action.action
     );
 }
 

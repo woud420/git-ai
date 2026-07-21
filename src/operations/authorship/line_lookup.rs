@@ -99,7 +99,7 @@ pub fn get_line_attribution(
                     } else {
                         // Try to find prompt record using git grep
                         let shas =
-                            search_notes(repo, &format!("\"{}\"", &entry.hash)).unwrap_or_default();
+                            search_notes(repo, &format!("\"{}\"", entry.hash)).unwrap_or_default();
                         let result = if let Some(latest_sha) = shas.first() {
                             if let Some(authorship_log) = read_authorship(repo, latest_sha) {
                                 authorship_log.metadata.prompts.get(&entry.hash).cloned()

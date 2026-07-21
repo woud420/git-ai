@@ -84,4 +84,8 @@ pub use crate::model::telemetry::TelemetryEnvelope;
 mod stream_worker_tests;
 
 #[cfg(test)]
-mod tests;
+mod tests_coordinator;
+#[cfg(test)]
+mod tests_daemon_units;
+#[cfg(test)]
+mod tests_ingress;

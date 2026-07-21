@@ -9,6 +9,7 @@ mod conflict_markers;
 mod diff_utils;
 mod foreign_prompt_loader;
 mod initial_attribution;
+mod log_split_stages;
 mod merge;
 mod persisted_log_loader;
 mod types;

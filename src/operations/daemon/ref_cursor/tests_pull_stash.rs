@@ -1,0 +1,427 @@
+use super::*;
+use crate::model::domain::{
+    CommandScope, Confidence, FamilyKey, FamilyState, NormalizedCommand, WatermarkState,
+};
+use std::collections::HashMap;
+use std::fs;
+
+const A: &str = "1111111111111111111111111111111111111111";
+const B: &str = "2222222222222222222222222222222222222222";
+const C: &str = "3333333333333333333333333333333333333333";
+const D: &str = "4444444444444444444444444444444444444444";
+const E: &str = "5555555555555555555555555555555555555555";
+const F: &str = "6666666666666666666666666666666666666666";
+
+fn family_state(family: &FamilyKey) -> FamilyState {
+    FamilyState {
+        family_key: family.clone(),
+        refs: HashMap::new(),
+        worktrees: HashMap::new(),
+        last_error: None,
+        applied_seq: 0,
+        watermarks: WatermarkState::default(),
+    }
+}
+
+fn command(family: &FamilyKey, args: &[&str]) -> NormalizedCommand {
+    command_with_worktree(family, None, args)
+}
+
+fn command_with_worktree(
+    family: &FamilyKey,
+    worktree: Option<PathBuf>,
+    args: &[&str],
+) -> NormalizedCommand {
+    NormalizedCommand {
+        scope: CommandScope::Family(family.clone()),
+        family_key: Some(family.clone()),
+        worktree,
+        root_sid: "sid".to_string(),
+        raw_argv: std::iter::once("git".to_string())
+            .chain(args.iter().map(|arg| arg.to_string()))
+            .collect(),
+        primary_command: args.first().map(|arg| arg.to_string()),
+        invoked_command: args.first().map(|arg| arg.to_string()),
+        invoked_args: args.iter().map(|arg| arg.to_string()).collect(),
+        observed_child_commands: Vec::new(),
+        exit_code: 0,
+        started_at_ns: 1,
+        finished_at_ns: 2,
+        reflog_start_offsets: HashMap::new(),
+        stash_target_oid: None,
+        cherry_pick_source_oids: Vec::new(),
+        revert_source_oids: Vec::new(),
+        ref_changes: Vec::new(),
+        confidence: Confidence::Low,
+    }
+}
+
+fn append_reflog(common_dir: &Path, reference: &str, entries: &[(&str, &str, &str)]) {
+    let path = common_dir.join("logs").join(reference);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut text = String::new();
+    for (old, new, message) in entries {
+        text.push_str(&format!(
+            "{old} {new} Test User <test@example.com> 0 +0000\t{message}\n"
+        ));
+    }
+    fs::write(path, text).unwrap();
+}
+
+#[test]
+fn revert_span_starts_at_first_revert_when_expected_state_matches_second_revert() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("repo");
+    let git_dir = worktree.join(".git");
+    fs::create_dir_all(git_dir.join("logs")).unwrap();
+    append_reflog(
+        &git_dir,
+        "HEAD",
+        &[(B, C, "revert: Revert one"), (C, D, "revert: Revert two")],
+    );
+    let family = FamilyKey::new(git_dir.to_string_lossy().to_string());
+    let mut state = family_state(&family);
+    state.refs.insert("HEAD".to_string(), C.to_string());
+    state
+        .refs
+        .insert("refs/heads/intermediate".to_string(), C.to_string());
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command_with_worktree(&family, Some(worktree), &["revert", A, E]);
+    let expected = ExpectedTransition::from_state_and_working_logs(&cmd, &state);
+
+    cursor
+        .consume_head_span_for_command_limited(&mut cmd, &state, &["revert:"], expected, 2)
+        .unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: B.to_string(),
+                new: C.to_string(),
+            },
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: C.to_string(),
+                new: D.to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn pull_reflog_action_uses_expanded_command_for_zero_arg_alias() {
+    let family = FamilyKey::new("/repo/.git".to_string());
+    let mut cmd = command_with_worktree(&family, None, &["up"]);
+    cmd.primary_command = Some("pull".to_string());
+    cmd.invoked_command = Some("pull".to_string());
+    cmd.invoked_args.clear();
+
+    assert_eq!(pull_reflog_action(&cmd), "pull");
+}
+
+#[test]
+fn pull_rebase_span_starts_at_start_entry_when_expected_state_matches_pick() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("repo");
+    let git_dir = worktree.join(".git");
+    fs::create_dir_all(git_dir.join("logs/refs/heads")).unwrap();
+    append_reflog(
+        &git_dir,
+        "HEAD",
+        &[
+            (
+                B,
+                C,
+                "pull --rebase origin main (start): checkout origin/main",
+            ),
+            (C, D, "pull --rebase origin main (pick): Local commit"),
+            (
+                D,
+                D,
+                "pull --rebase origin main (finish): returning to refs/heads/main",
+            ),
+        ],
+    );
+    append_reflog(
+        &git_dir,
+        "refs/heads/main",
+        &[(
+            B,
+            D,
+            "pull --rebase origin main (finish): refs/heads/main onto origin/main",
+        )],
+    );
+    let family = FamilyKey::new(git_dir.to_string_lossy().to_string());
+    let mut state = family_state(&family);
+    state.refs.insert("HEAD".to_string(), C.to_string());
+    state
+        .refs
+        .insert("refs/heads/main".to_string(), C.to_string());
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command_with_worktree(
+        &family,
+        Some(worktree),
+        &["pull", "--rebase", "origin", "main"],
+    );
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: B.to_string(),
+                new: C.to_string(),
+            },
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: C.to_string(),
+                new: D.to_string(),
+            },
+            RefChange {
+                reference: "refs/heads/main".to_string(),
+                old: B.to_string(),
+                new: D.to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn cold_pull_rebase_late_ingress_offset_still_recovers_start_and_branch_finish() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("repo");
+    let git_dir = worktree.join(".git");
+    fs::create_dir_all(git_dir.join("logs/refs/heads")).unwrap();
+
+    let start_line = format!(
+        "{B} {C} Test User <test@example.com> 0 +0000\tpull --rebase (start): checkout {C}\n"
+    );
+    let pick_line = format!(
+        "{C} {D} Test User <test@example.com> 0 +0000\tpull --rebase (pick): Local commit\n"
+    );
+    let finish_line = format!(
+        "{D} {D} Test User <test@example.com> 0 +0000\tpull --rebase (finish): returning to refs/heads/main\n"
+    );
+    fs::write(
+        git_dir.join("logs/HEAD"),
+        format!("{start_line}{pick_line}{finish_line}"),
+    )
+    .unwrap();
+    let late_head_offset = start_line.len() as u64;
+
+    let branch_line = format!(
+        "{B} {D} Test User <test@example.com> 0 +0000\tpull --rebase (finish): refs/heads/main onto {C}\n"
+    );
+    fs::write(git_dir.join("logs/refs/heads/main"), &branch_line).unwrap();
+    let late_branch_offset = branch_line.len() as u64;
+
+    let family = FamilyKey::new(git_dir.to_string_lossy().to_string());
+    let mut state = family_state(&family);
+    state.refs.insert("HEAD".to_string(), C.to_string());
+    state
+        .refs
+        .insert("refs/heads/main".to_string(), C.to_string());
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command_with_worktree(&family, Some(worktree), &["pull", "--rebase"]);
+    cmd.reflog_start_offsets
+        .insert(head_key(&git_dir), late_head_offset);
+    cmd.reflog_start_offsets
+        .insert(common_key("refs/heads/main"), late_branch_offset);
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: B.to_string(),
+                new: C.to_string(),
+            },
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: C.to_string(),
+                new: D.to_string(),
+            },
+            RefChange {
+                reference: "refs/heads/main".to_string(),
+                old: B.to_string(),
+                new: D.to_string(),
+            },
+        ],
+        "cold late pull-rebase enrichment must preserve the non-fast-forward local-tip to rebased-tip pair"
+    );
+}
+
+#[test]
+fn cold_pull_rebase_true_boundary_does_not_replay_older_pull_span() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("repo");
+    let git_dir = worktree.join(".git");
+    fs::create_dir_all(git_dir.join("logs/refs/heads")).unwrap();
+
+    let old_start = format!(
+        "{A} {B} Test User <test@example.com> 0 +0000\tpull --rebase (start): checkout main\n"
+    );
+    let old_pick =
+        format!("{B} {C} Test User <test@example.com> 0 +0000\tpull --rebase (pick): Old commit\n");
+    let old_finish = format!(
+        "{C} {C} Test User <test@example.com> 0 +0000\tpull --rebase (finish): returning to refs/heads/main\n"
+    );
+    let current_start = format!(
+        "{D} {E} Test User <test@example.com> 0 +0000\tpull --rebase (start): checkout main\n"
+    );
+    let current_pick = format!(
+        "{E} {F} Test User <test@example.com> 0 +0000\tpull --rebase (pick): Current commit\n"
+    );
+    let current_finish = format!(
+        "{F} {F} Test User <test@example.com> 0 +0000\tpull --rebase (finish): returning to refs/heads/main\n"
+    );
+    let true_head_boundary = (old_start.len() + old_pick.len() + old_finish.len()) as u64;
+    fs::write(
+        git_dir.join("logs/HEAD"),
+        format!("{old_start}{old_pick}{old_finish}{current_start}{current_pick}{current_finish}"),
+    )
+    .unwrap();
+
+    let old_branch = format!(
+        "{A} {C} Test User <test@example.com> 0 +0000\tpull --rebase (finish): refs/heads/main onto main\n"
+    );
+    let current_branch = format!(
+        "{D} {F} Test User <test@example.com> 0 +0000\tpull --rebase (finish): refs/heads/main onto main\n"
+    );
+    let true_branch_boundary = old_branch.len() as u64;
+    fs::write(
+        git_dir.join("logs/refs/heads/main"),
+        format!("{old_branch}{current_branch}"),
+    )
+    .unwrap();
+
+    let family = FamilyKey::new(git_dir.to_string_lossy().to_string());
+    let mut state = family_state(&family);
+    state.refs.insert("HEAD".to_string(), D.to_string());
+    state
+        .refs
+        .insert("refs/heads/main".to_string(), D.to_string());
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command_with_worktree(&family, Some(worktree), &["pull", "--rebase"]);
+    cmd.reflog_start_offsets
+        .insert(head_key(&git_dir), true_head_boundary);
+    cmd.reflog_start_offsets
+        .insert(common_key("refs/heads/main"), true_branch_boundary);
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: D.to_string(),
+                new: E.to_string(),
+            },
+            RefChange {
+                reference: "HEAD".to_string(),
+                old: E.to_string(),
+                new: F.to_string(),
+            },
+            RefChange {
+                reference: "refs/heads/main".to_string(),
+                old: D.to_string(),
+                new: F.to_string(),
+            },
+        ],
+        "true command-start boundary must not rewind into an older pull-rebase span"
+    );
+}
+
+#[test]
+fn cold_stash_push_uses_message_to_skip_raw_stash_history() {
+    let temp = tempfile::tempdir().unwrap();
+    append_reflog(
+        temp.path(),
+        "refs/stash",
+        &[
+            (A, B, "On main: old raw stash"),
+            (B, C, "On main: current ai stash"),
+        ],
+    );
+    let family = FamilyKey::new(temp.path().to_string_lossy().to_string());
+    let state = family_state(&family);
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command(&family, &["stash", "push", "-m", "current ai stash"]);
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![RefChange {
+            reference: "refs/stash".to_string(),
+            old: B.to_string(),
+            new: C.to_string(),
+        }]
+    );
+    assert_eq!(cursor.stash_stack, vec![C.to_string()]);
+}
+
+#[test]
+fn cold_stash_push_uses_command_reflog_boundary_without_message() {
+    let temp = tempfile::tempdir().unwrap();
+    let old_line = format!("{A} {B} Test User <test@example.com> 0 +0000\tWIP on main\n");
+    let old_history_len = old_line.len() as u64;
+    let current_line = format!("{B} {C} Test User <test@example.com> 0 +0000\tWIP on main\n");
+    let path = temp.path().join("logs/refs/stash");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, format!("{old_line}{current_line}")).unwrap();
+    let family = FamilyKey::new(temp.path().to_string_lossy().to_string());
+    let state = family_state(&family);
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command(&family, &["stash", "push"]);
+    cmd.reflog_start_offsets
+        .insert(common_key("refs/stash"), old_history_len);
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![RefChange {
+            reference: "refs/stash".to_string(),
+            old: B.to_string(),
+            new: C.to_string(),
+        }]
+    );
+    assert_eq!(cursor.stash_stack, vec![C.to_string()]);
+}
+
+#[test]
+fn cold_stash_save_uses_message_to_skip_raw_stash_history() {
+    let temp = tempfile::tempdir().unwrap();
+    append_reflog(
+        temp.path(),
+        "refs/stash",
+        &[
+            (A, B, "On main: old raw stash"),
+            (B, C, "On main: current save stash"),
+        ],
+    );
+    let family = FamilyKey::new(temp.path().to_string_lossy().to_string());
+    let state = family_state(&family);
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command(&family, &["stash", "save", "current", "save", "stash"]);
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![RefChange {
+            reference: "refs/stash".to_string(),
+            old: B.to_string(),
+            new: C.to_string(),
+        }]
+    );
+    assert_eq!(cursor.stash_stack, vec![C.to_string()]);
+}

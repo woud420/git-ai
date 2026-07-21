@@ -49,7 +49,6 @@ src/operations/daemon/actor_coordinator_side_effects.rs	836
 src/operations/daemon/analyzers/history.rs	935
 src/operations/daemon/checkpoint.rs	1123
 src/operations/daemon/git_backend.rs	813
-src/operations/daemon/ref_cursor.rs	5781
 src/operations/daemon/rewrite_metrics.rs	674
 src/operations/daemon/stream_worker.rs	2032
 src/operations/daemon/telemetry_worker.rs	2258

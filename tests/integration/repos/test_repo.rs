@@ -1502,6 +1502,16 @@ impl TestRepo {
     }
 
     pub fn new_with_daemon_env(daemon_env: &[(&str, &str)]) -> Self {
+        Self::new_with_daemon_env_and_patch(daemon_env, |_| {})
+    }
+
+    /// Like `new_with_daemon_env`, but applies `extra_patch` to the config **before** the
+    /// daemon process starts, so the daemon reads the fully-configured state from its first
+    /// tracing event onward (important for features gated by `telemetry_enabled()`).
+    pub fn new_with_daemon_env_and_patch<F>(daemon_env: &[(&str, &str)], extra_patch: F) -> Self
+    where
+        F: FnOnce(&mut git_ai::config::ConfigPatch),
+    {
         ensure_isolated_process_home();
 
         let mut rng = rand::rng();
@@ -1527,6 +1537,7 @@ impl TestRepo {
         };
 
         repo.apply_default_config_patch();
+        repo.patch_git_ai_config(extra_patch);
 
         // Start a dedicated daemon with extra env vars
         let daemon = Arc::new(DaemonProcess::start_with_env(

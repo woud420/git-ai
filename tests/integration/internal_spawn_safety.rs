@@ -202,24 +202,33 @@ fn direct_git_command_spawns_are_centralized() {
 
 #[test]
 fn ref_cursor_does_not_spawn_git_on_trace_ingestion_path() {
-    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("operations")
         .join("daemon")
-        .join("ref_cursor.rs");
-    let content = fs::read_to_string(&file).unwrap();
-    for disallowed in [
-        "Command::new(",
-        "exec_git(",
-        "exec_git_allow_nonzero(",
-        "exec_git_stdin(",
-        "exec_git_stdin_with_profile(",
-    ] {
-        assert!(
-            !content.contains(disallowed),
-            "{} must not contain `{}`; trace2 ingestion must not spawn git",
-            file.display(),
-            disallowed
-        );
+        .join("ref_cursor");
+    let mut files = Vec::new();
+    collect_rs_files(&dir, &mut files);
+    assert!(
+        !files.is_empty(),
+        "expected ref_cursor module files under {}",
+        dir.display()
+    );
+    for file in files {
+        let content = fs::read_to_string(&file).unwrap();
+        for disallowed in [
+            "Command::new(",
+            "exec_git(",
+            "exec_git_allow_nonzero(",
+            "exec_git_stdin(",
+            "exec_git_stdin_with_profile(",
+        ] {
+            assert!(
+                !content.contains(disallowed),
+                "{} must not contain `{}`; trace2 ingestion must not spawn git",
+                file.display(),
+                disallowed
+            );
+        }
     }
 }

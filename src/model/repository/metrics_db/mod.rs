@@ -16,7 +16,6 @@ mod types;
 mod upload_queue;
 
 pub(crate) use event_writes::METADATA_BACKFILL_BATCH_SIZE;
-pub(crate) use types::SessionEventRecoveryCandidate;
 pub use types::{MetricHistoryRecord, MetricMetadataBackfillSummary, MetricRecord, MetricsStatus};
 
 // Re-exports used by integration and unit tests within this module tree.

@@ -684,7 +684,7 @@ fn row_to_call(row: &rusqlite::Row<'_>) -> rusqlite::Result<BashCheckpointCall> 
     })
 }
 
-pub fn distance_to_call_window(timestamp_ns: u128, call: &BashCheckpointCall) -> u128 {
+fn distance_to_call_window(timestamp_ns: u128, call: &BashCheckpointCall) -> u128 {
     let start = call.start_time_ns;
     let end = call.end_time_ns.unwrap_or(start);
     if timestamp_ns < start {

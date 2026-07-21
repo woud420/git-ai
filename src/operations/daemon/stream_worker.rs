@@ -15,6 +15,7 @@ use crate::model::stream_watermark::{WatermarkStrategy, WatermarkType};
 use crate::operations::daemon::telemetry_worker::DaemonTelemetryWorkerHandle;
 use crate::operations::daemon::transcript_redaction::redact_json_secrets;
 use crate::operations::streams::agent::{SHARED_STREAM_SESSION_ID, StreamDescriptor};
+use crate::operations::streams::sweep::StreamFormat;
 use chrono::{TimeZone, Utc};
 use std::collections::{BinaryHeap, HashSet};
 use std::path::{Path, PathBuf};
@@ -881,8 +882,8 @@ impl StreamWorker {
             stream_kind: "transcript".to_string(),
             tool: "claude".to_string(),
             stream_path: path_str,
-            stream_format: "ClaudeJsonl".to_string(),
-            watermark_type: "ByteOffset".to_string(),
+            stream_format: StreamFormat::ClaudeJsonl,
+            watermark_type: WatermarkType::ByteOffset,
             watermark_value: initial_watermark.serialize(),
             external_session_id: external_session_id.to_string(),
             external_parent_session_id: external_parent_session_id.map(|s| s.to_string()),
@@ -929,8 +930,8 @@ impl StreamWorker {
             stream_kind: stream.stream_kind.to_string(),
             tool: tool.to_string(),
             stream_path: path_str,
-            stream_format: format!("{:?}", stream.effective_format(stream_path)),
-            watermark_type: format!("{:?}", effective_wm_type),
+            stream_format: stream.effective_format(stream_path),
+            watermark_type: effective_wm_type,
             watermark_value: initial_watermark.serialize(),
             external_session_id: if is_shared {
                 String::new()
@@ -1043,9 +1044,7 @@ impl StreamWorker {
             }
         })?;
 
-        let watermark_type: WatermarkType = stream.watermark_type.parse()?;
-
-        let mut current_watermark = watermark_type.deserialize(&stream.watermark_value)?;
+        let mut current_watermark = stream.watermark_type.deserialize(&stream.watermark_value)?;
         let path = PathBuf::from(&stream.stream_path);
         let mut total_events = 0usize;
         let is_shared_stream = stream.session_id == SHARED_STREAM_SESSION_ID;
@@ -1116,13 +1115,9 @@ impl StreamWorker {
         }
 
         let file_meta = std::fs::metadata(&path).ok();
-        let watermark_type_str = &stream.watermark_type;
         let is_initial_watermark = stream.watermark_value.is_empty()
-            || watermark_type_str
-                .parse::<crate::model::stream_watermark::WatermarkType>()
-                .ok()
-                .map(|wt| wt.create_initial_watermark().serialize() == stream.watermark_value)
-                .unwrap_or(false);
+            || stream.watermark_type.create_initial_watermark().serialize()
+                == stream.watermark_value;
 
         loop {
             if shutdown_flag.load(Ordering::Relaxed) {
@@ -1981,8 +1976,8 @@ mod subagent_sweep_tests {
             .unwrap()
             .unwrap();
         assert_eq!(otel_record.tool, "github-copilot");
-        assert_eq!(otel_record.stream_format, "CopilotOtelSqlite");
-        assert_eq!(otel_record.watermark_type, "TimestampCursor");
+        assert_eq!(otel_record.stream_format, StreamFormat::CopilotOtelSqlite);
+        assert_eq!(otel_record.watermark_type, WatermarkType::TimestampCursor);
         assert_eq!(otel_record.external_session_id, "");
         assert_eq!(otel_record.external_parent_session_id, None);
         assert_eq!(otel_record.repo_work_dir, None);

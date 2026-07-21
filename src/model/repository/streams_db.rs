@@ -1,7 +1,8 @@
 //! Transcripts database for tracking stream cursors and watermarks.
 
 use crate::model::stream_types::StreamError;
-use crate::model::stream_watermark::WatermarkStrategy;
+use crate::model::stream_types::StreamFormat;
+use crate::model::stream_watermark::{WatermarkStrategy, WatermarkType};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
@@ -127,8 +128,8 @@ pub struct StreamRecord {
     pub stream_kind: String,
     pub tool: String,
     pub stream_path: String,
-    pub stream_format: String,
-    pub watermark_type: String,
+    pub stream_format: StreamFormat,
+    pub watermark_type: WatermarkType,
     pub watermark_value: String,
     pub external_session_id: String,
     pub external_parent_session_id: Option<String>,
@@ -256,8 +257,8 @@ impl StreamsDatabase {
                 record.stream_kind,
                 record.tool,
                 record.stream_path,
-                record.stream_format,
-                record.watermark_type,
+                record.stream_format.to_string(),
+                record.watermark_type.to_string(),
                 record.watermark_value,
                 record.external_session_id,
                 record.external_parent_session_id,
@@ -277,15 +278,23 @@ impl StreamsDatabase {
         Ok(())
     }
 
-    /// Helper to map a row to a StreamRecord.
+    /// Helper to map a row to a StreamRecord. Returns an error if any enum field is unrecognized.
     fn row_to_stream(row: &rusqlite::Row) -> rusqlite::Result<StreamRecord> {
+        let fmt_str: String = row.get(4)?;
+        let wm_str: String = row.get(5)?;
+        let stream_format = fmt_str.parse().map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e))
+        })?;
+        let watermark_type = wm_str.parse().map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e))
+        })?;
         Ok(StreamRecord {
             session_id: row.get(0)?,
             stream_kind: row.get(1)?,
             tool: row.get(2)?,
             stream_path: row.get(3)?,
-            stream_format: row.get(4)?,
-            watermark_type: row.get(5)?,
+            stream_format,
+            watermark_type,
             watermark_value: row.get(6)?,
             external_session_id: row.get(7)?,
             external_parent_session_id: row.get(8)?,
@@ -512,9 +521,12 @@ impl StreamsDatabase {
 
         let mut streams = Vec::new();
         for row in rows {
-            streams.push(row.map_err(|e| StreamError::Fatal {
-                message: format!("Failed to read stream row: {}", e),
-            })?);
+            match row {
+                Ok(record) => streams.push(record),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Skipping stream row with unrecognized format or watermark type")
+                }
+            }
         }
 
         Ok(streams)
@@ -524,6 +536,7 @@ impl StreamsDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::stream_types::StreamFormat;
     use chrono::TimeZone;
     use tempfile::NamedTempFile;
 
@@ -539,8 +552,8 @@ mod tests {
             stream_kind: "transcript".to_string(),
             tool: "claude".to_string(),
             stream_path: "/path/to/transcript.jsonl".to_string(),
-            stream_format: "jsonl".to_string(),
-            watermark_type: "ByteOffset".to_string(),
+            stream_format: StreamFormat::ClaudeJsonl,
+            watermark_type: WatermarkType::ByteOffset,
             watermark_value: "0".to_string(),
             external_session_id: "thread-123".to_string(),
             external_parent_session_id: None,
@@ -694,8 +707,8 @@ mod tests {
             stream_kind: "transcript".to_string(),
             tool: "claude".to_string(),
             stream_path: "/path".to_string(),
-            stream_format: "jsonl".to_string(),
-            watermark_type: "ByteOffset".to_string(),
+            stream_format: StreamFormat::ClaudeJsonl,
+            watermark_type: WatermarkType::ByteOffset,
             watermark_value: "0".to_string(),
             external_session_id: "session-null".to_string(),
             external_parent_session_id: None,
@@ -1133,7 +1146,7 @@ mod tests {
         let mut otel_stream = create_test_stream("shared-session");
         otel_stream.stream_kind = "otel_traces".to_string();
         otel_stream.stream_path = "/path/to/traces.db".to_string();
-        otel_stream.watermark_type = "TimestampCursor".to_string();
+        otel_stream.watermark_type = WatermarkType::TimestampCursor;
         otel_stream.watermark_value = "0|".to_string();
         db.insert_stream(&otel_stream).unwrap();
 
@@ -1232,5 +1245,28 @@ mod tests {
             .unwrap()
             .is_some()
         );
+    }
+
+    // Verify all_streams() skips rows with unknown enum values (log-and-skip, not abort).
+    #[test]
+    fn all_streams_skips_unrecognized_format_row() {
+        let (db, _temp) = create_test_db();
+        db.insert_stream(&create_test_stream("session-good"))
+            .unwrap();
+        db.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO tracked_streams (session_id, stream_kind, tool, stream_path, \
+             stream_format, watermark_type, watermark_value, external_session_id, \
+             first_seen_at, last_processed_at, last_known_size) \
+             VALUES ('session-bogus','transcript','claude','/bogus',\
+             'UnknownFormatXyz','ByteOffset','0','ext-bogus',1000,1000,0)",
+                [],
+            )
+            .unwrap();
+        let streams = db.all_streams().unwrap();
+        assert_eq!(streams.len(), 1, "bogus row should be skipped, not crash");
+        assert_eq!(streams[0].session_id, "session-good");
     }
 }

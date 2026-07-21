@@ -1,8 +1,9 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::metrics::{EventAttributes, MetricEvent, PosEncoded, SessionEventValues};
-use git_ai::model::stream_watermark::ByteOffsetWatermark;
+use git_ai::model::stream_watermark::{ByteOffsetWatermark, WatermarkType};
 use git_ai::operations::streams::agent::Agent;
 use git_ai::operations::streams::agents::ClaudeAgent;
+use git_ai::operations::streams::sweep::StreamFormat;
 use git_ai::operations::streams::{StreamRecord, StreamsDatabase};
 use git_ai::repo_url::resolve_repo_url_from_path;
 use serde_json::json;
@@ -70,8 +71,8 @@ fn make_stream_record(
         stream_kind: "transcript".to_string(),
         tool: tool.to_string(),
         stream_path: stream_path.display().to_string(),
-        stream_format: "ClaudeJsonl".to_string(),
-        watermark_type: "ByteOffset".to_string(),
+        stream_format: StreamFormat::ClaudeJsonl,
+        watermark_type: WatermarkType::ByteOffset,
         watermark_value: "0".to_string(),
         external_session_id: format!("ext-{}", session_id),
         external_parent_session_id: None,

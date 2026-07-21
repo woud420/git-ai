@@ -20,6 +20,7 @@ pub mod hunk_shift;
 pub mod imara_diff_utils;
 pub mod move_detection;
 pub mod repository;
+pub mod session_recovery_candidate;
 pub mod stream_types;
 pub mod stream_watermark;
 pub mod telemetry;

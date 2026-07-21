@@ -18,18 +18,7 @@ pub struct MetricHistoryRecord {
     pub event: MetricEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SessionEventRecoveryCandidate {
-    pub row_id: i64,
-    pub event_ts: u32,
-    pub session_id: String,
-    pub trace_id: Option<String>,
-    pub tool: String,
-    pub model: Option<String>,
-    pub external_session_id: String,
-    pub external_tool_use_id: Option<String>,
-    pub repo_url: Option<String>,
-}
+pub(crate) use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
 
 /// Point-in-time status summary for local metric delivery.
 #[derive(Debug, Clone, PartialEq, Eq)]

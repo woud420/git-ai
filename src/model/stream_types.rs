@@ -1,6 +1,7 @@
 //! Core types for transcript processing.
 
 use std::io::BufRead;
+use std::str::FromStr;
 use std::time::Duration;
 
 /// Result of reading a single line from a JSONL reader.
@@ -194,5 +195,90 @@ mod tests {
 
         let r2 = read_jsonl_line(&mut reader, &mut line).unwrap();
         assert!(matches!(r2, JsonlLineState::Partial));
+    }
+}
+
+/// Transcript file format enum
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamFormat {
+    ClaudeJsonl,
+    CursorJsonl,
+    DroidJsonl,
+    CopilotSessionJson,
+    CopilotEventStreamJsonl,
+    GeminiJsonl,
+    ContinueJson,
+    WindsurfJsonl,
+    CodexJsonl,
+    AmpThreadJson,
+    OpenCodeSqlite,
+    PiJsonl,
+    CopilotOtelSqlite,
+}
+
+impl std::fmt::Display for StreamFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ClaudeJsonl => write!(f, "ClaudeJsonl"),
+            Self::CursorJsonl => write!(f, "CursorJsonl"),
+            Self::DroidJsonl => write!(f, "DroidJsonl"),
+            Self::CopilotSessionJson => write!(f, "CopilotSessionJson"),
+            Self::CopilotEventStreamJsonl => write!(f, "CopilotEventStreamJsonl"),
+            Self::GeminiJsonl => write!(f, "GeminiJsonl"),
+            Self::ContinueJson => write!(f, "ContinueJson"),
+            Self::WindsurfJsonl => write!(f, "WindsurfJsonl"),
+            Self::CodexJsonl => write!(f, "CodexJsonl"),
+            Self::AmpThreadJson => write!(f, "AmpThreadJson"),
+            Self::OpenCodeSqlite => write!(f, "OpenCodeSqlite"),
+            Self::PiJsonl => write!(f, "PiJsonl"),
+            Self::CopilotOtelSqlite => write!(f, "CopilotOtelSqlite"),
+        }
+    }
+}
+
+impl FromStr for StreamFormat {
+    type Err = StreamError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ClaudeJsonl" => Ok(Self::ClaudeJsonl),
+            "CursorJsonl" => Ok(Self::CursorJsonl),
+            "DroidJsonl" => Ok(Self::DroidJsonl),
+            "CopilotSessionJson" => Ok(Self::CopilotSessionJson),
+            "CopilotEventStreamJsonl" => Ok(Self::CopilotEventStreamJsonl),
+            "GeminiJsonl" => Ok(Self::GeminiJsonl),
+            "ContinueJson" => Ok(Self::ContinueJson),
+            "WindsurfJsonl" => Ok(Self::WindsurfJsonl),
+            "CodexJsonl" => Ok(Self::CodexJsonl),
+            "AmpThreadJson" => Ok(Self::AmpThreadJson),
+            "OpenCodeSqlite" => Ok(Self::OpenCodeSqlite),
+            "PiJsonl" => Ok(Self::PiJsonl),
+            "CopilotOtelSqlite" => Ok(Self::CopilotOtelSqlite),
+            _ => Err(StreamError::Parse {
+                line: 0,
+                message: format!("Unknown stream format: {s}"),
+            }),
+        }
+    }
+}
+
+impl StreamFormat {
+    pub fn watermark_type(self) -> crate::model::stream_watermark::WatermarkType {
+        use crate::model::stream_watermark::WatermarkType;
+        match self {
+            Self::ClaudeJsonl
+            | Self::CursorJsonl
+            | Self::GeminiJsonl
+            | Self::WindsurfJsonl
+            | Self::CodexJsonl
+            | Self::PiJsonl
+            | Self::CopilotEventStreamJsonl => WatermarkType::ByteOffset,
+            Self::DroidJsonl => WatermarkType::Hybrid,
+            Self::CopilotSessionJson | Self::ContinueJson | Self::AmpThreadJson => {
+                WatermarkType::RecordIndex
+            }
+            Self::OpenCodeSqlite => WatermarkType::Timestamp,
+            Self::CopilotOtelSqlite => WatermarkType::TimestampCursor,
+        }
     }
 }

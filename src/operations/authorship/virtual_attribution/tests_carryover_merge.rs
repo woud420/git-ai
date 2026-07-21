@@ -1,4 +1,7 @@
-use super::carryover_merge::{carryover_merge_content, checkout_merge_rebased_content};
+use super::carryover_merge::{
+    carryover_merge_content, checkout_merge_rebased_content, diff_hunks_between_contents,
+    merged_carryover_content_pure,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
@@ -185,5 +188,30 @@ fn checkout_merge_rebased_content_preserves_local_side_for_overlapping_conflict(
     assert_eq!(
         checkout_merge_rebased_content("shared\n", "THEIRS\n", "AI_CONTENT\n"),
         "AI_CONTENT\n"
+    );
+}
+
+#[test]
+fn carryover_merge_ignores_mixed_eol_when_content_matches_committed() {
+    let parent = "base one\nbase two\n";
+    let committed = "base one\nbase two\nai line\n";
+    let observed = "base one\r\nbase two\r\nai line\n";
+
+    assert_eq!(
+        merged_carryover_content_pure(parent, committed, observed),
+        committed
+    );
+    assert!(diff_hunks_between_contents(observed, committed).is_empty());
+}
+
+#[test]
+fn carryover_merge_does_not_treat_crlf_only_observed_chunk_as_change() {
+    let parent = "a\nb\nc\n";
+    let committed = "A\nb\nC\n";
+    let observed = "a\r\nb\r\nD\r\n";
+
+    assert_eq!(
+        carryover_merge_content(parent, committed, observed),
+        "A\nb\nD\r\n"
     );
 }

@@ -2,6 +2,7 @@ use super::blame_loader::file_exists_in_commit;
 use super::carryover_merge::split_lines_preserving_terminators;
 use crate::error::GitAiError;
 use crate::model::authorship_log::LineRange;
+use crate::model::imara_diff_utils::{content_eq_ignoring_line_endings, normalize_line_endings};
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 use std::collections::{HashMap, HashSet};
 
@@ -184,12 +185,14 @@ pub(super) fn collect_unstaged_hunks_from_snapshot(
             .cloned()
             .unwrap_or_else(|| committed_content.clone());
 
-        if committed_content == final_content {
+        if content_eq_ignoring_line_endings(&committed_content, &final_content) {
             continue;
         }
 
-        let committed_lines = split_lines_preserving_terminators(&committed_content);
-        let final_lines = split_lines_preserving_terminators(&final_content);
+        let normalized_committed = normalize_line_endings(&committed_content);
+        let normalized_final = normalize_line_endings(&final_content);
+        let committed_lines = split_lines_preserving_terminators(&normalized_committed);
+        let final_lines = split_lines_preserving_terminators(&normalized_final);
         let diff_ops =
             crate::model::imara_diff_utils::capture_diff_slices(&committed_lines, &final_lines);
 

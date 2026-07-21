@@ -1,4 +1,5 @@
 use crate::model::hunk_shift::DiffHunk;
+use crate::model::imara_diff_utils::{content_eq_ignoring_line_endings, normalize_line_endings};
 
 pub(super) fn split_lines_preserving_terminators(s: &str) -> Vec<&str> {
     let mut lines = Vec::new();
@@ -19,8 +20,10 @@ pub(super) fn split_lines_preserving_terminators(s: &str) -> Vec<&str> {
 }
 
 pub(super) fn diff_hunks_between_contents(old_content: &str, new_content: &str) -> Vec<DiffHunk> {
-    let old_lines = split_lines_preserving_terminators(old_content);
-    let new_lines = split_lines_preserving_terminators(new_content);
+    let normalized_old = normalize_line_endings(old_content);
+    let normalized_new = normalize_line_endings(new_content);
+    let old_lines = split_lines_preserving_terminators(&normalized_old);
+    let new_lines = split_lines_preserving_terminators(&normalized_new);
     crate::model::imara_diff_utils::capture_diff_slices(&old_lines, &new_lines)
         .into_iter()
         .filter_map(|op| match op {
@@ -61,13 +64,15 @@ pub(super) fn diff_hunks_between_contents(old_content: &str, new_content: &str) 
 }
 
 fn line_sequence_contains(needle: &str, haystack: &str) -> bool {
-    let needle_lines = split_lines_preserving_terminators(needle);
+    let normalized_needle = normalize_line_endings(needle);
+    let normalized_haystack = normalize_line_endings(haystack);
+    let needle_lines = split_lines_preserving_terminators(&normalized_needle);
     if needle_lines.is_empty() {
         return true;
     }
 
     let mut next_needle = 0;
-    for haystack_line in split_lines_preserving_terminators(haystack) {
+    for haystack_line in split_lines_preserving_terminators(&normalized_haystack) {
         if haystack_line == needle_lines[next_needle] {
             next_needle += 1;
             if next_needle == needle_lines.len() {
@@ -85,8 +90,8 @@ pub(crate) fn merged_carryover_content_pure(
     committed_content: &str,
     observed_content: &str,
 ) -> String {
-    if committed_content == observed_content {
-        return observed_content.to_string();
+    if content_eq_ignoring_line_endings(committed_content, observed_content) {
+        return committed_content.to_string();
     }
     if line_sequence_contains(committed_content, observed_content) {
         return observed_content.to_string();
@@ -94,10 +99,10 @@ pub(crate) fn merged_carryover_content_pure(
     if line_sequence_contains(observed_content, committed_content) {
         return committed_content.to_string();
     }
-    if committed_content == parent_content {
+    if content_eq_ignoring_line_endings(committed_content, parent_content) {
         return observed_content.to_string();
     }
-    if observed_content == parent_content {
+    if content_eq_ignoring_line_endings(observed_content, parent_content) {
         return committed_content.to_string();
     }
     carryover_merge_content(parent_content, committed_content, observed_content)
@@ -115,24 +120,31 @@ pub(crate) fn merged_carryover_content_pure(
 pub(super) fn carryover_merge_content(parent: &str, committed: &str, observed: &str) -> String {
     use crate::model::imara_diff_utils::{DiffOp, capture_diff_slices};
 
-    if committed == observed {
+    if content_eq_ignoring_line_endings(committed, observed) {
+        return committed.to_string();
+    }
+    if content_eq_ignoring_line_endings(parent, committed) {
         return observed.to_string();
     }
-    if parent == committed {
-        return observed.to_string();
-    }
-    if parent == observed {
+    if content_eq_ignoring_line_endings(parent, observed) {
         return committed.to_string();
     }
 
     let base_lines = split_lines_preserving_terminators(parent);
     let committed_lines = split_lines_preserving_terminators(committed);
     let observed_lines = split_lines_preserving_terminators(observed);
+    let normalized_parent = normalize_line_endings(parent);
+    let normalized_committed = normalize_line_endings(committed);
+    let normalized_observed = normalize_line_endings(observed);
+    let base_cmp_lines = split_lines_preserving_terminators(&normalized_parent);
+    let committed_cmp_lines = split_lines_preserving_terminators(&normalized_committed);
+    let observed_cmp_lines = split_lines_preserving_terminators(&normalized_observed);
 
     // For each side, map every base line index to its aligned index on that
     // side (None if the base line was changed/deleted on that side). Also record
     // each side's content so we can emit it for changed chunks.
-    fn align_to_base(base_len: usize, base: &[&str], side: &[&str]) -> Vec<Option<usize>> {
+    fn align_to_base(base: &[&str], side: &[&str]) -> Vec<Option<usize>> {
+        let base_len = base.len();
         let mut map = vec![None; base_len];
         for op in capture_diff_slices(base, side) {
             if let DiffOp::Equal {
@@ -149,8 +161,8 @@ pub(super) fn carryover_merge_content(parent: &str, committed: &str, observed: &
         map
     }
 
-    let committed_map = align_to_base(base_lines.len(), &base_lines, &committed_lines);
-    let observed_map = align_to_base(base_lines.len(), &base_lines, &observed_lines);
+    let committed_map = align_to_base(&base_cmp_lines, &committed_cmp_lines);
+    let observed_map = align_to_base(&base_cmp_lines, &observed_cmp_lines);
 
     // A base line is "stable" when both sides keep it aligned (unchanged on
     // both). We walk base lines; runs of stable lines are emitted verbatim,
@@ -195,7 +207,9 @@ pub(super) fn carryover_merge_content(parent: &str, committed: &str, observed: &
             // Resolve pending region: if both sides inserted differing content,
             // favor observed; else take whichever inserted.
             if !c_pending.is_empty() && !o_pending.is_empty() {
-                if c_pending == o_pending {
+                if committed_cmp_lines[committed_i..c_anchor]
+                    == observed_cmp_lines[observed_i..o_anchor]
+                {
                     result.extend(c_pending);
                 } else {
                     result.extend(o_pending);
@@ -236,12 +250,15 @@ pub(super) fn carryover_merge_content(parent: &str, committed: &str, observed: &
                 .collect();
 
             // Determine which sides changed this base region relative to base.
+            let base_cmp_chunk = &base_cmp_lines[chunk_base_start..base_i];
+            let committed_cmp_chunk = &committed_cmp_lines[committed_i..c_anchor];
+            let observed_cmp_chunk = &observed_cmp_lines[observed_i..o_anchor];
+            let committed_changed = committed_cmp_chunk != base_cmp_chunk;
+            let observed_changed = observed_cmp_chunk != base_cmp_chunk;
             let base_chunk: Vec<String> = base_lines[chunk_base_start..base_i]
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect();
-            let committed_changed = committed_chunk != base_chunk;
-            let observed_changed = observed_chunk != base_chunk;
 
             match (committed_changed, observed_changed) {
                 (true, false) => result.extend(committed_chunk),
@@ -249,7 +266,7 @@ pub(super) fn carryover_merge_content(parent: &str, committed: &str, observed: &
                 (true, true) => {
                     // Two-sided change → favor observed (matches --theirs),
                     // unless both produced identical content.
-                    if committed_chunk == observed_chunk {
+                    if committed_cmp_chunk == observed_cmp_chunk {
                         result.extend(committed_chunk);
                     } else {
                         result.extend(observed_chunk);
@@ -273,7 +290,7 @@ pub(super) fn carryover_merge_content(parent: &str, committed: &str, observed: &
         .map(|s| (*s).to_string())
         .collect();
     if !c_tail.is_empty() && !o_tail.is_empty() {
-        if c_tail == o_tail {
+        if committed_cmp_lines[committed_i..] == observed_cmp_lines[observed_i..] {
             result.extend(c_tail);
         } else {
             result.extend(o_tail);

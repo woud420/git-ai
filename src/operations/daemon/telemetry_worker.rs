@@ -774,7 +774,7 @@ fn store_metrics_in_db_with(
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-struct PendingMetricsFlushResult {
+pub(super) struct PendingMetricsFlushResult {
     uploaded_events: usize,
     uploaded_batches: usize,
     invalid_records: usize,
@@ -806,7 +806,7 @@ fn flush_pending_metrics_from_db(
     )
 }
 
-fn flush_pending_metric_records_with<
+pub(super) fn flush_pending_metric_records_with<
     DequeueBatch,
     MarkDelivered,
     MarkFailed,
@@ -882,7 +882,12 @@ where
                     error = %e,
                     "metrics upload batch failed"
                 );
-                mark_failed(&record_ids, &e)?;
+                if e.is_terminal_api_error() {
+                    let u: Vec<_> = record_ids.iter().map(|&id| (id, e.to_string())).collect();
+                    mark_undeliverable(&u)?;
+                } else {
+                    mark_failed(&record_ids, &e)?;
+                }
                 return Err(e);
             }
         };
@@ -1525,12 +1530,7 @@ mod tests {
         format!(r#"{{"t":{ts},"e":1,"v":{{}},"a":{{}}}}"#)
     }
 
-    fn unix_now() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    }
+    use super::current_unix_ts as unix_now;
 
     #[test]
     fn telemetry_flush_schedule_is_measured_from_completion() {

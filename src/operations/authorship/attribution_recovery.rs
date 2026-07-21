@@ -289,6 +289,7 @@ pub(crate) fn matching_session_event_candidate_exists(
     Ok(select_best_session_event_candidate(&candidates, timestamps_ns, target_repo_url).is_some())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recover_bash_mtime(
     repo: &Repository,
     parent_sha: &str,
@@ -404,6 +405,7 @@ fn recover_bash_mtime(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recover_session_event_mtime(
     repo: &Repository,
     parent_sha: &str,
@@ -515,6 +517,7 @@ fn recover_session_event_mtime(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recover_commit_metadata(
     repo: &Repository,
     parent_sha: &str,

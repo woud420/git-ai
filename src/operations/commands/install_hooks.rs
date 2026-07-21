@@ -1011,15 +1011,6 @@ mod tests {
             }
             Self { key, old }
         }
-
-        fn remove(key: &'static str) -> Self {
-            let old = std::env::var(key).ok();
-            // SAFETY: tests marked `serial` avoid concurrent env mutation.
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, old }
-        }
     }
 
     impl Drop for EnvVarGuard {

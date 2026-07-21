@@ -6,10 +6,9 @@
 //! `has_api_key()` is true (matching the CAS pattern).
 
 use crate::clients::api::client::ApiClient;
+use crate::clients::api::error::http_status_error;
 use crate::error::GitAiError;
-use crate::model::api_types::{
-    ApiErrorResponse, NotesReadResponse, NotesUploadRequest, NotesUploadResponse,
-};
+use crate::model::api_types::{NotesReadResponse, NotesUploadRequest, NotesUploadResponse};
 
 impl ApiClient {
     /// Upload a batch of authorship notes to the remote backend.
@@ -31,21 +30,11 @@ impl ApiClient {
             .as_str()
             .map_err(|e| GitAiError::Generic(format!("Failed to read response body: {}", e)))?;
 
-        match status_code {
-            200 => serde_json::from_str(body).map_err(GitAiError::JsonError),
-            400 => {
-                let err: ApiErrorResponse =
-                    serde_json::from_str(body).unwrap_or_else(|_| ApiErrorResponse {
-                        error: "Invalid request body".to_string(),
-                        details: Some(serde_json::Value::String(body.to_string())),
-                    });
-                Err(GitAiError::Generic(format!("Bad Request: {}", err.error)))
-            }
-            _ => Err(GitAiError::Generic(format!(
-                "Notes upload failed with status {}: {}",
-                status_code, body
-            ))),
+        if status_code == 200 {
+            return serde_json::from_str(body).map_err(GitAiError::JsonError);
         }
+
+        Err(http_status_error("notes upload", status_code, body, "unexpected error").into())
     }
 
     /// Read authorship notes by commit SHAs. Max 100 per call.
@@ -80,13 +69,11 @@ impl ApiClient {
 
         match status_code {
             200 => serde_json::from_str(body).map_err(GitAiError::JsonError),
+            // All SHAs not found — return empty response gracefully
             404 => Ok(NotesReadResponse {
                 notes: std::collections::HashMap::new(),
             }),
-            _ => Err(GitAiError::Generic(format!(
-                "Notes read failed with status {}: {}",
-                status_code, body
-            ))),
+            _ => Err(http_status_error("notes read", status_code, body, "unexpected error").into()),
         }
     }
 }

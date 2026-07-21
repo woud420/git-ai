@@ -1,6 +1,7 @@
 use crate::clients::api::client::ApiClient;
+use crate::clients::api::error::http_status_error;
 use crate::error::GitAiError;
-use crate::model::api_types::{ApiErrorResponse, CreateBundleRequest, CreateBundleResponse};
+use crate::model::api_types::{CreateBundleRequest, CreateBundleResponse};
 
 /// Bundle API endpoints
 impl ApiClient {
@@ -14,9 +15,8 @@ impl ApiClient {
     /// * `Err(GitAiError)` - Error response
     ///
     /// # Errors
-    /// * Returns `GitAiError::Generic` for HTTP errors
+    /// * Returns `GitAiError::Api` for HTTP errors (use `ApiError::retryability()` to classify)
     /// * Returns `GitAiError::JsonError` for JSON parsing errors
-    /// * Returns `GitAiError::Generic` with error details for API errors (400, 500, etc.)
     pub fn create_bundle(
         &self,
         request: CreateBundleRequest,
@@ -28,39 +28,12 @@ impl ApiClient {
             .as_str()
             .map_err(|e| GitAiError::Generic(format!("Failed to read response body: {}", e)))?;
 
-        match status_code {
-            200 => {
-                let bundle_response: CreateBundleResponse =
-                    serde_json::from_str(body).map_err(GitAiError::JsonError)?;
-                Ok(bundle_response)
-            }
-            400 => {
-                // Try to parse error response
-                let error_response: ApiErrorResponse =
-                    serde_json::from_str(body).unwrap_or_else(|_| ApiErrorResponse {
-                        error: "Invalid request body".to_string(),
-                        details: Some(serde_json::Value::String(body.to_string())),
-                    });
-                Err(GitAiError::Generic(format!(
-                    "Bad Request: {}",
-                    error_response.error
-                )))
-            }
-            500 => {
-                let error_response: ApiErrorResponse =
-                    serde_json::from_str(body).unwrap_or_else(|_| ApiErrorResponse {
-                        error: "Internal server error".to_string(),
-                        details: None,
-                    });
-                Err(GitAiError::Generic(format!(
-                    "Internal Server Error: {}",
-                    error_response.error
-                )))
-            }
-            _ => Err(GitAiError::Generic(format!(
-                "Unexpected status code {}: {}",
-                status_code, body
-            ))),
+        if status_code == 200 {
+            let bundle_response: CreateBundleResponse =
+                serde_json::from_str(body).map_err(GitAiError::JsonError)?;
+            return Ok(bundle_response);
         }
+
+        Err(http_status_error("bundle create", status_code, body, "unexpected error").into())
     }
 }

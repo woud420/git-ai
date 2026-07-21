@@ -37,6 +37,10 @@ pub enum GitAiError {
     /// type with no added prefix, so the observable message text is
     /// controlled by `PersistenceError::fmt`.
     Persistence(crate::model::repository::error::PersistenceError),
+    /// Structured API-layer error produced by `clients/api`. Display delegates
+    /// to the inner type; callers that need retryability semantics can
+    /// match on this variant and call `ApiError::retryability()`.
+    Api(crate::clients::api::error::ApiError),
 }
 
 impl fmt::Display for GitAiError {
@@ -61,7 +65,18 @@ impl fmt::Display for GitAiError {
             GitAiError::Generic(e) => write!(f, "Generic error: {}", e),
             GitAiError::GixError(e) => write!(f, "Gix error: {}", e),
             GitAiError::Persistence(e) => write!(f, "{}", e),
+            GitAiError::Api(e) => write!(f, "{}", e),
         }
+    }
+}
+
+impl GitAiError {
+    /// Returns `true` when this is an `Api` error whose `retryability()` is
+    /// `Terminal` (e.g. 401 Unauthorized, 400 Bad Request).  Used by
+    /// `flush_pending_metric_records_with` to route permanent failures to
+    /// `mark_undeliverable` rather than burning the retry budget.
+    pub fn is_terminal_api_error(&self) -> bool {
+        matches!(self, GitAiError::Api(a) if matches!(a.retryability(), Retryability::Terminal))
     }
 }
 
@@ -117,6 +132,8 @@ impl Clone for GitAiError {
             GitAiError::GixError(e) => GitAiError::Generic(format!("Gix error: {}", e)),
             // PersistenceError derives Clone, so this is non-lossy.
             GitAiError::Persistence(e) => GitAiError::Persistence(e.clone()),
+            // ApiError derives Clone, so this is non-lossy.
+            GitAiError::Api(e) => GitAiError::Api(e.clone()),
         }
     }
 }

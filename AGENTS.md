@@ -234,6 +234,19 @@ Uses `insta` crate. Snapshots live in `tests/integration/snapshots/` and `tests/
 - **`GIT_AI_VERSION` constant** changes between debug/release/test modes via `cfg` attributes in `authorship_log_serialization.rs`.
 - **Cross-platform**: `#[cfg(unix)]` / `#[cfg(windows)]` conditional compilation is used extensively (well over a hundred `#[cfg(windows)]` annotations across ~two dozen files) for signal handling, process creation flags (`CREATE_NO_WINDOW`), path handling, terminal detection, and named-pipe vs unix-socket transport (e.g. the daemon control/trace sockets are named pipes on Windows, so `Path::exists()` checks are gated to non-Windows).
 
+## Error conventions
+
+`GitAiError::Generic(String)` is legacy. When touching a module that constructs
+it, convert those sites to the layered types instead — never as a repo-wide
+sweep: `PersistenceError` (model/repository; sqlite/lock/migration/io with
+`retryability()`), `ApiError` (clients/api; operation + status + message with
+`retryability()`), both bridging losslessly into `GitAiError` so pub signatures
+stay unchanged. Keep observable Display text byte-stable where it is persisted
+(last_sync_error columns, FamilyStatus.last_error) or test-asserted; a site
+whose exact string is load-bearing may stay on Generic with a comment. The
+GitCliError family (code/stderr/args) is load-bearing for structural matching —
+never wrap or re-nest it.
+
 ## Optimize for Human Review
 
 - Always write code optimized for human review. No code can be merged without a greenlight from a human, so make it easy for humans to review your code. This means clear naming, clear refactors as needed, and, most importantly, minimal and simple code. Clean, DRY, simple, maintainable code is your true north star.

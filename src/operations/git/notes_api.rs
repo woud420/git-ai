@@ -21,6 +21,13 @@ use std::collections::{HashMap, HashSet};
 // Re-export CommitAuthorship so callers don't need to import from refs directly.
 pub use crate::operations::git::refs::CommitAuthorship;
 
+/// Per-SHA note-write pair: `(commit_sha, serialized_note_content)`.
+///
+/// The canonical element type for all `write_notes_batch` / `export_notes_to_git_refs`
+/// calls. Multi-commit loops collect `Vec<NoteWriteEntry>` in memory and flush once.
+/// Distinct from `notes_add_blob_batch`'s `(commit_sha, blob_oid)` shape.
+pub type NoteWriteEntry = (String, String);
+
 // --- Writes ---
 
 pub fn write_note(repo: &Repository, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
@@ -33,10 +40,7 @@ pub fn write_note(repo: &Repository, commit_sha: &str, content: &str) -> Result<
     }
 }
 
-pub fn write_notes_batch(
-    repo: &Repository,
-    entries: &[(String, String)],
-) -> Result<(), GitAiError> {
+pub fn write_notes_batch(repo: &Repository, entries: &[NoteWriteEntry]) -> Result<(), GitAiError> {
     if entries.is_empty() {
         return Ok(());
     }
@@ -189,24 +193,9 @@ pub fn read_authorship_v3(
 
 /// Return a map of commit SHA → note-blob OID for the given commits.
 ///
-/// # Audit results (Phase 2)
-///
-/// All callers of this function use the returned blob OIDs as *git object IDs*
-/// to subsequently read note content via `batch_read_blob_contents` /
-/// `batch_read_blobs_with_oids`.  They are NOT purely presence checks.
-///
-/// Call sites and how they use the OIDs:
-///
-/// 1. `authorship_traversal::load_ai_touched_files_for_commits` — passes OIDs
-///    to `batch_read_blobs_with_oids`; must be real git OIDs.
-/// 2. `rewrite::shift_authorship_notes` — reads notes by OID;
-///    must be real git OIDs.
-///
-/// **HTTP backend**: notes do not live in `refs/notes/ai`, so there are no
-/// git blob OIDs to return.  Returning an empty map causes callers to handle
-/// the "no notes available" case (skip or use slow-path reads).  This is
-/// safe and correct for the transition period — callers that need note content
-/// will fall back to `read_note` / `read_authorship` which hit the cache.
+/// Callers use the returned OIDs as git object IDs with `batch_read_blobs_with_oids`
+/// (not purely presence checks). On Http/Sqlite backends notes live in notes-db, not in
+/// git refs, so an empty map is returned and callers fall back to `read_note`.
 pub fn read_note_blob_oids(
     repo: &Repository,
     commit_shas: &[String],
@@ -601,7 +590,7 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
 /// attribution via the notes ref.
 pub fn export_notes_to_git_refs(
     repo: &Repository,
-    entries: &[(String, String)],
+    entries: &[NoteWriteEntry],
 ) -> Result<(), GitAiError> {
     crate::operations::git::refs::notes_add_batch(repo, entries)
 }
@@ -616,7 +605,7 @@ fn sqlite_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> 
 }
 
 /// Sqlite backend: write a batch of notes as local-primary storage.
-fn sqlite_write_batch(entries: &[(String, String)]) -> Result<(), GitAiError> {
+fn sqlite_write_batch(entries: &[NoteWriteEntry]) -> Result<(), GitAiError> {
     let db = crate::model::repository::notes_db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()
@@ -659,7 +648,7 @@ fn http_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
     Ok(())
 }
 
-fn http_write_batch(entries: &[(String, String)]) -> Result<(), GitAiError> {
+fn http_write_batch(entries: &[NoteWriteEntry]) -> Result<(), GitAiError> {
     let db = crate::model::repository::notes_db::NotesDatabase::global()?;
     let mut db_lock = db
         .lock()

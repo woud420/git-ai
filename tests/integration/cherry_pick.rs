@@ -1224,6 +1224,138 @@ fn test_cherry_pick_no_commit_defers_to_final_commit_tree() {
     ]);
 }
 
+/// Cherry-pick chain where only commit 1 conflicts (on file_a), requiring a
+/// conflict-resolution working log.  Commit 2 (file_b only) applies cleanly and
+/// its working log was consumed at commit time on the feature branch, so only
+/// commit 1 produces a `flush_pending_note_writes` entry.
+///
+/// The key falsifiability property: the conflict is resolved with NEW content
+/// "RESOLVED_NEW_AI" that was never present in the source commit's tree.  The
+/// `CherryPickComplete` shift writes a note for new_commit1 that carries
+/// "FEATURE_A_AI" attribution; only the merged conflict-resolution note produced
+/// by `flush_pending_note_writes` can carry "RESOLVED_NEW_AI" as AI-attributed.
+/// If the flush call is dropped, the blame assertion on file_a fails.
+#[test]
+fn test_multi_commit_cherry_pick_chain_with_conflict_resolution_working_logs() {
+    let repo = TestRepo::new();
+
+    let file_a_path = repo.path().join("file_a.txt");
+    let file_b_path = repo.path().join("file_b.txt");
+
+    fs::write(&file_a_path, "base_a\nshared_a\n").unwrap();
+    fs::write(&file_b_path, "base_b\nshared_b\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "file_a.txt"])
+        .unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "file_b.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("initial").unwrap();
+    let mut file_a = repo.filename("file_a.txt");
+    let mut file_b = repo.filename("file_b.txt");
+    file_a.assert_committed_lines(crate::lines!["base_a".human(), "shared_a".human()]);
+    file_b.assert_committed_lines(crate::lines!["base_b".human(), "shared_b".human()]);
+    let main_branch = repo.current_branch();
+
+    // Feature branch: commit 1 adds AI content to file_a (will conflict).
+    // Commit 2 adds AI content to file_b only (applies cleanly; its working log
+    // is consumed at commit time and does not contribute a conflict-resolution entry).
+    repo.git(&["checkout", "-b", "feature"]).unwrap();
+
+    fs::write(&file_a_path, "base_a\nFEATURE_A_AI\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "file_a.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("AI changes to A").unwrap();
+    let feature_commit1 = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+    file_a.assert_committed_lines(crate::lines![
+        "base_a".unattributed_human(),
+        "FEATURE_A_AI".ai()
+    ]);
+
+    fs::write(&file_b_path, "base_b\nFEATURE_B_AI\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "file_b.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("AI changes to B").unwrap();
+    let feature_commit2 = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+    file_b.assert_committed_lines(crate::lines![
+        "base_b".unattributed_human(),
+        "FEATURE_B_AI".ai()
+    ]);
+
+    // Main branch: only file_a has a conflicting change; file_b is untouched.
+    repo.git(&["checkout", &main_branch]).unwrap();
+    fs::write(&file_a_path, "base_a\nMAIN_A_HUMAN\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "file_a.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("Human change to A").unwrap();
+    file_a.assert_committed_lines(crate::lines!["base_a".human(), "MAIN_A_HUMAN".human()]);
+    file_b.assert_committed_lines(crate::lines!["base_b".human(), "shared_b".human()]);
+
+    // Only commit 1 conflicts (file_a); commit 2 will apply cleanly afterward.
+    let pick_result = repo.git(&["cherry-pick", &feature_commit1, &feature_commit2]);
+    assert!(
+        pick_result.is_err(),
+        "cherry-pick should conflict on file_a"
+    );
+    repo.sync_daemon();
+
+    // Resolve with entirely new AI content absent from the source commit.
+    // Modelling an AI agent: pre-edit human checkpoint, then the AI writes new content.
+    // "RESOLVED_NEW_AI" is the observable signal: only the conflict-resolution working
+    // log (written here and flushed by `flush_pending_note_writes`) can carry it as
+    // AI-attributed.  The shifted note from `CherryPickComplete` has "FEATURE_A_AI",
+    // not "RESOLVED_NEW_AI", so if the flush is dropped the blame assertion below fails.
+    fs::write(&file_a_path, "base_a\nFEATURE_A_AI\n").unwrap();
+    repo.git_ai(&["checkpoint", "human", "file_a.txt"]).unwrap();
+    fs::write(&file_a_path, "base_a\nRESOLVED_NEW_AI\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "file_a.txt"])
+        .unwrap();
+    repo.git(&["add", "file_a.txt"]).unwrap();
+    // --continue applies commit 1, then immediately applies commit 2 (non-conflicting).
+    repo.git(&["cherry-pick", "--continue"]).unwrap();
+
+    repo.sync_daemon();
+
+    // Commit 1 is HEAD~1; commit 2 is HEAD.
+    let new_commit2 = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+    let new_commit1 = repo
+        .git(&["rev-parse", "HEAD~1"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // The note for commit 1 must be the merged conflict-resolution note (from
+    // `flush_pending_note_writes`), not the raw shifted note -- evidenced by
+    // "RESOLVED_NEW_AI" appearing as AI-attributed in the blame.
+    let note1 = repo
+        .read_authorship_note(&new_commit1)
+        .expect("cherry-picked commit 1 must have an authorship note after batched flush");
+    assert!(
+        note1.contains("file_a.txt"),
+        "commit 1 note should contain file_a.txt attribution: {note1}"
+    );
+
+    // Commit 2's note comes from the CherryPickComplete shift (no conflict-resolution
+    // working log for this commit).
+    let note2 = repo
+        .read_authorship_note(&new_commit2)
+        .expect("cherry-picked commit 2 must have an authorship note");
+    assert!(
+        note2.contains("file_b.txt"),
+        "commit 2 note should contain file_b.txt attribution: {note2}"
+    );
+
+    // "RESOLVED_NEW_AI" is AI-attributed: proves the conflict-resolution working log
+    // was flushed and merged into the note.  Dropping the flush in
+    // `flush_pending_note_writes` causes this assertion to fail.
+    file_a.assert_committed_lines(crate::lines![
+        "base_a".unattributed_human(),
+        "RESOLVED_NEW_AI".ai()
+    ]);
+    file_b.assert_committed_lines(crate::lines![
+        "base_b".unattributed_human(),
+        "FEATURE_B_AI".ai()
+    ]);
+}
+
 crate::reuse_tests_in_worktree!(
     test_single_commit_cherry_pick,
     test_cherry_pick_preserves_human_only_commit_note_metadata,
@@ -1242,4 +1374,5 @@ crate::reuse_tests_in_worktree!(
     test_cherry_pick_no_commit_defers_to_final_commit_tree,
     test_cherry_pick_skip_failed_next_conflict_advances_pending_remote_tracking_source,
     test_cherry_pick_skip_failed_next_conflict_does_not_double_skip_refcursor_sources,
+    test_multi_commit_cherry_pick_chain_with_conflict_resolution_working_logs,
 );

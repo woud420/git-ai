@@ -110,6 +110,7 @@ pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
             supress_output,
             compute_stats: true,
             recover_attribution: true,
+            defer_note_write: false,
         },
         PostCommitContext {
             precomputed_parent_diff: None,
@@ -125,6 +126,7 @@ pub(crate) struct PostCommitOptions {
     pub supress_output: bool,
     pub compute_stats: bool,
     pub recover_attribution: bool,
+    pub defer_note_write: bool,
 }
 
 pub(crate) struct PostCommitDetailedResult {
@@ -134,10 +136,10 @@ pub(crate) struct PostCommitDetailedResult {
 }
 
 #[derive(Clone, Copy, Default)]
-struct PostCommitContext<'a> {
-    precomputed_parent_diff: Option<&'a DiffTreeResult>,
-    recovery_file_timestamps: Option<&'a FileTimestampsByPath>,
-    before_external_recovery: Option<&'a dyn Fn(&UnknownLinesByFile)>,
+pub(crate) struct PostCommitContext<'a> {
+    pub(crate) precomputed_parent_diff: Option<&'a DiffTreeResult>,
+    pub(crate) recovery_file_timestamps: Option<&'a FileTimestampsByPath>,
+    pub(crate) before_external_recovery: Option<&'a dyn Fn(&UnknownLinesByFile)>,
 }
 
 pub fn post_commit_from_working_log_with_transform<F>(
@@ -160,6 +162,7 @@ where
             supress_output,
             compute_stats: true,
             recover_attribution: true,
+            defer_note_write: false,
         },
         transform,
     )
@@ -270,7 +273,7 @@ where
     .map(|result| (result.commit_sha, result.authorship_log))
 }
 
-fn post_commit_from_working_log_with_transform_context_detailed<F>(
+pub(crate) fn post_commit_from_working_log_with_transform_context_detailed<F>(
     repo: &Repository,
     base_commit: Option<String>,
     commit_sha: String,
@@ -282,11 +285,9 @@ fn post_commit_from_working_log_with_transform_context_detailed<F>(
 where
     F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
 {
-    // Use base_commit parameter if provided, otherwise use "initial" for empty repos
-    // This matches the convention in checkpoint.rs
+    // "initial" is the empty-repo convention, matching checkpoint.rs.
     let parent_sha = base_commit.unwrap_or_else(|| "initial".to_string());
 
-    // Initialize the new storage system
     let repo_storage = &repo.storage;
     let working_log = repo_storage.working_log_for_base_commit(&parent_sha)?;
 
@@ -299,9 +300,8 @@ where
         Some(human_author.clone()),
     )?;
 
-    // Build pathspecs from AI-relevant checkpoint entries only.
-    // Human-only entries with no AI attribution do not affect authorship output and should not
-    // trigger expensive post-commit diff work across large commits.
+    // Pathspecs from AI-relevant checkpoint entries only: human-only entries don't
+    // affect authorship output and must not trigger expensive post-commit diff work.
     let mut pathspecs: HashSet<String> = HashSet::new();
     for checkpoint in &parent_working_log {
         for entry in &checkpoint.entries {
@@ -311,9 +311,8 @@ where
         }
     }
 
-    // Also include files from INITIAL attributions (uncommitted files from previous commits)
-    // These files may not have checkpoints but still need their attribution preserved
-    // when they are finally committed. See issue #356.
+    // Also include files from INITIAL attributions (uncommitted files from previous
+    // commits): they may lack checkpoints but keep their attribution. See issue #356.
     let initial_attributions_for_pathspecs = working_log.read_initial_attributions();
     for file_path in initial_attributions_for_pathspecs.files.keys() {
         pathspecs.insert(file_path.clone());
@@ -408,9 +407,7 @@ where
         authorship_log.metadata.base_commit_sha = commit_sha.clone();
     }
 
-    // Long-lived daemon processes should read a fresh config snapshot.
-    // Always use Config::fresh() to support runtime config updates
-    // (especially important for daemon mode, but also good for consistency)
+    // Use Config::fresh() so long-lived daemon processes observe runtime config changes.
     let config = Config::fresh();
     let custom_attrs = config.custom_attributes().clone();
 
@@ -428,7 +425,9 @@ where
         .serialize_to_string()
         .map_err(|_| GitAiError::Generic("Failed to serialize authorship log".to_string()))?;
 
-    write_note(repo, &commit_sha, &authorship_note_str)?;
+    if !options.defer_note_write {
+        write_note(repo, &commit_sha, &authorship_note_str)?;
+    }
 
     // Compute stats once (needed for both metrics and terminal output), unless preflight
     // estimate predicts this would be too expensive for the commit hook path.
@@ -528,12 +527,13 @@ where
         )?;
     }
 
-    // // Clean up old working log
-    repo_storage.delete_working_log_for_base_commit(&parent_sha)?;
+    // When deferring, the caller deletes working logs only after a successful
+    // flush; deleting here would make attribution unrecoverable on flush failure.
+    if !options.defer_note_write {
+        repo_storage.delete_working_log_for_base_commit(&parent_sha)?;
+    }
 
-    // Use Config::fresh() to support runtime config updates
     if !options.supress_output && !Config::fresh().is_quiet() {
-        // Only print stats if we're in an interactive terminal and quiet mode is disabled
         let is_interactive = std::io::stdout().is_terminal();
         if let Some(stats) = stats.as_ref() {
             write_stats_to_terminal(stats, is_interactive);

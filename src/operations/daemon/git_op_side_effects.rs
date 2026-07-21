@@ -1,3 +1,4 @@
+use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
 use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
 use crate::operations::daemon::side_effect_helpers::{
@@ -6,7 +7,7 @@ use crate::operations::daemon::side_effect_helpers::{
 };
 use crate::operations::git::cli_parser::summarize_rebase_args;
 use crate::operations::git::find_repository_in_path;
-use crate::operations::git::repository::{Repository, exec_git};
+use crate::operations::git::repository::Repository;
 use crate::operations::git::sync_authorship::{fetch_authorship_notes, fetch_remote_from_args};
 
 pub fn apply_push_side_effect(
@@ -303,7 +304,7 @@ pub fn is_ancestor_commit(repository: &Repository, ancestor: &str, descendant: &
     args.push("--is-ancestor".to_string());
     args.push(ancestor.to_string());
     args.push(descendant.to_string());
-    crate::operations::git::repository::exec_git(&args).is_ok()
+    crate::clients::git_cli::exec_git(&args).is_ok()
 }
 
 pub fn repo_is_ancestor(

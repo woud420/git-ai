@@ -1,15 +1,16 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
-use crate::operations::git::repository::{Repository, exec_git};
+use crate::operations::git::repository::Repository;
 
 use super::{
     is_valid_oid, is_zero_oid, parsed_invocation_for_normalized_command, rebase_is_control_mode,
     valid_non_zero_ref_change,
 };
+use crate::clients::git_cli::exec_git_stdin;
 use crate::operations::git::repo_state::git_dir_for_worktree;
-use crate::operations::git::repository::exec_git_stdin;
 
 pub(crate) fn rebase_new_tip_from_command(
     cmd: &crate::model::domain::NormalizedCommand,

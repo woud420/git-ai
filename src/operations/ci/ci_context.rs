@@ -1,3 +1,4 @@
+use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::authorship::rewrite::{RewriteEvent, handle_rewrite_event};
@@ -5,9 +6,7 @@ use crate::operations::git::notes_api::{read_authorship_v3, read_note};
 use crate::operations::git::refs::{
     AI_AUTHORSHIP_FORK_TRACKING_REF, copy_missing_notes_for_commits_from_ref, ref_exists,
 };
-use crate::operations::git::repository::{
-    CommitRange, Repository, exec_git, exec_git_allow_nonzero, exec_git_stdin,
-};
+use crate::operations::git::repository::{CommitRange, Repository};
 use crate::operations::git::sync_authorship::fetch_authorship_notes;
 use std::fs;
 use std::path::PathBuf;

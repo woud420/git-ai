@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin_streaming};
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::authorship::hunk_shift::{DiffHunk, parse_hunk_header};
 use crate::operations::git::notes_api;
 use crate::operations::git::repo_state::is_valid_git_oid;
-use crate::operations::git::repository::{
-    Repository, exec_git, exec_git_allow_nonzero, exec_git_stdin_streaming,
-};
+use crate::operations::git::repository::Repository;
 
 const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 

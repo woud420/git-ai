@@ -61,7 +61,7 @@ pub fn process_conflict_resolution_working_logs(
         "--format=%H %P".to_string(),
         format!("{}..{}", onto_sha, new_tip),
     ]);
-    let output = crate::operations::git::repository::exec_git(&args)?;
+    let output = crate::clients::git_cli::exec_git(&args)?;
     let log_output = String::from_utf8_lossy(&output.stdout);
 
     let commit_parent_pairs = log_output

@@ -1,11 +1,11 @@
 use crate::clients::auth::CredentialStore;
+use crate::clients::git_cli::{exec_git, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::working_log::CheckpointKind;
 use crate::operations::git::notes_api::read_authorship_v3;
 use crate::operations::git::repository::Repository;
-use crate::operations::git::repository::{exec_git, exec_git_stdin};
 #[cfg(windows)]
 use crate::utils::normalize_to_posix;
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};

@@ -242,7 +242,7 @@ fn run_plain_log(global_args: &[String], git_log_args: &[String]) -> Result<Exit
     command_args.push("--notes=ai".to_string());
     command_args.extend(git_log_args.iter().cloned());
 
-    let mut child = crate::operations::git::repository::spawn_git_passthrough(&command_args)?;
+    let mut child = crate::clients::git_cli::spawn_git_passthrough(&command_args)?;
     child.wait().map_err(LogError::Io)
 }
 
@@ -455,7 +455,7 @@ impl CommitStream {
         command_args.push(format!("--format=format:{}", GIT_LOG_FORMAT));
         command_args.extend(git_log_args.iter().cloned());
 
-        let mut child = crate::operations::git::repository::spawn_git_stdout(&command_args)?;
+        let mut child = crate::clients::git_cli::spawn_git_stdout(&command_args)?;
 
         let stdout = child
             .stdout

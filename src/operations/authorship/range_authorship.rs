@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::operations::authorship::diff_ai_accepted::diff_ai_accepted_stats;
 use crate::operations::authorship::ignore::{
@@ -13,9 +14,7 @@ use crate::operations::authorship::stats::{
     CommitStats, stats_for_commit_stats, stats_from_authorship_log,
 };
 use crate::operations::git::notes_api::{CommitAuthorship, filter_commits_with_notes};
-use crate::operations::git::repository::{
-    CommitRange, InternalGitProfile, Repository, exec_git_with_profile,
-};
+use crate::operations::git::repository::{CommitRange, Repository};
 use std::io::IsTerminal;
 
 /// The git empty tree hash - represents an empty repository state

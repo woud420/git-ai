@@ -1244,7 +1244,7 @@ fn discover_dirty_files_from_status(cwd: &std::path::Path) -> Vec<String> {
         "--porcelain".to_string(),
         "-uall".to_string(),
     ];
-    let output = crate::operations::git::repository::exec_git(&args).ok();
+    let output = crate::clients::git_cli::exec_git(&args).ok();
     let Some(output) = output else {
         return vec![];
     };

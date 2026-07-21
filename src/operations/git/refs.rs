@@ -1,9 +1,8 @@
+use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::{AUTHORSHIP_LOG_VERSION, AuthorshipLog};
 use crate::model::working_log::Checkpoint;
-use crate::operations::git::repository::{
-    Repository, exec_git, exec_git_allow_nonzero, exec_git_stdin,
-};
+use crate::operations::git::repository::Repository;
 use serde_json;
 use std::collections::{HashMap, HashSet};
 

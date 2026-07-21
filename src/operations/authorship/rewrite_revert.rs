@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::clients::git_cli::{exec_git, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::model::authorship_log::LineRange;
 use crate::model::authorship_log_serialization::{
@@ -9,7 +10,7 @@ use crate::operations::authorship::hunk_shift::apply_hunk_shifts_to_file_attesta
 use crate::operations::authorship::rewrite::compute_diff_trees_batch;
 use crate::operations::authorship::rewrite::{RewriteMetricCommit, RewriteMetricOperation};
 use crate::operations::git::notes_api;
-use crate::operations::git::repository::{Repository, exec_git, exec_git_stdin};
+use crate::operations::git::repository::Repository;
 
 /// One reverted commit to reconstruct: the new revert commit, its parent, and
 /// the original commit that was reverted (used to locate the source note).

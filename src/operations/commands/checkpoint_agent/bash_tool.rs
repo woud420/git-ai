@@ -435,7 +435,7 @@ fn get_git_dir(repo_root: &Path) -> Result<PathBuf, GitAiError> {
         "rev-parse".to_string(),
         "--git-dir".to_string(),
     ];
-    let output = crate::operations::git::repository::exec_git_allow_nonzero(&args)?;
+    let output = crate::clients::git_cli::exec_git_allow_nonzero(&args)?;
     if !output.status.success() {
         return Err(GitAiError::Generic(
             "git rev-parse --git-dir failed".to_string(),
@@ -760,7 +760,7 @@ fn git_status_fallback_args(repo_root: &Path) -> Vec<String> {
 
 pub fn git_status_fallback(repo_root: &Path) -> Result<Vec<String>, GitAiError> {
     let args = git_status_fallback_args(repo_root);
-    let output = crate::operations::git::repository::exec_git_allow_nonzero(&args)?;
+    let output = crate::clients::git_cli::exec_git_allow_nonzero(&args)?;
 
     if !output.status.success() {
         return Err(GitAiError::Generic(format!(

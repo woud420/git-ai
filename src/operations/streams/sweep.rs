@@ -32,7 +32,6 @@ pub use crate::model::stream_types::StreamFormat;
 mod tests {
     use super::*;
     use crate::model::stream_watermark::WatermarkType;
-    use std::str::FromStr;
 
     /// Every StreamFormat variant must round-trip through Display → FromStr without loss.
     /// Also verifies Debug == Display so the old `format!("{:?}", ...)` writers were

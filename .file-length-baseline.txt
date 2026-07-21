@@ -16,7 +16,6 @@ src/model/authorship_log_serialization.rs	753
 src/model/repository/bash_history_db.rs	964
 src/model/repository/internal_db.rs	1060
 src/model/repository/notes_db.rs	1136
-src/model/repository/streams_db.rs	1236
 src/model/stream_watermark.rs	688
 src/operations/authorship/attribution_recovery.rs	2152
 src/model/imara_diff_utils.rs	647

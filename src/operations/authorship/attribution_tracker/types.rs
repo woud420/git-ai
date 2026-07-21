@@ -1,0 +1,156 @@
+//! Core attribution types.
+//!
+//! `Attribution` and `LineAttribution` are the public data model for attribution
+//! ranges; `Deletion`, `Insertion`, and `MoveMapping` are internal diff-catalog
+//! types shared across the diff engine and tracker.
+
+/// Represents a single attribution range in the file.
+/// Ranges can overlap (multiple authors can be attributed to the same text).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct Attribution {
+    /// Character position where this attribution starts (inclusive)
+    pub start: usize,
+    /// Character position where this attribution ends (exclusive)
+    pub end: usize,
+    /// Identifier for the author of this range
+    pub author_id: String,
+    /// Timestamp of the attribution (in milliseconds since epoch)
+    pub ts: u128,
+}
+
+/// Represents attribution for a range of lines.
+/// Both start_line and end_line are inclusive (1-indexed).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct LineAttribution {
+    /// Line number where this attribution starts (inclusive, 1-indexed)
+    pub start_line: u32,
+    /// Line number where this attribution ends (inclusive, 1-indexed)
+    pub end_line: u32,
+    /// Identifier for the author of this range
+    pub author_id: String,
+    /// Author ID that was overwritten by this attribution (e.g., if Alice wrote this line originally, then Bob edited it, overwrote=Alice because her edit was writen over)
+    #[serde(default)]
+    pub overrode: Option<String>,
+}
+
+impl LineAttribution {
+    pub fn new(
+        start_line: u32,
+        end_line: u32,
+        author_id: String,
+        overrode: Option<String>,
+    ) -> Self {
+        LineAttribution {
+            start_line,
+            end_line,
+            author_id,
+            overrode,
+        }
+    }
+
+    /// Returns the number of lines this attribution covers
+    #[allow(dead_code)]
+    pub fn line_count(&self) -> u32 {
+        if self.start_line > self.end_line {
+            0
+        } else {
+            self.end_line - self.start_line + 1
+        }
+    }
+
+    /// Checks if this line attribution is empty
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.start_line > self.end_line
+    }
+
+    /// Checks if this attribution overlaps with a given line range (inclusive)
+    #[allow(dead_code)]
+    pub fn overlaps(&self, start_line: u32, end_line: u32) -> bool {
+        self.start_line <= end_line && self.end_line >= start_line
+    }
+
+    /// Returns the overlapping portion of this attribution with a given line range
+    #[allow(dead_code)]
+    pub fn intersection(&self, start_line: u32, end_line: u32) -> Option<(u32, u32)> {
+        let overlap_start = self.start_line.max(start_line);
+        let overlap_end = self.end_line.min(end_line);
+
+        if overlap_start <= overlap_end {
+            Some((overlap_start, overlap_end))
+        } else {
+            None
+        }
+    }
+}
+
+impl Attribution {
+    pub fn new(start: usize, end: usize, author_id: String, ts: u128) -> Self {
+        Attribution {
+            start,
+            end,
+            author_id,
+            ts,
+        }
+    }
+
+    /// Returns the length of this attribution range
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
+
+    /// Checks if this attribution is empty
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+
+    /// Checks if this attribution overlaps with a given range
+    pub fn overlaps(&self, start: usize, end: usize) -> bool {
+        self.start < end && self.end > start
+    }
+
+    /// Returns the overlapping portion of this attribution with a given range
+    pub fn intersection(&self, start: usize, end: usize) -> Option<(usize, usize)> {
+        let overlap_start = self.start.max(start);
+        let overlap_end = self.end.min(end);
+
+        if overlap_start < overlap_end {
+            Some((overlap_start, overlap_end))
+        } else {
+            None
+        }
+    }
+}
+
+/// Represents a deletion operation from the diff
+#[derive(Debug, Clone)]
+pub(crate) struct Deletion {
+    /// Start position in old content
+    pub(crate) start: usize,
+    /// End position in old content
+    pub(crate) end: usize,
+}
+
+/// Represents an insertion operation from the diff
+#[derive(Debug, Clone)]
+pub(crate) struct Insertion {
+    /// Start position in new content
+    pub(crate) start: usize,
+    /// End position in new content
+    pub(crate) end: usize,
+}
+
+/// Information about a detected move operation
+#[derive(Debug, Clone)]
+pub(crate) struct MoveMapping {
+    /// The deletion that was moved
+    pub(crate) deletion_idx: usize,
+    /// The insertion where it was moved to
+    pub(crate) insertion_idx: usize,
+    /// Range within the deletion text that maps to the insertion (start, end) exclusive bounds
+    pub(crate) source_range: (usize, usize),
+    /// Range within the insertion text where the deletion text lands (start, end) exclusive bounds
+    pub(crate) target_range: (usize, usize),
+}

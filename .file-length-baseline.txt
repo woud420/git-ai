@@ -19,7 +19,6 @@ src/model/repository/notes_db.rs	1136
 src/model/repository/streams_db.rs	1236
 src/operations/authorship/virtual_attribution/authorship_log_split.rs	606
 src/operations/authorship/attribution_recovery.rs	2152
-src/operations/authorship/attribution_tracker.rs	2709
 src/operations/authorship/imara_diff_utils.rs	647
 src/operations/authorship/post_commit.rs	1432
 src/operations/authorship/rewrite.rs	1903

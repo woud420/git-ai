@@ -134,6 +134,11 @@ tasks:
     cmds:
       - cargo clippy --all-targets -- -D warnings
 
+  check:windows:
+    desc: Type-check the tree for Windows (cfg(windows) code never compiles in local macOS builds)
+    cmds:
+      - cargo check --all-targets --target x86_64-pc-windows-gnu
+
   doc:
     desc: Build documentation with warnings as errors
     cmds:

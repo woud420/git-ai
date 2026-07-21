@@ -38,6 +38,11 @@ task test CARGO_TEST_ARGS="--lib" # cargo-level flags (rare)
 task lint
 task fmt
 
+# Windows cross-check (catches cfg(windows) breakage locally — the daemon's
+# socket/pipe code only compiles on Windows targets; plain builds on macOS
+# silently skip it). Requires: brew install mingw-w64 && rustup target add x86_64-pc-windows-gnu
+task check:windows
+
 # Snapshot management (insta crate)
 cargo insta review                       # interactively review snapshot changes
 cargo insta accept                       # accept all pending snapshots

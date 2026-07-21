@@ -12,8 +12,11 @@ use interprocess::local_socket::{ListenerOptions, prelude::*};
 #[cfg(windows)]
 use named_pipe::{
     ConnectingServer as WindowsConnectingServer, OpenMode as WindowsPipeOpenMode,
-    PipeOptions as WindowsPipeOptions, PipeServer as WindowsPipeServer,
+    PipeClient as WindowsPipeClient, PipeOptions as WindowsPipeOptions,
+    PipeServer as WindowsPipeServer,
 };
+#[cfg(windows)]
+use std::path::Path;
 
 pub fn control_listener_loop_actor(
     control_socket_path: PathBuf,

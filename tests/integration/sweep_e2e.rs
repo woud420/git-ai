@@ -8,10 +8,10 @@
 //! 5. Sweep never double processes files (in_flight deduplication)
 
 use git_ai::model::repository::streams_db::StreamsDatabase;
-use git_ai::model::stream_watermark::ByteOffsetWatermark;
+use git_ai::model::stream_watermark::{ByteOffsetWatermark, WatermarkType};
 use git_ai::operations::streams::agent::Agent;
 use git_ai::operations::streams::agents::ClaudeAgent;
-use git_ai::operations::streams::sweep::SweepStrategy;
+use git_ai::operations::streams::sweep::{StreamFormat, SweepStrategy};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -277,8 +277,8 @@ fn test_sweep_deduplication_via_session_id() {
         stream_kind: "transcript".to_string(),
         tool: "claude".to_string(),
         stream_path: transcript_path.display().to_string(),
-        stream_format: "ClaudeJsonl".to_string(),
-        watermark_type: "ByteOffset".to_string(),
+        stream_format: StreamFormat::ClaudeJsonl,
+        watermark_type: WatermarkType::ByteOffset,
         watermark_value: "0".to_string(),
         external_session_id: "test-ext-session".to_string(),
         external_parent_session_id: None,
@@ -326,8 +326,8 @@ fn test_behind_detection_on_file_growth() {
         stream_kind: "transcript".to_string(),
         tool: "claude".to_string(),
         stream_path: transcript_path.display().to_string(),
-        stream_format: "ClaudeJsonl".to_string(),
-        watermark_type: "ByteOffset".to_string(),
+        stream_format: StreamFormat::ClaudeJsonl,
+        watermark_type: WatermarkType::ByteOffset,
         watermark_value: "100".to_string(), // Simulating partial processing
         external_session_id: "test-ext-session".to_string(),
         external_parent_session_id: None,
@@ -413,8 +413,8 @@ fn test_watermark_persistence_after_processing() {
         stream_kind: "transcript".to_string(),
         tool: "claude".to_string(),
         stream_path: transcript_path.display().to_string(),
-        stream_format: "ClaudeJsonl".to_string(),
-        watermark_type: "ByteOffset".to_string(),
+        stream_format: StreamFormat::ClaudeJsonl,
+        watermark_type: WatermarkType::ByteOffset,
         watermark_value: "0".to_string(),
         external_session_id: "test-ext-session".to_string(),
         external_parent_session_id: None,

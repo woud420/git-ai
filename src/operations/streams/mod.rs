@@ -27,7 +27,8 @@
 //!     session_id: "session-123".to_string(),
 //!     tool: "claude-code".to_string(),
 //!     stream_path: "/path/to/transcript.jsonl".to_string(),
-//!     watermark_type: "ByteOffset".to_string(),
+//!     stream_format: StreamFormat::ClaudeJsonl,
+//!     watermark_type: WatermarkType::ByteOffset,
 //!     watermark_value: "0".to_string(),
 //!     // ... other fields
 //! };

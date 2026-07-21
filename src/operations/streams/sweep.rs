@@ -26,61 +26,70 @@ pub struct DiscoveredSession {
     pub external_parent_session_id: Option<String>,
 }
 
-/// Transcript file format enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StreamFormat {
-    ClaudeJsonl,
-    CursorJsonl,
-    DroidJsonl,
-    CopilotSessionJson,
-    CopilotEventStreamJsonl,
-    GeminiJsonl,
-    ContinueJson,
-    WindsurfJsonl,
-    CodexJsonl,
-    AmpThreadJson,
-    OpenCodeSqlite,
-    PiJsonl,
-    CopilotOtelSqlite,
-}
+pub use crate::model::stream_types::StreamFormat;
 
-impl std::fmt::Display for StreamFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ClaudeJsonl => write!(f, "ClaudeJsonl"),
-            Self::CursorJsonl => write!(f, "CursorJsonl"),
-            Self::DroidJsonl => write!(f, "DroidJsonl"),
-            Self::CopilotSessionJson => write!(f, "CopilotSessionJson"),
-            Self::CopilotEventStreamJsonl => write!(f, "CopilotEventStreamJsonl"),
-            Self::GeminiJsonl => write!(f, "GeminiJsonl"),
-            Self::ContinueJson => write!(f, "ContinueJson"),
-            Self::WindsurfJsonl => write!(f, "WindsurfJsonl"),
-            Self::CodexJsonl => write!(f, "CodexJsonl"),
-            Self::AmpThreadJson => write!(f, "AmpThreadJson"),
-            Self::OpenCodeSqlite => write!(f, "OpenCodeSqlite"),
-            Self::PiJsonl => write!(f, "PiJsonl"),
-            Self::CopilotOtelSqlite => write!(f, "CopilotOtelSqlite"),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::stream_watermark::WatermarkType;
+    use std::str::FromStr;
+
+    /// Every StreamFormat variant must round-trip through Display → FromStr without loss.
+    /// Also verifies Debug == Display so the old `format!("{:?}", ...)` writers were
+    /// always byte-compatible with the FromStr readers.
+    #[test]
+    fn stream_format_display_fromstr_roundtrip() {
+        let variants = [
+            StreamFormat::ClaudeJsonl,
+            StreamFormat::CursorJsonl,
+            StreamFormat::DroidJsonl,
+            StreamFormat::CopilotSessionJson,
+            StreamFormat::CopilotEventStreamJsonl,
+            StreamFormat::GeminiJsonl,
+            StreamFormat::ContinueJson,
+            StreamFormat::WindsurfJsonl,
+            StreamFormat::CodexJsonl,
+            StreamFormat::AmpThreadJson,
+            StreamFormat::OpenCodeSqlite,
+            StreamFormat::PiJsonl,
+            StreamFormat::CopilotOtelSqlite,
+        ];
+        for variant in variants {
+            let display = variant.to_string();
+            let debug = format!("{:?}", variant);
+            assert_eq!(
+                display, debug,
+                "StreamFormat::{variant:?}: Display != Debug"
+            );
+            let roundtrip = display
+                .parse::<StreamFormat>()
+                .unwrap_or_else(|_| panic!("StreamFormat::from_str failed for {display:?}"));
+            assert_eq!(variant, roundtrip, "round-trip failed for {display:?}");
         }
     }
-}
 
-impl StreamFormat {
-    pub fn watermark_type(self) -> crate::model::stream_watermark::WatermarkType {
-        use crate::model::stream_watermark::WatermarkType;
-        match self {
-            Self::ClaudeJsonl
-            | Self::CursorJsonl
-            | Self::GeminiJsonl
-            | Self::WindsurfJsonl
-            | Self::CodexJsonl
-            | Self::PiJsonl
-            | Self::CopilotEventStreamJsonl => WatermarkType::ByteOffset,
-            Self::DroidJsonl => WatermarkType::Hybrid,
-            Self::CopilotSessionJson | Self::ContinueJson | Self::AmpThreadJson => {
-                WatermarkType::RecordIndex
-            }
-            Self::OpenCodeSqlite => WatermarkType::Timestamp,
-            Self::CopilotOtelSqlite => WatermarkType::TimestampCursor,
+    /// Every WatermarkType variant must round-trip through Display → FromStr without loss.
+    /// Also verifies Debug == Display.
+    #[test]
+    fn watermark_type_display_fromstr_roundtrip() {
+        let variants = [
+            WatermarkType::ByteOffset,
+            WatermarkType::RecordIndex,
+            WatermarkType::Timestamp,
+            WatermarkType::Hybrid,
+            WatermarkType::TimestampCursor,
+        ];
+        for variant in variants {
+            let display = variant.to_string();
+            let debug = format!("{:?}", variant);
+            assert_eq!(
+                display, debug,
+                "WatermarkType::{variant:?}: Display != Debug"
+            );
+            let roundtrip = display
+                .parse::<WatermarkType>()
+                .unwrap_or_else(|_| panic!("WatermarkType::from_str failed for {display:?}"));
+            assert_eq!(variant, roundtrip, "round-trip failed for {display:?}");
         }
     }
 }

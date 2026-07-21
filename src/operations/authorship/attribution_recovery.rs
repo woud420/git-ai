@@ -4,9 +4,9 @@ use crate::model::authorship_log::{LineRange, SessionRecord};
 use crate::model::authorship_log_serialization::{
     AuthorshipLog, generate_session_id, generate_trace_id,
 };
-use crate::model::repository::bash_history_db::{BashCheckpointCall, distance_to_call_window};
-use crate::model::repository::metrics_db::SessionEventRecoveryCandidate;
+use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
 use crate::model::working_log::{AgentId, CheckpointKind};
+use crate::operations::authorship::bash_candidate::{BashCandidate, distance_to_call_window};
 use crate::operations::commands::checkpoint_agent::bash_tool::StatEntry;
 use crate::operations::git::repo_state::worktree_root_for_path;
 use crate::operations::git::repository::Repository;
@@ -321,14 +321,18 @@ fn recover_bash_mtime(
     all_timestamps.sort_unstable();
     all_timestamps.dedup();
 
-    let candidates = match crate::model::repository::bash_history_db::BashHistoryDatabase::global()
-    {
-        Ok(db) => match db.lock() {
-            Ok(db) => db.candidates_near_timestamps(&all_timestamps, BASH_RECOVERY_WINDOW_NS)?,
+    let candidates: Vec<BashCandidate> =
+        match crate::model::repository::bash_history_db::BashHistoryDatabase::global() {
+            Ok(db) => match db.lock() {
+                Ok(db) => db
+                    .candidates_near_timestamps(&all_timestamps, BASH_RECOVERY_WINDOW_NS)?
+                    .into_iter()
+                    .map(BashCandidate::from)
+                    .collect(),
+                Err(_) => Vec::new(),
+            },
             Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
-    };
+        };
     if candidates.is_empty() {
         return Ok(());
     }
@@ -364,7 +368,7 @@ fn recover_bash_mtime(
             "unknown_lines": unknown_lines,
             "target_repo_work_dir": repo_work_dir.as_str(),
             "file_timestamps_ns": timestamps,
-            "selected_bash_call_id": candidate.id,
+            "selected_bash_recency_ordinal": candidate.recency_ordinal,
             "selected_bash_original_cwd": candidate.original_cwd.as_str(),
             "selected_bash_repo_work_dir": candidate.repo_work_dir.as_deref(),
             "selected_bash_repo_discovery_error": candidate.repo_discovery_error.as_deref(),
@@ -374,8 +378,6 @@ fn recover_bash_mtime(
             "window_ns": BASH_RECOVERY_WINDOW_NS,
             "start_time_ns": candidate.start_time_ns,
             "end_time_ns": candidate.end_time_ns,
-            "start_trace_id": candidate.start_trace_id,
-            "end_trace_id": candidate.end_trace_id,
             "selection_tier": selection.tier.as_str(),
             "candidate_count": candidates.len(),
         });
@@ -1218,7 +1220,7 @@ fn system_time_to_ns(time: SystemTime) -> u128 {
 }
 
 fn select_best_bash_candidate<'a>(
-    candidates: &'a [BashCheckpointCall],
+    candidates: &'a [BashCandidate],
     timestamps: &[u128],
     existing_commit_sessions: &HashSet<String>,
     target_repo_work_dir: &str,
@@ -1259,12 +1261,17 @@ fn select_best_bash_candidate<'a>(
                         .is_some()
                         .cmp(&left.candidate.command.is_some())
                 })
-                .then_with(|| right.candidate.id.cmp(&left.candidate.id))
+                .then_with(|| {
+                    right
+                        .candidate
+                        .recency_ordinal
+                        .cmp(&left.candidate.recency_ordinal)
+                })
         })
 }
 
 struct BashCandidateSelection<'a> {
-    candidate: &'a BashCheckpointCall,
+    candidate: &'a BashCandidate,
     distance_ns: u128,
     tier: BashCandidateTier,
 }
@@ -1298,7 +1305,7 @@ impl BashCandidateTier {
 }
 
 fn bash_candidate_tier(
-    candidate: &BashCheckpointCall,
+    candidate: &BashCandidate,
     existing_commit_sessions: &HashSet<String>,
     target_repo_work_dir: &str,
 ) -> BashCandidateTier {
@@ -1320,7 +1327,7 @@ fn bash_candidate_tier(
     BashCandidateTier::TimeOnly
 }
 
-fn bash_candidate_session_id(candidate: &BashCheckpointCall) -> String {
+fn bash_candidate_session_id(candidate: &BashCandidate) -> String {
     generate_session_id(&candidate.agent_id.id, &candidate.agent_id.tool)
 }
 
@@ -1415,7 +1422,7 @@ fn distance_to_event_second(timestamp_ns: u128, event_ts: u32) -> u128 {
     }
 }
 
-fn recovery_distance_to_call_window(timestamp_ns: u128, call: &BashCheckpointCall) -> Option<u128> {
+fn recovery_distance_to_call_window(timestamp_ns: u128, call: &BashCandidate) -> Option<u128> {
     let start = call.start_time_ns;
     let end = call
         .end_time_ns
@@ -1465,7 +1472,7 @@ fn path_is_equal_or_child(child: &str, parent: &str) -> bool {
 fn insert_session_record(
     authorship_log: &mut AuthorshipLog,
     session_id: &str,
-    candidate: &BashCheckpointCall,
+    candidate: &BashCandidate,
     human_author: &str,
 ) {
     authorship_log
@@ -1771,22 +1778,17 @@ mod tests {
         repo_work_dir: &str,
         start_time_ns: u128,
         end_time_ns: Option<u128>,
-    ) -> BashCheckpointCall {
-        BashCheckpointCall {
-            id,
-            invocation_key: format!("{}:{}", external_session_id, tool_use_id),
+    ) -> BashCandidate {
+        BashCandidate {
+            recency_ordinal: id,
+            agent_id: test_agent(external_session_id),
             original_cwd: repo_work_dir.to_string(),
             repo_work_dir: Some(repo_work_dir.to_string()),
             repo_discovery_error: None,
-            session_id: external_session_id.to_string(),
             tool_use_id: tool_use_id.to_string(),
-            agent_id: test_agent(external_session_id),
-            start_trace_id: Some(format!("t_start_{}", id)),
-            end_trace_id: end_time_ns.map(|_| format!("t_end_{}", id)),
             start_time_ns,
             end_time_ns,
             command: Some("true".to_string()),
-            metadata: HashMap::new(),
         }
     }
 
@@ -1797,22 +1799,17 @@ mod tests {
         original_cwd: &str,
         start_time_ns: u128,
         end_time_ns: Option<u128>,
-    ) -> BashCheckpointCall {
-        BashCheckpointCall {
-            id,
-            invocation_key: format!("{}:{}", external_session_id, tool_use_id),
+    ) -> BashCandidate {
+        BashCandidate {
+            recency_ordinal: id,
+            agent_id: test_agent(external_session_id),
             original_cwd: original_cwd.to_string(),
             repo_work_dir: None,
             repo_discovery_error: Some("No git repository found".to_string()),
-            session_id: external_session_id.to_string(),
             tool_use_id: tool_use_id.to_string(),
-            agent_id: test_agent(external_session_id),
-            start_trace_id: Some(format!("t_start_{}", id)),
-            end_trace_id: end_time_ns.map(|_| format!("t_end_{}", id)),
             start_time_ns,
             end_time_ns,
             command: Some("cd repo && true".to_string()),
-            metadata: HashMap::new(),
         }
     }
 
@@ -1822,8 +1819,8 @@ mod tests {
         external_session_id: &str,
         event_ts: u32,
         repo_url: Option<&str>,
-    ) -> crate::model::repository::metrics_db::SessionEventRecoveryCandidate {
-        crate::model::repository::metrics_db::SessionEventRecoveryCandidate {
+    ) -> SessionEventRecoveryCandidate {
+        SessionEventRecoveryCandidate {
             row_id,
             event_ts,
             session_id: session_id.to_string(),

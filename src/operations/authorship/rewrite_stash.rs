@@ -4,16 +4,14 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::clients::git_cli::{disable_internal_git_hooks, exec_git_allow_nonzero_with_env};
 use crate::error::GitAiError;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::working_log::{Checkpoint, CheckpointKind};
 use crate::operations::authorship::attribution_tracker::LineAttribution;
 use crate::operations::authorship::imara_diff_utils::{DiffOp, capture_diff_slices};
 use crate::operations::git::repo_storage::{InitialAttributions, PersistedWorkingLog};
-use crate::operations::git::repository::{
-    Repository, batch_read_paths_at_treeishes, disable_internal_git_hooks,
-    exec_git_allow_nonzero_with_env,
-};
+use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StashMetadata {

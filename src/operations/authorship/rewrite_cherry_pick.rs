@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::operations::git::repository::{Repository, exec_git_stdin};
+use crate::clients::git_cli::exec_git_stdin;
+use crate::operations::git::repository::Repository;
 
 /// Pairs source commits with their cherry-picked counterparts using a two-pass algorithm.
 ///

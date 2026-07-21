@@ -348,8 +348,8 @@ fn http_search_notes(repo: &Repository, pattern: &str) -> Result<Vec<String>, Gi
 ///
 /// Returns the number of notes that were written into `refs/notes/ai-display`.
 pub fn materialize_notes_for_display(repo: &Repository, limit: usize) -> Result<usize, GitAiError> {
-    use crate::operations::git::repository::exec_git;
-    use crate::operations::git::repository::exec_git_stdin;
+    use crate::clients::git_cli::exec_git;
+    use crate::clients::git_cli::exec_git_stdin;
 
     // 1. Get recent commits via rev-list.
     let rev_list_args: Vec<String> = repo
@@ -442,7 +442,7 @@ pub fn materialize_notes_for_display(repo: &Repository, limit: usize) -> Result<
 /// (callers should treat failure as a cache miss, not a hard error).
 pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitAiError> {
     use crate::clients::api::client::{ApiClient, ApiContext};
-    use crate::operations::git::repository::exec_git;
+    use crate::clients::git_cli::exec_git;
 
     // 1. Walk recent history. Prefer the remote's default branch; fall back to HEAD.
     let remote_head = format!("refs/remotes/{}/HEAD", remote);
@@ -909,7 +909,7 @@ mod tests {
     #[test]
     #[serial_test::serial(notes_db_env)]
     fn integration_http_write_note_goes_to_db_not_git() {
-        use crate::operations::git::repository::exec_git;
+        use crate::clients::git_cli::exec_git;
         use crate::operations::git::test_utils::TmpRepo;
         use std::env;
 
@@ -968,7 +968,7 @@ mod tests {
     #[test]
     #[serial_test::serial(notes_db_env)]
     fn integration_materialize_notes_for_display() {
-        use crate::operations::git::repository::exec_git;
+        use crate::clients::git_cli::exec_git;
         use crate::operations::git::test_utils::TmpRepo;
         use std::env;
 

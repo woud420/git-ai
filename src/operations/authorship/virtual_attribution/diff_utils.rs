@@ -46,7 +46,7 @@ pub(super) fn detect_renames_in_commit(
     parent_sha: &str,
     commit_sha: &str,
 ) -> Result<HashMap<String, String>, GitAiError> {
-    use crate::operations::git::repository::exec_git_allow_nonzero;
+    use crate::clients::git_cli::exec_git_allow_nonzero;
 
     let mut args = repo.global_args_for_exec();
     args.extend([

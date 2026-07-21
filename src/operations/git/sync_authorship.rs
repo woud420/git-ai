@@ -3,8 +3,7 @@ use crate::operations::git::refs::{
     ref_exists, tracking_ref_for_remote,
 };
 use crate::{
-    error::GitAiError,
-    operations::git::{cli_parser::ParsedGitInvocation, repository::exec_git},
+    clients::git_cli::exec_git, error::GitAiError, operations::git::cli_parser::ParsedGitInvocation,
 };
 
 use super::repository::Repository;

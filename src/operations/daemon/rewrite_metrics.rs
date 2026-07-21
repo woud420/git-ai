@@ -161,7 +161,7 @@ fn parent_shas_for_commits(
     ]);
     args.extend(commit_shas.iter().cloned());
 
-    let output = crate::operations::git::repository::exec_git(&args).ok()?;
+    let output = crate::clients::git_cli::exec_git(&args).ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut parent_by_commit = HashMap::new();
     for line in stdout.lines() {

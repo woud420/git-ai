@@ -203,7 +203,7 @@ fn set_global_git_config_value(git_cmd: &str, key: &str, value: &str) -> Result<
         .args(["config", "--global", key, value])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    crate::operations::git::repository::apply_internal_git_env(&mut command);
+    crate::clients::git_cli::apply_internal_git_env(&mut command);
 
     let status = command.status()?;
     if status.success() {
@@ -240,7 +240,7 @@ pub(crate) fn remove_global_git_config_section(
         .args(["config", "--global", "--remove-section", section])
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    crate::operations::git::repository::apply_internal_git_env(&mut command);
+    crate::clients::git_cli::apply_internal_git_env(&mut command);
 
     let status = command.status()?;
     // Exit code 128 means the section doesn't exist, which is fine.
@@ -738,7 +738,7 @@ fn warn_if_git_version_too_old() {
         .args(["--version"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    crate::operations::git::repository::apply_internal_git_env(&mut command);
+    crate::clients::git_cli::apply_internal_git_env(&mut command);
 
     let output = command.output();
 

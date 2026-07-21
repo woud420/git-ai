@@ -17,7 +17,7 @@ use crate::operations::authorship::virtual_attribution::{
     AuthorshipLogDiffContext, VirtualAttributions,
 };
 use crate::operations::git::notes_api::write_note;
-use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes, exec_git};
+use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 
@@ -1047,7 +1047,7 @@ pub(crate) fn commit_metric_metadata(
         "--format=%s%x00%b%x00%at%x00%ct".to_string(),
         commit_sha.to_string(),
     ]);
-    let output = exec_git(&args)?;
+    let output = crate::clients::git_cli::exec_git(&args)?;
     let stdout = String::from_utf8(output.stdout)?;
     Ok(parse_commit_metric_metadata_output(&stdout))
 }

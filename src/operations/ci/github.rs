@@ -1,6 +1,6 @@
+use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
 use crate::operations::ci::ci_context::{CiContext, CiEvent};
-use crate::operations::git::repository::exec_git;
 use crate::operations::git::repository::find_repository_in_path;
 use serde::{Deserialize, Serialize};
 use std::fs;

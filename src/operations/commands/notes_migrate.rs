@@ -358,7 +358,7 @@ fn migrate_refs_to_http(
 fn list_notes(
     repo: &crate::operations::git::repository::Repository,
 ) -> Result<Vec<(String, String)>, GitAiError> {
-    use crate::operations::git::repository::exec_git;
+    use crate::clients::git_cli::exec_git;
 
     let mut args = repo.global_args_for_exec();
     args.extend([
@@ -422,7 +422,7 @@ fn cat_file_batch(
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    crate::operations::git::repository::apply_internal_git_env(&mut cmd);
+    crate::clients::git_cli::apply_internal_git_env(&mut cmd);
 
     let mut child = cmd
         .spawn()

@@ -1,7 +1,8 @@
 //! Clients for external services and processes: the git-ai HTTP API
 //! (metrics/logs/notes/CAS upload), authentication and credential storage,
-//! and the shared HTTP helper.
+//! the shared HTTP helper, and the git spawn layer.
 
 pub mod api;
 pub mod auth;
+pub mod git_cli;
 pub mod http;

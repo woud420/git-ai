@@ -1,5 +1,6 @@
+use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
-use crate::operations::git::repository::{InternalGitProfile, Repository, exec_git_with_profile};
+use crate::operations::git::repository::Repository;
 use std::collections::HashSet;
 use std::str;
 use unicode_normalization::UnicodeNormalization;

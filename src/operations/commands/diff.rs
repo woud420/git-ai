@@ -1,3 +1,4 @@
+use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::AuthorshipLog;
@@ -5,13 +6,16 @@ use crate::operations::authorship::ignore::{
     build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
 use crate::operations::commands::blame::GitAiBlameOptions;
+use crate::operations::commands::diff_header_paths::{
+    parse_diff_git_header_paths, parse_new_file_path_from_plus_header_line,
+    parse_old_file_path_from_minus_header_line,
+};
 use crate::operations::git::notes_api::{read_authorship, read_note};
-use crate::operations::git::repository::{InternalGitProfile, Repository, exec_git_with_profile};
+use crate::operations::git::repository::Repository;
 use serde::{Deserialize, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::IsTerminal;
-use unicode_normalization::UnicodeNormalization;
 
 // ============================================================================
 // Data Structures
@@ -579,94 +583,6 @@ fn parse_diff_hunks(diff_text: &str) -> Result<Vec<DiffHunk>, GitAiError> {
 
     flush_current_hunk(&mut hunks, &mut current_hunk);
     Ok(hunks)
-}
-
-fn normalize_diff_path_token(path: &str) -> String {
-    let unescaped = crate::utils::unescape_git_path(path.trim_end());
-    let prefixes = ["a/", "b/", "c/", "w/", "i/", "o/"];
-    let stripped = prefixes
-        .iter()
-        .find_map(|prefix| unescaped.strip_prefix(prefix))
-        .unwrap_or(&unescaped);
-    stripped.nfc().collect()
-}
-
-fn parse_new_file_path_from_plus_header_line(line: &str) -> Option<Option<String>> {
-    parse_file_path_from_header_line(line, "+++ ")
-}
-
-fn parse_old_file_path_from_minus_header_line(line: &str) -> Option<Option<String>> {
-    parse_file_path_from_header_line(line, "--- ")
-}
-
-fn parse_file_path_from_header_line(line: &str, prefix: &str) -> Option<Option<String>> {
-    let raw = line.strip_prefix(prefix)?;
-    if raw.trim_end() == "/dev/null" {
-        return Some(None);
-    }
-    Some(Some(normalize_diff_path_token(raw)))
-}
-
-fn parse_diff_git_header_paths(line: &str) -> Option<(String, String)> {
-    let raw = line.strip_prefix("diff --git ")?;
-    let (old_raw, new_raw) = parse_two_git_path_tokens(raw)?;
-    Some((
-        normalize_diff_path_token(&old_raw),
-        normalize_diff_path_token(&new_raw),
-    ))
-}
-
-fn parse_two_git_path_tokens(raw: &str) -> Option<(String, String)> {
-    let mut chars = raw.chars().peekable();
-    let mut tokens: Vec<String> = Vec::new();
-
-    while tokens.len() < 2 {
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-        if chars.peek().is_none() {
-            break;
-        }
-
-        let mut token = String::new();
-        if chars.peek() == Some(&'"') {
-            token.push(chars.next().unwrap_or('"'));
-            let mut escaped = false;
-            for ch in chars.by_ref() {
-                token.push(ch);
-                if escaped {
-                    escaped = false;
-                    continue;
-                }
-                if ch == '\\' {
-                    escaped = true;
-                    continue;
-                }
-                if ch == '"' {
-                    break;
-                }
-            }
-        } else {
-            while let Some(&ch) = chars.peek() {
-                if ch.is_whitespace() {
-                    break;
-                }
-                token.push(ch);
-                chars.next();
-            }
-        }
-
-        if token.is_empty() {
-            return None;
-        }
-        tokens.push(token);
-    }
-
-    if tokens.len() == 2 {
-        Some((tokens[0].clone(), tokens[1].clone()))
-    } else {
-        None
-    }
 }
 
 fn parse_hunk_line(

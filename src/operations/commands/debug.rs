@@ -896,8 +896,8 @@ fn run_git_command_capture_with_timeout(
         program,
         args,
         timeout,
-        crate::operations::git::repository::INTERNAL_GIT_ENV_REMOVE,
-        crate::operations::git::repository::INTERNAL_GIT_ENV_SET,
+        crate::clients::git_cli::INTERNAL_GIT_ENV_REMOVE,
+        crate::clients::git_cli::INTERNAL_GIT_ENV_SET,
     )
 }
 

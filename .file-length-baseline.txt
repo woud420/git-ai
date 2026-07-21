@@ -60,7 +60,6 @@ src/operations/git/fast_reader.rs	636
 src/operations/git/notes_api.rs	1306
 src/operations/git/refs.rs	1148
 src/operations/git/repo_storage.rs	963
-src/operations/git/repository.rs	3554
 src/operations/mdm/agents/claude_code.rs	1257
 src/operations/mdm/agents/cline.rs	648
 src/operations/mdm/agents/codex.rs	2472

@@ -9,7 +9,7 @@ use crate::model::repository::metrics_db::SessionEventRecoveryCandidate;
 use crate::model::working_log::{AgentId, CheckpointKind};
 use crate::operations::commands::checkpoint_agent::bash_tool::StatEntry;
 use crate::operations::git::repo_state::worktree_root_for_path;
-use crate::operations::git::repository::{Repository, exec_git};
+use crate::operations::git::repository::Repository;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -631,7 +631,7 @@ fn read_commit_metadata(repo: &Repository, commit_sha: &str) -> Result<CommitMet
         "--format=%an%x00%ae%x00%B".to_string(),
         commit_sha.to_string(),
     ]);
-    let output = exec_git(&args)?;
+    let output = crate::clients::git_cli::exec_git(&args)?;
     let raw = String::from_utf8(output.stdout)?;
     let mut parts = raw.splitn(3, '\0');
     let author_name = parts.next().unwrap_or_default().trim().to_string();

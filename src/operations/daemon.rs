@@ -43,6 +43,8 @@ pub(crate) mod lifecycle;
 pub(crate) mod log_setup;
 pub(crate) mod revert_rebase_helpers;
 pub(crate) mod side_effect_helpers;
+pub(crate) mod side_effects_commit;
+pub(crate) mod side_effects_git_ops;
 pub(crate) mod socket_listeners;
 pub(crate) mod trace_helpers;
 

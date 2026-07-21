@@ -10,6 +10,11 @@ payloads that other systems (servers, CI, teammates' clones) depend on.
   `refs/notes/ai`) and `git_notes` (notes in the shareable
   `refs/notes/ai` ref); `git-ai notes migrate --to <backend>` moves between
   them.
+- [persistence-model.md](persistence-model.md) — source of truth per
+  persisted fact and multi-store rules.
+- [cli-output.md](cli-output.md) — machine-readable CLI output surfaces.
+- [checkpoint-interface.md](checkpoint-interface.md) — the agent checkpoint
+  compatibility surface.
 - [telemetry-streams-summary.md](telemetry-streams-summary.md) — summary of
   the telemetry stream pipeline and its event payloads.
 - [telemetry-examples.md](telemetry-examples.md) — example telemetry payloads.

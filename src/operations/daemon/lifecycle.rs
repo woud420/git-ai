@@ -350,12 +350,36 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
 
     let mut coordinator_inner = ActorDaemonCoordinator::new();
 
+    // Resolve store handles once here (pre-Arc window) so neither the telemetry
+    // flush loop nor the coordinator control handlers call ::global() at runtime.
+    // Each ::global() call triggers OnceLock::get_or_init with a degrade-don't-crash
+    // fallback; calling them here means the fallback runs at most once.
+    // The expects below are unreachable today — all three ::global() impls are
+    // infallible (they open an in-process temp SQLite on any real error).  If that
+    // ever becomes fallible, prefer logging + skipping rather than aborting.
+    let metrics_db = crate::model::repository::metrics_db::MetricsDatabase::global()
+        .expect("metrics DB fallback cannot fail");
+    let notes_db = crate::model::repository::notes_db::NotesDatabase::global()
+        .expect("notes DB fallback cannot fail");
+    let internal_db = crate::model::repository::internal_db::InternalDatabase::global()
+        .expect("internal DB fallback cannot fail");
+    let bash_history_db =
+        crate::model::repository::bash_history_db::BashHistoryDatabase::global().ok();
+
+    let telemetry_stores = crate::operations::daemon::telemetry_worker::TelemetryStores {
+        metrics: metrics_db,
+        notes: notes_db,
+        internal: internal_db,
+    };
+
     // Spawn the telemetry worker inside the daemon's tokio runtime.
-    let telemetry_handle = crate::operations::daemon::telemetry_worker::spawn_telemetry_worker();
+    let telemetry_handle =
+        crate::operations::daemon::telemetry_worker::spawn_telemetry_worker(telemetry_stores);
     crate::operations::daemon::telemetry_worker::set_daemon_internal_telemetry(
         telemetry_handle.clone(),
     );
     coordinator_inner.telemetry_worker = Some(telemetry_handle.clone());
+    coordinator_inner.bash_history_db = bash_history_db;
 
     // Spawn the transcript worker BEFORE wrapping coordinator in Arc
     if config::Config::get()

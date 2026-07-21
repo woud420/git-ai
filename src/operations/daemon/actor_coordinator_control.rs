@@ -283,10 +283,17 @@ impl ActorDaemonCoordinator {
             }
             ControlRequest::FlushNotes => {
                 // Trigger an immediate notes flush in a blocking task.
+                // Route through the worker so the injected notes-db handle is used.
                 // Fire-and-forget: the periodic flush loop is the safety net.
-                tokio::task::spawn_blocking(|| {
-                    crate::operations::daemon::telemetry_worker::flush_notes();
-                });
+                if let Some(worker) = self.telemetry_worker.clone() {
+                    tokio::task::spawn_blocking(move || {
+                        worker.flush_notes_sync();
+                    });
+                } else {
+                    tokio::task::spawn_blocking(|| {
+                        crate::operations::daemon::telemetry_worker::flush_notes_global();
+                    });
+                }
                 Ok(ControlResponse::ok(None, None))
             }
             ControlRequest::Await { timeout_secs } => {
@@ -309,8 +316,7 @@ impl ActorDaemonCoordinator {
             } => {
                 let worktree_key = Self::worktree_state_key(Path::new(&repo_work_dir));
                 let original_cwd = original_cwd.unwrap_or_else(|| repo_work_dir.clone());
-                if let Ok(db) =
-                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) = self.bash_history_db()
                     && let Ok(mut db_lock) = db.lock()
                     && let Err(e) = db_lock.record_start(
                         &crate::model::repository::bash_history_db::BashCallStart {
@@ -381,8 +387,7 @@ impl ActorDaemonCoordinator {
                 } else {
                     metadata
                 };
-                if let Ok(db) =
-                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) = self.bash_history_db()
                     && let Ok(mut db_lock) = db.lock()
                     && let Err(e) = db_lock.record_end(
                         &crate::model::repository::bash_history_db::BashCallEnd {
@@ -421,8 +426,7 @@ impl ActorDaemonCoordinator {
                     .as_deref()
                     .map(Path::new)
                     .map(Self::worktree_state_key);
-                if let Ok(db) =
-                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) = self.bash_history_db()
                     && let Ok(mut db_lock) = db.lock()
                     && let Err(e) = db_lock.record_start(
                         &crate::model::repository::bash_history_db::BashCallStart {
@@ -459,8 +463,7 @@ impl ActorDaemonCoordinator {
                     .as_deref()
                     .map(Path::new)
                     .map(Self::worktree_state_key);
-                if let Ok(db) =
-                    crate::model::repository::bash_history_db::BashHistoryDatabase::global()
+                if let Ok(db) = self.bash_history_db()
                     && let Ok(mut db_lock) = db.lock()
                     && let Err(e) = db_lock.record_end(
                         &crate::model::repository::bash_history_db::BashCallEnd {

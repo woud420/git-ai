@@ -1,7 +1,9 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
-use std::io::{self, BufRead, BufReader, Read, Write};
+#[cfg(not(windows))]
+use std::io;
+use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(not(windows))]
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::Path;

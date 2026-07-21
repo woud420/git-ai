@@ -2,7 +2,7 @@
 //!
 //! All authorship-note reads and writes flow through this module. The implementation
 //! dispatches to the sqlite backend (default), the git-notes backend, or the HTTP
-//! backend based on `Config::get().notes_backend().kind`.
+//! backend based on `Config::fresh().notes_backend_kind()`.
 //!
 //! Dispatch reads a fresh config snapshot (`Config::fresh()`) rather than the
 //! process-lifetime `Config::get()` singleton: the daemon is long-lived and must
@@ -15,6 +15,10 @@
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
+use crate::operations::git::notes_store::{
+    AuthorshipNoteStore, GitNotesStore, HttpNoteStore, SqliteNoteStore, db_check_exists,
+    db_read_notes,
+};
 use crate::operations::git::repository::{Repository, resolve_api_author_identity};
 use std::collections::{HashMap, HashSet};
 
@@ -32,11 +36,9 @@ pub type NoteWriteEntry = (String, String);
 
 pub fn write_note(repo: &Repository, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
     match Config::fresh().notes_backend_kind() {
-        NotesBackendKind::Sqlite => sqlite_write_note(commit_sha, content),
-        NotesBackendKind::Http => http_write_note(commit_sha, content),
-        NotesBackendKind::GitNotes => {
-            crate::operations::git::refs::notes_add(repo, commit_sha, content)
-        }
+        NotesBackendKind::Sqlite => SqliteNoteStore::new().write_note(commit_sha, content),
+        NotesBackendKind::Http => HttpNoteStore::new().write_note(commit_sha, content),
+        NotesBackendKind::GitNotes => GitNotesStore { repo }.write_note(commit_sha, content),
     }
 }
 
@@ -45,9 +47,9 @@ pub fn write_notes_batch(repo: &Repository, entries: &[NoteWriteEntry]) -> Resul
         return Ok(());
     }
     match Config::fresh().notes_backend_kind() {
-        NotesBackendKind::Sqlite => sqlite_write_batch(entries),
-        NotesBackendKind::Http => http_write_batch(entries),
-        NotesBackendKind::GitNotes => crate::operations::git::refs::notes_add_batch(repo, entries),
+        NotesBackendKind::Sqlite => SqliteNoteStore::new().write_notes_batch(entries),
+        NotesBackendKind::Http => HttpNoteStore::new().write_notes_batch(entries),
+        NotesBackendKind::GitNotes => GitNotesStore { repo }.write_notes_batch(entries),
     }
 }
 
@@ -55,14 +57,13 @@ pub fn write_notes_batch(repo: &Repository, entries: &[NoteWriteEntry]) -> Resul
 
 pub fn read_note(repo: &Repository, commit_sha: &str) -> Option<String> {
     match Config::fresh().notes_backend_kind() {
-        NotesBackendKind::Sqlite => {
-            http_read_note(commit_sha).or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
-        }
-        NotesBackendKind::Http => http_read_note(commit_sha)
-            .or_else(|| crate::operations::git::refs::show_authorship_note(repo, commit_sha)),
-        NotesBackendKind::GitNotes => {
-            crate::operations::git::refs::show_authorship_note(repo, commit_sha)
-        }
+        NotesBackendKind::Sqlite => SqliteNoteStore::new()
+            .read_note(commit_sha)
+            .or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha)),
+        NotesBackendKind::Http => HttpNoteStore::new()
+            .read_note(commit_sha)
+            .or_else(|| GitNotesStore { repo }.read_note(commit_sha)),
+        NotesBackendKind::GitNotes => GitNotesStore { repo }.read_note(commit_sha),
     }
 }
 
@@ -82,7 +83,7 @@ pub fn read_notes_batch(
 
     match Config::fresh().notes_backend_kind() {
         NotesBackendKind::Sqlite => {
-            let mut notes = http_read_notes(commit_shas);
+            let mut notes = SqliteNoteStore::new().read_notes_batch(commit_shas)?;
 
             // Fall back to refs/notes/ai for misses and backfill the cache so
             // subsequent reads are served from the database. Refs read errors
@@ -94,42 +95,33 @@ pub fn read_notes_batch(
                 .cloned()
                 .collect();
             if !missing.is_empty() {
-                let git_notes = crate::operations::git::refs::notes_for_commits(repo, &missing)?;
-                sqlite_backfill_cache(&git_notes);
+                let git_notes = GitNotesStore { repo }.read_notes_batch(&missing)?;
+                SqliteNoteStore::backfill_cache(&git_notes);
                 notes.extend(git_notes);
             }
 
             Ok(notes)
         }
         NotesBackendKind::Http => {
-            let mut notes = http_read_notes(commit_shas);
+            // db + remote-fetch tier (inside HttpNoteStore::read_notes_batch)
+            let mut notes = HttpNoteStore::new().read_notes_batch(commit_shas)?;
 
-            let missing_after_cache: Vec<String> = commit_shas
+            // Final refs fallback — errors swallowed (Http arm must not fail closed;
+            // contrast with Sqlite arm above where errors propagate).
+            let missing: Vec<String> = commit_shas
                 .iter()
                 .filter(|sha| !notes.contains_key(*sha))
                 .cloned()
                 .collect();
-            if !missing_after_cache.is_empty() {
-                notes.extend(http_fetch_and_cache_notes(&missing_after_cache));
-            }
-
-            let missing_after_http: Vec<String> = commit_shas
-                .iter()
-                .filter(|sha| !notes.contains_key(*sha))
-                .cloned()
-                .collect();
-            if !missing_after_http.is_empty()
-                && let Ok(git_notes) =
-                    crate::operations::git::refs::notes_for_commits(repo, &missing_after_http)
+            if !missing.is_empty()
+                && let Ok(git_notes) = (GitNotesStore { repo }).read_notes_batch(&missing)
             {
                 notes.extend(git_notes);
             }
 
             Ok(notes)
         }
-        NotesBackendKind::GitNotes => {
-            crate::operations::git::refs::notes_for_commits(repo, commit_shas)
-        }
+        NotesBackendKind::GitNotes => GitNotesStore { repo }.read_notes_batch(commit_shas),
     }
 }
 
@@ -138,7 +130,8 @@ pub fn read_authorship(repo: &Repository, commit_sha: &str) -> Option<Authorship
         NotesBackendKind::Sqlite => {
             // Check the database first; fall through to git notes on miss and
             // backfill the raw content so the next read is served locally.
-            http_read_note(commit_sha)
+            SqliteNoteStore::new()
+                .read_note(commit_sha)
                 .or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
                 .and_then(|content| {
                     AuthorshipLog::deserialize_from_string(&content)
@@ -148,7 +141,7 @@ pub fn read_authorship(repo: &Repository, commit_sha: &str) -> Option<Authorship
         }
         NotesBackendKind::Http => {
             // Check the cache first; fall through to git notes on miss.
-            if let Some(content) = http_read_note(commit_sha) {
+            if let Some(content) = HttpNoteStore::new().read_note(commit_sha) {
                 AuthorshipLog::deserialize_from_string(&content)
                     .map_err(|e| tracing::debug!("notes deserialization error: {}", e))
                     .ok()
@@ -168,7 +161,8 @@ pub fn read_authorship_v3(
 ) -> Result<AuthorshipLog, GitAiError> {
     match Config::fresh().notes_backend_kind() {
         NotesBackendKind::Sqlite => {
-            if let Some(content) = http_read_note(commit_sha)
+            if let Some(content) = SqliteNoteStore::new()
+                .read_note(commit_sha)
                 .or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
             {
                 AuthorshipLog::deserialize_from_string(&content)
@@ -178,7 +172,7 @@ pub fn read_authorship_v3(
             }
         }
         NotesBackendKind::Http => {
-            if let Some(content) = http_read_note(commit_sha) {
+            if let Some(content) = HttpNoteStore::new().read_note(commit_sha) {
                 AuthorshipLog::deserialize_from_string(&content)
                     .map_err(|e| GitAiError::Generic(format!("notes deserialization error: {}", e)))
             } else {
@@ -217,7 +211,7 @@ pub fn commits_with_notes(
     match Config::fresh().notes_backend_kind() {
         NotesBackendKind::Sqlite | NotesBackendKind::Http => {
             // Check the database first; fall through to git notes for misses.
-            let cached = http_check_exists(commit_shas);
+            let cached = db_check_exists(commit_shas);
             if cached.len() == commit_shas.len() {
                 return Ok(cached);
             }
@@ -231,9 +225,7 @@ pub fn commits_with_notes(
                 crate::operations::git::refs::commits_with_authorship_notes(repo, &missing)?;
             Ok(cached.into_iter().chain(from_git).collect())
         }
-        NotesBackendKind::GitNotes => {
-            crate::operations::git::refs::commits_with_authorship_notes(repo, commit_shas)
-        }
+        NotesBackendKind::GitNotes => (GitNotesStore { repo }).commits_with_notes(commit_shas),
     }
 }
 
@@ -252,7 +244,7 @@ pub fn filter_commits_with_notes(
             // notes_api), so for Http the results will be `CommitAuthorship::NoLog`
             // for all commits. We promote any commit that has a cache entry to
             // `CommitAuthorship::Log`.
-            let cached_map = http_read_notes(commit_shas);
+            let cached_map = db_read_notes(commit_shas);
 
             let git_results =
                 crate::operations::git::refs::get_commits_with_notes_from_list(repo, commit_shas)?;
@@ -301,26 +293,22 @@ pub fn filter_commits_with_notes(
 /// the GitNotes backend it greps `refs/notes/ai` directly.
 pub fn search_notes(repo: &Repository, pattern: &str) -> Result<Vec<String>, GitAiError> {
     match Config::fresh().notes_backend_kind() {
-        NotesBackendKind::Sqlite | NotesBackendKind::Http => http_search_notes(repo, pattern),
-        NotesBackendKind::GitNotes => crate::operations::git::refs::grep_ai_notes(repo, pattern),
+        NotesBackendKind::Sqlite | NotesBackendKind::Http => {
+            let mut shas: HashSet<String> = {
+                // db-side search (same for both Sqlite and Http)
+                let db_results = SqliteNoteStore::new().search_notes(pattern)?;
+                db_results.into_iter().collect()
+            };
+
+            // Union in matches from local git notes for transition-period repos.
+            if let Ok(git_shas) = (GitNotesStore { repo }).search_notes(pattern) {
+                shas.extend(git_shas);
+            }
+
+            crate::operations::git::refs::sort_commit_shas_by_date_desc(repo, shas)
+        }
+        NotesBackendKind::GitNotes => (GitNotesStore { repo }).search_notes(pattern),
     }
-}
-
-fn http_search_notes(repo: &Repository, pattern: &str) -> Result<Vec<String>, GitAiError> {
-    let mut shas: HashSet<String> = {
-        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-        let db_lock = db
-            .lock()
-            .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-        db_lock.search_notes_content(pattern)?.into_iter().collect()
-    };
-
-    // Union in matches from local git notes for transition-period repos.
-    if let Ok(git_shas) = crate::operations::git::refs::grep_ai_notes(repo, pattern) {
-        shas.extend(git_shas);
-    }
-
-    crate::operations::git::refs::sort_commit_shas_by_date_desc(repo, shas)
 }
 
 // --- Materialization (for git ai log) ---
@@ -364,7 +352,7 @@ pub fn materialize_notes_for_display(repo: &Repository, limit: usize) -> Result<
     }
 
     // 2. Look up which commits are in the local notes-db cache.
-    let cached_map = http_read_notes(&commit_shas);
+    let cached_map = db_read_notes(&commit_shas);
     if cached_map.is_empty() {
         return Ok(0);
     }
@@ -480,7 +468,7 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
     }
 
     // 2. Filter out SHAs already in notes-db.
-    let already_cached: std::collections::HashSet<String> = {
+    let already_cached: HashSet<String> = {
         match crate::model::repository::notes_db::NotesDatabase::global() {
             Ok(db) => match db.lock() {
                 Ok(lock) => {
@@ -492,12 +480,12 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
                 }
                 Err(e) => {
                     tracing::warn!("warm_cache_for_remote: DB lock poisoned: {}", e);
-                    std::collections::HashSet::new()
+                    HashSet::new()
                 }
             },
             Err(e) => {
                 tracing::warn!("warm_cache_for_remote: failed to open notes-db: {}", e);
-                std::collections::HashSet::new()
+                HashSet::new()
             }
         }
     };
@@ -583,7 +571,7 @@ pub fn warm_cache_for_remote(repo: &Repository, remote: &str) -> Result<(), GitA
     Ok(())
 }
 
-// --- HTTP backend helpers (private) ---
+// --- Backend bypass ---
 
 /// Export entries directly into `refs/notes/ai` regardless of the configured
 /// backend. Used by `git-ai notes migrate --to git-notes` to share sqlite-backed
@@ -595,131 +583,14 @@ pub fn export_notes_to_git_refs(
     crate::operations::git::refs::notes_add_batch(repo, entries)
 }
 
-/// Sqlite backend: write a note as local-primary storage.
-fn sqlite_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-    db_lock.upsert_local_note(commit_sha, content)
-}
-
-/// Sqlite backend: write a batch of notes as local-primary storage.
-fn sqlite_write_batch(entries: &[NoteWriteEntry]) -> Result<(), GitAiError> {
-    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-    db_lock.upsert_local_notes_batch(entries)
-}
+// --- Private helpers ---
 
 /// Sqlite backend: read a single note from refs/notes/ai on database miss and
 /// backfill it into the cache so the next read is served from the database.
 fn sqlite_fallback_read_from_refs(repo: &Repository, commit_sha: &str) -> Option<String> {
-    let content = crate::operations::git::refs::show_authorship_note(repo, commit_sha)?;
-    sqlite_backfill_cache(&HashMap::from([(commit_sha.to_string(), content.clone())]));
+    let content = GitNotesStore { repo }.read_note(commit_sha)?;
+    SqliteNoteStore::backfill_cache(&HashMap::from([(commit_sha.to_string(), content.clone())]));
     Some(content)
-}
-
-/// Best-effort backfill of refs/notes/ai fallback reads into the cache.
-fn sqlite_backfill_cache(notes: &HashMap<String, String>) {
-    if notes.is_empty() {
-        return;
-    }
-    let entries: Vec<(String, String)> = notes
-        .iter()
-        .map(|(sha, content)| (sha.clone(), content.clone()))
-        .collect();
-    if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
-        && let Ok(mut db_lock) = db.lock()
-    {
-        let _ = db_lock.cache_synced_notes(&entries);
-    }
-}
-
-fn http_write_note(commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-    db_lock.upsert_note(commit_sha, content)?;
-    drop(db_lock);
-    crate::operations::daemon::telemetry_handle::submit_notes();
-    Ok(())
-}
-
-fn http_write_batch(entries: &[NoteWriteEntry]) -> Result<(), GitAiError> {
-    let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-    let mut db_lock = db
-        .lock()
-        .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-    db_lock.upsert_notes_batch(entries)?;
-    drop(db_lock);
-    crate::operations::daemon::telemetry_handle::submit_notes();
-    Ok(())
-}
-
-fn http_read_note(commit_sha: &str) -> Option<String> {
-    let db = crate::model::repository::notes_db::NotesDatabase::global().ok()?;
-    let db_lock = db.lock().ok()?;
-    db_lock.get_note(commit_sha).ok().flatten()
-}
-
-fn http_read_notes(commit_shas: &[String]) -> HashMap<String, String> {
-    let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global() else {
-        return HashMap::new();
-    };
-    let Ok(db_lock) = db.lock() else {
-        return HashMap::new();
-    };
-    let refs: Vec<&str> = commit_shas.iter().map(|s| s.as_str()).collect();
-    db_lock.get_notes(&refs).unwrap_or_default()
-}
-
-fn http_fetch_and_cache_notes(commit_shas: &[String]) -> HashMap<String, String> {
-    if commit_shas.is_empty() {
-        return HashMap::new();
-    }
-
-    let cfg = Config::fresh();
-    let Some(backend_url) = cfg.notes_backend_url().map(str::to_string) else {
-        return HashMap::new();
-    };
-
-    use crate::clients::api::client::{ApiClient, ApiContext};
-    let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
-    let client = ApiClient::new(ctx);
-    if !client.is_logged_in() && !client.has_api_key() {
-        return HashMap::new();
-    }
-
-    let mut fetched = HashMap::new();
-    for chunk in commit_shas.chunks(100) {
-        let refs: Vec<&str> = chunk.iter().map(String::as_str).collect();
-        match client.read_notes(&refs) {
-            Ok(response) => {
-                if response.notes.is_empty() {
-                    continue;
-                }
-                let entries: Vec<(String, String)> = response.notes.into_iter().collect();
-                if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
-                    && let Ok(mut lock) = db.lock()
-                {
-                    let _ = lock.cache_synced_notes(&entries);
-                }
-                fetched.extend(entries);
-            }
-            Err(e) => {
-                tracing::debug!(%e, "notes batch read from HTTP backend failed");
-            }
-        }
-    }
-
-    fetched
-}
-
-fn http_check_exists(commit_shas: &[String]) -> HashSet<String> {
-    http_read_notes(commit_shas).into_keys().collect()
 }
 
 // --- Tests ---
@@ -727,10 +598,11 @@ fn http_check_exists(commit_shas: &[String]) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::git::notes_store::{HttpNoteStore, SqliteNoteStore, db_read_note};
 
     /// With kind=Http, the http helpers upsert into notes-db (synced=0) and the
-    /// read helper returns the cached value. This tests the private http_* helpers
-    /// directly so no config override is needed.
+    /// read helper returns the cached value. This tests the store methods directly
+    /// so no config override is needed.
     #[test]
     #[serial_test::serial(notes_db_env)]
     fn http_write_then_read_uses_cache() {
@@ -744,11 +616,13 @@ mod tests {
             env::set_var("GIT_AI_TEST_NOTES_DB_PATH", &db_path);
         }
 
-        // Write directly via http helper (no repo needed).
-        http_write_note("abc123def456abc123def456abc123def456abc1", "test content").expect("write");
+        // Write directly via store (no repo needed).
+        HttpNoteStore::new()
+            .write_note("abc123def456abc123def456abc123def456abc1", "test content")
+            .expect("write");
 
         // Read back from cache.
-        let content = http_read_note("abc123def456abc123def456abc123def456abc1");
+        let content = db_read_note("abc123def456abc123def456abc123def456abc1");
         assert_eq!(content, Some("test content".to_string()));
 
         // Confirm it is in the DB with synced=0.
@@ -785,11 +659,15 @@ mod tests {
         let sha2 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
         let sha3 = "cccccccccccccccccccccccccccccccccccccccc".to_string();
 
-        http_write_note(&sha1, "content-a").expect("write sha1");
-        http_write_note(&sha2, "content-b").expect("write sha2");
+        HttpNoteStore::new()
+            .write_note(&sha1, "content-a")
+            .expect("write sha1");
+        HttpNoteStore::new()
+            .write_note(&sha2, "content-b")
+            .expect("write sha2");
 
         // sha3 is not written — should not appear in result.
-        let result = http_read_notes(&[sha1.clone(), sha2.clone(), sha3.clone()]);
+        let result = db_read_notes(&[sha1.clone(), sha2.clone(), sha3.clone()]);
         assert_eq!(result.get(&sha1), Some(&"content-a".to_string()));
         assert_eq!(result.get(&sha2), Some(&"content-b".to_string()));
         assert!(!result.contains_key(&sha3));
@@ -803,10 +681,13 @@ mod tests {
     /// the notes-db cache (refs/notes/ai is empty there). Regression: search was
     /// a pure pass-through to `git grep refs/notes/ai`, so session/prompt history
     /// lookups silently found nothing under the HTTP backend.
+    ///
+    /// Tests the store's search_notes directly (not via the dispatcher) to avoid
+    /// the `GIT_AI_NOTES_BACKEND_KIND` env var racing with other concurrent tests.
     #[test]
     #[serial_test::serial(notes_db_env)]
     fn http_search_notes_finds_cached_note_content() {
-        use crate::operations::git::test_utils::TmpRepo;
+        use crate::operations::git::notes_store::AuthorshipNoteStore;
         use std::env;
 
         let tmp_db = tempfile::NamedTempFile::new().expect("tmp file");
@@ -815,12 +696,16 @@ mod tests {
             env::set_var("GIT_AI_TEST_NOTES_DB_PATH", &db_path);
         }
 
-        let tmp = TmpRepo::new().expect("TmpRepo::new");
         let sha = "dddddddddddddddddddddddddddddddddddddddd";
-        http_write_note(sha, r#"{"sessions": {"s_searchable123456": {}}}"#).expect("write");
+        HttpNoteStore::new()
+            .write_note(sha, r#"{"sessions": {"s_searchable123456": {}}}"#)
+            .expect("write");
 
-        let matches =
-            http_search_notes(tmp.gitai_repo(), "\"s_searchable123456\"").expect("search");
+        // Verify the db-tier search (used by both Http and Sqlite arms) finds
+        // notes in the cache even when refs/notes/ai is absent.
+        let matches = SqliteNoteStore::new()
+            .search_notes("\"s_searchable123456\"")
+            .expect("search");
         assert_eq!(
             matches,
             vec![sha.to_string()],
@@ -829,8 +714,65 @@ mod tests {
 
         // A needle that appears nowhere must return no matches (LIKE wildcards in
         // the needle must not be interpreted).
-        let no_matches = http_search_notes(tmp.gitai_repo(), "\"s_%_absent%\"").expect("search");
+        let no_matches = SqliteNoteStore::new()
+            .search_notes("\"s_%_absent%\"")
+            .expect("search");
         assert!(no_matches.is_empty(), "got: {:?}", no_matches);
+
+        unsafe {
+            env::remove_var("GIT_AI_TEST_NOTES_DB_PATH");
+        }
+    }
+
+    /// Regression test for the composed Sqlite|Http search arm in
+    /// `search_notes(repo, pattern)`.
+    ///
+    /// Before the P9.5 store-trait refactor the Http arm was a pure git-grep
+    /// pass-through; notes that existed only in the notes-db cache were invisible
+    /// to search.  This test drives the full dispatcher path (db search + git-grep
+    /// union + sort) with `GIT_AI_TEST_NOTES_DB_PATH` to avoid env-var races and
+    /// verifies that a db-only SHA (absent from refs/notes/ai) is returned.
+    #[test]
+    #[serial_test::serial(notes_db_env)]
+    fn sqlite_http_search_arm_returns_db_only_sha() {
+        use crate::operations::git::test_utils::TmpRepo;
+        use std::env;
+
+        let tmp_db = tempfile::NamedTempFile::new().expect("tmp notes-db");
+        unsafe {
+            env::set_var("GIT_AI_TEST_NOTES_DB_PATH", tmp_db.path().to_str().unwrap());
+        }
+
+        // Use a fake SHA that does not exist in any git object store.
+        let db_only_sha = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string();
+        let pattern = "\"db_only_session_xyz\"";
+        let note_content = r#"{"sessions": {"db_only_session_xyz": {}}}"#;
+
+        // Seed the note into the db directly via SqliteNoteStore so it exists
+        // only in the db, not in refs/notes/ai.
+        SqliteNoteStore::new()
+            .write_note(&db_only_sha, note_content)
+            .expect("seed note");
+
+        // Create a TmpRepo (needed for the repo arg; refs/notes/ai will be empty).
+        let repo = TmpRepo::new().expect("TmpRepo::new");
+
+        // Call the composed search path with Sqlite backend.  The search must
+        // union db results with the (empty) git-grep result and return the SHA.
+        unsafe {
+            env::set_var("GIT_AI_NOTES_BACKEND_KIND", "sqlite");
+        }
+        let results =
+            search_notes(repo.gitai_repo(), pattern).expect("search_notes must not error");
+        unsafe {
+            env::remove_var("GIT_AI_NOTES_BACKEND_KIND");
+        }
+
+        assert!(
+            results.contains(&db_only_sha),
+            "db-only SHA must appear in composed search results; got: {:?}",
+            results
+        );
 
         unsafe {
             env::remove_var("GIT_AI_TEST_NOTES_DB_PATH");
@@ -914,8 +856,10 @@ mod tests {
             .expect("write file");
         let sha = repo.commit_all("msg").expect("commit");
 
-        // Write a note for this SHA using the Http helper.
-        http_write_note(&sha, "some-note-content").expect("http write");
+        // Write a note for this SHA using the Http store.
+        HttpNoteStore::new()
+            .write_note(&sha, "some-note-content")
+            .expect("http write");
 
         // Confirm it is in notes-db with synced=0.
         let db = crate::model::repository::notes_db::NotesDatabase::global().expect("global db");
@@ -973,7 +917,9 @@ mod tests {
         let sha = repo.commit_all("test commit").expect("commit");
 
         // Put a note in the cache for this commit.
-        http_write_note(&sha, "display-note-content").expect("write note");
+        HttpNoteStore::new()
+            .write_note(&sha, "display-note-content")
+            .expect("write note");
 
         // Materialize the cache into refs/notes/ai-display.
         let count = materialize_notes_for_display(repo.gitai_repo(), 50).expect("materialize");

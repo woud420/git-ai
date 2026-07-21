@@ -380,6 +380,7 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
     );
     coordinator_inner.telemetry_worker = Some(telemetry_handle.clone());
     coordinator_inner.bash_history_db = bash_history_db;
+    coordinator_inner.metrics_db = Some(metrics_db);
 
     // Spawn the transcript worker BEFORE wrapping coordinator in Arc
     if config::Config::get()

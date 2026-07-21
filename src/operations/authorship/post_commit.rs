@@ -9,6 +9,7 @@ use crate::operations::authorship::diff_base::single_commit_diff_base;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
+use crate::operations::authorship::recovery_stores::RecoveryStores;
 use crate::operations::authorship::rewrite::DiffTreeResult;
 use crate::operations::authorship::stats::{
     stats_for_commit_stats_from_hunks, write_stats_to_terminal,
@@ -311,8 +312,7 @@ where
         }
     }
 
-    // Also include files from INITIAL attributions (uncommitted files from previous
-    // commits): they may lack checkpoints but keep their attribution. See issue #356.
+    // INITIAL attributions (prev-commit uncommitted files) lack checkpoints. See #356.
     let initial_attributions_for_pathspecs = working_log.read_initial_attributions();
     for file_path in initial_attributions_for_pathspecs.files.keys() {
         pathspecs.insert(file_path.clone());
@@ -402,6 +402,7 @@ where
             AttributionRecoveryContext {
                 file_timestamps: context.recovery_file_timestamps,
                 before_external_recovery: context.before_external_recovery,
+                stores: RecoveryStores::resolve(),
             },
         )?;
         authorship_log.metadata.base_commit_sha = commit_sha.clone();
@@ -429,8 +430,7 @@ where
         write_note(repo, &commit_sha, &authorship_note_str)?;
     }
 
-    // Compute stats once (needed for both metrics and terminal output), unless preflight
-    // estimate predicts this would be too expensive for the commit hook path.
+    // Compute stats (metrics + terminal output) unless preflight estimate says too expensive.
     let mut stats: Option<crate::operations::authorship::stats::CommitStats> = None;
     let mut skip_reason = None;
 
@@ -480,11 +480,10 @@ where
             .and_then(|artifacts| serde_json::to_string(&artifacts.json_hunks).ok());
 
             // Record metrics only when we have full stats.
+            // Store the recorded parent as `base_commit_sha`, not `<commit>^`.
             record_commit_metrics(
                 repo,
                 &commit_sha,
-                // Store the recorded parent as `base_commit_sha`, not the
-                // `<commit>^` diff rev-expression used for the diff spawns.
                 &parent_sha,
                 &human_author,
                 &authorship_note_str,
@@ -782,6 +781,7 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         AttributionRecoveryContext {
             file_timestamps: recovery_file_timestamps,
             before_external_recovery,
+            stores: RecoveryStores::resolve(),
         },
     )?;
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();

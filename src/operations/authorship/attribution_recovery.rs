@@ -7,6 +7,7 @@ use crate::model::authorship_log_serialization::{
 use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
 use crate::model::working_log::{AgentId, CheckpointKind};
 use crate::operations::authorship::bash_candidate::{BashCandidate, distance_to_call_window};
+use crate::operations::authorship::recovery_stores::RecoveryStores;
 use crate::operations::commands::checkpoint_agent::bash_tool::StatEntry;
 use crate::operations::git::repo_state::worktree_root_for_path;
 use crate::operations::git::repository::Repository;
@@ -193,10 +194,11 @@ struct CommitMetadataSessionSelection {
     external_tool_use_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub(crate) struct AttributionRecoveryContext<'a> {
     pub(crate) file_timestamps: Option<&'a FileTimestampsByPath>,
     pub(crate) before_external_recovery: Option<&'a dyn Fn(&UnknownLinesByFile)>,
+    pub(crate) stores: RecoveryStores,
 }
 
 pub(crate) fn recover_attribution(
@@ -224,6 +226,7 @@ pub(crate) fn recover_attribution(
         authorship_log,
         committed_hunks,
         context.file_timestamps,
+        context.stores,
     )?;
 
     recover_adjacent_edges(
@@ -250,6 +253,7 @@ pub(crate) fn recover_attribution(
         authorship_log,
         committed_hunks,
         context.file_timestamps,
+        context.stores,
     )?;
 
     recover_commit_metadata(
@@ -260,6 +264,7 @@ pub(crate) fn recover_attribution(
         authorship_log,
         committed_hunks,
         context.file_timestamps,
+        context.stores,
     )?;
     Ok(())
 }
@@ -267,20 +272,18 @@ pub(crate) fn recover_attribution(
 pub(crate) fn matching_session_event_candidate_exists(
     timestamps_ns: &[u128],
     target_repo_url: &str,
+    stores: RecoveryStores,
 ) -> Result<bool, GitAiError> {
     if timestamps_ns.is_empty() || target_repo_url.is_empty() {
         return Ok(false);
     }
 
-    let candidates = match crate::model::repository::metrics_db::MetricsDatabase::global() {
-        Ok(db) => match db.lock() {
-            Ok(db) => db.session_event_candidates_near_timestamps(
-                timestamps_ns,
-                SESSION_EVENT_RECOVERY_WINDOW_NS,
-            )?,
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
+    let candidates = match stores.metrics.and_then(|db| db.lock().ok()) {
+        Some(db) => db.session_event_candidates_near_timestamps(
+            timestamps_ns,
+            SESSION_EVENT_RECOVERY_WINDOW_NS,
+        )?,
+        None => Vec::new(),
     };
 
     Ok(select_best_session_event_candidate(&candidates, timestamps_ns, target_repo_url).is_some())
@@ -294,6 +297,7 @@ fn recover_bash_mtime(
     authorship_log: &mut AuthorshipLog,
     committed_hunks: &HashMap<String, Vec<LineRange>>,
     captured_file_timestamps: Option<&FileTimestampsByPath>,
+    stores: RecoveryStores,
 ) -> Result<(), GitAiError> {
     let repo_work_dir = repo_worktree_key(repo)?;
     let workdir = repo.workdir()?;
@@ -321,18 +325,14 @@ fn recover_bash_mtime(
     all_timestamps.sort_unstable();
     all_timestamps.dedup();
 
-    let candidates: Vec<BashCandidate> =
-        match crate::model::repository::bash_history_db::BashHistoryDatabase::global() {
-            Ok(db) => match db.lock() {
-                Ok(db) => db
-                    .candidates_near_timestamps(&all_timestamps, BASH_RECOVERY_WINDOW_NS)?
-                    .into_iter()
-                    .map(BashCandidate::from)
-                    .collect(),
-                Err(_) => Vec::new(),
-            },
-            Err(_) => Vec::new(),
-        };
+    let candidates: Vec<BashCandidate> = match stores.bash_history.and_then(|db| db.lock().ok()) {
+        Some(db) => db
+            .candidates_near_timestamps(&all_timestamps, BASH_RECOVERY_WINDOW_NS)?
+            .into_iter()
+            .map(BashCandidate::from)
+            .collect(),
+        None => Vec::new(),
+    };
     if candidates.is_empty() {
         return Ok(());
     }
@@ -412,6 +412,7 @@ fn recover_session_event_mtime(
     authorship_log: &mut AuthorshipLog,
     committed_hunks: &HashMap<String, Vec<LineRange>>,
     captured_file_timestamps: Option<&FileTimestampsByPath>,
+    stores: RecoveryStores,
 ) -> Result<(), GitAiError> {
     let workdir = repo.workdir()?;
     let unknown_by_file = unknown_lines_by_file(authorship_log, committed_hunks);
@@ -438,15 +439,12 @@ fn recover_session_event_mtime(
     all_timestamps.sort_unstable();
     all_timestamps.dedup();
 
-    let candidates = match crate::model::repository::metrics_db::MetricsDatabase::global() {
-        Ok(db) => match db.lock() {
-            Ok(db) => db.session_event_candidates_near_timestamps(
-                &all_timestamps,
-                SESSION_EVENT_RECOVERY_WINDOW_NS,
-            )?,
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
+    let candidates = match stores.metrics.and_then(|db| db.lock().ok()) {
+        Some(db) => db.session_event_candidates_near_timestamps(
+            &all_timestamps,
+            SESSION_EVENT_RECOVERY_WINDOW_NS,
+        )?,
+        None => Vec::new(),
     };
     if candidates.is_empty() {
         return Ok(());
@@ -525,6 +523,7 @@ fn recover_commit_metadata(
     authorship_log: &mut AuthorshipLog,
     committed_hunks: &HashMap<String, Vec<LineRange>>,
     captured_file_timestamps: Option<&FileTimestampsByPath>,
+    stores: RecoveryStores,
 ) -> Result<(), GitAiError> {
     let unknown_by_file = unknown_lines_by_file(authorship_log, committed_hunks);
     if unknown_by_file.is_empty() {
@@ -546,6 +545,7 @@ fn recover_commit_metadata(
         &detections,
         &latest_timestamps,
         target_repo_url.as_deref(),
+        stores,
     )?
     else {
         return Ok(());
@@ -843,6 +843,7 @@ fn select_commit_metadata_session(
     detections: &[CommitAgentDetection],
     latest_timestamps: &[u128],
     target_repo_url: Option<&str>,
+    stores: RecoveryStores,
 ) -> Result<Option<CommitMetadataSessionSelection>, GitAiError> {
     if detections.is_empty() {
         return Ok(None);
@@ -855,11 +856,12 @@ fn select_commit_metadata_session(
         detections,
         latest_timestamps,
         target_repo_url,
+        stores,
     )? {
         return Ok(Some(selection));
     }
     if let Some(selection) =
-        select_latest_commit_metadata_metric_session(detections, target_repo_url)?
+        select_latest_commit_metadata_metric_session(detections, target_repo_url, stores)?
     {
         return Ok(Some(selection));
     }
@@ -956,20 +958,18 @@ fn select_nearest_commit_metadata_metric_session(
     detections: &[CommitAgentDetection],
     latest_timestamps: &[u128],
     target_repo_url: Option<&str>,
+    stores: RecoveryStores,
 ) -> Result<Option<CommitMetadataSessionSelection>, GitAiError> {
     if latest_timestamps.is_empty() {
         return Ok(None);
     }
 
-    let candidates = match crate::model::repository::metrics_db::MetricsDatabase::global() {
-        Ok(db) => match db.lock() {
-            Ok(db) => db.session_event_candidates_near_timestamps(
-                latest_timestamps,
-                SESSION_EVENT_RECOVERY_WINDOW_NS,
-            )?,
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
+    let candidates = match stores.metrics.and_then(|db| db.lock().ok()) {
+        Some(db) => db.session_event_candidates_near_timestamps(
+            latest_timestamps,
+            SESSION_EVENT_RECOVERY_WINDOW_NS,
+        )?,
+        None => Vec::new(),
     };
 
     let mut best: Option<(
@@ -1030,14 +1030,10 @@ fn select_nearest_commit_metadata_metric_session(
 fn select_latest_commit_metadata_metric_session(
     detections: &[CommitAgentDetection],
     target_repo_url: Option<&str>,
+    stores: RecoveryStores,
 ) -> Result<Option<CommitMetadataSessionSelection>, GitAiError> {
-    let db = match crate::model::repository::metrics_db::MetricsDatabase::global() {
-        Ok(db) => db,
-        Err(_) => return Ok(None),
-    };
-    let db = match db.lock() {
-        Ok(db) => db,
-        Err(_) => return Ok(None),
+    let Some(db) = stores.metrics.and_then(|db| db.lock().ok()) else {
+        return Ok(None);
     };
 
     for detection in detections {

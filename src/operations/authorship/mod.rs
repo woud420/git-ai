@@ -9,6 +9,7 @@ pub mod git_ai_hooks;
 pub mod ignore;
 pub mod line_lookup;
 pub mod post_commit;
+pub(crate) mod recovery_stores;
 
 pub mod prompt_utils;
 pub mod range_authorship;

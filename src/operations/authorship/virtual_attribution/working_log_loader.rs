@@ -1,10 +1,8 @@
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::{LineAttribution, line_attributions_to_attributions};
 use crate::model::authorship_log::{HumanRecord, SessionRecord};
 use crate::model::working_log::CheckpointKind;
-use crate::operations::authorship::attribution_tracker::{
-    LineAttribution, line_attributions_to_attributions,
-};
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -30,7 +28,7 @@ impl VirtualAttributions {
         let mut attributions: HashMap<
             String,
             (
-                Vec<crate::operations::authorship::attribution_tracker::Attribution>,
+                Vec<crate::model::attribution_tracker::Attribution>,
                 Vec<LineAttribution>,
             ),
         > = HashMap::new();
@@ -184,7 +182,7 @@ impl VirtualAttributions {
                 // for compatibility with older checkpoint data.
                 let file_content = file_contents.get(&entry.file).cloned().unwrap_or_default();
                 let line_attrs = if entry.line_attributions.is_empty() {
-                    crate::operations::authorship::attribution_tracker::attributions_to_line_attributions(
+                    crate::model::attribution_tracker::attributions_to_line_attributions(
                         &entry.attributions,
                         &file_content,
                     )
@@ -243,7 +241,7 @@ impl VirtualAttributions {
         let mut attributions: HashMap<
             String,
             (
-                Vec<crate::operations::authorship::attribution_tracker::Attribution>,
+                Vec<crate::model::attribution_tracker::Attribution>,
                 Vec<LineAttribution>,
             ),
         > = HashMap::new();
@@ -373,7 +371,7 @@ impl VirtualAttributions {
                 file_contents.insert(entry.file.clone(), file_content.clone());
 
                 let line_attrs = if entry.line_attributions.is_empty() {
-                    crate::operations::authorship::attribution_tracker::attributions_to_line_attributions(
+                    crate::model::attribution_tracker::attributions_to_line_attributions(
                         &entry.attributions,
                         &file_content,
                     )

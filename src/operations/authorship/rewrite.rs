@@ -4,7 +4,7 @@ use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin_s
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::operations::authorship::hunk_shift::{DiffHunk, parse_hunk_header};
+use crate::model::hunk_shift::{DiffHunk, parse_hunk_header};
 use crate::operations::git::notes_api;
 use crate::operations::git::repo_state::is_valid_git_oid;
 use crate::operations::git::repository::Repository;
@@ -473,7 +473,7 @@ fn handle_squash_merge(
     squash_commit: &str,
     onto: &str,
 ) -> Result<RewriteOutcome, GitAiError> {
-    use crate::operations::authorship::hunk_shift::apply_hunk_shifts_to_file_attestation;
+    use crate::model::hunk_shift::apply_hunk_shifts_to_file_attestation;
 
     let target_notes = notes_api::read_notes_batch(repo, &[squash_commit.to_string()])?;
     let existing_target_log = target_notes
@@ -724,7 +724,7 @@ fn shift_authorship_notes_with_existing_mode(
     mappings: &[(String, String)],
     merge_existing_targets: bool,
 ) -> Result<Vec<(String, String)>, GitAiError> {
-    use crate::operations::authorship::hunk_shift::apply_hunk_shifts_to_file_attestation;
+    use crate::model::hunk_shift::apply_hunk_shifts_to_file_attestation;
 
     tracing::debug!("shift_authorship_notes: {} mappings", mappings.len());
 

@@ -115,7 +115,7 @@ pub struct CasUploadResponse {
 /// Wrapper for messages stored in CAS
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CasMessagesObject {
-    pub messages: Vec<crate::operations::authorship::transcript::Message>,
+    pub messages: Vec<crate::model::transcript::Message>,
 }
 
 /// A single authorship note entry (commit SHA + content).
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn test_cas_messages_object() {
-        use crate::operations::authorship::transcript::Message;
+        use crate::model::transcript::Message;
 
         let messages = vec![Message::user("test".to_string(), None)];
 

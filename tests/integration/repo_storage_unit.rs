@@ -1,6 +1,6 @@
 use crate::repos::test_repo::TestRepo;
+use git_ai::model::attribution_tracker::LineAttribution;
 use git_ai::model::working_log::{AgentId, CHECKPOINT_API_VERSION, Checkpoint, CheckpointKind};
-use git_ai::operations::authorship::attribution_tracker::LineAttribution;
 use git_ai::operations::git::repo_storage::{InitialAttributions, RepoStorage};
 use std::collections::HashMap;
 use std::fs;

@@ -1,9 +1,9 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use git_ai::config::AuthorConfig;
+use git_ai::model::attribution_tracker::Attribution;
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use git_ai::model::working_log::{CheckpointKind, WorkingLogEntry};
-use git_ai::operations::authorship::attribution_tracker::Attribution;
 use std::fs;
 
 fn configure_diff_settings(repo: &TestRepo, settings: &[(&str, &str)]) {

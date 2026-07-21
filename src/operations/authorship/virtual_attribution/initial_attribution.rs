@@ -1,9 +1,9 @@
 use super::diff_utils::collect_committed_hunks;
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::working_log::CheckpointKind;
-use crate::operations::authorship::attribution_tracker::LineAttribution;
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
@@ -273,7 +273,7 @@ impl VirtualAttributions {
         attributions: &HashMap<
             String,
             (
-                Vec<crate::operations::authorship::attribution_tracker::Attribution>,
+                Vec<crate::model::attribution_tracker::Attribution>,
                 Vec<LineAttribution>,
             ),
         >,
@@ -377,7 +377,7 @@ impl VirtualAttributions {
                 .get(file_path)
                 .cloned()
                 .unwrap_or_default();
-            *line_attrs = crate::operations::authorship::attribution_tracker::attributions_to_line_attributions(
+            *line_attrs = crate::model::attribution_tracker::attributions_to_line_attributions(
                 char_attrs,
                 &file_content,
             );

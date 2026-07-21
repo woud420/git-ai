@@ -7,10 +7,10 @@ use super::diff_utils::{
 };
 use super::types::{AuthorshipLogDiffContext, VirtualAttributions};
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, LineRange, SessionRecord};
+use crate::model::hunk_shift::apply_hunk_shifts_to_line_attributions;
 use crate::model::working_log::CheckpointKind;
-use crate::operations::authorship::attribution_tracker::LineAttribution;
-use crate::operations::authorship::hunk_shift::apply_hunk_shifts_to_line_attributions;
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;

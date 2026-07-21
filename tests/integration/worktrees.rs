@@ -1,9 +1,9 @@
 use crate::repos::test_file::ExpectedLineExt;
 
 use crate::test_utils::fixture_path;
+use git_ai::model::attribution_tracker::LineAttribution;
 use git_ai::model::authorship_log::PromptRecord;
 use git_ai::model::working_log::{AgentId, CheckpointKind};
-use git_ai::operations::authorship::attribution_tracker::LineAttribution;
 use git_ai::operations::authorship::stats::CommitStats;
 use git_ai::operations::git::repository as GitAiRepository;
 use insta::assert_debug_snapshot;

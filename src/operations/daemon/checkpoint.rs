@@ -1,15 +1,13 @@
 use crate::error::GitAiError;
+use crate::model::attribution_tracker::{
+    Attribution, AttributionTracker, INITIAL_ATTRIBUTION_TS, LineAttribution,
+};
 use crate::model::authorship_log_serialization::generate_session_id;
 #[cfg(not(any(test, feature = "test-support")))]
 use crate::model::authorship_log_serialization::generate_short_hash;
+use crate::model::imara_diff_utils::{LineChangeTag, compute_line_changes, normalize_line_endings};
 use crate::model::working_log::CheckpointKind;
 use crate::model::working_log::{Checkpoint, WorkingLogEntry};
-use crate::operations::authorship::attribution_tracker::{
-    Attribution, AttributionTracker, INITIAL_ATTRIBUTION_TS, LineAttribution,
-};
-use crate::operations::authorship::imara_diff_utils::{
-    LineChangeTag, compute_line_changes, normalize_line_endings,
-};
 use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
 use crate::operations::git::repo_storage::PersistedWorkingLog;
 use crate::operations::git::repository::Repository;
@@ -723,7 +721,7 @@ fn get_checkpoint_entry_for_file(
 
         // Convert any line attributions to character attributions
         let prev_attributions =
-            crate::operations::authorship::attribution_tracker::line_attributions_to_attributions(
+            crate::model::attribution_tracker::line_attributions_to_attributions(
                 &prev_line_attributions,
                 content_for_line_conversion,
                 INITIAL_ATTRIBUTION_TS,
@@ -754,13 +752,13 @@ fn get_checkpoint_entry_for_file(
         // and AI checkpoints (force_split=true) would re-attribute all lines to AI.
         // Remap attributions through line-number space to adjust byte offsets.
         let line_attributions =
-            crate::operations::authorship::attribution_tracker::attributions_to_line_attributions_for_checkpoint(
+            crate::model::attribution_tracker::attributions_to_line_attributions_for_checkpoint(
                 &prev_attributions,
                 &previous_content,
                 kind.is_ai(),
             );
         let remapped_attributions =
-            crate::operations::authorship::attribution_tracker::line_attributions_to_attributions(
+            crate::model::attribution_tracker::line_attributions_to_attributions(
                 &line_attributions,
                 &current_content,
                 ts,
@@ -1036,11 +1034,11 @@ fn make_entry_for_file(
     );
 
     // TODO Consider discarding any "uncontentious" attributions for the human author. Any human attributions that do not share a line with any other author's attributions can be discarded.
-    // let filtered_attributions = crate::operations::authorship::attribution_tracker::discard_uncontentious_attributions_for_author(&new_attributions, &CheckpointKind::Human.to_str());
+    // let filtered_attributions = crate::model::attribution_tracker::discard_uncontentious_attributions_for_author(&new_attributions, &CheckpointKind::Human.to_str());
 
     let line_attr_start = Instant::now();
     let line_attributions =
-        crate::operations::authorship::attribution_tracker::attributions_to_line_attributions_for_checkpoint(
+        crate::model::attribution_tracker::attributions_to_line_attributions_for_checkpoint(
             &new_attributions,
             content,
             is_ai_checkpoint,

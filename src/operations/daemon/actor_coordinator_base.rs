@@ -55,6 +55,7 @@ impl ActorDaemonCoordinator {
             transcript_shutdown_notify: std::sync::OnceLock::new(),
             streams_db: None,
             bash_history_db: None,
+            metrics_db: None,
             next_trace_ingest_seq: AtomicUsize::new(0),
             queued_trace_payloads: AtomicUsize::new(0),
             queued_trace_payloads_by_root: Mutex::new(HashMap::new()),
@@ -86,6 +87,24 @@ impl ActorDaemonCoordinator {
         match self.bash_history_db {
             Some(db) => Ok(db),
             None => crate::model::repository::bash_history_db::BashHistoryDatabase::global(),
+        }
+    }
+
+    /// Build a [`RecoveryStores`] from injected handles, falling back to `resolve()` for
+    /// fields that are `None` (unit-test constructions where handles are not injected).
+    pub(crate) fn recovery_stores(
+        &self,
+    ) -> crate::operations::authorship::recovery_stores::RecoveryStores {
+        use crate::operations::authorship::recovery_stores::RecoveryStores;
+        // When both fields are populated (daemon path), no ::global() is called.
+        // When either is None (unit tests), fall back to the global singleton.
+        RecoveryStores {
+            metrics: self
+                .metrics_db
+                .or_else(|| crate::model::repository::metrics_db::MetricsDatabase::global().ok()),
+            bash_history: self.bash_history_db.or_else(|| {
+                crate::model::repository::bash_history_db::BashHistoryDatabase::global().ok()
+            }),
         }
     }
 
@@ -187,10 +206,12 @@ impl ActorDaemonCoordinator {
             return;
         };
 
+        let stores = self.recovery_stores();
         let has_candidate = || {
             crate::operations::authorship::attribution_recovery::matching_session_event_candidate_exists(
                 &timestamps,
                 &target_repo_url,
+                stores,
             )
             .unwrap_or_else(|error| {
                 tracing::debug!(%error, "failed checking session-event recovery candidates");

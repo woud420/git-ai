@@ -170,6 +170,8 @@ pub struct ActorDaemonCoordinator {
     pub(crate) bash_history_db: Option<
         &'static std::sync::Mutex<crate::model::repository::bash_history_db::BashHistoryDatabase>,
     >,
+    pub(crate) metrics_db:
+        Option<&'static std::sync::Mutex<crate::model::repository::metrics_db::MetricsDatabase>>,
     pub(crate) next_trace_ingest_seq: AtomicUsize,
     pub(crate) queued_trace_payloads: AtomicUsize,
     pub(crate) queued_trace_payloads_by_root: Mutex<HashMap<String, usize>>,

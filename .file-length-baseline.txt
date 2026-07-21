@@ -18,6 +18,7 @@ src/model/repository/internal_db.rs	1060
 src/model/repository/metrics_db.rs	3034
 src/model/repository/notes_db.rs	1136
 src/model/repository/streams_db.rs	1236
+src/operations/authorship/virtual_attribution/authorship_log_split.rs	606
 src/operations/authorship/attribution_recovery.rs	2152
 src/operations/authorship/attribution_tracker.rs	2709
 src/operations/authorship/imara_diff_utils.rs	647
@@ -26,7 +27,6 @@ src/operations/authorship/rewrite.rs	1903
 src/operations/authorship/rewrite_stash.rs	825
 src/operations/authorship/secrets.rs	711
 src/operations/authorship/stats.rs	851
-src/operations/authorship/virtual_attribution.rs	3815
 src/operations/ci/ci_context.rs	1083
 src/operations/ci/gitlab.rs	800
 src/operations/commands/analyze/sessions.rs	1862

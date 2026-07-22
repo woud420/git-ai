@@ -128,24 +128,24 @@ verify_checksum() {
 # Returns shell configurations in format: "shell_name|config_file" (one per line)
 detect_all_shells() {
     local shells=""
-    
+
     # Check for bash configs (prefer .bashrc over .bash_profile)
     if [ -f "$HOME/.bashrc" ]; then
         shells="${shells}bash|$HOME/.bashrc\n"
     elif [ -f "$HOME/.bash_profile" ]; then
         shells="${shells}bash|$HOME/.bash_profile\n"
     fi
-    
+
     # Check for zsh config
     if [ -f "$HOME/.zshrc" ]; then
         shells="${shells}zsh|$HOME/.zshrc\n"
     fi
-    
+
     # Check for fish config
     if [ -f "$HOME/.config/fish/config.fish" ]; then
         shells="${shells}fish|$HOME/.config/fish/config.fish\n"
     fi
-    
+
     # If no configs found, fall back to $SHELL detection and create config for that shell only
     if [ -z "$shells" ]; then
         local login_shell=""
@@ -164,7 +164,7 @@ detect_all_shells() {
                 ;;
         esac
     fi
-    
+
     # Remove trailing newline and output
     printf '%b' "$shells" | sed '/^$/d'
 }
@@ -300,8 +300,10 @@ fi
 
 # Create ~/.local/bin/git-ai symlink for systems where ~/.local/bin is already on PATH
 LOCAL_BIN_DIR="$HOME/.local/bin"
+SYMLINK_CREATED=false
 if mkdir -p "$LOCAL_BIN_DIR" 2>/dev/null && ln -sf "${INSTALL_DIR}/git-ai" "${LOCAL_BIN_DIR}/git-ai" 2>/dev/null; then
     success "Created symlink at ${LOCAL_BIN_DIR}/git-ai"
+    SYMLINK_CREATED=true
 else
     warn "Failed to create ~/.local/bin/git-ai symlink. This is non-fatal."
 fi
@@ -321,6 +323,18 @@ if [ -n "${INSTALL_NONCE:-}" ] && [ -n "${API_BASE:-}" ]; then
     fi
 fi
 
+# Write the base install manifest (binary_path + symlinks) BEFORE running
+# install-hooks so the binary can load/merge/save its own fields (git_config_keys,
+# agent_hooks) on top without any python dependency.
+MANIFEST_PATH="$HOME/.git-ai/install-manifest.json"
+SYMLINKS_JSON="[]"
+if [ "$SYMLINK_CREATED" = "true" ]; then
+    SYMLINKS_JSON="[\"${LOCAL_BIN_DIR}/git-ai\"]"
+fi
+mkdir -p "$(dirname "$MANIFEST_PATH")"
+printf '{"version":1,"binary_path":"%s","symlinks":%s,"rc_files":[]}\n' \
+    "${INSTALL_DIR}/git-ai" "$SYMLINKS_JSON" > "$MANIFEST_PATH"
+
 echo "Setting up IDE/agent hooks..."
 if ! ${INSTALL_DIR}/git-ai install-hooks; then
     warn "Warning: Failed to set up IDE/agent hooks. Please try running 'git-ai install-hooks' manually."
@@ -328,14 +342,23 @@ else
     success "Successfully set up IDE/agent hooks"
 fi
 
-# Add to PATH in all detected shell configurations
+# Add to PATH in all detected shell configurations using fenced blocks.
+# The fence markers (# >>> git-ai >>> / # <<< git-ai <<<) let `git-ai uninstall`
+# remove the block exactly without touching the rest of the file.
+FENCE_OPEN="# >>> git-ai >>>"
+FENCE_CLOSE="# <<< git-ai <<<"
 SHELLS_CONFIGURED=""
 SHELLS_ALREADY_CONFIGURED=""
 CREATED_SHELL_PATHS=""
+MANIFEST_RC_FILES=""
+# RC_FILES_JSON is built in the loop below (not in a pipeline subshell, which
+# would cause variable assignments to be lost when the subshell exits).
+RC_FILES_JSON="[]"
+_rc_first=true
 
 while IFS='|' read -r shell_name config_file; do
     [ -z "$shell_name" ] && continue
-    
+
     # Generate shell-appropriate PATH command
     if [ "$shell_name" = "fish" ]; then
         path_cmd="fish_add_path -g \"$INSTALL_DIR\""
@@ -348,23 +371,33 @@ while IFS='|' read -r shell_name config_file; do
     else
         path_cmd="export PATH=\"$INSTALL_DIR:\$PATH\""
     fi
-    
+
     # Create config file if it doesn't exist (for fallback case when no configs found)
     if [ ! -f "$config_file" ]; then
         CREATED_SHELL_PATHS="${CREATED_SHELL_PATHS}${config_file}\n"
     fi
     touch "$config_file"
-    
-    # Append if not already present
+
+    # Append fenced block if not already present (check for fence open marker OR legacy marker)
     if ! grep -qsF "$INSTALL_DIR" "$config_file"; then
-        echo "" >> "$config_file"
-        echo "# Added by git-ai installer on $(date)" >> "$config_file"
-        echo "$path_cmd" >> "$config_file"
+        printf '\n%s\n%s\n%s\n' "$FENCE_OPEN" "$path_cmd" "$FENCE_CLOSE" >> "$config_file"
         SHELLS_CONFIGURED="${SHELLS_CONFIGURED}${shell_name}|${config_file}\n"
+        MANIFEST_RC_FILES="${MANIFEST_RC_FILES}${config_file}\n"
     else
         SHELLS_ALREADY_CONFIGURED="${SHELLS_ALREADY_CONFIGURED}${shell_name}|${config_file}\n"
+        MANIFEST_RC_FILES="${MANIFEST_RC_FILES}${config_file}\n"
+    fi
+
+    # Build RC_FILES_JSON here (same shell — not a pipeline subshell) so that
+    # the variable update is visible after the loop.
+    if [ "$_rc_first" = "true" ]; then
+        RC_FILES_JSON="[{\"path\":\"${config_file}\"}"
+        _rc_first=false
+    else
+        RC_FILES_JSON="${RC_FILES_JSON},{\"path\":\"${config_file}\"}"
     fi
 done <<< "$(detect_all_shells)"
+[ "$_rc_first" = "false" ] && RC_FILES_JSON="${RC_FILES_JSON}]"
 
 # Display results to user
 if [ -n "$SHELLS_CONFIGURED" ]; then
@@ -374,7 +407,7 @@ if [ -n "$SHELLS_CONFIGURED" ]; then
         [ -z "$shell_name" ] && continue
         success "  ✓ $config_file"
     done
-    
+
     echo ""
     echo "To apply changes immediately:"
     printf '%b' "$SHELLS_CONFIGURED" | while IFS='|' read -r shell_name config_file; do
@@ -411,6 +444,40 @@ if [ "$(id -u)" = "0" ] && [ -n "$INSTALL_USER" ]; then
             [ -z "$created_path" ] && continue
             chown "$INSTALL_USER" "$created_path" 2>/dev/null || true
         done
+    fi
+fi
+
+# Merge rc_files into the manifest that install-hooks already updated with its
+# own fields (git_config_keys, agent_hooks).  The binary's load/merge/save
+# ensures no field is lost; here we only need to add rc_files.
+if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    PY=$(command -v python3 2>/dev/null || command -v python)
+    "$PY" - "$MANIFEST_PATH" "$RC_FILES_JSON" <<'PYEOF'
+import json, sys
+path, rc_arg = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    m = json.load(f)
+existing_rc = {e["path"] for e in m.get("rc_files", [])}
+for e in json.loads(rc_arg):
+    if e["path"] not in existing_rc:
+        m.setdefault("rc_files", []).append(e)
+        existing_rc.add(e["path"])
+with open(path, "w") as f:
+    json.dump(m, f, indent=2)
+PYEOF
+else
+    # No python — patch rc_files field in place with a fresh read/write.
+    # The binary already wrote git_config_keys/agent_hooks; rewrite with rc_files added.
+    # Note: this plain overwrite preserves binary_path/symlinks but drops agent fields
+    # if python is absent. Users without python should run 'git-ai install-hooks' again.
+    if [ -f "$MANIFEST_PATH" ]; then
+        # Read existing fields we must preserve (binary_path and symlinks were written above).
+        EXISTING_BINARY=$(grep -o '"binary_path":"[^"]*"' "$MANIFEST_PATH" | head -1 | cut -d'"' -f4 || true)
+        EXISTING_SYMLINKS=$(grep -o '"symlinks":\[[^]]*\]' "$MANIFEST_PATH" | head -1 | sed 's/"symlinks"://' || true)
+        [ -z "$EXISTING_BINARY" ] && EXISTING_BINARY="${INSTALL_DIR}/git-ai"
+        [ -z "$EXISTING_SYMLINKS" ] && EXISTING_SYMLINKS="$SYMLINKS_JSON"
+        printf '{"version":1,"binary_path":"%s","symlinks":%s,"rc_files":%s}\n' \
+            "$EXISTING_BINARY" "$EXISTING_SYMLINKS" "$RC_FILES_JSON" > "$MANIFEST_PATH"
     fi
 fi
 

@@ -7,22 +7,24 @@
 //! 3. Shut the daemon down and remove its sockets/locks.
 //! 4. Remove installed binaries and shims (`~/.git-ai/bin`,
 //!    `~/.local/bin/git-ai`).
-//! 5. Remove installer-added PATH lines from shell rc files.
+//! 5. Remove installer-added PATH blocks from shell rc files (fence blocks
+//!    written by install.sh ≥ 1.7; legacy bare lines are stripped with a
+//!    warning when no fence is found).
 //! 6. With `--purge`, remove the whole `~/.git-ai` data directory (config,
 //!    local databases, logs).
 //!
-//! Repo-local `.git/ai/` directories are never touched: git-ai does not track
-//! which repositories exist, so they are the user's to remove.
+//! When `~/.git-ai/install-manifest.json` exists (written by install.sh /
+//! install-hooks ≥ 1.7) the manifest drives steps 4–5; otherwise known
+//! locations are used as a fallback for legacy installs.
 
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::operations::commands::install_hooks::{
     TRACE2_EVENT_NESTING_KEY, TRACE2_EVENT_TARGET_KEY, remove_global_git_config_section,
 };
+use crate::operations::commands::install_manifest::{InstallManifest, remove_fence_block};
 use std::io::IsTerminal;
 use std::path::Path;
-
-const RC_MARKER_COMMENT: &str = "# Added by git-ai installer";
 
 pub fn run_uninstall_all(args: &[String]) -> Result<(), GitAiError> {
     let mut purge = false;
@@ -78,11 +80,14 @@ pub fn run_uninstall_all(args: &[String]) -> Result<(), GitAiError> {
         }
     }
 
-    // 4. Binaries and shims.
-    report.extend(remove_binaries());
+    // Load manifest (empty when not present — falls back to known locations).
+    let manifest = InstallManifest::load();
 
-    // 5. Shell rc PATH lines.
-    report.extend(clean_shell_rc_files());
+    // 4. Binaries and shims.
+    report.extend(remove_binaries(&manifest));
+
+    // 5. Shell rc PATH blocks.
+    report.extend(clean_shell_rc_files(&manifest));
 
     // 6. Data.
     if purge {
@@ -168,20 +173,40 @@ fn revert_trace2_config() -> String {
     }
 }
 
-fn remove_binaries() -> Vec<String> {
+fn remove_binaries(manifest: &InstallManifest) -> Vec<String> {
     let mut report = Vec::new();
     let Some(home) = dirs::home_dir() else {
         return report;
     };
 
     // ~/.local/bin/git-ai symlink (only when it points into ~/.git-ai).
+    // Check manifest symlinks first, then fall back to the well-known path.
     let local_bin_link = home.join(".local").join("bin").join("git-ai");
-    if let Ok(target) = std::fs::read_link(&local_bin_link)
-        && target.to_string_lossy().contains(".git-ai")
-    {
-        match std::fs::remove_file(&local_bin_link) {
-            Ok(()) => report.push("~/.local/bin/git-ai symlink: removed".to_string()),
-            Err(e) => report.push(format!("~/.local/bin/git-ai symlink: FAILED ({})", e)),
+    let check_symlinks: Vec<std::path::PathBuf> = if manifest.symlinks.is_empty() {
+        vec![local_bin_link]
+    } else {
+        manifest
+            .symlinks
+            .iter()
+            .map(std::path::PathBuf::from)
+            // Safety: reject any manifest entry that escapes $HOME (hardening
+            // against a crafted manifest directing removal at arbitrary paths).
+            .filter(|p| {
+                p.starts_with(&home)
+                    && p.symlink_metadata()
+                        .map(|m| m.file_type().is_symlink())
+                        .unwrap_or(false)
+            })
+            .collect()
+    };
+    for link in &check_symlinks {
+        if let Ok(target) = std::fs::read_link(link)
+            && target.to_string_lossy().contains(".git-ai")
+        {
+            match std::fs::remove_file(link) {
+                Ok(()) => report.push(format!("{}: symlink removed", link.display())),
+                Err(e) => report.push(format!("{}: FAILED ({})", link.display(), e)),
+            }
         }
     }
 
@@ -206,48 +231,79 @@ fn remove_binaries() -> Vec<String> {
     report
 }
 
-/// Strip installer-added PATH lines from the standard shell rc files: the
-/// `# Added by git-ai installer …` marker comment and any line referencing
-/// `/.git-ai/bin`.
-fn clean_shell_rc_files() -> Vec<String> {
+/// Strip installer-added PATH blocks from shell rc files.
+///
+/// For installs from 1.7+, the rc edit is wrapped in a fence block
+/// (`# >>> git-ai >>>` / `# <<< git-ai <<<`).  Older installs used bare
+/// `# Added by git-ai installer …` comment + PATH line; those are stripped
+/// with best-effort and a diff is printed when ambiguous content remains.
+fn clean_shell_rc_files(manifest: &InstallManifest) -> Vec<String> {
     let mut report = Vec::new();
     let Some(home) = dirs::home_dir() else {
         return report;
     };
-    let rc_files = [
-        home.join(".bashrc"),
-        home.join(".bash_profile"),
-        home.join(".zshrc"),
-        home.join(".config").join("fish").join("config.fish"),
-    ];
-    for rc in rc_files {
+
+    // Determine which rc files to clean: manifest-recorded (preferred) or
+    // well-known fallback list for legacy installs.
+    let rc_paths: Vec<std::path::PathBuf> = if !manifest.rc_files.is_empty() {
+        manifest
+            .rc_files
+            .iter()
+            .map(|e| std::path::PathBuf::from(&e.path))
+            // Safety: reject manifest entries outside $HOME or that are not
+            // regular files (hardening against a crafted install-manifest.json).
+            .filter(|p| {
+                p.starts_with(&home)
+                    && p.metadata()
+                        .map(|m| m.file_type().is_file())
+                        .unwrap_or(false)
+            })
+            .collect()
+    } else {
+        vec![
+            home.join(".bashrc"),
+            home.join(".bash_profile"),
+            home.join(".zshrc"),
+            home.join(".config").join("fish").join("config.fish"),
+        ]
+    };
+
+    for rc in rc_paths {
         match clean_rc_file(&rc) {
-            Ok(true) => report.push(format!("{}: git-ai PATH lines removed", display_home(&rc))),
-            Ok(false) => {}
+            Ok(Some(had_legacy_remaining)) => {
+                report.push(format!("{}: git-ai PATH block removed", display_home(&rc)));
+                if had_legacy_remaining {
+                    report.push(format!(
+                        "  (note: {} may still contain legacy git-ai lines — please review)",
+                        display_home(&rc)
+                    ));
+                }
+            }
+            Ok(None) => {}
             Err(e) => report.push(format!("{}: FAILED ({})", display_home(&rc), e)),
         }
     }
     report
 }
 
-fn clean_rc_file(path: &Path) -> Result<bool, std::io::Error> {
+/// Remove the git-ai PATH block from `path`.
+///
+/// Returns `Ok(Some(had_legacy))` when something was removed, `Ok(None)` when
+/// the file was unchanged, or `Err` on I/O failure.  `had_legacy` is `true`
+/// when no fence block was found but bare legacy lines were removed (the caller
+/// should warn the user to review the file).
+fn clean_rc_file(path: &Path) -> Result<Option<bool>, std::io::Error> {
     if !path.is_file() {
-        return Ok(false);
+        return Ok(None);
     }
     let content = std::fs::read_to_string(path)?;
-    let cleaned: Vec<&str> = content
-        .lines()
-        .filter(|line| !line.starts_with(RC_MARKER_COMMENT) && !line.contains("/.git-ai/bin"))
-        .collect();
-    let mut cleaned = cleaned.join("\n");
-    if content.ends_with('\n') && !cleaned.ends_with('\n') {
-        cleaned.push('\n');
+    let result = remove_fence_block(&content);
+    if result.text == content {
+        return Ok(None);
     }
-    if cleaned == content {
-        return Ok(false);
-    }
-    std::fs::write(path, cleaned)?;
-    Ok(true)
+    std::fs::write(path, &result.text)?;
+    // Signal whether the removal was fenced (clean) or legacy (may need review).
+    Ok(Some(!result.removed_fence))
 }
 
 fn display_home(path: &Path) -> String {
@@ -278,9 +334,34 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::commands::install_manifest::{
+        FENCE_CLOSE, FENCE_OPEN, make_fence_block,
+    };
 
     #[test]
-    fn clean_rc_file_strips_installer_lines() {
+    fn clean_rc_file_removes_fenced_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let rc = dir.path().join(".zshrc");
+        let block = make_fence_block("export PATH=\"$HOME/.git-ai/bin:$PATH\"");
+        std::fs::write(&rc, format!("export FOO=1\n{}", block)).unwrap();
+
+        let result = clean_rc_file(&rc).unwrap();
+        assert!(
+            result.is_some(),
+            "expected Some when a fence block was removed"
+        );
+        assert!(
+            !result.unwrap(),
+            "removed_fence=true so had_legacy should be false"
+        );
+        let cleaned = std::fs::read_to_string(&rc).unwrap();
+        assert_eq!(cleaned, "export FOO=1\n");
+        assert!(!cleaned.contains(FENCE_OPEN));
+        assert!(!cleaned.contains(FENCE_CLOSE));
+    }
+
+    #[test]
+    fn clean_rc_file_strips_legacy_installer_lines() {
         let dir = tempfile::tempdir().unwrap();
         let rc = dir.path().join(".zshrc");
         std::fs::write(
@@ -289,12 +370,16 @@ mod tests {
         )
         .unwrap();
 
-        assert!(clean_rc_file(&rc).unwrap());
+        let result = clean_rc_file(&rc).unwrap();
+        assert!(
+            result.is_some(),
+            "expected Some when legacy lines were removed"
+        );
         let cleaned = std::fs::read_to_string(&rc).unwrap();
         assert_eq!(cleaned, "export FOO=1\nalias ll='ls -l'\n");
 
         // Idempotent: a second pass changes nothing.
-        assert!(!clean_rc_file(&rc).unwrap());
+        assert!(clean_rc_file(&rc).unwrap().is_none());
     }
 
     #[test]
@@ -304,7 +389,7 @@ mod tests {
         let content = "export FOO=1\nexport PATH=\"$HOME/bin:$PATH\"\n";
         std::fs::write(&rc, content).unwrap();
 
-        assert!(!clean_rc_file(&rc).unwrap());
+        assert!(clean_rc_file(&rc).unwrap().is_none());
         assert_eq!(std::fs::read_to_string(&rc).unwrap(), content);
     }
 
@@ -318,13 +403,27 @@ mod tests {
         )
         .unwrap();
 
-        assert!(clean_rc_file(&rc).unwrap());
+        clean_rc_file(&rc).unwrap();
         assert_eq!(std::fs::read_to_string(&rc).unwrap(), "set -x EDITOR vim\n");
     }
 
     #[test]
     fn clean_rc_file_missing_file_is_noop() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!clean_rc_file(&dir.path().join("nope")).unwrap());
+        assert!(clean_rc_file(&dir.path().join("nope")).unwrap().is_none());
+    }
+
+    #[test]
+    fn clean_rc_file_fence_round_trip_with_content_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let rc = dir.path().join(".bashrc");
+        let before = "# existing config\n";
+        let after = "alias gs='git status'\n";
+        let block = make_fence_block("export PATH=\"$HOME/.git-ai/bin:$PATH\"");
+        std::fs::write(&rc, format!("{}{}{}", before, block, after)).unwrap();
+
+        clean_rc_file(&rc).unwrap();
+        let result = std::fs::read_to_string(&rc).unwrap();
+        assert_eq!(result, format!("{}{}", before, after));
     }
 }

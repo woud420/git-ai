@@ -535,8 +535,13 @@ Write-Success "You can now run 'git-ai' from your terminal"
 # Git Bash (MSYS2/MinGW) prepends its own directories to PATH, which shadows
 # the Windows PATH entry we set above. Writing to ~/.bashrc ensures git-ai's
 # bin directory is prepended after Git Bash's own PATH setup.
+# The edit uses a fenced block (# >>> git-ai >>> / # <<< git-ai <<<) so that
+# `git-ai uninstall` can remove it exactly without touching other rc content.
+$fenceOpen  = '# >>> git-ai >>>'
+$fenceClose = '# <<< git-ai <<<'
 $gitBashConfigured = $false
 $gitBashAlreadyConfigured = $false
+$targetBashConfig = $null
 try {
     $bashrcPath = Join-Path $HOME '.bashrc'
     $bashProfilePath = Join-Path $HOME '.bash_profile'
@@ -558,7 +563,6 @@ try {
 
     if ($gitBashInstalled) {
         # Determine which config file to update (prefer .bashrc, fall back to .bash_profile)
-        $targetBashConfig = $null
         if (Test-Path -LiteralPath $bashrcPath) {
             $targetBashConfig = $bashrcPath
         } elseif (Test-Path -LiteralPath $bashProfilePath) {
@@ -568,7 +572,7 @@ try {
             $targetBashConfig = $bashrcPath
         }
 
-        # Check if already configured
+        # Check if already configured (fence marker OR legacy bare line)
         $alreadyPresent = $false
         if (Test-Path -LiteralPath $targetBashConfig) {
             $content = Get-Content -LiteralPath $targetBashConfig -Raw -ErrorAction SilentlyContinue
@@ -580,8 +584,7 @@ try {
         if ($alreadyPresent) {
             $gitBashAlreadyConfigured = $true
         } else {
-            $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-            $appendContent = "`n# Added by git-ai installer on $timestamp`n$pathCmd`n"
+            $appendContent = "`n$fenceOpen`n$pathCmd`n$fenceClose`n"
             $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
             [System.IO.File]::AppendAllText($targetBashConfig, $appendContent, $utf8NoBom)
             $gitBashConfigured = $true
@@ -595,6 +598,45 @@ if ($gitBashConfigured) {
     Write-Success "Successfully configured Git Bash ($targetBashConfig)"
 } elseif ($gitBashAlreadyConfigured) {
     Write-Success "Git Bash already configured ($targetBashConfig)"
+}
+
+# Write the install manifest so `git-ai uninstall` knows exactly what to undo.
+# Merged with any content already written by `git-ai install-hooks` (which ran above).
+# Build a fresh hashtable rather than mutating the parsed PSCustomObject: ConvertFrom-Json
+# only creates properties that exist in the JSON, so assigning to an absent property throws
+# on PSCustomObject.  A hashtable accepts new keys unconditionally and serialises correctly.
+$manifestPath = Join-Path $HOME '.git-ai\install-manifest.json'
+$manifestRcFiles = ,@()
+if ($null -ne $targetBashConfig -and ($gitBashConfigured -or $gitBashAlreadyConfigured)) {
+    $manifestRcFiles = ,@([PSCustomObject]@{ path = $targetBashConfig.Replace('\', '/') })
+}
+try {
+    # Seed with defaults, then overlay whatever install-hooks already wrote.
+    $merged = @{
+        version     = 1
+        binary_path = $finalExe.Replace('\', '/')
+        symlinks    = @()
+        rc_files    = $manifestRcFiles
+        git_config_keys = @()
+        agent_hooks = @()
+    }
+    if (Test-Path -LiteralPath $manifestPath) {
+        $existing = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        # Preserve fields written by install-hooks (git_config_keys, agent_hooks).
+        if ($existing.PSObject.Properties['git_config_keys']) { $merged['git_config_keys'] = @($existing.git_config_keys) }
+        if ($existing.PSObject.Properties['agent_hooks'])     { $merged['agent_hooks']     = @($existing.agent_hooks) }
+        # Merge rc_files (avoid duplicates); wrap in @() to force array for serde.
+        $existingPaths = @($existing.PSObject.Properties['rc_files'] | ForEach-Object { $existing.rc_files } | ForEach-Object { $_.path })
+        $mergedRc = @($existing.PSObject.Properties['rc_files'] | ForEach-Object { @($existing.rc_files) } | ForEach-Object { $_ })
+        foreach ($rc in $manifestRcFiles) {
+            if ($existingPaths -notcontains $rc.path) { $mergedRc += $rc }
+        }
+        $merged['rc_files'] = ,@($mergedRc)
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($manifestPath, ($merged | ConvertTo-Json -Depth 5), $utf8NoBom)
+} catch {
+    Write-Host "Warning: Could not write install manifest: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
 Write-Host 'Close and reopen your terminal and IDE sessions to use git-ai.' -ForegroundColor Yellow

@@ -36,7 +36,6 @@ src/operations/commands/checkpoint_agent/presets/github_copilot/ide.rs	1014
 src/operations/commands/config.rs	2176
 src/operations/commands/daemon.rs	788
 src/operations/commands/debug.rs	1659
-src/operations/commands/diff.rs	2767
 src/operations/commands/git_hook_handlers.rs	615
 src/operations/commands/install_hooks.rs	1280
 src/operations/commands/log.rs	1399

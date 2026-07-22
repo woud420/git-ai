@@ -162,17 +162,13 @@ impl<'a> TestFile<'a> {
         let lines = if let Ok(blame_output) = blame_result {
             // Parse blame output to get authorship for each line
             let content_lines: Vec<&str> = contents.lines().collect();
-            let blame_lines: Vec<&str> = blame_output
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .collect();
+            let blame_lines = Self::parse_blame_lines(&blame_output);
 
             content_lines
                 .iter()
                 .zip(blame_lines.iter())
-                .map(|(content, blame_line)| {
-                    let (author, _) = Self::parse_blame_line_static(blame_line);
-                    let author_type = if Self::is_ai_author_static(&author) {
+                .map(|(content, (author, _))| {
+                    let author_type = if Self::is_ai_author_helper(author) {
                         AuthorType::Ai
                     } else {
                         AuthorType::Human
@@ -235,15 +231,32 @@ impl<'a> TestFile<'a> {
         ("unknown".to_string(), line.to_string())
     }
 
-    /// Static version of is_ai_author for use in from_existing_file
-    fn is_ai_author_static(author: &str) -> bool {
-        Self::is_ai_author_helper(author)
+    fn parse_blame_lines(blame_output: &str) -> Vec<(String, String)> {
+        blame_output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(Self::parse_blame_line_static)
+            .collect()
+    }
+
+    fn parse_committed_blame_lines(blame_output: &str) -> Vec<(String, String)> {
+        Self::parse_blame_lines(blame_output)
+            .into_iter()
+            .filter(|(author, _)| author != "Not Committed Yet")
+            .collect()
     }
 
     pub fn stage(&self) {
         self.repo
             .git(&["add", self.file_path.to_str().expect("valid path")])
             .expect("add file should succeed");
+    }
+
+    fn blame_output(&self) -> String {
+        let filename = self.file_path.to_str().expect("valid path");
+        self.repo
+            .git_ai(&["blame", filename])
+            .expect("git-ai blame should succeed")
     }
 
     pub fn assert_contents_expected(&self) {
@@ -257,11 +270,7 @@ impl<'a> TestFile<'a> {
     }
 
     pub fn assert_blame_snapshot(&self) {
-        let filename = self.file_path.to_str().expect("valid path");
-        let blame_output = self
-            .repo
-            .git_ai(&["blame", filename])
-            .expect("git-ai blame should succeed");
+        let blame_output = self.blame_output();
 
         let formatted = self.format_blame_for_snapshot(&blame_output);
         assert_debug_snapshot!(formatted);
@@ -269,113 +278,53 @@ impl<'a> TestFile<'a> {
 
     pub fn assert_lines_and_blame<T: Into<ExpectedLine>>(&mut self, lines: Vec<T>) {
         let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
+        let blame_output = self.blame_output();
+        let actual_lines = Self::parse_blame_lines(&blame_output);
 
-        // Get blame output
-        let filename = self.file_path.to_str().expect("valid path");
-        let blame_output = self
-            .repo
-            .git_ai(&["blame", filename])
-            .expect("git-ai blame should succeed");
-
-        // Parse the blame output to get (author, content) for each line
-        let actual_lines: Vec<(String, String)> = blame_output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| self.parse_blame_line(line))
-            .collect();
-
-        // Compare line counts
-        assert_eq!(
-            actual_lines.len(),
-            expected_lines.len(),
-            "Number of lines in blame output ({}) doesn't match expected ({})\nBlame output:\n{}",
-            actual_lines.len(),
-            expected_lines.len(),
-            blame_output
+        Self::assert_blame_lines(
+            &actual_lines,
+            &expected_lines,
+            &blame_output,
+            "lines in blame output",
         );
-
-        // Compare each line's content and authorship
-        for (i, ((actual_author, actual_content), expected_line)) in
-            actual_lines.iter().zip(&expected_lines).enumerate()
-        {
-            let line_num = i + 1;
-
-            // Check line content
-            assert_eq!(
-                actual_content.trim(),
-                expected_line.contents.trim(),
-                "Line {}: Content mismatch\nExpected: {:?}\nActual: {:?}\nFull blame output:\n{}",
-                line_num,
-                expected_line.contents,
-                actual_content,
-                blame_output
-            );
-
-            // Check authorship
-            match &expected_line.author_type {
-                AuthorType::Ai => {
-                    assert!(
-                        self.is_ai_author(actual_author),
-                        "Line {}: Expected AI author but got '{}'\nExpected: {:?}\nActual content: {:?}\nFull blame output:\n{}",
-                        line_num,
-                        actual_author,
-                        expected_line,
-                        actual_content,
-                        blame_output
-                    );
-                }
-                AuthorType::Human | AuthorType::UnattributedHuman => {
-                    assert!(
-                        !self.is_ai_author(actual_author),
-                        "Line {}: Expected Human author but got AI author '{}'\nExpected: {:?}\nActual content: {:?}\nFull blame output:\n{}",
-                        line_num,
-                        actual_author,
-                        expected_line,
-                        actual_content,
-                        blame_output
-                    );
-                }
-            }
-        }
     }
 
     /// Assert only committed lines (filters out uncommitted lines)
     /// Useful for partial staging tests where some lines aren't committed yet
     pub fn assert_committed_lines<T: Into<ExpectedLine>>(&mut self, lines: Vec<T>) {
         let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
+        let blame_output = self.blame_output();
+        let committed_lines = Self::parse_committed_blame_lines(&blame_output);
 
-        // Get blame output
-        let filename = self.file_path.to_str().expect("valid path");
-        let blame_output = self
-            .repo
-            .git_ai(&["blame", filename])
-            .expect("git-ai blame should succeed");
+        Self::assert_blame_lines(
+            &committed_lines,
+            &expected_lines,
+            &blame_output,
+            "committed lines",
+        );
+    }
 
-        // Parse the blame output and filter out uncommitted lines
-        let committed_lines: Vec<(String, String)> = blame_output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| self.parse_blame_line(line))
-            .filter(|(author, _)| author != "Not Committed Yet")
-            .collect();
-
-        // Compare line counts
+    fn assert_blame_lines(
+        actual_lines: &[(String, String)],
+        expected_lines: &[ExpectedLine],
+        blame_output: &str,
+        line_description: &str,
+    ) {
         assert_eq!(
-            committed_lines.len(),
+            actual_lines.len(),
             expected_lines.len(),
-            "Number of committed lines ({}) doesn't match expected ({})\nBlame output:\n{}",
-            committed_lines.len(),
+            "Number of {} ({}) doesn't match expected ({})\nBlame output:\n{}",
+            line_description,
+            actual_lines.len(),
             expected_lines.len(),
             blame_output
         );
 
-        // Compare each line's content and authorship
         for (i, ((actual_author, actual_content), expected_line)) in
-            committed_lines.iter().zip(&expected_lines).enumerate()
+            actual_lines.iter().zip(expected_lines).enumerate()
         {
             let line_num = i + 1;
 
-            // Check line content
             assert_eq!(
                 actual_content.trim(),
                 expected_line.contents.trim(),
@@ -386,11 +335,10 @@ impl<'a> TestFile<'a> {
                 blame_output
             );
 
-            // Check authorship
             match &expected_line.author_type {
                 AuthorType::Ai => {
                     assert!(
-                        self.is_ai_author(actual_author),
+                        Self::is_ai_author_helper(actual_author),
                         "Line {}: Expected AI author but got '{}'\nExpected: {:?}\nActual content: {:?}\nFull blame output:\n{}",
                         line_num,
                         actual_author,
@@ -401,7 +349,7 @@ impl<'a> TestFile<'a> {
                 }
                 AuthorType::Human | AuthorType::UnattributedHuman => {
                     assert!(
-                        !self.is_ai_author(actual_author),
+                        !Self::is_ai_author_helper(actual_author),
                         "Line {}: Expected Human author but got AI author '{}'\nExpected: {:?}\nActual content: {:?}\nFull blame output:\n{}",
                         line_num,
                         actual_author,
@@ -419,15 +367,12 @@ impl<'a> TestFile<'a> {
     pub fn format_blame_for_snapshot(&self, blame_output: &str) -> String {
         let mut result = String::new();
         let mut current_author: Option<String> = None;
-        let mut line_num = 1;
 
-        for line in blame_output.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            // Parse the blame line to extract author and content
-            let (author, content) = self.parse_blame_line(line);
+        for (index, (author, content)) in Self::parse_blame_lines(blame_output)
+            .into_iter()
+            .enumerate()
+        {
+            let line_num = index + 1;
 
             // Add header when author changes
             if current_author.as_ref() != Some(&author) {
@@ -440,7 +385,6 @@ impl<'a> TestFile<'a> {
 
             // Add the line with author prefix and line number
             result.push_str(&format!("{} {}) {}\n", author, line_num, content));
-            line_num += 1;
         }
 
         result
@@ -449,45 +393,22 @@ impl<'a> TestFile<'a> {
     /// Parse a single blame line to extract author and content
     /// Format: sha (author date line_num) content
     pub fn parse_blame_line(&self, line: &str) -> (String, String) {
-        if let Some(start_paren) = line.find('(')
-            && let Some(end_paren) = line.find(')')
-        {
-            let author_section = &line[start_paren + 1..end_paren];
-            let content = line[end_paren + 1..].trim();
-
-            // Extract author name (everything before the date)
-            let parts: Vec<&str> = author_section.split_whitespace().collect();
-            let mut author_parts = Vec::new();
-            for part in parts {
-                // Stop when we hit what looks like a date (starts with digit)
-                if part.chars().next().unwrap_or('a').is_ascii_digit() {
-                    break;
-                }
-                author_parts.push(part);
-            }
-            let author = author_parts.join(" ");
-
-            return (author, content.to_string());
-        }
-        ("unknown".to_string(), line.to_string())
+        Self::parse_blame_line_static(line)
     }
 
     /// Assert that the file at the given path matches the expected contents and authorship
     pub fn assert_blame_contents_expected(&self) {
-        // Get blame output
-        let filename = self.file_path.to_str().expect("valid path");
-        let blame_output = self
-            .repo
-            .git_ai(&["blame", filename])
-            .expect("git-ai blame should succeed");
+        let blame_output = self.blame_output();
 
         // println!(
         //     "\n=== Git-AI Blame Output ===\n{}\n===========================\n",
         //     blame_output
         // );
 
-        // Parse the blame output to extract authors for each line
-        let lines_by_author = self.parse_blame_output(&blame_output);
+        let lines_by_author: Vec<_> = Self::parse_blame_lines(&blame_output)
+            .into_iter()
+            .map(|(author, _)| author)
+            .collect();
 
         // Compare with expected authorship
         assert_eq!(
@@ -505,7 +426,7 @@ impl<'a> TestFile<'a> {
             match &expected_line.author_type {
                 AuthorType::Ai => {
                     assert!(
-                        self.is_ai_author(actual_author),
+                        Self::is_ai_author_helper(actual_author),
                         "Line {}: Expected AI author but got '{}'. Expected line: {:?}\n{}",
                         line_num,
                         actual_author,
@@ -515,7 +436,7 @@ impl<'a> TestFile<'a> {
                 }
                 AuthorType::Human | AuthorType::UnattributedHuman => {
                     assert!(
-                        !self.is_ai_author(actual_author),
+                        !Self::is_ai_author_helper(actual_author),
                         "Line {}: Expected Human author but got AI author '{}'. Expected line: {:?}\n{}",
                         line_num,
                         actual_author,
@@ -525,45 +446,6 @@ impl<'a> TestFile<'a> {
                 }
             }
         }
-    }
-
-    /// Parse git-ai blame output and extract the author for each line
-    /// Format: sha (author date line_num) content
-    fn parse_blame_output(&self, blame_output: &str) -> Vec<String> {
-        blame_output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                // Find the author between the first '(' and the timestamp
-                if let Some(start_paren) = line.find('(') {
-                    let after_paren = &line[start_paren + 1..];
-                    // Author is everything before the date/timestamp
-                    // Date format is typically "YYYY-MM-DD" or similar
-                    // Split by multiple spaces or look for year pattern
-                    let parts: Vec<&str> = after_paren.split_whitespace().collect();
-                    if !parts.is_empty() {
-                        // The author is typically the first part before the date
-                        // Date usually starts with a year (4 digits) or a number
-                        let mut author_parts = Vec::new();
-                        for part in parts {
-                            // Stop when we hit what looks like a date (starts with digit)
-                            if part.chars().next().unwrap_or('a').is_ascii_digit() {
-                                break;
-                            }
-                            author_parts.push(part);
-                        }
-                        return author_parts.join(" ");
-                    }
-                }
-                "unknown".to_string()
-            })
-            .collect()
-    }
-
-    /// Check if an author string indicates AI authorship
-    /// AI authors typically contain keywords like "mock_ai", agent names, etc.
-    fn is_ai_author(&self, author: &str) -> bool {
-        Self::is_ai_author_helper(author)
     }
 
     /// Get lines with a specific author type
@@ -856,4 +738,64 @@ macro_rules! lines {
             v
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TestFile;
+
+    #[test]
+    fn blame_parser_preserves_multi_word_author_and_email() {
+        let line = "abc123 (Jane Mary Doe <jane@example.com> 2026-07-22 12:00:00 -0400 1) content";
+
+        assert_eq!(
+            TestFile::parse_blame_line_static(line),
+            (
+                "Jane Mary Doe <jane@example.com>".to_string(),
+                "content".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn ai_detection_ignores_agent_names_inside_email_addresses() {
+        assert!(!TestFile::is_ai_author_helper(
+            "Human Developer <amp@example.com>"
+        ));
+        assert!(TestFile::is_ai_author_helper(
+            "GitHub Copilot <human@example.com>"
+        ));
+    }
+
+    #[test]
+    fn malformed_blame_line_is_returned_as_unknown() {
+        let line = "abc123 (Jane Doe 2026-07-22 12:00:00 -0400 1 content";
+
+        assert_eq!(
+            TestFile::parse_blame_line_static(line),
+            ("unknown".to_string(), line.to_string())
+        );
+    }
+
+    #[test]
+    fn committed_line_filter_only_removes_not_committed_yet() {
+        let blame_output = "\
+abc123 (Jane Doe 2026-07-22 12:00:00 -0400 1) committed human
+000000 (Not Committed Yet 2026-07-22 12:00:00 -0400 2) pending
+def456 (mock_ai 2026-07-22 12:00:00 -0400 3) committed ai
+";
+
+        let all_lines = TestFile::parse_blame_lines(blame_output);
+        let committed_lines = TestFile::parse_committed_blame_lines(blame_output);
+
+        assert_eq!(all_lines.len(), 3);
+        assert_eq!(all_lines[1].0, "Not Committed Yet");
+        assert_eq!(
+            committed_lines,
+            vec![
+                ("Jane Doe".to_string(), "committed human".to_string()),
+                ("mock_ai".to_string(), "committed ai".to_string()),
+            ]
+        );
+    }
 }

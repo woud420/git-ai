@@ -5,16 +5,16 @@ use crate::model::attribution_tracker::{
 use crate::model::authorship_log_serialization::generate_session_id;
 #[cfg(not(any(test, feature = "test-support")))]
 use crate::model::authorship_log_serialization::generate_short_hash;
+use crate::model::checkpoint_request::CheckpointRequest;
+pub use crate::model::checkpoint_request::PreparedPathRole;
 use crate::model::imara_diff_utils::{
     LineChangeTag, compute_line_changes, content_eq_ignoring_line_endings,
 };
 use crate::model::working_log::CheckpointKind;
 use crate::model::working_log::{Checkpoint, WorkingLogEntry};
-use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
 use crate::operations::git::repo_storage::PersistedWorkingLog;
 use crate::operations::git::repository::Repository;
 use futures::stream::{self, StreamExt};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -70,13 +70,6 @@ pub(crate) fn should_emit_agent_usage(agent_id: &AgentId) -> bool {
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) fn should_emit_agent_usage(_agent_id: &AgentId) -> bool {
     false
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PreparedPathRole {
-    Edited,
-    WillEdit,
 }
 
 #[derive(Debug, Clone)]

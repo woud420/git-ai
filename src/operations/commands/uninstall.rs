@@ -23,6 +23,8 @@ use crate::operations::commands::install_hooks::{
     TRACE2_EVENT_NESTING_KEY, TRACE2_EVENT_TARGET_KEY, remove_global_git_config_section,
 };
 use crate::operations::commands::install_manifest::{InstallManifest, remove_fence_block};
+use crate::operations::daemon::daemon_config::WINDOWS_PIPE_PREFIX;
+use crate::operations::mdm::utils::home_dir;
 use std::io::IsTerminal;
 use std::path::Path;
 
@@ -64,14 +66,15 @@ pub fn run_uninstall_all(args: &[String]) -> Result<(), GitAiError> {
 
     // 3. Daemon shutdown + socket/lock cleanup. Skipped inside test harnesses
     //    (mirrors ensure_daemon), where per-test daemons manage their own state.
+    //    Shutdown failure (e.g. daemon not running) is non-fatal: we warn and
+    //    continue so the remaining cleanup steps still execute.
     if std::env::var_os("GIT_AI_TEST_DB_PATH").is_none()
         && std::env::var_os("GITAI_TEST_DB_PATH").is_none()
     {
-        crate::operations::commands::daemon::handle_daemon(&["shutdown".to_string()]);
-        report.push("daemon: shutdown requested".to_string());
+        report.push(shutdown_daemon_best_effort());
     }
-    if let Some(home) = dirs::home_dir() {
-        let daemon_dir = home.join(".git-ai").join("internal").join("daemon");
+    {
+        let daemon_dir = home_dir().join(".git-ai").join("internal").join("daemon");
         if daemon_dir.exists() {
             match std::fs::remove_dir_all(&daemon_dir) {
                 Ok(()) => report.push("daemon sockets/locks: removed".to_string()),
@@ -91,13 +94,11 @@ pub fn run_uninstall_all(args: &[String]) -> Result<(), GitAiError> {
 
     // 6. Data.
     if purge {
-        if let Some(home) = dirs::home_dir() {
-            let data_dir = home.join(".git-ai");
-            if data_dir.exists() {
-                match std::fs::remove_dir_all(&data_dir) {
-                    Ok(()) => report.push("~/.git-ai (config + data): removed".to_string()),
-                    Err(e) => report.push(format!("~/.git-ai: FAILED ({})", e)),
-                }
+        let data_dir = home_dir().join(".git-ai");
+        if data_dir.exists() {
+            match std::fs::remove_dir_all(&data_dir) {
+                Ok(()) => report.push("~/.git-ai (config + data): removed".to_string()),
+                Err(e) => report.push(format!("~/.git-ai: FAILED ({})", e)),
             }
         }
     } else {
@@ -143,6 +144,10 @@ fn confirm(purge: bool) -> bool {
 /// Remove our trace2 configuration from the global git config, but only when
 /// the event target actually points at the git-ai daemon (never clobber a
 /// user's own trace2 setup).
+///
+/// Recognized patterns written by git-ai:
+/// - Unix socket:   `af_unix:stream:/…/.git-ai/…`  (contains `.git-ai`)
+/// - Windows pipe:  `\\.\pipe\git-ai-<hash16>-trace2`  (starts with [`WINDOWS_PIPE_PREFIX`])
 fn revert_trace2_config() -> String {
     let config = Config::fresh();
     let git_cmd = config.git_cmd().to_string();
@@ -158,7 +163,7 @@ fn revert_trace2_config() -> String {
     if current_target.is_empty() {
         return "git trace2 config: not set".to_string();
     }
-    if !current_target.contains(".git-ai") {
+    if !target_is_git_ai_owned(&current_target) {
         return format!(
             "git trace2 config: left untouched ({} does not point at git-ai)",
             TRACE2_EVENT_TARGET_KEY
@@ -173,11 +178,40 @@ fn revert_trace2_config() -> String {
     }
 }
 
+/// Return `true` when `target` was written by git-ai and is safe to remove.
+///
+/// git-ai writes two distinct formats depending on OS:
+/// - Unix: `af_unix:stream:<path>` where `<path>` contains `.git-ai`
+/// - Windows: `\\.\pipe\git-ai-<16-hex>-trace2`
+///
+/// The rare Unix long-path fallback socket (`$TMPDIR/git-ai-d-<hash>/trace.sock`,
+/// used when the home path exceeds the unix-socket length limit) is intentionally
+/// not matched: it contains neither marker and is left for a future extension.
+fn target_is_git_ai_owned(target: &str) -> bool {
+    target.contains(".git-ai") || target.starts_with(WINDOWS_PIPE_PREFIX)
+}
+
+/// Attempt to shut down the daemon, returning a report string.
+///
+/// The daemon may not be running at uninstall time, which is normal.  We treat
+/// shutdown failure as a non-fatal warning so the rest of the uninstall steps
+/// still execute.
+fn shutdown_daemon_best_effort() -> String {
+    use crate::operations::daemon::{ControlRequest, DaemonConfig, send_control_request};
+
+    let config = match DaemonConfig::from_env_or_default_paths() {
+        Ok(c) => c,
+        Err(e) => return format!("daemon: warning — could not resolve config ({})", e),
+    };
+    match send_control_request(&config.control_socket_path, &ControlRequest::Shutdown) {
+        Ok(_) => "daemon: shutdown requested".to_string(),
+        Err(e) => format!("daemon: warning — shutdown skipped ({})", e),
+    }
+}
+
 fn remove_binaries(manifest: &InstallManifest) -> Vec<String> {
     let mut report = Vec::new();
-    let Some(home) = dirs::home_dir() else {
-        return report;
-    };
+    let home = home_dir();
 
     // ~/.local/bin/git-ai symlink (only when it points into ~/.git-ai).
     // Check manifest symlinks first, then fall back to the well-known path.
@@ -239,9 +273,7 @@ fn remove_binaries(manifest: &InstallManifest) -> Vec<String> {
 /// with best-effort and a diff is printed when ambiguous content remains.
 fn clean_shell_rc_files(manifest: &InstallManifest) -> Vec<String> {
     let mut report = Vec::new();
-    let Some(home) = dirs::home_dir() else {
-        return report;
-    };
+    let home = home_dir();
 
     // Determine which rc files to clean: manifest-recorded (preferred) or
     // well-known fallback list for legacy installs.
@@ -307,12 +339,10 @@ fn clean_rc_file(path: &Path) -> Result<Option<bool>, std::io::Error> {
 }
 
 fn display_home(path: &Path) -> String {
-    match dirs::home_dir() {
-        Some(home) => match path.strip_prefix(&home) {
-            Ok(rel) => format!("~/{}", rel.display()),
-            Err(_) => path.display().to_string(),
-        },
-        None => path.display().to_string(),
+    let home = home_dir();
+    match path.strip_prefix(&home) {
+        Ok(rel) => format!("~/{}", rel.display()),
+        Err(_) => path.display().to_string(),
     }
 }
 
@@ -425,5 +455,36 @@ mod tests {
         clean_rc_file(&rc).unwrap();
         let result = std::fs::read_to_string(&rc).unwrap();
         assert_eq!(result, format!("{}{}", before, after));
+    }
+
+    // ── target_is_git_ai_owned ───────────────────────────────────────────────
+
+    #[test]
+    fn target_is_git_ai_owned_unix_socket() {
+        // af_unix socket path written by install-hooks on Unix.
+        assert!(target_is_git_ai_owned(
+            "af_unix:stream:/home/user/.git-ai/internal/daemon/trace2.sock"
+        ));
+    }
+
+    #[test]
+    fn target_is_git_ai_owned_windows_pipe() {
+        // Named-pipe path written by the daemon on Windows.
+        assert!(target_is_git_ai_owned(
+            r"\\.\pipe\git-ai-abcdef1234567890-trace2"
+        ));
+    }
+
+    #[test]
+    fn target_is_git_ai_owned_foreign_target_is_rejected() {
+        // A user's own tracer must not be removed.
+        assert!(!target_is_git_ai_owned("/tmp/my-own-trace.sock"));
+        assert!(!target_is_git_ai_owned(r"\\.\pipe\some-other-tool"));
+        assert!(!target_is_git_ai_owned("af_unix:stream:/tmp/notus"));
+    }
+
+    #[test]
+    fn target_is_git_ai_owned_empty_string_is_rejected() {
+        assert!(!target_is_git_ai_owned(""));
     }
 }

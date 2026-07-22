@@ -6,7 +6,7 @@ use crate::operations::mdm::agents::get_all_installers;
 use crate::operations::mdm::hook_installer::HookInstallerParams;
 use crate::operations::mdm::skills_installer;
 use crate::operations::mdm::spinner::{Spinner, print_diff};
-use crate::operations::mdm::utils::get_current_binary_path;
+use crate::operations::mdm::utils::{get_current_binary_path, home_dir};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -975,10 +975,7 @@ async fn async_run_uninstall(
 /// All telemetry now flows through the daemon control socket, so the per-PID
 /// log file system under `~/.git-ai/internal/logs/` is no longer needed.
 fn cleanup_legacy_envelope_logs() {
-    let Some(home) = dirs::home_dir() else {
-        return;
-    };
-    let internal = home.join(".git-ai").join("internal");
+    let internal = home_dir().join(".git-ai").join("internal");
 
     // Remove the entire logs directory
     let logs_dir = internal.join("logs");

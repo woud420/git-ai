@@ -16,7 +16,6 @@ src/model/repository/bash_history_db.rs	964
 src/model/repository/internal_db.rs	1060
 src/model/repository/notes_db.rs	1136
 src/model/stream_watermark.rs	688
-src/operations/authorship/attribution_recovery.rs	2152
 src/model/imara_diff_utils.rs	647
 src/operations/authorship/post_commit.rs	1432
 src/operations/authorship/rewrite.rs	1903
@@ -31,7 +30,6 @@ src/operations/commands/checkpoint_agent/orchestrator.rs	623
 src/operations/commands/checkpoint_agent/presets/cline.rs	654
 src/operations/commands/checkpoint_agent/presets/cursor.rs	680
 src/operations/commands/checkpoint_agent/presets/github_copilot/ide.rs	1014
-src/operations/commands/config.rs	2176
 src/operations/commands/daemon.rs	788
 src/operations/commands/debug.rs	1659
 src/operations/commands/git_hook_handlers.rs	615
@@ -45,6 +43,7 @@ src/operations/daemon/git_backend.rs	813
 src/operations/daemon/rewrite_metrics.rs	674
 src/operations/daemon/stream_worker.rs	2032
 src/operations/daemon/telemetry_worker.rs	2256
+src/operations/daemon/trace_normalizer.rs	2143
 src/operations/git/cli_parser.rs	1032
 src/operations/git/command_classification.rs	720
 src/operations/git/fast_reader.rs	636

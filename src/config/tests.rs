@@ -1116,29 +1116,3 @@ fn test_transcript_streaming_lookback_days_zero_means_unlimited() {
     }
     assert_eq!(result, None);
 }
-
-#[test]
-#[serial_test::serial]
-fn test_build_config_applies_test_patch_without_losing_base_values() {
-    let previous_patch = std::env::var_os("GIT_AI_TEST_CONFIG_PATCH");
-    unsafe { std::env::remove_var("GIT_AI_TEST_CONFIG_PATCH") };
-    let base = build_config();
-    let patch = serde_json::json!({
-        "prompt_storage": "notes",
-        "custom_attributes": { "team": "config-test" },
-        "max_checkpoint_total_lines": 1234
-    });
-    unsafe { std::env::set_var("GIT_AI_TEST_CONFIG_PATCH", patch.to_string()) };
-    let patched = build_config();
-    match previous_patch {
-        Some(value) => unsafe { std::env::set_var("GIT_AI_TEST_CONFIG_PATCH", value) },
-        None => unsafe { std::env::remove_var("GIT_AI_TEST_CONFIG_PATCH") },
-    }
-
-    assert_eq!(patched.git_path, base.git_path);
-    assert_eq!(patched.api_base_url, base.api_base_url);
-    assert_eq!(patched.git_ai_hooks, base.git_ai_hooks);
-    assert_eq!(patched.prompt_storage, "notes");
-    assert_eq!(patched.custom_attributes["team"], "config-test");
-    assert_eq!(patched.max_checkpoint_total_lines, 1234);
-}

@@ -1,3 +1,4 @@
+use crate::operations::git::alias_parser::parse_alias_tokens;
 use crate::operations::git::cli_parser::{ParsedGitInvocation, parse_git_cli_args};
 use crate::operations::git::repository::config_get_str_for_path_no_git_exec;
 use std::collections::HashSet;
@@ -164,69 +165,6 @@ fn resolve_alias_invocation_no_git_exec(
         expanded_args.extend(current.command_args.iter().cloned());
         current = parse_git_cli_args(&expanded_args);
     }
-}
-
-fn parse_alias_tokens(value: &str) -> Option<Vec<String>> {
-    let trimmed = value.trim_start();
-    if trimmed.starts_with('!') {
-        return None;
-    }
-
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut escaped = false;
-
-    for ch in trimmed.chars() {
-        if escaped {
-            current.push(ch);
-            escaped = false;
-            continue;
-        }
-
-        if in_single {
-            if ch == '\'' {
-                in_single = false;
-            } else {
-                current.push(ch);
-            }
-            continue;
-        }
-
-        if in_double {
-            match ch {
-                '"' => in_double = false,
-                '\\' => escaped = true,
-                _ => current.push(ch),
-            }
-            continue;
-        }
-
-        match ch {
-            '\'' => in_single = true,
-            '"' => in_double = true,
-            '\\' => escaped = true,
-            c if c.is_whitespace() => {
-                if !current.is_empty() {
-                    tokens.push(current.clone());
-                    current.clear();
-                }
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if escaped {
-        current.push('\\');
-    }
-    if in_single || in_double {
-        return None;
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    Some(tokens)
 }
 
 #[cfg(test)]

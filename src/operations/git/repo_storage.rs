@@ -4,7 +4,6 @@ use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::generate_short_hash;
 use crate::model::working_log::{CHECKPOINT_API_VERSION, Checkpoint, CheckpointKind};
 use crate::utils::normalize_to_posix;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -13,28 +12,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+pub use crate::model::working_log::InitialAttributions;
+
 pub const MAX_CHECKPOINTS_JSONL_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[cfg(feature = "test-support")]
 const TEST_CHECKPOINTS_JSONL_MAX_BYTES_ENV: &str = "GIT_AI_TEST_CHECKPOINTS_JSONL_MAX_BYTES";
-
-/// Initial attributions data structure stored in the INITIAL file
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct InitialAttributions {
-    /// Map of file path to line attributions
-    pub files: HashMap<String, Vec<LineAttribution>>,
-    /// Map of author_id (hash) to PromptRecord for prompt tracking
-    pub prompts: HashMap<String, PromptRecord>,
-    /// Optional blob snapshot of the file content represented by INITIAL.
-    #[serde(default)]
-    pub file_blobs: HashMap<String, String>,
-    /// Known human records: `h_<hash>` -> HumanRecord
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub humans: std::collections::BTreeMap<String, HumanRecord>,
-    /// Session records: `s_<session_id>` -> SessionRecord
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub sessions: std::collections::BTreeMap<String, SessionRecord>,
-}
 
 #[derive(Debug, Clone)]
 pub struct RepoStorage {

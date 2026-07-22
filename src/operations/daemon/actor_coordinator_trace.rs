@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+#[cfg(feature = "test-support")]
 use std::time::Duration;
 use tokio::sync::mpsc;
 

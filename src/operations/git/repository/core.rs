@@ -261,7 +261,7 @@ impl Repository {
     /// Whether git-ai collection is allowed for this repository under `config`.
     ///
     /// Fetches the repository's remotes and root once and delegates to the pure
-    /// [`config::Config::is_allowed_repository_with_context`] policy. Collection
+    /// `config::Config::is_allowed_repository_with_context` policy. Collection
     /// is opt-in: an empty `allowed_repositories` list denies every repository.
     pub fn is_collection_allowed(&self, config: &config::Config) -> bool {
         let remotes = self.remotes_with_urls().ok();

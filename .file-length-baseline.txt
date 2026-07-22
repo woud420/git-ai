@@ -7,8 +7,8 @@ src/config/file.rs	970
 src/config/mod.rs	638
 src/config/tests.rs	1119
 src/diagnostics.rs	1482
-src/metrics/attrs.rs	741
-src/metrics/pos_encoded.rs	637
+src/model/metrics/attrs.rs	741
+src/model/metrics/pos_encoded.rs	637
 src/model/api_types.rs	610
 src/model/authorship_log_serialization.rs	753
 src/model/repository/bash_history_db.rs	964

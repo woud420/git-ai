@@ -4,21 +4,37 @@
 //! Events are routed through the daemon telemetry worker.
 //!
 //! All public types are re-exported for external use (e.g., ingestion server).
+//! The data types live in `crate::model::metrics`; this module re-exports them
+//! so all existing `crate::metrics::*` consumer paths remain valid.
 
-pub mod attrs;
-pub mod events;
 pub mod local_stats;
-pub mod pos_encoded;
-pub mod types;
+
+// Sub-module shims: forward to the model layer so that paths like
+// `crate::metrics::pos_encoded::PosField` (used by #[macro_export] macros)
+// and `crate::metrics::attrs::attr_pos` continue to resolve.
+pub mod pos_encoded {
+    pub use crate::model::metrics::pos_encoded::*;
+}
+pub mod types {
+    pub use crate::model::metrics::types::*;
+}
+pub mod attrs {
+    pub use crate::model::metrics::attrs::*;
+}
+pub mod events {
+    pub use crate::model::metrics::events::*;
+}
 
 // Re-export all public types for external crates
-pub use attrs::EventAttributes;
-pub use events::{
+pub use crate::model::metrics::attrs::EventAttributes;
+pub use crate::model::metrics::events::{
     AgentUsageValues, CheckpointValues, CommittedValues, InstallHooksValues, OtelTraceValues,
     RewriteCommittedValues, SessionEventValues,
 };
-pub use pos_encoded::PosEncoded;
-pub use types::{EventValues, METRICS_API_VERSION, MetricEvent, MetricsBatch};
+pub use crate::model::metrics::pos_encoded::PosEncoded;
+pub use crate::model::metrics::types::{
+    EventValues, METRICS_API_VERSION, MetricEvent, MetricsBatch,
+};
 
 /// Record an event with values and attributes.
 ///

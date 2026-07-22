@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_metric_event_with_timestamp() {
-        use crate::metrics::events::CommittedValues;
+        use crate::model::metrics::events::CommittedValues;
 
         let values = CommittedValues::new().human_additions(50);
         let mut attrs = SparseArray::new();
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_metric_event_new_creates_current_timestamp() {
-        use crate::metrics::events::AgentUsageValues;
+        use crate::model::metrics::events::AgentUsageValues;
         use std::time::{SystemTime, UNIX_EPOCH};
 
         let values = AgentUsageValues::new();

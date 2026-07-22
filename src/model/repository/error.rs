@@ -102,13 +102,12 @@ impl PersistenceError {
         if let PersistenceError::Sqlite {
             code: Some(code), ..
         } = self
-        {
-            if matches!(
+            && matches!(
                 code,
                 rusqlite::ffi::ErrorCode::DatabaseBusy | rusqlite::ffi::ErrorCode::DatabaseLocked
-            ) {
-                return Retryability::Retryable { retry_after: None };
-            }
+            )
+        {
+            return Retryability::Retryable { retry_after: None };
         }
         Retryability::Terminal
     }

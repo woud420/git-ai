@@ -1,8 +1,7 @@
 use crate::clients::api::client::ApiClient;
+use crate::clients::api::error::http_status_error;
 use crate::error::GitAiError;
-use crate::model::api_types::{
-    ApiErrorResponse, CAPromptStoreReadResponse, CasUploadRequest, CasUploadResponse,
-};
+use crate::model::api_types::{CAPromptStoreReadResponse, CasUploadRequest, CasUploadResponse};
 
 /// CAS API endpoints
 impl ApiClient {
@@ -22,39 +21,13 @@ impl ApiClient {
             .as_str()
             .map_err(|e| GitAiError::Generic(format!("Failed to read response body: {}", e)))?;
 
-        match status_code {
-            200 => {
-                let cas_response: CasUploadResponse =
-                    serde_json::from_str(body).map_err(GitAiError::JsonError)?;
-                Ok(cas_response)
-            }
-            400 => {
-                let error_response: ApiErrorResponse =
-                    serde_json::from_str(body).unwrap_or_else(|_| ApiErrorResponse {
-                        error: "Invalid request body".to_string(),
-                        details: Some(serde_json::Value::String(body.to_string())),
-                    });
-                Err(GitAiError::Generic(format!(
-                    "Bad Request: {}",
-                    error_response.error
-                )))
-            }
-            500 => {
-                let error_response: ApiErrorResponse =
-                    serde_json::from_str(body).unwrap_or_else(|_| ApiErrorResponse {
-                        error: "Internal server error".to_string(),
-                        details: None,
-                    });
-                Err(GitAiError::Generic(format!(
-                    "Internal Server Error: {}",
-                    error_response.error
-                )))
-            }
-            _ => Err(GitAiError::Generic(format!(
-                "Unexpected status code {}: {}",
-                status_code, body
-            ))),
+        if status_code == 200 {
+            let cas_response: CasUploadResponse =
+                serde_json::from_str(body).map_err(GitAiError::JsonError)?;
+            return Ok(cas_response);
         }
+
+        Err(http_status_error("CAS upload", status_code, body, "unexpected error").into())
     }
 
     /// Read CAS objects by hash from the server
@@ -95,18 +68,13 @@ impl ApiClient {
                     serde_json::from_str(body).map_err(GitAiError::JsonError)?;
                 Ok(cas_response)
             }
-            404 => {
-                // All hashes not found — return empty response gracefully
-                Ok(CAPromptStoreReadResponse {
-                    results: Vec::new(),
-                    success_count: 0,
-                    failure_count: hashes.len(),
-                })
-            }
-            _ => Err(GitAiError::Generic(format!(
-                "CAS read failed with status {}: {}",
-                status_code, body
-            ))),
+            // All hashes not found — return empty response gracefully
+            404 => Ok(CAPromptStoreReadResponse {
+                results: Vec::new(),
+                success_count: 0,
+                failure_count: hashes.len(),
+            }),
+            _ => Err(http_status_error("CAS read", status_code, body, "unexpected error").into()),
         }
     }
 }

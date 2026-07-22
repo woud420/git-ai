@@ -82,6 +82,8 @@ pub use crate::model::telemetry::TelemetryEnvelope;
 // Test modules.
 #[cfg(test)]
 mod stream_worker_tests;
+#[cfg(test)]
+mod telemetry_worker_tests;
 
 #[cfg(test)]
 mod tests_coordinator;

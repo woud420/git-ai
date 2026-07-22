@@ -1,11 +1,10 @@
 //! Daemon diagnostics upload API.
 
 use crate::clients::api::client::ApiClient;
+use crate::clients::api::error::http_status_error;
 use crate::clients::api::metrics::metrics_upload_allowed;
 use crate::error::GitAiError;
-use crate::model::api_types::{
-    ApiErrorResponse, DaemonLogsUploadRequest, DaemonLogsUploadResponse,
-};
+use crate::model::api_types::{DaemonLogsUploadRequest, DaemonLogsUploadResponse};
 
 /// Returns whether daemon log uploads are allowed for the current API context.
 ///
@@ -28,39 +27,12 @@ impl ApiClient {
             .as_str()
             .map_err(|e| GitAiError::Generic(format!("Failed to read response body: {}", e)))?;
 
-        match status_code {
-            200 => {
-                let logs_response: DaemonLogsUploadResponse =
-                    serde_json::from_str(body).map_err(GitAiError::JsonError)?;
-                Ok(logs_response)
-            }
-            400 => {
-                let error_response: ApiErrorResponse =
-                    serde_json::from_str(body).unwrap_or_else(|_| ApiErrorResponse {
-                        error: "Invalid request body".to_string(),
-                        details: Some(serde_json::Value::String(body.to_string())),
-                    });
-                Err(GitAiError::Generic(format!(
-                    "Bad Request: {}",
-                    error_response.error
-                )))
-            }
-            401 => Err(GitAiError::Generic("Unauthorized".to_string())),
-            500 => {
-                let error_response: ApiErrorResponse =
-                    serde_json::from_str(body).unwrap_or_else(|_| ApiErrorResponse {
-                        error: "Internal server error".to_string(),
-                        details: None,
-                    });
-                Err(GitAiError::Generic(format!(
-                    "Internal Server Error: {}",
-                    error_response.error
-                )))
-            }
-            _ => Err(GitAiError::Generic(format!(
-                "Unexpected status code {}: {}",
-                status_code, body
-            ))),
+        if status_code == 200 {
+            let logs_response: DaemonLogsUploadResponse =
+                serde_json::from_str(body).map_err(GitAiError::JsonError)?;
+            return Ok(logs_response);
         }
+
+        Err(http_status_error("daemon logs upload", status_code, body, "unexpected error").into())
     }
 }

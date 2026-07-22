@@ -18,7 +18,6 @@ src/model/repository/notes_db.rs	1136
 src/model/stream_watermark.rs	688
 src/model/imara_diff_utils.rs	647
 src/operations/authorship/post_commit.rs	1432
-src/operations/authorship/rewrite.rs	1903
 src/operations/authorship/rewrite_stash.rs	825
 src/operations/authorship/secrets.rs	711
 src/operations/authorship/stats.rs	851

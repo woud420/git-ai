@@ -57,7 +57,6 @@ src/operations/git/refs.rs	1148
 src/operations/git/repo_storage.rs	963
 src/operations/mdm/agents/claude_code.rs	1257
 src/operations/mdm/agents/cline.rs	648
-src/operations/mdm/agents/codex.rs	2472
 src/operations/mdm/agents/cursor.rs	664
 src/operations/mdm/agents/droid.rs	1241
 src/operations/mdm/agents/gemini.rs	1063

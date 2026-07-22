@@ -1,3 +1,4 @@
+pub(crate) mod alias_parser;
 pub mod cli_parser;
 pub mod command_classification;
 pub mod fast_reader;

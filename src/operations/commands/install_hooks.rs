@@ -1,5 +1,6 @@
 use crate::config;
 use crate::error::GitAiError;
+use crate::operations::commands::install_manifest::{InstallManifest, TRACE2_GIT_CONFIG_KEYS};
 use crate::operations::daemon::DaemonConfig;
 use crate::operations::mdm::agents::get_all_installers;
 use crate::operations::mdm::hook_installer::HookInstallerParams;
@@ -349,13 +350,15 @@ pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     // Run async operations and convert result.
     let statuses = crate::tokio_runtime::block_on(async_run_install(&params, &options))?;
 
-    // Clean up legacy envelope logs directory and related artifacts.
-    // These are no longer used — all telemetry now routes through the daemon.
+    let statuses = to_hashmap(statuses);
+    // Clean up legacy artifacts and update the install manifest.
     if !options.dry_run {
         cleanup_legacy_envelope_logs();
+        InstallManifest::record_install_hooks(TRACE2_GIT_CONFIG_KEYS, &statuses).unwrap_or_else(
+            |e| eprintln!("[git-ai] warning: could not write install manifest: {e}"),
+        );
     }
-
-    Ok(to_hashmap(statuses))
+    Ok(statuses)
 }
 
 fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> {

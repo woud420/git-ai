@@ -62,6 +62,16 @@ git-ai uninstall            # keeps your config and local attribution data
 git-ai uninstall --purge    # also deletes ~/.git-ai
 ```
 
+If `git-ai` is not on your PATH, use the one-liner scripts instead:
+
+```bash
+# Mac / Linux / Windows (WSL)
+curl -sSL https://usegitai.com/uninstall.sh | bash
+
+# Windows PowerShell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://usegitai.com/uninstall.ps1 | iex"
+```
+
 **The [Git AI standard](https://github.com/git-ai-project/git-ai/blob/main/specs/git_ai_standard_v3.0.0.md) is supported by:**
 <table>
 <tr>

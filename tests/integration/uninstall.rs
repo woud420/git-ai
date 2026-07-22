@@ -2,8 +2,12 @@
 //! TestRepo isolates $HOME, so these tests plant realistic artifacts in the
 //! test home and assert the inverse-of-install inventory.
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use std::fs;
+
+fn uninstall_repo() -> TestRepo {
+    TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon)
+}
 
 fn plant_artifacts(repo: &TestRepo) -> std::path::PathBuf {
     let home = repo.test_home_path().clone();
@@ -31,7 +35,7 @@ fn plant_artifacts(repo: &TestRepo) -> std::path::PathBuf {
 
 #[test]
 fn test_uninstall_removes_artifacts_but_keeps_data() {
-    let repo = TestRepo::new_dedicated_daemon();
+    let repo = uninstall_repo();
     let home = plant_artifacts(&repo);
 
     // Point the global git config trace2 target at a git-ai socket path.
@@ -43,13 +47,31 @@ fn test_uninstall_removes_artifacts_but_keeps_data() {
     ])
     .unwrap();
 
-    repo.git_ai(&["uninstall", "--yes"])
+    let output = repo
+        .git_ai(&["uninstall", "--yes"])
         .expect("uninstall should succeed");
 
+    let bin_dir = home.join(".git-ai").join("bin");
+    #[cfg(not(windows))]
     assert!(
-        !home.join(".git-ai").join("bin").exists(),
-        "binary dir should be removed"
+        !bin_dir.exists(),
+        "Unix uninstall should remove the binary directory; uninstall output: {output}"
     );
+    #[cfg(windows)]
+    {
+        assert!(
+            bin_dir.exists(),
+            "Windows must leave the binary dir for removal after process exit; uninstall output: {output}"
+        );
+        let expected = format!(
+            "{}: remove manually after this process exits (Windows cannot delete a running executable)",
+            bin_dir.display()
+        );
+        assert!(
+            output.contains(&expected),
+            "expected Windows manual-removal instruction {expected:?}, got: {output}"
+        );
+    }
     let zshrc = fs::read_to_string(home.join(".zshrc")).unwrap();
     assert!(
         !zshrc.contains(".git-ai") && !zshrc.contains("Added by git-ai"),
@@ -74,21 +96,22 @@ fn test_uninstall_removes_artifacts_but_keeps_data() {
 
 #[test]
 fn test_uninstall_purge_removes_data_dir() {
-    let repo = TestRepo::new_dedicated_daemon();
+    let repo = uninstall_repo();
     let home = plant_artifacts(&repo);
 
-    repo.git_ai(&["uninstall", "--yes", "--purge"])
+    let output = repo
+        .git_ai(&["uninstall", "--yes", "--purge"])
         .expect("uninstall --purge should succeed");
 
     assert!(
         !home.join(".git-ai").exists(),
-        "~/.git-ai should be fully removed with --purge"
+        "~/.git-ai should be fully removed with --purge; uninstall output: {output}"
     );
 }
 
 #[test]
 fn test_uninstall_leaves_foreign_trace2_config_alone() {
-    let repo = TestRepo::new_dedicated_daemon();
+    let repo = uninstall_repo();
     plant_artifacts(&repo);
 
     repo.git(&[
@@ -117,7 +140,7 @@ fn test_uninstall_leaves_foreign_trace2_config_alone() {
 /// directly to the global git config.
 #[test]
 fn test_uninstall_removes_windows_pipe_trace2_target() {
-    let repo = TestRepo::new_dedicated_daemon();
+    let repo = uninstall_repo();
     plant_artifacts(&repo);
 
     // The daemon writes \\.\pipe\git-ai-<hash16>-trace2 on Windows.

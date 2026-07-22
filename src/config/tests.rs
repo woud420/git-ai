@@ -12,8 +12,6 @@ use super::file::{
     ConfigPatch, FileConfig, UpdateChannel, build_config, parse_file_config_bytes,
     resolve_telemetry_enabled,
 };
-#[cfg(unix)]
-use super::file::path_is_git_ai_binary;
 use super::notes_backend::{NotesBackendConfig, NotesBackendKind};
 use super::patterns::remote_matches_patterns;
 use super::prompt_storage::PromptStorageMode;
@@ -940,10 +938,8 @@ fn test_path_is_git_ai_binary_symlink_to_git_ai() {
     let dir = tempfile::tempdir().unwrap();
     let git_ai = dir.path().join("git-ai");
     fs::write(&git_ai, "fake-binary").unwrap();
-    #[cfg(unix)]
     std::os::unix::fs::symlink(&git_ai, dir.path().join("git")).unwrap();
-    #[cfg(unix)]
-    assert!(path_is_git_ai_binary(&dir.path().join("git")));
+    assert!(super::file::path_is_git_ai_binary(&dir.path().join("git")));
 }
 
 #[test]

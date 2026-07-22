@@ -453,6 +453,14 @@ if [[ ! -d "$REPO_DIR/.git" ]]; then
   exit 1
 fi
 
+# Benchmark attribution is intentional and validated through refs/notes/ai, so
+# configure the isolated runtime before creating any checkpointed commits. The
+# repository must exist first because path-valued configuration resolves remotes.
+GIT_AI_DEBUG=0 GIT_AI_DEBUG_PERFORMANCE=0 \
+  "$GIT_AI_BIN" config set notes_backend.kind git_notes >/dev/null
+GIT_AI_DEBUG=0 GIT_AI_DEBUG_PERFORMANCE=0 \
+  "$GIT_AI_BIN" config --add allowed_repositories "$REPO_DIR" >/dev/null
+
 DEFAULT_BRANCH="$("$GIT_BIN" -C "$REPO_DIR" rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|^origin/||')"
 if [[ -z "$DEFAULT_BRANCH" || "$DEFAULT_BRANCH" == "HEAD" ]]; then
   if "$GIT_BIN" -C "$REPO_DIR" rev-parse --verify origin/main >/dev/null 2>&1; then

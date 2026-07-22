@@ -655,13 +655,10 @@ jobs:
           & (Join-Path $env:GITHUB_WORKSPACE "uninstall.ps1") -Yes
           if ($LASTEXITCODE -ne 0) { throw "uninstall.ps1 failed with exit code $LASTEXITCODE" }
           $failures = @()
-          # 1. On Windows uninstall.rs cannot delete a running exe, so it leaves
-          #    ~/.git-ai/bin in place and asks the user to remove it after the
-          #    process exits. Additionally, remove_binaries resolves home via
-          #    dirs::home_dir() (the real runner profile), so the TEST_HOME bin
-          #    dir is doubly out of its reach: wrong home AND locked exe. Complete
-          #    the documented manual step here; success also proves the uninstall's
-          #    daemon shutdown released the exe lock.
+          # 1. On Windows uninstall.rs cannot delete a running exe, so it reports
+          #    the bin dir and asks the user to remove it after the process exits.
+          #    Complete the documented manual step here; a successful removal also
+          #    proves that uninstall's daemon shutdown released the exe lock.
           if (Test-Path -LiteralPath $installDir) {
             $removed = $false
             for ($i = 0; $i -lt 30; $i++) {
@@ -678,17 +675,14 @@ jobs:
           if (Test-Path -LiteralPath $gitAiExe) {
             $failures += "git-ai.exe still present under $installDir"
           }
-          # 2. Postcondition of uninstall.rs::revert_trace2_config: any eventTarget
-          #    pointing into ~/.git-ai is removed. On Windows install configures a
-          #    named pipe (\\.\pipe\git-ai-<hash>-trace2) with no '.git-ai'
-          #    component, which that guard leaves untouched by design — so assert
-          #    the target is unset OR does not point into ~/.git-ai.
+          # 2. uninstall.rs::revert_trace2_config now recognises both Unix socket
+          #    paths (containing '.git-ai') and Windows named-pipe paths
+          #    (prefix '\\.\pipe\git-ai-').  With this fix, trace2.eventTarget
+          #    must be fully unset after uninstall.
           $trace2Target = git config --global --get trace2.eventTarget 2>$null
           if ($LASTEXITCODE -ne 0) { $trace2Target = $null }
-          if ($trace2Target -and ($trace2Target -match '\.git-ai')) {
-            $failures += "trace2.eventTarget still points into ~/.git-ai: $trace2Target"
-          } elseif ($trace2Target) {
-            Write-Host "NOTE: trace2.eventTarget left as '$trace2Target' (named pipe — uninstall.rs only reverts targets containing '.git-ai')"
+          if ($trace2Target) {
+            $failures += "trace2.eventTarget must be unset after uninstall but got: $trace2Target"
           }
           # 3. Without --purge the ~/.git-ai data dir (config + local databases) is
           #    kept, and uninstall.rs only LOADS install-manifest.json to drive the
@@ -701,15 +695,12 @@ jobs:
               $failures += "$kept missing — uninstall without --purge must keep ~/.git-ai"
             }
           }
-          # 4. rc fence: install.ps1 wrote a fenced block to ~/.bashrc, but the
-          #    binary resolves home via the Windows known-folder API
-          #    (dirs::home_dir), which ignores this job's USERPROFILE redirection,
-          #    so the fence in the redirected test home is not cleaned here.
-          #    Report it as a diagnostic only — the fence-removal contract is
-          #    asserted for real on the Unix jobs.
+          # 4. rc fence blocks must be removed: uninstall.rs now resolves home via
+          #    the project's env-honoring home_dir() (respects USERPROFILE) so it
+          #    correctly targets the redirected TEST_HOME used by this job.
           foreach ($rc in @((Join-Path $env:USERPROFILE ".bashrc"), (Join-Path $env:USERPROFILE ".bash_profile"))) {
             if ((Test-Path -LiteralPath $rc) -and (Select-String -Path $rc -Pattern '# >>> git-ai >>>' -SimpleMatch -Quiet)) {
-              Write-Host "NOTE: git-ai fence block still present in $rc (known: dirs::home_dir ignores the USERPROFILE redirection used by this job)"
+              $failures += "git-ai fence block still present in $rc after uninstall"
             }
           }
           if ($failures.Count -gt 0) {

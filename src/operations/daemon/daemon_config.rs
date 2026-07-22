@@ -14,6 +14,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::time::Duration;
 
+/// Prefix for every Windows named-pipe path the daemon creates.
+///
+/// The full pipe names are `\\.\pipe\git-ai-<hash16>-trace2` and
+/// `\\.\pipe\git-ai-<hash16>-control`.  `revert_trace2_config` checks this
+/// prefix to recognise git-ai-owned `trace2.eventTarget` values on Windows.
+pub const WINDOWS_PIPE_PREFIX: &str = r"\\.\pipe\git-ai-";
+
 pub const TRACE_INGEST_SEQ_FIELD: &str = "git_ai_ingest_seq";
 pub const TRACE_ROOT_ARGV_FIELD: &str = "git_ai_root_argv";
 pub const TRACE_ROOT_STARTED_AT_NS_FIELD: &str = "git_ai_root_started_at_ns";

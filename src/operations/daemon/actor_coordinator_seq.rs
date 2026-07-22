@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::operations::git::repo_state::common_dir_for_worktree;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -29,7 +30,9 @@ impl ActorDaemonCoordinator {
     ) -> Result<(), GitAiError> {
         {
             let pending_slots = self.pending_root_slots_by_root.lock().map_err(|_| {
-                GitAiError::Generic("pending root slots map lock poisoned".to_string())
+                PersistenceError::LockPoisoned {
+                    what: "pending root slots map",
+                }
             })?;
             if pending_slots.contains_key(root_sid) {
                 return Ok(());
@@ -38,7 +41,9 @@ impl ActorDaemonCoordinator {
 
         let order = {
             let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
-                GitAiError::Generic("family sequencer map lock poisoned".to_string())
+                PersistenceError::LockPoisoned {
+                    what: "family sequencer map",
+                }
             })?;
             let state =
                 sequencers
@@ -60,7 +65,9 @@ impl ActorDaemonCoordinator {
 
         self.pending_root_slots_by_root
             .lock()
-            .map_err(|_| GitAiError::Generic("pending root slots map lock poisoned".to_string()))?
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending root slots map",
+            })?
             .insert(
                 root_sid.to_string(),
                 PendingRootSlot {
@@ -77,7 +84,10 @@ impl ActorDaemonCoordinator {
     ) -> Result<Option<PendingRootSlot>, GitAiError> {
         self.pending_root_slots_by_root
             .lock()
-            .map_err(|_| GitAiError::Generic("pending root slots map lock poisoned".to_string()))
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending root slots map",
+            })
+            .map_err(Into::into)
             .map(|mut slots| slots.remove(root_sid))
     }
 
@@ -137,7 +147,9 @@ impl ActorDaemonCoordinator {
         let _guard = exec_lock.lock().await;
         {
             let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
-                GitAiError::Generic("family sequencer map lock poisoned".to_string())
+                PersistenceError::LockPoisoned {
+                    what: "family sequencer map",
+                }
             })?;
             let state =
                 sequencers
@@ -172,7 +184,9 @@ impl ActorDaemonCoordinator {
     pub(crate) async fn drain_all_ready_family_sequencers(&self) -> Result<(), GitAiError> {
         let families = {
             let map = self.family_sequencers_by_family.lock().map_err(|_| {
-                GitAiError::Generic("family sequencer map lock poisoned".to_string())
+                PersistenceError::LockPoisoned {
+                    what: "family sequencer map",
+                }
             })?;
             map.keys().cloned().collect::<Vec<_>>()
         };
@@ -206,7 +220,9 @@ impl ActorDaemonCoordinator {
         let _guard = exec_lock.lock().await;
         {
             let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
-                GitAiError::Generic("family sequencer map lock poisoned".to_string())
+                PersistenceError::LockPoisoned {
+                    what: "family sequencer map",
+                }
             })?;
             let state = sequencers
                 .entry(family.clone())
@@ -243,10 +259,12 @@ impl ActorDaemonCoordinator {
         started_at_ns: u128,
         entry_root_sid: Option<&str>,
     ) -> Result<bool, GitAiError> {
-        let ingress = self
-            .trace_ingress_state
-            .lock()
-            .map_err(|_| GitAiError::Generic("trace ingress state lock poisoned".to_string()))?;
+        let ingress =
+            self.trace_ingress_state
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "trace ingress state",
+                })?;
 
         for (root_sid, open_count) in &ingress.root_open_connections {
             if *open_count == 0 || entry_root_sid == Some(root_sid.as_str()) {
@@ -284,10 +302,11 @@ impl ActorDaemonCoordinator {
         seq: u64,
         error: &GitAiError,
     ) -> Result<(), GitAiError> {
-        let mut map = self
-            .side_effect_errors_by_family
-            .lock()
-            .map_err(|_| GitAiError::Generic("side effect errors map lock poisoned".to_string()))?;
+        let mut map = self.side_effect_errors_by_family.lock().map_err(|_| {
+            PersistenceError::LockPoisoned {
+                what: "side effect errors map",
+            }
+        })?;
         let family_errors = map.entry(family.to_string()).or_insert_with(BTreeMap::new);
         family_errors.insert(seq, error.to_string());
         while family_errors.len() > 256 {
@@ -304,10 +323,11 @@ impl ActorDaemonCoordinator {
         &self,
         family: &str,
     ) -> Result<Option<String>, GitAiError> {
-        let map = self
-            .side_effect_errors_by_family
-            .lock()
-            .map_err(|_| GitAiError::Generic("side effect errors map lock poisoned".to_string()))?;
+        let map = self.side_effect_errors_by_family.lock().map_err(|_| {
+            PersistenceError::LockPoisoned {
+                what: "side effect errors map",
+            }
+        })?;
         Ok(map
             .get(family)
             .and_then(|errors| errors.iter().next_back().map(|(_, error)| error.clone())))
@@ -323,8 +343,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .recent_replay_prerequisites_by_family
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("recent replay prerequisites map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "recent replay prerequisites map",
             })?;
         let entries = map.entry(family.to_string()).or_insert_with(VecDeque::new);
         entries.push_back(prerequisite);
@@ -342,10 +362,12 @@ impl ActorDaemonCoordinator {
         let Some(dir) = self.test_completion_log_dir.as_ref() else {
             return Ok(());
         };
-        let _guard = self
-            .test_completion_log_lock
-            .lock()
-            .map_err(|_| GitAiError::Generic("test completion log lock poisoned".to_string()))?;
+        let _guard =
+            self.test_completion_log_lock
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "test completion log",
+                })?;
 
         fs::create_dir_all(dir)?;
         let mut hasher = Sha256::new();

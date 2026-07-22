@@ -5,6 +5,7 @@ use crate::clients::api::metrics::{MetricsUploadResponse, metrics_upload_allowed
 use crate::clients::api::{ApiClient, ApiContext};
 use crate::error::GitAiError;
 use crate::metrics::{MetricEvent, MetricsBatch};
+use crate::model::repository::error::PersistenceError;
 use crate::model::repository::metrics_db::{METADATA_BACKFILL_BATCH_SIZE, MetricRecord};
 use crate::observability::MAX_METRICS_PER_ENVELOPE;
 use crate::operations::git::repository::resolve_api_author_identity;
@@ -38,7 +39,7 @@ fn backfill_metrics_event_metadata(db: MetricsDbHandle) -> Result<(), GitAiError
         let (summary, last_id) = {
             let mut db_lock = db
                 .lock()
-                .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
+                .map_err(|_| PersistenceError::LockPoisoned { what: "metrics DB" })?;
             db_lock.backfill_event_metadata_batch_after(after_id, METADATA_BACKFILL_BATCH_SIZE)?
         };
 
@@ -78,7 +79,7 @@ pub(super) fn store_metrics_in_db_with(
         .collect::<Result<_, _>>()?;
     let mut db_lock = db?
         .lock()
-        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))?;
+        .map_err(|_| PersistenceError::LockPoisoned { what: "metrics DB" })?;
     db_lock.insert_events(&event_jsons)
 }
 
@@ -132,7 +133,7 @@ pub(super) fn count_pending_metrics_for_await(stores: TelemetryStores) -> usize 
     stores
         .metrics
         .lock()
-        .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))
+        .map_err(|_| GitAiError::from(PersistenceError::LockPoisoned { what: "metrics DB" }))
         .and_then(|db| db.count_retryable())
         .unwrap_or(0)
 }
@@ -152,7 +153,7 @@ fn flush_pending_metrics_from_db(
     let db = stores.metrics;
     let lock_db = || {
         db.lock()
-            .map_err(|_| GitAiError::Generic("metrics DB lock poisoned".to_string()))
+            .map_err(|_| GitAiError::from(PersistenceError::LockPoisoned { what: "metrics DB" }))
     };
     flush_pending_metric_records_with(
         |limit| lock_db().and_then(|mut l| l.dequeue_pending_batch(limit)),

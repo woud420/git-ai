@@ -15,6 +15,14 @@ pub fn open_with_memory_limits(path: impl AsRef<Path>) -> rusqlite::Result<Conne
     Ok(conn)
 }
 
+pub fn open_writable_with_memory_limits(path: impl AsRef<Path>) -> rusqlite::Result<Connection> {
+    let conn = open_with_memory_limits(path)?;
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;",
+    )?;
+    Ok(conn)
+}
+
 pub fn open_with_flags_and_memory_limits(
     path: impl AsRef<Path>,
     flags: OpenFlags,
@@ -39,6 +47,32 @@ mod tests {
             .pragma_query_value(None, "cache_size", |row| row.get(0))
             .unwrap();
         assert_eq!(cache_size, MEMORY_LIMIT_CACHE_SIZE_KIB);
+    }
+
+    #[test]
+    fn open_writable_with_memory_limits_sets_write_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("writable.db");
+
+        let conn = open_writable_with_memory_limits(&db_path).unwrap();
+
+        let cache_size: i32 = conn
+            .pragma_query_value(None, "cache_size", |row| row.get(0))
+            .unwrap();
+        let journal_mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        let synchronous: i32 = conn
+            .pragma_query_value(None, "synchronous", |row| row.get(0))
+            .unwrap();
+        let temp_store: i32 = conn
+            .pragma_query_value(None, "temp_store", |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(cache_size, MEMORY_LIMIT_CACHE_SIZE_KIB);
+        assert_eq!(journal_mode, "wal");
+        assert_eq!(synchronous, 1);
+        assert_eq!(temp_store, 2);
     }
 
     #[test]

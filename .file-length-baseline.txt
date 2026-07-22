@@ -23,7 +23,6 @@ src/operations/authorship/secrets.rs	711
 src/operations/authorship/stats.rs	851
 src/operations/ci/ci_context.rs	1083
 src/operations/ci/gitlab.rs	800
-src/operations/commands/analyze/sessions.rs	1862
 src/operations/commands/checkpoint_agent/bash_tool.rs	1703
 src/operations/commands/checkpoint_agent/orchestrator.rs	623
 src/operations/commands/checkpoint_agent/presets/cline.rs	654

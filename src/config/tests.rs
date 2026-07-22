@@ -10,8 +10,10 @@ use super::author::AuthorConfig;
 use super::file::CodexHooksFormat;
 use super::file::{
     ConfigPatch, FileConfig, UpdateChannel, build_config, parse_file_config_bytes,
-    path_is_git_ai_binary, resolve_telemetry_enabled,
+    resolve_telemetry_enabled,
 };
+#[cfg(unix)]
+use super::file::path_is_git_ai_binary;
 use super::notes_backend::{NotesBackendConfig, NotesBackendKind};
 use super::patterns::remote_matches_patterns;
 use super::prompt_storage::PromptStorageMode;
@@ -932,6 +934,7 @@ fn test_config_patch_accepts_both_allowlist_keys() {
 }
 
 #[test]
+#[cfg(unix)]
 fn test_path_is_git_ai_binary_symlink_to_git_ai() {
     // A symlink `git → git-ai` should be detected as git-ai.
     let dir = tempfile::tempdir().unwrap();

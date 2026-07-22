@@ -10,6 +10,7 @@
 //! - `git-ai install-hooks` (git config keys + agent hooks, merged on top)
 
 use crate::error::GitAiError;
+use crate::operations::mdm::utils::home_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -59,15 +60,13 @@ pub struct InstallManifest {
 }
 
 impl InstallManifest {
-    fn manifest_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".git-ai").join("install-manifest.json"))
+    fn manifest_path() -> PathBuf {
+        home_dir().join(".git-ai").join("install-manifest.json")
     }
 
     /// Load the manifest from disk, returning a default if absent or unreadable.
     pub fn load() -> Self {
-        let Some(path) = Self::manifest_path() else {
-            return Self::default_with_version();
-        };
+        let path = Self::manifest_path();
         let Ok(bytes) = std::fs::read(&path) else {
             return Self::default_with_version();
         };
@@ -76,9 +75,7 @@ impl InstallManifest {
 
     /// Persist the manifest, creating `~/.git-ai/` if needed.
     pub fn save(&self) -> Result<(), GitAiError> {
-        let path = Self::manifest_path().ok_or_else(|| {
-            GitAiError::Generic("cannot determine home directory for manifest".to_string())
-        })?;
+        let path = Self::manifest_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

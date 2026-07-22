@@ -111,3 +111,32 @@ fn test_uninstall_leaves_foreign_trace2_config_alone() {
         "a user's own trace2 target must not be touched"
     );
 }
+
+/// Windows named-pipe targets written by the git-ai daemon must be removed.
+/// We simulate this on all platforms by writing the pipe-format string
+/// directly to the global git config.
+#[test]
+fn test_uninstall_removes_windows_pipe_trace2_target() {
+    let repo = TestRepo::new_dedicated_daemon();
+    plant_artifacts(&repo);
+
+    // The daemon writes \\.\pipe\git-ai-<hash16>-trace2 on Windows.
+    repo.git(&[
+        "config",
+        "--global",
+        "trace2.eventTarget",
+        r"\\.\pipe\git-ai-abcdef1234567890-trace2",
+    ])
+    .unwrap();
+
+    repo.git_ai(&["uninstall", "--yes"])
+        .expect("uninstall should succeed");
+
+    let trace2 = repo
+        .git(&["config", "--global", "--get", "trace2.eventTarget"])
+        .unwrap_or_default();
+    assert!(
+        trace2.trim().is_empty(),
+        "Windows named-pipe trace2 target must be removed by uninstall, got: {trace2}"
+    );
+}

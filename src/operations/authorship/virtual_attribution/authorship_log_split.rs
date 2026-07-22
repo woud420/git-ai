@@ -7,7 +7,7 @@ use super::types::{AuthorshipLogDiffContext, VirtualAttributions};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::hunk_shift::apply_hunk_shifts_to_line_attributions;
-use crate::model::working_log::CheckpointKind;
+use crate::model::working_log::{CheckpointKind, InitialAttributions};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 
@@ -32,14 +32,12 @@ impl VirtualAttributions {
     ) -> Result<
         (
             crate::model::authorship_log_serialization::AuthorshipLog,
-            crate::operations::git::repo_storage::InitialAttributions,
+            InitialAttributions,
             HashMap<String, String>,
         ),
         GitAiError,
     > {
         use crate::model::authorship_log::{HumanRecord, SessionRecord};
-        use crate::operations::git::repo_storage::InitialAttributions;
-
         let mut authorship_log = self.seed_authorship_log_metadata();
 
         let mut initial_files: HashMap<String, Vec<LineAttribution>> = HashMap::new();

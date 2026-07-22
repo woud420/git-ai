@@ -2,7 +2,7 @@ use crate::checkpoint_content_budget::CheckpointContentBudget;
 use crate::config;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
+use crate::model::checkpoint_request::CheckpointRequest;
 use crate::operations::git::cli_parser::{ParsedGitInvocation, parse_git_cli_args};
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::repository::{Repository, discover_repository_in_path_no_git_exec};
@@ -335,10 +335,10 @@ pub fn resolve_checkpoint_request(
     request: &mut CheckpointRequest,
 ) -> Result<Option<crate::operations::daemon::checkpoint::ResolvedCheckpointExecution>, GitAiError>
 {
+    use crate::model::checkpoint_request::BaseCommit;
     use crate::operations::authorship::ignore::{
         build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
     };
-    use crate::operations::commands::checkpoint_agent::orchestrator::BaseCommit;
     use crate::utils::normalize_to_posix;
 
     let Some(first_file) = request.files.first() else {

@@ -2,12 +2,14 @@
 
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::stream_types::{StreamBatch, StreamError};
-use crate::model::stream_watermark::{ByteOffsetWatermark, WatermarkStrategy};
+use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::mdm::utils::codex_home_dir;
-use crate::operations::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
+use crate::operations::streams::agent::{
+    Agent, PathResolverKind, StreamDescriptor, read_jsonl_byte_stream,
+};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -195,97 +197,14 @@ impl Agent for CodexAgent {
         watermark: Box<dyn WatermarkStrategy>,
         session_id: &str,
     ) -> Result<StreamBatch, StreamError> {
-        // Downcast watermark to ByteOffsetWatermark
-        let byte_watermark = watermark
-            .as_any()
-            .downcast_ref::<ByteOffsetWatermark>()
-            .ok_or_else(|| StreamError::Fatal {
-                message: format!(
-                    "Codex reader requires ByteOffsetWatermark, got incompatible type for session {}",
-                    session_id
-                ),
-            })?;
-
-        let start_offset = byte_watermark.0;
-
-        // Open file
-        let file = File::open(path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                StreamError::Fatal {
-                    message: format!("Transcript file not found: {}", path.display()),
-                }
-            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                StreamError::Fatal {
-                    message: format!("Permission denied reading transcript: {}", path.display()),
-                }
-            } else {
-                StreamError::Transient {
-                    message: format!("Failed to open transcript file: {}", e),
-                    retry_after: Duration::from_secs(5),
-                }
-            }
-        })?;
-
-        let mut reader = BufReader::new(file);
-
-        // Seek to watermark position
-        reader
-            .seek(SeekFrom::Start(start_offset))
-            .map_err(|e| StreamError::Transient {
-                message: format!("Failed to seek to offset {}: {}", start_offset, e),
-                retry_after: Duration::from_secs(5),
-            })?;
-
-        let batch_limit = self.batch_size_hint();
-        let mut events = Vec::with_capacity(batch_limit);
-        let mut current_offset = start_offset;
-        let mut line_number = 0;
-        let mut line = String::new();
-
-        loop {
-            match crate::model::stream_types::read_jsonl_line(&mut reader, &mut line).map_err(
-                |e| StreamError::Transient {
-                    message: format!("I/O error reading line: {}", e),
-                    retry_after: Duration::from_secs(5),
-                },
-            )? {
-                crate::model::stream_types::JsonlLineState::Eof => break,
-                crate::model::stream_types::JsonlLineState::Partial => break,
-                crate::model::stream_types::JsonlLineState::Complete(bytes_read) => {
-                    line_number += 1;
-                    current_offset += bytes_read as u64;
-                }
-            }
-
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let entry: serde_json::Value = match serde_json::from_str(&line) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(
-                        line = line_number,
-                        path = %path.display(),
-                        error = %e,
-                        "skipping malformed JSON line"
-                    );
-                    continue;
-                }
-            };
-
-            events.push(entry);
-            if events.len() >= batch_limit {
-                break;
-            }
-        }
-
-        let new_watermark = Box::new(ByteOffsetWatermark::new(current_offset));
-
-        Ok(StreamBatch {
-            events,
-            new_watermark,
-        })
+        read_jsonl_byte_stream(
+            path,
+            watermark,
+            session_id,
+            self.batch_size_hint(),
+            "Codex",
+            "open",
+        )
     }
 
     fn extract_event_timestamp(
@@ -344,6 +263,7 @@ impl Agent for CodexAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::stream_watermark::ByteOffsetWatermark;
 
     #[test]
     fn test_sweep_strategy() {

@@ -1,8 +1,8 @@
 //! Pre- and post-tool-use hook orchestration for bash-tool stat-diff attribution.
 
 use crate::error::GitAiError;
+use crate::model::daemon_control::ControlRequest;
 use crate::model::working_log::AgentId;
-use crate::operations::daemon::control_api::ControlRequest;
 use crate::operations::daemon::send_control_request;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

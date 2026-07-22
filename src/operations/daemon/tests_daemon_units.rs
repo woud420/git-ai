@@ -1,7 +1,6 @@
 use super::*;
+use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
 use crate::model::working_log::CheckpointKind;
-use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
-use crate::operations::daemon::checkpoint::PreparedPathRole;
 use crate::operations::daemon::cherry_pick_helpers::{
     cherry_pick_source_args_from_command_args, rebase_new_tip_from_command,
     revert_source_args_from_command_args,
@@ -62,7 +61,7 @@ impl Drop for EnvVarGuard {
 }
 
 fn sample_checkpoint_request() -> ControlRequest {
-    use crate::operations::commands::checkpoint_agent::orchestrator::{BaseCommit, CheckpointFile};
+    use crate::model::checkpoint_request::{BaseCommit, CheckpointFile};
     ControlRequest::CheckpointRun {
         request: Box::new(CheckpointRequest {
             trace_id: "test-trace".to_string(),

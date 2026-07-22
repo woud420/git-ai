@@ -4,7 +4,8 @@
 //! flushing before the process exits. This is useful in cloud sandboxes where
 //! the container may be torn down immediately after a build step.
 
-use crate::operations::daemon::{ControlRequest, ControlResponse, send_control_request};
+use crate::model::daemon_control::{ControlRequest, ControlResponse};
+use crate::operations::daemon::send_control_request;
 use serde::Deserialize;
 use std::thread;
 use std::time::Duration;

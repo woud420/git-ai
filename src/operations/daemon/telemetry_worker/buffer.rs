@@ -2,8 +2,8 @@
 
 use crate::metrics::MetricEvent;
 use crate::model::api_types::DaemonLogEvent;
+use crate::model::daemon_control::CasSyncPayload;
 use crate::model::telemetry::TelemetryEnvelope;
-use crate::operations::daemon::control_api::CasSyncPayload;
 use serde_json::Value;
 
 pub(super) const MAX_DAEMON_LOG_BUFFER_EVENTS: usize = 5000;

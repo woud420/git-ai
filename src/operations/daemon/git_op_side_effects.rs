@@ -1,5 +1,6 @@
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
+use crate::model::working_log::InitialAttributions;
 use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
 use crate::operations::daemon::side_effect_helpers::{
     matches_any_pathspec, parsed_invocation_for_normalized_command,
@@ -149,7 +150,7 @@ pub fn remove_working_log_attributions_for_pathspecs(
             .collect();
         let mut filtered_blobs = initial.file_blobs;
         filtered_blobs.retain(|file, _| !matches_any_pathspec(file, pathspecs));
-        working_log.write_initial(crate::operations::git::repo_storage::InitialAttributions {
+        working_log.write_initial(InitialAttributions {
             files: filtered_files,
             prompts: initial.prompts,
             file_blobs: filtered_blobs,

@@ -31,10 +31,7 @@ fn log_raw_shows_authorship_note() {
     // Give it a dedicated daemon so another parallel TestRepo cannot rewrite
     // the daemon's home config, and allow the exact repo/worktree it created.
     let mut repo = TestRepo::new_dedicated_daemon();
-    let repo_root = repo.canonical_path().to_string_lossy().replace('\\', "/");
-    repo.patch_git_ai_config(move |patch| {
-        patch.allowed_repositories = Some(vec![repo_root]);
-    });
+    repo.allow_only_self_for_collection();
 
     let mut file = repo.filename("raw.txt");
     file.set_contents(lines!["AI raw line".ai()]);

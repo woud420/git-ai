@@ -4,7 +4,7 @@ use super::TelemetryStores;
 use super::metrics_flush::default_api_base_and_client;
 use crate::clients::api::{CasObject, CasUploadRequest};
 use crate::config::DEFAULT_API_BASE_URL;
-use crate::operations::daemon::control_api::CasSyncPayload;
+use crate::model::daemon_control::CasSyncPayload;
 use serde_json::Value;
 
 pub(super) fn flush_cas(records: Vec<CasSyncPayload>, stores: TelemetryStores) {

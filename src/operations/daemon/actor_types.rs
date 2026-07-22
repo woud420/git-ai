@@ -1,5 +1,5 @@
 use crate::error::GitAiError;
-use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
+use crate::model::checkpoint_request::CheckpointRequest;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;

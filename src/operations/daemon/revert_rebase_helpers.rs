@@ -1,4 +1,5 @@
 use crate::error::GitAiError;
+use crate::model::domain::RewriteEvent;
 use crate::operations::git::cli_parser::explicit_rebase_branch_arg;
 use std::collections::HashMap;
 
@@ -59,7 +60,7 @@ pub(crate) fn apply_cherry_pick_complete_rewrite(
         let (src, dst): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
         let outcome = crate::operations::authorship::rewrite::handle_rewrite_event_with_metrics(
             repo,
-            crate::operations::authorship::rewrite::RewriteEvent::CherryPickComplete {
+            RewriteEvent::CherryPickComplete {
                 sources: src,
                 new_commits: dst,
             },

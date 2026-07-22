@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
-use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
+use crate::model::checkpoint_request::CheckpointRequest;
 use crate::operations::daemon::git_backend::GitBackend;
 use serde_json::Value;
 use std::sync::Arc;

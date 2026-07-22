@@ -11,6 +11,7 @@ use git_ai::operations::daemon::{
 use git_ai::operations::git::cli_parser::{ParsedGitInvocation, extract_clone_target_directory};
 use git_ai::operations::git::repo_storage::PersistedWorkingLog;
 use git_ai::operations::git::repository as GitAiRepository;
+use git_ai::utils::normalize_to_posix;
 // BenchmarkResult for performance testing
 #[derive(Debug, Clone)]
 pub struct BenchmarkResult {
@@ -2471,6 +2472,20 @@ impl TestRepo {
         f(&mut patch);
         self.config_patch = Some(patch);
         self.sync_test_home_config();
+    }
+
+    /// Restrict attribution collection to this exact repository or worktree.
+    /// Requires a dedicated daemon so the exact allowlist cannot affect other tests.
+    pub fn allow_only_self_for_collection(&mut self) {
+        assert_eq!(
+            self.daemon_scope,
+            DaemonTestScope::Dedicated,
+            "an exact repository allowlist requires a dedicated test daemon"
+        );
+        let repo_root = normalize_to_posix(&self.canonical_path().to_string_lossy());
+        self.patch_git_ai_config(move |patch| {
+            patch.allowed_repositories = Some(vec![repo_root]);
+        });
     }
 
     pub fn path(&self) -> &PathBuf {

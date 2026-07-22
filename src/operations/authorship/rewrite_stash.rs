@@ -9,8 +9,8 @@ use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::imara_diff_utils::{DiffOp, capture_diff_slices};
-use crate::model::working_log::{Checkpoint, CheckpointKind};
-use crate::operations::git::repo_storage::{InitialAttributions, PersistedWorkingLog};
+use crate::model::working_log::{Checkpoint, CheckpointKind, InitialAttributions};
+use crate::operations::git::repo_storage::PersistedWorkingLog;
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

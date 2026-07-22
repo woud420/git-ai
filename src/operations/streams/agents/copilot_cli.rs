@@ -1,13 +1,13 @@
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
-use crate::operations::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
+use crate::operations::streams::agent::{
+    Agent, PathResolverKind, StreamDescriptor, read_jsonl_byte_stream,
+};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-use super::copilot::read_event_stream;
 
 pub struct CopilotCliAgent {
     batch_size: usize,
@@ -98,7 +98,14 @@ impl Agent for CopilotCliAgent {
         watermark: Box<dyn WatermarkStrategy>,
         session_id: &str,
     ) -> Result<StreamBatch, StreamError> {
-        read_event_stream(path, watermark, session_id, self.batch_size_hint())
+        read_jsonl_byte_stream(
+            path,
+            watermark,
+            session_id,
+            self.batch_size_hint(),
+            "Copilot event stream",
+            "open",
+        )
     }
 
     fn extract_event_ids(

@@ -1,8 +1,7 @@
 use super::tests_ingress::make_start_payload;
 use super::*;
+use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
 use crate::model::working_log::CheckpointKind;
-use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
-use crate::operations::daemon::checkpoint::PreparedPathRole;
 use crate::operations::daemon::git_backend::GitBackend;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -71,7 +70,7 @@ async fn checkpoint_fence_waits_for_open_mutating_trace_root() {
 
 #[tokio::test]
 async fn checkpoint_control_request_waits_while_blocked_behind_pending_root() {
-    use crate::operations::commands::checkpoint_agent::orchestrator::{BaseCommit, CheckpointFile};
+    use crate::model::checkpoint_request::{BaseCommit, CheckpointFile};
 
     let coord = Arc::new(ActorDaemonCoordinator::new());
     let temp = tempfile::tempdir().unwrap();

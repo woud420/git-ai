@@ -1,6 +1,6 @@
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
-use crate::model::working_log::CheckpointKind;
+use crate::model::working_log::{CheckpointKind, InitialAttributions};
 use crate::operations::authorship::ignore::{
     IgnoreMatcher, build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
@@ -9,7 +9,6 @@ use crate::operations::authorship::stats::{
 };
 use crate::operations::authorship::virtual_attribution::VirtualAttributions;
 use crate::operations::git::find_repository;
-use crate::operations::git::repo_storage::InitialAttributions;
 use crate::operations::git::repository::Repository;
 use crate::operations::git::status::MAX_PATHSPEC_ARGS;
 use serde::Serialize;

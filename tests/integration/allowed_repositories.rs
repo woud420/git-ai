@@ -81,10 +81,7 @@ fn test_reallowing_repo_restores_collection() {
     assert!(repo.read_authorship_note(&first).is_none());
 
     // Allow this repository by its root path and verify collection resumes.
-    let repo_root = repo.canonical_path().to_string_lossy().replace('\\', "/");
-    repo.patch_git_ai_config(move |patch| {
-        patch.allowed_repositories = Some(vec![repo_root]);
-    });
+    repo.allow_only_self_for_collection();
 
     let second_edit = "\
 Untracked line

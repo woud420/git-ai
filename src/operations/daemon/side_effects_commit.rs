@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::domain::RewriteEvent;
 use crate::operations::daemon::actor_coordinator_side_effects::RebaseMode;
 use crate::operations::git::find_repository_in_path;
 use std::path::Path;
@@ -49,7 +50,7 @@ impl ActorDaemonCoordinator {
                 let outcome =
                     crate::operations::authorship::rewrite::handle_rewrite_event_with_metrics(
                         &repo,
-                        crate::operations::authorship::rewrite::RewriteEvent::SquashMerge {
+                        RewriteEvent::SquashMerge {
                             source_head: pending.source_head,
                             squash_commit: new_head.to_string(),
                             onto: pending.onto,

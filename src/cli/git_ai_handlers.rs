@@ -1,11 +1,11 @@
 use crate::config;
+use crate::model::daemon_control::ControlRequest;
 use crate::model::repository::internal_db::InternalDatabase;
 use crate::observability::log_message;
 use crate::operations::authorship::ignore::effective_ignore_patterns;
 use crate::operations::authorship::range_authorship;
 use crate::operations::authorship::stats::stats_command;
 use crate::operations::commands;
-use crate::operations::daemon::ControlRequest;
 use crate::operations::git::find_repository;
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::repository::{CommitRange, Repository};

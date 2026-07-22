@@ -1,5 +1,6 @@
 use super::types::{AuthorshipLogDiffContext, VirtualAttributions};
 use crate::error::GitAiError;
+use crate::model::working_log::InitialAttributions;
 use std::collections::HashMap;
 
 impl VirtualAttributions {
@@ -18,7 +19,7 @@ impl VirtualAttributions {
     ) -> Result<
         (
             crate::model::authorship_log_serialization::AuthorshipLog,
-            crate::operations::git::repo_storage::InitialAttributions,
+            InitialAttributions,
             HashMap<String, String>,
         ),
         GitAiError,

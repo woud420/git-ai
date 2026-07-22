@@ -2,10 +2,10 @@
 
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::stream_types::{StreamBatch, StreamError};
-use crate::model::stream_watermark::{
-    ByteOffsetWatermark, RecordIndexWatermark, WatermarkStrategy, WatermarkType,
+use crate::model::stream_watermark::{RecordIndexWatermark, WatermarkStrategy, WatermarkType};
+use crate::operations::streams::agent::{
+    Agent, PathResolverKind, StreamDescriptor, read_jsonl_byte_stream,
 };
-use crate::operations::streams::agent::{Agent, PathResolverKind, StreamDescriptor};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -306,7 +306,14 @@ impl Agent for CopilotAgent {
         // Existing transcript reading logic
         let batch_limit = self.batch_size_hint();
         if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-            read_event_stream(path, watermark, session_id, batch_limit)
+            read_jsonl_byte_stream(
+                path,
+                watermark,
+                session_id,
+                batch_limit,
+                "Copilot event stream",
+                "open",
+            )
         } else {
             read_session_json(path, watermark, session_id, batch_limit)
         }
@@ -476,113 +483,10 @@ fn read_session_json(
     })
 }
 
-/// Read JSONL event stream incrementally using byte-offset watermarks.
-pub(super) fn read_event_stream(
-    path: &Path,
-    watermark: Box<dyn WatermarkStrategy>,
-    session_id: &str,
-    batch_limit: usize,
-) -> Result<StreamBatch, StreamError> {
-    use std::fs::File;
-    use std::io::{BufReader, Seek, SeekFrom};
-
-    // Downcast watermark to ByteOffsetWatermark
-    let byte_watermark = watermark
-        .as_any()
-        .downcast_ref::<ByteOffsetWatermark>()
-        .ok_or_else(|| StreamError::Fatal {
-            message: format!(
-                "Copilot event stream reader requires ByteOffsetWatermark, got incompatible type for session {}",
-                session_id
-            ),
-        })?;
-
-    let start_offset = byte_watermark.0;
-
-    // Open file
-    let file = File::open(path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            StreamError::Fatal {
-                message: format!("Transcript file not found: {}", path.display()),
-            }
-        } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-            StreamError::Fatal {
-                message: format!("Permission denied reading transcript: {}", path.display()),
-            }
-        } else {
-            StreamError::Transient {
-                message: format!("Failed to open transcript file: {}", e),
-                retry_after: std::time::Duration::from_secs(5),
-            }
-        }
-    })?;
-
-    let mut reader = BufReader::new(file);
-
-    // Seek to watermark position
-    reader
-        .seek(SeekFrom::Start(start_offset))
-        .map_err(|e| StreamError::Transient {
-            message: format!("Failed to seek to offset {}: {}", start_offset, e),
-            retry_after: std::time::Duration::from_secs(5),
-        })?;
-
-    let mut events = Vec::with_capacity(batch_limit);
-    let mut current_offset = start_offset;
-    let mut line_number = 0;
-
-    // Read lines from watermark position
-    let mut line = String::new();
-    loop {
-        match crate::model::stream_types::read_jsonl_line(&mut reader, &mut line).map_err(|e| {
-            StreamError::Transient {
-                message: format!("I/O error reading line: {}", e),
-                retry_after: std::time::Duration::from_secs(5),
-            }
-        })? {
-            crate::model::stream_types::JsonlLineState::Eof => break,
-            crate::model::stream_types::JsonlLineState::Partial => break,
-            crate::model::stream_types::JsonlLineState::Complete(bytes_read) => {
-                line_number += 1;
-                current_offset += bytes_read as u64;
-            }
-        }
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let entry: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(
-                    line = line_number,
-                    path = %path.display(),
-                    error = %e,
-                    "skipping malformed JSON line"
-                );
-                continue;
-            }
-        };
-
-        events.push(entry);
-        if events.len() >= batch_limit {
-            break;
-        }
-    }
-
-    // Create new watermark with updated offset
-    let new_watermark = Box::new(ByteOffsetWatermark::new(current_offset));
-
-    Ok(StreamBatch {
-        events,
-        new_watermark,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::stream_watermark::ByteOffsetWatermark;
 
     #[test]
     fn test_sweep_strategy() {

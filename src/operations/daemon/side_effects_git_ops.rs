@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::domain::RewriteEvent;
 use crate::operations::daemon::cherry_pick_helpers::{
     cherry_pick_command_has_flag, cherry_pick_source_args_for_side_effect,
     resolve_cherry_pick_source_args_with_git_in_head_context,
@@ -181,7 +182,7 @@ impl ActorDaemonCoordinator {
                     let outcome =
                         crate::operations::authorship::rewrite::handle_rewrite_event_with_metrics(
                             &repo,
-                            crate::operations::authorship::rewrite::RewriteEvent::NonFastForward {
+                            RewriteEvent::NonFastForward {
                                 old_tip: old_head.to_string(),
                                 new_tip: new_head.to_string(),
                                 onto: None,
@@ -292,7 +293,7 @@ impl ActorDaemonCoordinator {
             } else {
                 crate::operations::authorship::rewrite::handle_rewrite_event(
                     &repo,
-                    crate::operations::authorship::rewrite::RewriteEvent::NonFastForward {
+                    RewriteEvent::NonFastForward {
                         old_tip: old.to_string(),
                         new_tip: new.to_string(),
                         onto: None,

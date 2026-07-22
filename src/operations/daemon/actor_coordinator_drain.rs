@@ -1,10 +1,9 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
 use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::CheckpointKind;
-use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
-use crate::operations::daemon::checkpoint::PreparedPathRole;
 use std::collections::BTreeMap;
 use std::path::Path;
 use tokio::sync::oneshot;

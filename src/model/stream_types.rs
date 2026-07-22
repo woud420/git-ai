@@ -73,7 +73,7 @@ pub struct StreamBatch {
     /// Raw JSON events from the transcript.
     pub events: Vec<serde_json::Value>,
     /// Updated watermark position after processing this batch.
-    pub new_watermark: Box<dyn crate::operations::streams::WatermarkStrategy>,
+    pub new_watermark: Box<dyn crate::model::stream_watermark::WatermarkStrategy>,
 }
 
 #[cfg(test)]

@@ -1,8 +1,10 @@
 // src/streams/agent.rs
 
 use super::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::model::stream_types::{StreamBatch, StreamError};
-use crate::model::stream_watermark::WatermarkStrategy;
+use crate::model::stream_types::{JsonlLineState, StreamBatch, StreamError, read_jsonl_line};
+use crate::model::stream_watermark::{ByteOffsetWatermark, WatermarkStrategy};
+use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// Sentinel session_id for shared stream watermark rows.
@@ -156,6 +158,101 @@ pub trait Agent: Send + Sync {
 
     /// Returns the stream descriptors for this agent.
     fn streams(&self) -> Vec<StreamDescriptor>;
+}
+
+/// Read a JSONL transcript incrementally using a byte-offset watermark.
+///
+/// Agent-specific readers share the same I/O and malformed-line behavior; only
+/// the reader name and open-error wording vary for compatibility with existing
+/// diagnostics.
+pub(super) fn read_jsonl_byte_stream(
+    path: &Path,
+    watermark: Box<dyn WatermarkStrategy>,
+    session_id: &str,
+    batch_limit: usize,
+    reader_name: &str,
+    open_error_verb: &str,
+) -> Result<StreamBatch, StreamError> {
+    let byte_watermark = watermark
+        .as_any()
+        .downcast_ref::<ByteOffsetWatermark>()
+        .ok_or_else(|| StreamError::Fatal {
+            message: format!(
+                "{} reader requires ByteOffsetWatermark, got incompatible type for session {}",
+                reader_name, session_id
+            ),
+        })?;
+
+    let start_offset = byte_watermark.0;
+    let file = File::open(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            StreamError::Fatal {
+                message: format!("Transcript file not found: {}", path.display()),
+            }
+        } else if error.kind() == std::io::ErrorKind::PermissionDenied {
+            StreamError::Fatal {
+                message: format!("Permission denied reading transcript: {}", path.display()),
+            }
+        } else {
+            StreamError::Transient {
+                message: format!("Failed to {} transcript file: {}", open_error_verb, error),
+                retry_after: std::time::Duration::from_secs(5),
+            }
+        }
+    })?;
+
+    let mut reader = BufReader::new(file);
+    reader
+        .seek(SeekFrom::Start(start_offset))
+        .map_err(|error| StreamError::Transient {
+            message: format!("Failed to seek to offset {}: {}", start_offset, error),
+            retry_after: std::time::Duration::from_secs(5),
+        })?;
+
+    let mut events = Vec::with_capacity(batch_limit);
+    let mut current_offset = start_offset;
+    let mut line_number = 0;
+    let mut line = String::new();
+
+    loop {
+        match read_jsonl_line(&mut reader, &mut line).map_err(|error| StreamError::Transient {
+            message: format!("I/O error reading line: {}", error),
+            retry_after: std::time::Duration::from_secs(5),
+        })? {
+            JsonlLineState::Eof | JsonlLineState::Partial => break,
+            JsonlLineState::Complete(bytes_read) => {
+                line_number += 1;
+                current_offset += bytes_read as u64;
+            }
+        }
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let entry = match serde_json::from_str(&line) {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(
+                    line = line_number,
+                    path = %path.display(),
+                    error = %error,
+                    "skipping malformed JSON line"
+                );
+                continue;
+            }
+        };
+
+        events.push(entry);
+        if events.len() >= batch_limit {
+            break;
+        }
+    }
+
+    Ok(StreamBatch {
+        events,
+        new_watermark: Box::new(ByteOffsetWatermark::new(current_offset)),
+    })
 }
 
 /// Fallback timestamp from file metadata when an event lacks a per-event timestamp.

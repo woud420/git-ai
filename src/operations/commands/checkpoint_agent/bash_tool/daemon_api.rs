@@ -1,8 +1,8 @@
 //! Daemon communication for bash-tool: watermark queries, snapshot queries,
 //! and hook-attempt / session-end signals.
 
+use crate::model::daemon_control::{BashSnapshotQueryResponse, ControlRequest};
 use crate::model::working_log::AgentId;
-use crate::operations::daemon::control_api::{BashSnapshotQueryResponse, ControlRequest};
 use crate::operations::daemon::{DaemonConfig, send_control_request_with_timeout};
 use std::collections::HashMap;
 use std::path::Path;

@@ -197,7 +197,8 @@ fn target_is_git_ai_owned(target: &str) -> bool {
 /// shutdown failure as a non-fatal warning so the rest of the uninstall steps
 /// still execute.
 fn shutdown_daemon_best_effort() -> String {
-    use crate::operations::daemon::{ControlRequest, DaemonConfig, send_control_request};
+    use crate::model::daemon_control::ControlRequest;
+    use crate::operations::daemon::{DaemonConfig, send_control_request};
 
     let config = match DaemonConfig::from_env_or_default_paths() {
         Ok(c) => c,

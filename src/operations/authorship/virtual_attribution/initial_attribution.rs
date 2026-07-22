@@ -3,7 +3,7 @@ use super::types::VirtualAttributions;
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
-use crate::model::working_log::CheckpointKind;
+use crate::model::working_log::{CheckpointKind, InitialAttributions};
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
@@ -203,9 +203,7 @@ impl VirtualAttributions {
     }
 
     /// Convert all current AI attributions into INITIAL without consulting the live worktree.
-    pub fn to_initial_working_log_only(
-        &self,
-    ) -> crate::operations::git::repo_storage::InitialAttributions {
+    pub fn to_initial_working_log_only(&self) -> InitialAttributions {
         let mut initial_files: HashMap<String, Vec<LineAttribution>> = HashMap::new();
         let mut referenced_prompts = HashSet::new();
 
@@ -258,7 +256,7 @@ impl VirtualAttributions {
             }
         }
 
-        crate::operations::git::repo_storage::InitialAttributions {
+        InitialAttributions {
             files: initial_files,
             prompts: initial_prompts,
             file_blobs: HashMap::new(),

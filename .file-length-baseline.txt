@@ -42,6 +42,7 @@ src/operations/daemon/checkpoint.rs	1123
 src/operations/daemon/git_backend.rs	813
 src/operations/daemon/rewrite_metrics.rs	674
 src/operations/daemon/stream_worker.rs	2032
+src/operations/daemon/telemetry_worker.rs	2256
 src/operations/daemon/trace_normalizer.rs	2143
 src/operations/git/cli_parser.rs	1032
 src/operations/git/command_classification.rs	720

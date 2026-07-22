@@ -5,15 +5,19 @@
 //! These run the real binary against an isolated test HOME, so `config set`
 //! writes land in the sandboxed `~/.git-ai/config.json` rather than the user's.
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
 fn get_json(repo: &TestRepo, key: &str) -> Value {
+    get_json_with_env(repo, key, &[])
+}
+
+fn get_json_with_env(repo: &TestRepo, key: &str, envs: &[(&str, &str)]) -> Value {
     let out = repo
-        .git_ai(&["config", key])
+        .git_ai_with_env(&["config", key], envs)
         .unwrap_or_else(|e| panic!("config get {key} failed: {e}"));
     serde_json::from_str(out.trim())
         .unwrap_or_else(|e| panic!("config get {key} returned non-JSON {out:?}: {e}"))
@@ -238,6 +242,38 @@ fn test_config_show_all_includes_new_keys() {
     assert!(value.get("max_checkpoint_total_size_bytes").is_some());
     assert!(value.get("max_checkpoint_total_lines").is_some());
     assert!(value.get("custom_attributes").is_some());
+}
+
+#[test]
+fn test_config_patch_preserves_unpatched_fields() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let base_git_path = get_json(&repo, "git_path");
+    let base_api_url = get_json(&repo, "api_base_url");
+    let base_hooks = get_json(&repo, "git_ai_hooks");
+
+    let patch = serde_json::json!({
+        "prompt_storage": "local",
+        "custom_attributes": { "team": "config-test" },
+        "max_checkpoint_total_lines": 1234
+    })
+    .to_string();
+    let envs = [("GIT_AI_TEST_CONFIG_PATCH", patch.as_str())];
+
+    assert_eq!(get_json_with_env(&repo, "git_path", &envs), base_git_path);
+    assert_eq!(
+        get_json_with_env(&repo, "api_base_url", &envs),
+        base_api_url
+    );
+    assert_eq!(get_json_with_env(&repo, "git_ai_hooks", &envs), base_hooks);
+    assert_eq!(get_json_with_env(&repo, "prompt_storage", &envs), "local");
+    assert_eq!(
+        get_json_with_env(&repo, "custom_attributes.team", &envs),
+        "config-test"
+    );
+    assert_eq!(
+        get_json_with_env(&repo, "max_checkpoint_total_lines", &envs),
+        1234
+    );
 }
 
 /// Map a `FileConfig` field name to the CLI key used to read it back, when the

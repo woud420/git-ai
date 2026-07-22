@@ -14,23 +14,7 @@ pub(crate) use note_shift::shift_authorship_notes_merging_existing_with_notes;
 pub use note_shift::{shift_authorship_notes, shift_authorship_notes_merging_existing};
 pub(crate) use range_diff::list_commits_in_range;
 
-#[derive(Debug)]
-pub enum RewriteEvent {
-    NonFastForward {
-        old_tip: String,
-        new_tip: String,
-        onto: Option<String>,
-    },
-    CherryPickComplete {
-        sources: Vec<String>,
-        new_commits: Vec<String>,
-    },
-    SquashMerge {
-        source_head: String,
-        squash_commit: String,
-        onto: String,
-    },
-}
+pub use crate::model::domain::RewriteEvent;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct DiffTreeResult {

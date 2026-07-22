@@ -280,3 +280,21 @@ pub struct FamilyStatus {
     pub applied_seq: u64,
     pub last_error: Option<String>,
 }
+
+#[derive(Debug)]
+pub enum RewriteEvent {
+    NonFastForward {
+        old_tip: String,
+        new_tip: String,
+        onto: Option<String>,
+    },
+    CherryPickComplete {
+        sources: Vec<String>,
+        new_commits: Vec<String>,
+    },
+    SquashMerge {
+        source_head: String,
+        squash_commit: String,
+        onto: String,
+    },
+}

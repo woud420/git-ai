@@ -1,4 +1,5 @@
 use crate::model::attribution::{Attribution, LineAttribution};
+use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::GIT_AI_VERSION;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -6,6 +7,24 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CHECKPOINT_API_VERSION: &str = "checkpoint/1.0.0";
+
+/// Initial attributions data structure stored in the INITIAL file
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InitialAttributions {
+    /// Map of file path to line attributions
+    pub files: HashMap<String, Vec<LineAttribution>>,
+    /// Map of author_id (hash) to PromptRecord for prompt tracking
+    pub prompts: HashMap<String, PromptRecord>,
+    /// Optional blob snapshot of the file content represented by INITIAL.
+    #[serde(default)]
+    pub file_blobs: HashMap<String, String>,
+    /// Known human records: `h_<hash>` -> HumanRecord
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub humans: std::collections::BTreeMap<String, HumanRecord>,
+    /// Session records: `s_<session_id>` -> SessionRecord
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sessions: std::collections::BTreeMap<String, SessionRecord>,
+}
 
 /// Represents a working log entry for a specific file
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -38,7 +38,7 @@ impl VirtualAttributions {
         GitAiError,
     > {
         use crate::model::authorship_log::{HumanRecord, SessionRecord};
-        let mut authorship_log = self.seed_authorship_log_metadata();
+        let mut authorship_log = self.authorship_log_with_metadata();
 
         let mut initial_files: HashMap<String, Vec<LineAttribution>> = HashMap::new();
         let mut referenced_prompts: HashSet<String> = HashSet::new();

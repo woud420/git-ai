@@ -121,7 +121,7 @@ pub fn build_diff_artifacts_with_note(
 /// Build diff artifacts from pre-computed hunks, avoiding redundant git calls.
 ///
 /// Used by the post-commit hook path where the caller already has the hunks
-/// from a single [`get_diff_with_line_numbers`] call.
+/// from a single [`super::diff_parsing::get_diff_with_line_numbers`] call.
 pub fn build_diff_artifacts_from_hunks(
     repo: &Repository,
     hunks: Vec<DiffHunk>,

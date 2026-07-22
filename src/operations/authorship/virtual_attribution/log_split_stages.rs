@@ -242,25 +242,6 @@ pub(super) fn append_committed_attestations(
 // ── VirtualAttributions methods ───────────────────────────────────────────────
 
 impl VirtualAttributions {
-    /// Seed a fresh `AuthorshipLog` with metadata from this `VirtualAttributions`.
-    pub(super) fn seed_authorship_log_metadata(&self) -> AuthorshipLog {
-        let mut log = AuthorshipLog::new();
-        log.metadata.base_commit_sha = self.base_commit.clone();
-        log.metadata.prompts = self
-            .prompts
-            .iter()
-            .filter_map(|(prompt_id, commits)| {
-                commits
-                    .values()
-                    .next()
-                    .map(|record| (prompt_id.clone(), record.clone()))
-            })
-            .collect();
-        log.metadata.humans = self.humans.clone();
-        log.metadata.sessions = self.sessions.clone();
-        log
-    }
-
     /// Convert `uncommitted_lines_map` into `LineAttribution` entries, populating
     /// `initial_humans` and `initial_sessions` for any h_/s_ authors encountered.
     ///

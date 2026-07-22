@@ -1,5 +1,6 @@
 use crate::model::attribution_tracker::{Attribution, LineAttribution};
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
+use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -31,6 +32,25 @@ pub(crate) struct AuthorshipLogDiffContext<'a> {
 }
 
 impl VirtualAttributions {
+    /// Create a fresh authorship log seeded with this attribution set's metadata.
+    pub(super) fn authorship_log_with_metadata(&self) -> AuthorshipLog {
+        let mut log = AuthorshipLog::new();
+        log.metadata.base_commit_sha = self.base_commit.clone();
+        log.metadata.prompts = self
+            .prompts
+            .iter()
+            .filter_map(|(prompt_id, commits)| {
+                commits
+                    .values()
+                    .next()
+                    .map(|record| (prompt_id.clone(), record.clone()))
+            })
+            .collect();
+        log.metadata.humans = self.humans.clone();
+        log.metadata.sessions = self.sessions.clone();
+        log
+    }
+
     /// Create VirtualAttributions from raw components (used for transformations)
     pub fn new(
         repo: Repository,

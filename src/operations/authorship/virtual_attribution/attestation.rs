@@ -11,24 +11,7 @@ impl VirtualAttributions {
     pub fn to_authorship_log(
         &self,
     ) -> Result<crate::model::authorship_log_serialization::AuthorshipLog, GitAiError> {
-        use crate::model::authorship_log_serialization::AuthorshipLog;
-
-        let mut authorship_log = AuthorshipLog::new();
-        authorship_log.metadata.base_commit_sha = self.base_commit.clone();
-        // Flatten the nested prompts map: take the most recent (first) prompt for each prompt_id
-        authorship_log.metadata.prompts = self
-            .prompts
-            .iter()
-            .filter_map(|(prompt_id, commits)| {
-                // Get the first (most recent) commit's PromptRecord
-                commits
-                    .values()
-                    .next()
-                    .map(|record| (prompt_id.clone(), record.clone()))
-            })
-            .collect();
-        authorship_log.metadata.humans = self.humans.clone();
-        authorship_log.metadata.sessions = self.sessions.clone();
+        let mut authorship_log = self.authorship_log_with_metadata();
 
         authorship_log.attestations = build_attestations_from_attributions(&self.attributions);
 

@@ -144,17 +144,24 @@ jobs:
           cd /tmp/e2e-test-repo
           "$INSTALL_DIR/git-ai" install
 
-      - name: Configure git-ai for E2E (notes backend + allowed repositories)
+      - name: Configure git-ai for E2E (notes backend)
         run: |
           INSTALL_DIR="$HOME/.git-ai/bin"
           # Use git_notes backend so verify-synthetic-attribution.sh can read
           # 'git notes --ref=ai show HEAD' directly.
           # SQLite-default coverage lives in tests/integration/sqlite_notes_backend.rs.
           "$INSTALL_DIR/git-ai" config set notes_backend.kind git_notes
-          # Resolve the canonical path — on macOS /tmp is a symlink to /private/tmp
-          # and allowed_repositories matching canonicalises the repo root.
-          REPO_CANONICAL="$(cd /tmp/e2e-test-repo && pwd -P)"
-          "$INSTALL_DIR/git-ai" config --add allowed_repositories "$REPO_CANONICAL"
+
+      - name: Allow the E2E test repo for collection
+        run: |
+          # GIT_AI_ALLOWED_REPOSITORIES is additive over the config file (see
+          # docs/data-privacy.md): a CI configuration point instead of a
+          # `config --add` step that mutates config.json. Exported via
+          # $GITHUB_ENV so both the async daemon (next step) and later
+          # git-ai invocations (checkpoint, etc.) inherit it. Existing paths
+          # are canonicalized automatically at load time — on macOS /tmp is a
+          # symlink to /private/tmp — so the raw path is enough.
+          echo "GIT_AI_ALLOWED_REPOSITORIES=/tmp/e2e-test-repo" >> "$GITHUB_ENV"
 
       - name: Start async daemon
         run: |
@@ -378,7 +385,7 @@ jobs:
           & $gitAiExe install
           if ($LASTEXITCODE -ne 0) { throw "git-ai install failed with exit code $LASTEXITCODE" }
 
-      - name: Configure git-ai for E2E (notes backend + allowed repositories) (Windows)
+      - name: Configure git-ai for E2E (notes backend) (Windows)
         shell: pwsh
         env:
           HOME: ${{ env.TEST_HOME }}
@@ -393,11 +400,20 @@ jobs:
           # SQLite-default coverage lives in tests/integration/sqlite_notes_backend.rs.
           & $gitAiExe config set notes_backend.kind git_notes
           if ($LASTEXITCODE -ne 0) { throw "git-ai config set notes_backend.kind failed" }
-          # Resolve the canonical path for allowed_repositories matching.
+
+      - name: Allow the E2E test repo for collection (Windows)
+        shell: pwsh
+        run: |
+          # GIT_AI_ALLOWED_REPOSITORIES is additive over the config file (see
+          # docs/data-privacy.md): a CI configuration point instead of a
+          # `config --add` step that mutates config.json. Exported via
+          # $GITHUB_ENV so both the async daemon (next step) and later
+          # git-ai.exe invocations inherit it from their job environment,
+          # regardless of which HOME/USERPROFILE ends up resolving the config
+          # file. Existing paths are canonicalized automatically at load time.
           $testRepo = $env:E2E_TEST_REPO
           $repoCanonical = (Resolve-Path $testRepo).Path
-          & $gitAiExe config --add allowed_repositories $repoCanonical
-          if ($LASTEXITCODE -ne 0) { throw "git-ai config --add allowed_repositories failed" }
+          Add-Content -Path $env:GITHUB_ENV -Value "GIT_AI_ALLOWED_REPOSITORIES=$repoCanonical"
 
       - name: Start async daemon (Windows)
         shell: pwsh

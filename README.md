@@ -53,6 +53,12 @@ git-ai config --add allowed_repositories ~/work/my-repo   # a local path…
 git-ai config --add allowed_repositories "https://github.com/my-org/*"  # …or a remote URL glob
 ```
 
+For CI and other ephemeral environments, set `GIT_AI_ALLOWED_REPOSITORIES` instead of mutating `config.json`. It's a comma-separated list of the same path/URL/glob patterns, additive over the config file (it can only widen the allowlist, never narrow it):
+
+```bash
+export GIT_AI_ALLOWED_REPOSITORIES="/path/to/repo,https://github.com/my-org/*"
+```
+
 **No per-repo setup or git hooks required.** Commit with the Agent, git, or your favorite git client. In allowed repositories, attribution will be linked to commits automatically.
 
 **Uninstall** is one command — it removes agent hooks, the git trace2 config, the daemon, and installed binaries, and reports everything it touched:

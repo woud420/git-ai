@@ -19,6 +19,8 @@ mod patterns;
 mod prompt_storage;
 
 #[cfg(test)]
+mod allowed_repositories_env_tests;
+#[cfg(test)]
 mod tests;
 
 // --- Public re-exports (preserve every crate::config::X path) ---

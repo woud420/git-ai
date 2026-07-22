@@ -204,6 +204,14 @@ jobs:
           git add README.md
           git commit -m "Initial commit"
 
+      - name: Allow the CI test repo for collection
+        run: |
+          # Collection is opt-in (see docs/data-privacy.md): without this,
+          # git-ai's checkpoint/commit hooks silently no-op for /tmp/test-repo.
+          # GIT_AI_ALLOWED_REPOSITORIES is additive over the config file and is
+          # canonicalized automatically at load time, so the raw path is enough.
+          echo "GIT_AI_ALLOWED_REPOSITORIES=/tmp/test-repo" >> "$GITHUB_ENV"
+
       - name: Install git-ai hooks in test repo
         run: |
           export PATH="$GITHUB_WORKSPACE/target/release:$PATH"
@@ -301,6 +309,14 @@ jobs:
           echo "# Integration Test Repo" > README.md
           git add README.md
           git commit -m "Initial commit"
+
+      - name: Allow the CI test repo for collection
+        run: |
+          # Collection is opt-in (see docs/data-privacy.md): without this,
+          # git-ai's checkpoint/commit hooks silently no-op for /tmp/test-repo.
+          # GIT_AI_ALLOWED_REPOSITORIES is additive over the config file and is
+          # canonicalized automatically at load time, so the raw path is enough.
+          echo "GIT_AI_ALLOWED_REPOSITORIES=/tmp/test-repo" >> "$GITHUB_ENV"
 
       - name: Install git-ai hooks in test repo
         run: |

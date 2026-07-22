@@ -103,6 +103,42 @@ AI line
 }
 
 #[test]
+fn test_env_var_allowlist_permits_collection_without_a_file_allowlist_entry() {
+    // GIT_AI_ALLOWED_REPOSITORIES (CI/ephemeral-environment configuration
+    // point) must union additively over the config file: it alone can make a
+    // repo collectible even when the file-derived allowlist is empty. The env
+    // var must reach both the `git-ai checkpoint` CLI (which pre-checks the
+    // allowlist itself before ever talking to the daemon) and the daemon
+    // (which decides whether to write authorship notes on commit) — each
+    // reads its own process environment, so both need it explicitly.
+    //
+    // The value is deliberately the *raw*, non-canonicalized OS temp root
+    // (on macOS this is a symlinked path, e.g. /var/folders/... ->
+    // /private/var/folders/...) to exercise the same canonicalization trap
+    // that `git-ai config --add allowed_repositories <path>` handles at
+    // write time: repo roots are always matched in canonicalized form.
+    let raw_temp_root = std::env::temp_dir().to_string_lossy().replace('\\', "/");
+    let repo = TestRepo::new_with_daemon_env_and_patch(
+        &[("GIT_AI_ALLOWED_REPOSITORIES", raw_temp_root.as_str())],
+        |patch| {
+            patch.allowed_repositories = Some(vec![]);
+        },
+    );
+
+    let file_path = repo.path().join("example.txt");
+    fs::write(&file_path, "AI line\n").unwrap();
+    repo.git_ai_with_env(
+        &["checkpoint", "mock_ai", "example.txt"],
+        &[("GIT_AI_ALLOWED_REPOSITORIES", raw_temp_root.as_str())],
+    )
+    .expect("checkpoint should succeed: GIT_AI_ALLOWED_REPOSITORIES allows the repo");
+    repo.stage_all_and_commit("env-allowed commit").unwrap();
+
+    let mut file = repo.filename("example.txt");
+    file.assert_committed_lines(lines!["AI line".ai()]);
+}
+
+#[test]
 fn test_config_cli_accepts_canonical_and_legacy_allowlist_keys() {
     let repo = TestRepo::new();
     // Entries are validated: a path must point at an existing git repository.

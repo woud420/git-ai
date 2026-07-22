@@ -144,6 +144,56 @@ fn strip_bracketed_host_port(host: &str) -> Option<&str> {
     }
 }
 
+/// Split a `GIT_AI_ALLOWED_REPOSITORIES` env var value into individual
+/// allowed-repository patterns: comma-separated, each segment trimmed, empty
+/// segments dropped. Comma-containing glob patterns are not supported this
+/// way; use the config file for those.
+///
+/// A segment that names an existing filesystem path is canonicalized so it
+/// matches the canonicalized repo root that `repo_root_matches_patterns`
+/// compares against — mirroring how `git-ai config --add allowed_repositories
+/// <path>` stores the canonical root at write time (see
+/// `resolve_path_to_remotes` in `operations/commands/config/pattern.rs`,
+/// which resolves via `repo.canonical_workdir()`). URL/glob entries, and
+/// paths that don't currently exist, are left untouched.
+pub(crate) fn parse_env_allowed_repositories(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(canonicalize_if_existing_path)
+        .collect()
+}
+
+fn canonicalize_if_existing_path(pattern: &str) -> String {
+    match Path::new(pattern).canonicalize() {
+        Ok(canonical) => crate::utils::normalize_to_posix(&canonical.to_string_lossy()),
+        Err(_) => pattern.to_string(),
+    }
+}
+
+/// Union `GIT_AI_ALLOWED_REPOSITORIES` into an already-resolved
+/// `allowed_repositories` pattern list, in place. Additive only: env-provided
+/// patterns extend `current` but never remove or replace entries already
+/// present (from the config file, or a test patch applied earlier in
+/// `build_config()`). A no-op when the env var is unset.
+pub(crate) fn apply_env_allowed_repositories(current: &mut Vec<Pattern>) {
+    let Ok(raw) = std::env::var("GIT_AI_ALLOWED_REPOSITORIES") else {
+        return;
+    };
+    for pattern_str in parse_env_allowed_repositories(&raw) {
+        if current.iter().any(|p| p.as_str() == pattern_str) {
+            continue;
+        }
+        match Pattern::new(&pattern_str) {
+            Ok(pattern) => current.push(pattern),
+            Err(e) => eprintln!(
+                "Warning: Invalid glob pattern in GIT_AI_ALLOWED_REPOSITORIES '{}': {}",
+                pattern_str, e
+            ),
+        }
+    }
+}
+
 pub(crate) fn normalize_repo_path_variants(path: &str) -> Option<Vec<String>> {
     let path = path
         .split(['?', '#'])

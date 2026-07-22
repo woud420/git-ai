@@ -11,6 +11,7 @@ use crate::operations::mdm::utils::home_dir;
 
 use super::author::AuthorConfig;
 use super::notes_backend::{NotesBackendConfig, NotesBackendKind};
+use super::patterns;
 use super::{
     Config, DEFAULT_API_BASE_URL, DEFAULT_MAX_CHECKPOINT_FILE_SIZE_BYTES,
     DEFAULT_MAX_CHECKPOINT_TOTAL_LINES, DEFAULT_MAX_CHECKPOINT_TOTAL_SIZE_BYTES,
@@ -542,43 +543,7 @@ pub(crate) fn build_config() -> Config {
         .or_else(|| file_cfg.as_ref().and_then(|c| c.max_checkpoint_total_lines))
         .unwrap_or(DEFAULT_MAX_CHECKPOINT_TOTAL_LINES);
 
-    #[cfg(any(test, feature = "test-support"))]
-    {
-        let mut config = Config {
-            git_path,
-            exclude_prompts_in_repositories,
-            include_prompts_in_repositories,
-            allowed_repositories,
-            exclude_repositories,
-            telemetry_enabled,
-            telemetry_oss_disabled,
-            telemetry_enterprise_dsn,
-            disable_version_checks,
-            disable_auto_updates,
-            update_channel,
-            feature_flags,
-            api_base_url,
-            prompt_storage,
-            default_prompt_storage,
-            api_key,
-            quiet,
-            allow_superuser,
-            author,
-            custom_attributes: custom_attributes.clone(),
-            git_ai_hooks: git_ai_hooks.clone(),
-            codex_hooks_format,
-            notes_backend,
-            transcript_streaming_lookback_days,
-            max_checkpoint_file_size_bytes,
-            max_checkpoint_total_size_bytes,
-            max_checkpoint_total_lines,
-        };
-        apply_test_config_patch(&mut config);
-        config
-    }
-
-    #[cfg(not(any(test, feature = "test-support")))]
-    Config {
+    let mut config = Config {
         git_path,
         exclude_prompts_in_repositories,
         include_prompts_in_repositories,
@@ -606,7 +571,17 @@ pub(crate) fn build_config() -> Config {
         max_checkpoint_file_size_bytes,
         max_checkpoint_total_size_bytes,
         max_checkpoint_total_lines,
-    }
+    };
+
+    // Test patches can replace `allowed_repositories` wholesale (e.g. to
+    // clear it), so the env union is applied last: it must stay additive
+    // over the patch, not just over the file config.
+    #[cfg(any(test, feature = "test-support"))]
+    apply_test_config_patch(&mut config);
+
+    patterns::apply_env_allowed_repositories(&mut config.allowed_repositories);
+
+    config
 }
 
 /// Build custom attributes from file config and `GIT_AI_CUSTOM_ATTRIBUTES` env var.

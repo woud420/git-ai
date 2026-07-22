@@ -31,7 +31,6 @@ src/operations/commands/checkpoint_agent/orchestrator.rs	623
 src/operations/commands/checkpoint_agent/presets/cline.rs	654
 src/operations/commands/checkpoint_agent/presets/cursor.rs	680
 src/operations/commands/checkpoint_agent/presets/github_copilot/ide.rs	1014
-src/operations/commands/config.rs	2176
 src/operations/commands/daemon.rs	788
 src/operations/commands/debug.rs	1659
 src/operations/commands/git_hook_handlers.rs	615

@@ -955,7 +955,7 @@ fn test_path_is_git_ai_binary_real_git_with_sibling_symlink() {
     #[cfg(unix)]
     std::os::unix::fs::symlink(&git_ai_target, dir.path().join("git-ai")).unwrap();
     #[cfg(unix)]
-    assert!(!path_is_git_ai_binary(&real_git));
+    assert!(!super::file::path_is_git_ai_binary(&real_git));
 }
 
 #[test]
@@ -968,7 +968,7 @@ fn test_path_is_git_ai_binary_hardlink() {
     {
         let git = dir.path().join("git");
         fs::hard_link(&git_ai, &git).unwrap();
-        assert!(path_is_git_ai_binary(&git));
+        assert!(super::file::path_is_git_ai_binary(&git));
     }
 }
 

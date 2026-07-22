@@ -95,14 +95,7 @@ impl NotesDatabase {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = crate::model::repository::sqlite::open_with_memory_limits(path)?;
-        conn.execute_batch(
-            r#"
-            PRAGMA journal_mode=WAL;
-            PRAGMA synchronous=NORMAL;
-            PRAGMA temp_store=MEMORY;
-            "#,
-        )?;
+        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(path)?;
         let mut db = Self { conn };
         db.initialize_schema()?;
         Ok(db)
@@ -116,14 +109,7 @@ impl NotesDatabase {
             std::fs::create_dir_all(parent)?;
         }
 
-        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path)?;
-        conn.execute_batch(
-            r#"
-            PRAGMA journal_mode=WAL;
-            PRAGMA synchronous=NORMAL;
-            PRAGMA temp_store=MEMORY;
-            "#,
-        )?;
+        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(&db_path)?;
 
         let mut db = Self { conn };
         db.initialize_schema()?;

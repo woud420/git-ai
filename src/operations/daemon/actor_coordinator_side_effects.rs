@@ -8,6 +8,7 @@ use crate::operations::daemon::cherry_pick_helpers::{
 use crate::operations::daemon::revert_rebase_helpers::strict_rebase_original_head_from_command;
 use crate::operations::git::find_repository_in_path;
 use std::ops::ControlFlow;
+#[cfg(feature = "test-support")]
 use std::time::Duration;
 
 /// Bundled rebase-mode flags threaded from `compute_rebase_mode` into

@@ -142,6 +142,18 @@ jobs:
           cd /tmp/e2e-test-repo
           "$INSTALL_DIR/git-ai" install
 
+      - name: Configure git-ai for E2E (notes backend + allowed repositories)
+        run: |
+          INSTALL_DIR="$HOME/.git-ai/bin"
+          # Use git_notes backend so verify-synthetic-attribution.sh can read
+          # 'git notes --ref=ai show HEAD' directly.
+          # SQLite-default coverage lives in tests/integration/sqlite_notes_backend.rs.
+          "$INSTALL_DIR/git-ai" config set notes_backend.kind git_notes
+          # Resolve the canonical path — on macOS /tmp is a symlink to /private/tmp
+          # and allowed_repositories matching canonicalises the repo root.
+          REPO_CANONICAL="$(cd /tmp/e2e-test-repo && pwd -P)"
+          "$INSTALL_DIR/git-ai" config --add allowed_repositories "$REPO_CANONICAL"
+
       - name: Start async daemon
         run: |
           source "$GITHUB_WORKSPACE/scripts/nightly/start-async-daemon.sh" \
@@ -307,6 +319,27 @@ jobs:
           # Run git-ai install in the test repo
           & $gitAiExe install
           if ($LASTEXITCODE -ne 0) { throw "git-ai install failed with exit code $LASTEXITCODE" }
+
+      - name: Configure git-ai for E2E (notes backend + allowed repositories) (Windows)
+        shell: pwsh
+        env:
+          HOME: ${{ env.TEST_HOME }}
+          USERPROFILE: ${{ env.TEST_HOME }}
+          HOMEDRIVE: ${{ env.TEST_HOME_DRIVE }}
+          HOMEPATH: ${{ env.TEST_HOME_PATH }}
+        run: |
+          $installDir = Join-Path $env:USERPROFILE ".git-ai\bin"
+          $gitAiExe = Join-Path $installDir "git-ai.exe"
+          # Use git_notes backend so the inline Windows verification step can read
+          # 'git notes --ref=ai show HEAD' directly.
+          # SQLite-default coverage lives in tests/integration/sqlite_notes_backend.rs.
+          & $gitAiExe config set notes_backend.kind git_notes
+          if ($LASTEXITCODE -ne 0) { throw "git-ai config set notes_backend.kind failed" }
+          # Resolve the canonical path for allowed_repositories matching.
+          $testRepo = $env:E2E_TEST_REPO
+          $repoCanonical = (Resolve-Path $testRepo).Path
+          & $gitAiExe config --add allowed_repositories $repoCanonical
+          if ($LASTEXITCODE -ne 0) { throw "git-ai config --add allowed_repositories failed" }
 
       - name: Start async daemon (Windows)
         shell: pwsh

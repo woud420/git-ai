@@ -176,6 +176,17 @@ pub(crate) fn apply_internal_git_env(cmd: &mut Command) {
     }
 }
 
+/// Build a `GitCliError` from an exit status code, stderr bytes, and the
+/// effective argument list.  Consolidates the three call sites that previously
+/// duplicated this construction inline.
+fn git_cli_error(code: Option<i32>, stderr: &[u8], args: Vec<String>) -> GitAiError {
+    GitAiError::GitCliError {
+        code,
+        stderr: String::from_utf8_lossy(stderr).to_string(),
+        args,
+    }
+}
+
 /// Helper to execute a git command with an explicit internal profile.
 pub fn exec_git_with_profile(
     args: &[String],
@@ -186,13 +197,11 @@ pub fn exec_git_with_profile(
     let output = exec_git_allow_nonzero_with_profile(args, profile)?;
 
     if !output.status.success() {
-        let code = output.status.code();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(GitAiError::GitCliError {
-            code,
-            stderr,
-            args: effective_args,
-        });
+        return Err(git_cli_error(
+            output.status.code(),
+            &output.stderr,
+            effective_args,
+        ));
     }
 
     Ok(output)
@@ -312,11 +321,7 @@ pub fn exec_git_stdin_streaming(
         let stderr_bytes = stderr_handle
             .map(|h| h.join().unwrap_or_default())
             .unwrap_or_default();
-        return Err(GitAiError::GitCliError {
-            code: status.code(),
-            stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
-            args: effective_args,
-        });
+        return Err(git_cli_error(status.code(), &stderr_bytes, effective_args));
     }
 
     Ok(())
@@ -343,13 +348,11 @@ pub fn exec_git_stdin_with_profile(
     }
 
     if !output.status.success() {
-        let code = output.status.code();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(GitAiError::GitCliError {
-            code,
-            stderr,
-            args: effective_args,
-        });
+        return Err(git_cli_error(
+            output.status.code(),
+            &output.stderr,
+            effective_args,
+        ));
     }
 
     Ok(output)

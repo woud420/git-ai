@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::CheckpointKind;
 use crate::operations::commands::checkpoint_agent::orchestrator::CheckpointRequest;
 use crate::operations::daemon::checkpoint::PreparedPathRole;
@@ -24,7 +25,9 @@ impl ActorDaemonCoordinator {
 
         {
             let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
-                GitAiError::Generic("family sequencer map lock poisoned".to_string())
+                PersistenceError::LockPoisoned {
+                    what: "family sequencer map",
+                }
             })?;
             let state =
                 sequencers
@@ -59,7 +62,9 @@ impl ActorDaemonCoordinator {
         let mut progressed = false;
         {
             let mut map = self.family_sequencers_by_family.lock().map_err(|_| {
-                GitAiError::Generic("family sequencer map lock poisoned".to_string())
+                PersistenceError::LockPoisoned {
+                    what: "family sequencer map",
+                }
             })?;
             let state = map
                 .entry(family.to_string())

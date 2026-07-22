@@ -4,6 +4,7 @@ use crate::clients::api::client::ApiClient;
 use crate::clients::api::error::http_status_error;
 use crate::error::GitAiError;
 use crate::metrics::MetricsBatch;
+use crate::model::repository::error::PersistenceError;
 use crate::observability::log_error;
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, OnceLock};
@@ -29,8 +30,8 @@ pub fn metrics_upload_allowed(_api_base_url: &str, client: &ApiClient) -> bool {
 
 fn wait_for_metrics_upload_rate_limit() -> Result<(), GitAiError> {
     let limiter = LAST_METRICS_UPLOAD_STARTED_AT.get_or_init(|| Mutex::new(None));
-    let mut last_started_at = limiter.lock().map_err(|_| {
-        GitAiError::Generic("metrics upload rate limiter lock poisoned".to_string())
+    let mut last_started_at = limiter.lock().map_err(|_| PersistenceError::LockPoisoned {
+        what: "metrics upload rate limiter",
     })?;
 
     wait_for_metrics_upload_rate_limit_with(&mut last_started_at, Instant::now, std::thread::sleep);

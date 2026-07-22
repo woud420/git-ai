@@ -1,5 +1,6 @@
 use super::actor_types::{ActorDaemonCoordinator, DaemonExitAction, TraceIngressState};
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::operations::daemon::DaemonConfig;
 use crate::operations::daemon::actor_types::{
     SESSION_EVENT_RECOVERY_PREFLIGHT_POLL, SESSION_EVENT_RECOVERY_PREFLIGHT_WAIT,
@@ -345,20 +346,24 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn begin_family_effect(&self, family: &str) -> Result<(), GitAiError> {
-        let mut map = self
-            .inflight_effects_by_family
-            .lock()
-            .map_err(|_| GitAiError::Generic("inflight effects map lock poisoned".to_string()))?;
+        let mut map =
+            self.inflight_effects_by_family
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "inflight effects map",
+                })?;
         let entry = map.entry(family.to_string()).or_insert(0);
         *entry = entry.saturating_add(1);
         Ok(())
     }
 
     pub(crate) fn end_family_effect(&self, family: &str) -> Result<(), GitAiError> {
-        let mut map = self
-            .inflight_effects_by_family
-            .lock()
-            .map_err(|_| GitAiError::Generic("inflight effects map lock poisoned".to_string()))?;
+        let mut map =
+            self.inflight_effects_by_family
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "inflight effects map",
+                })?;
         if let Some(entry) = map.get_mut(family) {
             if *entry <= 1 {
                 map.remove(family);

@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -11,10 +12,12 @@ use tokio::sync::mpsc;
 
 impl ActorDaemonCoordinator {
     pub(crate) fn trace_root_connection_opened(&self, root_sid: &str) -> Result<(), GitAiError> {
-        let mut ingress = self
-            .trace_ingress_state
-            .lock()
-            .map_err(|_| GitAiError::Generic("trace ingress state lock poisoned".to_string()))?;
+        let mut ingress =
+            self.trace_ingress_state
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "trace ingress state",
+                })?;
         *ingress
             .root_open_connections
             .entry(root_sid.to_string())
@@ -56,10 +59,12 @@ impl ActorDaemonCoordinator {
         roots: &[String],
     ) -> Result<Vec<String>, GitAiError> {
         let mut close_marker_candidates = Vec::new();
-        let mut ingress = self
-            .trace_ingress_state
-            .lock()
-            .map_err(|_| GitAiError::Generic("trace ingress state lock poisoned".to_string()))?;
+        let mut ingress =
+            self.trace_ingress_state
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "trace ingress state",
+                })?;
         for root_sid in roots {
             if let Some(count) = ingress.root_open_connections.get_mut(root_sid) {
                 if *count > 1 {
@@ -97,10 +102,12 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn trace_unidentified_connection_opened(&self) -> Result<(), GitAiError> {
-        let mut ingress = self
-            .trace_ingress_state
-            .lock()
-            .map_err(|_| GitAiError::Generic("trace ingress state lock poisoned".to_string()))?;
+        let mut ingress =
+            self.trace_ingress_state
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "trace ingress state",
+                })?;
         ingress.unidentified_open_connections =
             ingress.unidentified_open_connections.saturating_add(1);
         self.trace_ingest_progress_notify.notify_waiters();
@@ -110,10 +117,12 @@ impl ActorDaemonCoordinator {
     pub(crate) fn trace_unidentified_connection_identified_or_closed(
         &self,
     ) -> Result<(), GitAiError> {
-        let mut ingress = self
-            .trace_ingress_state
-            .lock()
-            .map_err(|_| GitAiError::Generic("trace ingress state lock poisoned".to_string()))?;
+        let mut ingress =
+            self.trace_ingress_state
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "trace ingress state",
+                })?;
         ingress.unidentified_open_connections =
             ingress.unidentified_open_connections.saturating_sub(1);
         self.trace_ingest_progress_notify.notify_waiters();
@@ -139,7 +148,9 @@ impl ActorDaemonCoordinator {
             return Ok(());
         };
         let mut queued = self.queued_trace_payloads_by_root.lock().map_err(|_| {
-            GitAiError::Generic("queued trace payloads by root lock poisoned".to_string())
+            PersistenceError::LockPoisoned {
+                what: "queued trace payloads by root",
+            }
         })?;
         *queued.entry(root_sid.to_string()).or_insert(0) += 1;
         Ok(())
@@ -153,7 +164,9 @@ impl ActorDaemonCoordinator {
             return Ok(());
         };
         let mut queued = self.queued_trace_payloads_by_root.lock().map_err(|_| {
-            GitAiError::Generic("queued trace payloads by root lock poisoned".to_string())
+            PersistenceError::LockPoisoned {
+                what: "queued trace payloads by root",
+            }
         })?;
         if let Some(count) = queued.get_mut(root_sid) {
             if *count > 1 {
@@ -167,13 +180,18 @@ impl ActorDaemonCoordinator {
 
     pub(crate) fn clear_trace_root_tracking(&self, root_sid: &str) -> Result<(), GitAiError> {
         {
-            let mut ingress = self.trace_ingress_state.lock().map_err(|_| {
-                GitAiError::Generic("trace ingress state lock poisoned".to_string())
-            })?;
+            let mut ingress =
+                self.trace_ingress_state
+                    .lock()
+                    .map_err(|_| PersistenceError::LockPoisoned {
+                        what: "trace ingress state",
+                    })?;
             Self::clear_trace_ingress_root_locked(&mut ingress, root_sid);
         }
         let mut queued = self.queued_trace_payloads_by_root.lock().map_err(|_| {
-            GitAiError::Generic("queued trace payloads by root lock poisoned".to_string())
+            PersistenceError::LockPoisoned {
+                what: "queued trace payloads by root",
+            }
         })?;
         queued.remove(root_sid);
         self.trace_ingest_progress_notify.notify_waiters();

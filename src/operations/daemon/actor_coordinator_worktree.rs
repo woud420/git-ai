@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::operations::git::repo_state::worktree_root_for_path;
 use std::path::Path;
 
@@ -23,8 +24,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_rebase_original_head_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending rebase original-head map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending rebase original-head map",
             })?;
         map.insert(Self::worktree_state_key(worktree), (original_head, onto));
         Ok(())
@@ -37,8 +38,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_rebase_original_head_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending rebase original-head map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending rebase original-head map",
             })?;
         map.remove(&Self::worktree_state_key(worktree));
         Ok(())
@@ -51,8 +52,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_rebase_original_head_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending rebase original-head map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending rebase original-head map",
             })?;
         Ok(map.remove(&Self::worktree_state_key(worktree)))
     }
@@ -65,8 +66,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_cherry_pick_sources_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending cherry-pick sources map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending cherry-pick sources map",
             })?;
         let key = Self::worktree_state_key(worktree);
         if sources.is_empty() {
@@ -84,8 +85,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_cherry_pick_sources_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending cherry-pick sources map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending cherry-pick sources map",
             })?;
         map.remove(&Self::worktree_state_key(worktree));
         Ok(())
@@ -98,8 +99,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_cherry_pick_sources_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending cherry-pick sources map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending cherry-pick sources map",
             })?;
         Ok(map
             .remove(&Self::worktree_state_key(worktree))
@@ -113,8 +114,8 @@ impl ActorDaemonCoordinator {
         let map = self
             .pending_cherry_pick_sources_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending cherry-pick sources map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending cherry-pick sources map",
             })?;
         Ok(map
             .get(&Self::worktree_state_key(worktree))
@@ -131,8 +132,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_cherry_pick_no_commit_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending cherry-pick no-commit map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending cherry-pick no-commit map",
             })?;
         let key = Self::worktree_state_key(worktree);
         if source_commits.is_empty() || head.is_empty() {
@@ -156,8 +157,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_cherry_pick_no_commit_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending cherry-pick no-commit map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending cherry-pick no-commit map",
             })?;
         map.remove(&Self::worktree_state_key(worktree));
         Ok(())
@@ -170,8 +171,8 @@ impl ActorDaemonCoordinator {
         let mut map = self
             .pending_cherry_pick_no_commit_by_worktree
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic("pending cherry-pick no-commit map lock poisoned".to_string())
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "pending cherry-pick no-commit map",
             })?;
         Ok(map.remove(&Self::worktree_state_key(worktree)))
     }
@@ -183,7 +184,9 @@ impl ActorDaemonCoordinator {
         onto: String,
     ) -> Result<(), GitAiError> {
         let mut map = self.pending_squash_merge_by_worktree.lock().map_err(|_| {
-            GitAiError::Generic("pending squash merge map lock poisoned".to_string())
+            PersistenceError::LockPoisoned {
+                what: "pending squash merge map",
+            }
         })?;
         map.insert(
             Self::worktree_state_key(worktree),
@@ -197,7 +200,9 @@ impl ActorDaemonCoordinator {
         worktree: &Path,
     ) -> Result<Option<PendingSquashMerge>, GitAiError> {
         let mut map = self.pending_squash_merge_by_worktree.lock().map_err(|_| {
-            GitAiError::Generic("pending squash merge map lock poisoned".to_string())
+            PersistenceError::LockPoisoned {
+                what: "pending squash merge map",
+            }
         })?;
         Ok(map.remove(&Self::worktree_state_key(worktree)))
     }

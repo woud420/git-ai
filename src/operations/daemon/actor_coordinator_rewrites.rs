@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::operations::daemon::cherry_pick_helpers::rebase_new_tip_from_command;
 use crate::operations::git::find_repository_in_path;
 use std::collections::HashMap;
@@ -230,10 +231,8 @@ impl ActorDaemonCoordinator {
         let mut cache = self
             .commit_file_timestamp_snapshots_by_root
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic(
-                    "commit file timestamp snapshot cache lock poisoned".to_string(),
-                )
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "commit file timestamp snapshot cache",
             })?;
         cache.insert(command.root_sid.clone(), handles);
         Ok(())
@@ -246,10 +245,8 @@ impl ActorDaemonCoordinator {
         let mut cache = self
             .commit_file_timestamp_snapshots_by_root
             .lock()
-            .map_err(|_| {
-                GitAiError::Generic(
-                    "commit file timestamp snapshot cache lock poisoned".to_string(),
-                )
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "commit file timestamp snapshot cache",
             })?;
         Ok(cache.remove(root_sid).unwrap_or_default())
     }

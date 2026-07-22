@@ -5,7 +5,7 @@
 //! These run the real binary against an isolated test HOME, so `config set`
 //! writes land in the sandboxed `~/.git-ai/config.json` rather than the user's.
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -238,6 +238,30 @@ fn test_config_show_all_includes_new_keys() {
     assert!(value.get("max_checkpoint_total_size_bytes").is_some());
     assert!(value.get("max_checkpoint_total_lines").is_some());
     assert!(value.get("custom_attributes").is_some());
+}
+
+#[test]
+fn test_config_patch_preserves_unpatched_fields() {
+    let mut repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let base_git_path = get_json(&repo, "git_path");
+    let base_api_url = get_json(&repo, "api_base_url");
+    let base_hooks = get_json(&repo, "git_ai_hooks");
+
+    repo.patch_git_ai_config(|patch| {
+        patch.prompt_storage = Some("local".to_string());
+        patch.custom_attributes = Some(HashMap::from([(
+            "team".to_string(),
+            "config-test".to_string(),
+        )]));
+        patch.max_checkpoint_total_lines = Some(1234);
+    });
+
+    assert_eq!(get_json(&repo, "git_path"), base_git_path);
+    assert_eq!(get_json(&repo, "api_base_url"), base_api_url);
+    assert_eq!(get_json(&repo, "git_ai_hooks"), base_hooks);
+    assert_eq!(get_json(&repo, "prompt_storage"), "local");
+    assert_eq!(get_json(&repo, "custom_attributes.team"), "config-test");
+    assert_eq!(get_json(&repo, "max_checkpoint_total_lines"), 1234);
 }
 
 /// Map a `FileConfig` field name to the CLI key used to read it back, when the

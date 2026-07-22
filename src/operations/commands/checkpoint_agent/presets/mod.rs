@@ -26,6 +26,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+// Re-export the checkpoint-wire stream types from model so that preset files
+// that import via `super::StreamFormat` / `super::StreamSource` keep working.
+pub use crate::model::checkpoint_request::StreamFormat;
+pub use crate::model::checkpoint_request::StreamSource;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetContext {
     pub agent_id: AgentId,
@@ -95,55 +100,6 @@ pub struct PostBashCall {
     #[serde(default)]
     pub command: Option<String>,
     pub stream_source: Option<StreamSource>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamSource {
-    pub path: PathBuf,
-    pub format: StreamFormat,
-    /// Session ID for this transcript (used to query/create session in DB).
-    pub session_id: String,
-    /// External thread/conversation ID (agent-specific identifier).
-    pub external_session_id: String,
-    /// Parent session ID for subagent transcripts.
-    #[serde(default)]
-    pub external_parent_session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StreamFormat {
-    ClaudeJsonl,
-    ContinueJson,
-    GeminiJsonl,
-    WindsurfJsonl,
-    CodexJsonl,
-    CursorJsonl,
-    DroidJsonl,
-    CopilotSessionJson,
-    CopilotEventStreamJsonl,
-    AmpThreadJson,
-    OpenCodeSqlite,
-    PiJsonl,
-}
-
-impl StreamFormat {
-    pub fn watermark_type(self) -> crate::model::stream_watermark::WatermarkType {
-        use crate::model::stream_watermark::WatermarkType;
-        match self {
-            Self::ClaudeJsonl
-            | Self::CursorJsonl
-            | Self::GeminiJsonl
-            | Self::WindsurfJsonl
-            | Self::CodexJsonl
-            | Self::PiJsonl
-            | Self::CopilotEventStreamJsonl => WatermarkType::ByteOffset,
-            Self::DroidJsonl => WatermarkType::Hybrid,
-            Self::CopilotSessionJson | Self::ContinueJson | Self::AmpThreadJson => {
-                WatermarkType::RecordIndex
-            }
-            Self::OpenCodeSqlite => WatermarkType::Timestamp,
-        }
-    }
 }
 
 pub trait AgentPreset {

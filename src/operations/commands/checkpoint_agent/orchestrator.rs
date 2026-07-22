@@ -7,39 +7,20 @@ use crate::operations::commands::checkpoint_agent::presets::{
     KnownHumanEdit, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
     StreamSource, UntrackedEdit,
 };
-use crate::operations::daemon::checkpoint::PreparedPathRole;
 use crate::operations::git::repo_state::{read_head_state_for_worktree, worktree_root_for_path};
 use crate::operations::git::repository::discover_repository_in_path_no_git_exec;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum BaseCommit {
-    Sha(String),
-    Initial,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CheckpointFile {
-    pub path: PathBuf,
-    pub content: Option<String>,
-    pub repo_work_dir: PathBuf,
-    pub base_commit: BaseCommit,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CheckpointRequest {
-    pub trace_id: String,
-    pub checkpoint_kind: CheckpointKind,
-    pub agent_id: Option<AgentId>,
-    pub files: Vec<CheckpointFile>,
-    pub path_role: PreparedPathRole,
-    pub stream_source: Option<StreamSource>,
-    pub metadata: HashMap<String, String>,
-}
+// Re-export the types that moved to model so the 11 existing consumers that
+// import via `orchestrator::` keep working without import-path changes.
+pub use crate::model::checkpoint_request::BaseCommit;
+pub use crate::model::checkpoint_request::CheckpointFile;
+pub use crate::model::checkpoint_request::CheckpointRequest;
+pub use crate::model::checkpoint_request::PreparedPathRole;
 
 #[derive(Serialize)]
 struct CheckpointDebugLogEntry<'a> {

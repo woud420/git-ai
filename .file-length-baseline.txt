@@ -8,7 +8,6 @@ src/config/mod.rs	638
 src/config/tests.rs	1119
 src/diagnostics.rs	1482
 src/metrics/attrs.rs	741
-src/metrics/events.rs	2222
 src/metrics/local_stats.rs	1552
 src/metrics/pos_encoded.rs	637
 src/model/api_types.rs	610

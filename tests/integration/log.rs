@@ -27,7 +27,15 @@ fn log_default_shows_stats_without_raw_note() {
 
 #[test]
 fn log_raw_shows_authorship_note() {
-    let repo = TestRepo::new();
+    // This regression test needs attribution collection to be deterministic.
+    // Give it a dedicated daemon so another parallel TestRepo cannot rewrite
+    // the daemon's home config, and allow the exact repo/worktree it created.
+    let mut repo = TestRepo::new_dedicated_daemon();
+    let repo_root = repo.canonical_path().to_string_lossy().replace('\\', "/");
+    repo.patch_git_ai_config(move |patch| {
+        patch.allowed_repositories = Some(vec![repo_root]);
+    });
+
     let mut file = repo.filename("raw.txt");
     file.set_contents(lines!["AI raw line".ai()]);
     repo.stage_all_and_commit("feat: raw note").unwrap();
@@ -196,3 +204,5 @@ fn log_http_backend_reads_notes_db_without_git_notes_ref() {
         output
     );
 }
+
+crate::reuse_tests_in_worktree!(log_raw_shows_authorship_note,);

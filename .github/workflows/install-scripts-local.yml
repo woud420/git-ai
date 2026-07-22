@@ -16,6 +16,8 @@ on:
       - 'Cargo.lock'
       - 'install.sh'
       - 'install.ps1'
+      - 'uninstall.sh'
+      - 'uninstall.ps1'
       - 'scripts/**'
       - '.github/workflows/install-scripts-local.yml'
   merge_group:
@@ -180,6 +182,62 @@ jobs:
         run: |
           bash "$GITHUB_WORKSPACE/scripts/nightly/stop-async-daemon.sh" \
             "$HOME/.git-ai/bin/git-ai"
+
+      - name: Run uninstall.sh and verify cleanup
+        run: |
+          INSTALL_DIR="$HOME/.git-ai/bin"
+          # The per-job daemon is already stopped; clear its env overrides so the
+          # uninstall binary's own daemon shutdown (uninstall.rs step 3) targets
+          # the default daemon that 'git-ai install-hooks' started under $HOME.
+          unset GIT_AI_DAEMON_HOME GIT_AI_DAEMON_CONTROL_SOCKET GIT_AI_DAEMON_TRACE_SOCKET ASYNC_DAEMON_PID
+          "$INSTALL_DIR/git-ai" bg status || true
+          # Run the repo's uninstaller (delegates to 'git-ai uninstall --yes').
+          bash "$GITHUB_WORKSPACE/uninstall.sh" --yes
+          fail=0
+          # 1. Binary dir (git-ai + git shim) and the ~/.local/bin/git-ai symlink
+          #    are removed (uninstall.rs::remove_binaries).
+          if [ -e "$INSTALL_DIR" ]; then
+            echo "FAIL: $INSTALL_DIR still exists after uninstall"
+            ls -la "$INSTALL_DIR" || true
+            fail=1
+          fi
+          if [ -e "$HOME/.local/bin/git-ai" ] || [ -L "$HOME/.local/bin/git-ai" ]; then
+            echo "FAIL: ~/.local/bin/git-ai symlink still exists after uninstall"
+            fail=1
+          fi
+          # 2. The fenced PATH blocks are removed from every rc file install.sh
+          #    touched (uninstall.rs::clean_shell_rc_files via the install manifest).
+          for rc in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" "$HOME/.config/fish/config.fish"; do
+            [ -f "$rc" ] || continue
+            if grep -nF -e '# >>> git-ai >>>' -e '.git-ai/bin' "$rc"; then
+              echo "FAIL: git-ai lines still present in $rc (shown above)"
+              fail=1
+            fi
+          done
+          # 3. install-hooks pointed trace2.eventTarget at af_unix:...$HOME/.git-ai/...,
+          #    so uninstall.rs::revert_trace2_config removes the whole [trace2] section.
+          trace2_remaining="$(git config --global --get-regexp '^trace2\.' || true)"
+          if [ -n "$trace2_remaining" ]; then
+            echo "FAIL: global trace2 git config still present:"
+            echo "$trace2_remaining"
+            fail=1
+          fi
+          # 4. Without --purge the ~/.git-ai data dir (config + local databases) is
+          #    kept, and uninstall.rs only LOADS install-manifest.json to drive the
+          #    removal — it never deletes the manifest file.
+          for kept in "$HOME/.git-ai/install-manifest.json" "$HOME/.git-ai/config.json"; do
+            if [ ! -f "$kept" ]; then
+              echo "FAIL: $kept missing — uninstall without --purge must keep ~/.git-ai"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "=== uninstall E2E verification FAILED — remaining artifacts ==="
+            ls -la "$HOME/.git-ai" "$HOME/.git-ai/bin" "$HOME/.local/bin" 2>/dev/null || true
+            git config --global --list 2>/dev/null || true
+            exit 1
+          fi
+          echo "uninstall.sh E2E verification passed"
 
       - name: Upload E2E test results
         if: always()
@@ -574,6 +632,98 @@ jobs:
               $proc | Stop-Process -Force -ErrorAction SilentlyContinue
             }
           }
+
+      - name: Run uninstall.ps1 and verify cleanup (Windows)
+        shell: pwsh
+        env:
+          HOME: ${{ env.TEST_HOME }}
+          USERPROFILE: ${{ env.TEST_HOME }}
+          HOMEDRIVE: ${{ env.TEST_HOME_DRIVE }}
+          HOMEPATH: ${{ env.TEST_HOME_PATH }}
+        run: |
+          $installDir = Join-Path $env:USERPROFILE ".git-ai\bin"
+          $gitAiExe = Join-Path $installDir "git-ai.exe"
+          # The per-job daemon is already stopped; clear its env overrides so the
+          # uninstall binary's own daemon shutdown (uninstall.rs step 3) targets
+          # the default daemon that 'git-ai install-hooks' started under this home.
+          Remove-Item Env:GIT_AI_DAEMON_HOME -ErrorAction SilentlyContinue
+          Remove-Item Env:GIT_AI_DAEMON_CONTROL_SOCKET -ErrorAction SilentlyContinue
+          Remove-Item Env:GIT_AI_DAEMON_TRACE_SOCKET -ErrorAction SilentlyContinue
+          & $gitAiExe bg status 2>&1 | Out-Host
+          # Run the repo's uninstaller (delegates to 'git-ai uninstall --yes').
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & (Join-Path $env:GITHUB_WORKSPACE "uninstall.ps1") -Yes
+          if ($LASTEXITCODE -ne 0) { throw "uninstall.ps1 failed with exit code $LASTEXITCODE" }
+          $failures = @()
+          # 1. On Windows uninstall.rs cannot delete a running exe, so it leaves
+          #    ~/.git-ai/bin in place and asks the user to remove it after the
+          #    process exits. Additionally, remove_binaries resolves home via
+          #    dirs::home_dir() (the real runner profile), so the TEST_HOME bin
+          #    dir is doubly out of its reach: wrong home AND locked exe. Complete
+          #    the documented manual step here; success also proves the uninstall's
+          #    daemon shutdown released the exe lock.
+          if (Test-Path -LiteralPath $installDir) {
+            $removed = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              try {
+                Remove-Item -Recurse -Force -LiteralPath $installDir -ErrorAction Stop
+                $removed = $true
+                break
+              } catch {
+                Start-Sleep -Milliseconds 500
+              }
+            }
+            if (-not $removed) { $failures += "could not remove $installDir — a git-ai process still holds a lock" }
+          }
+          if (Test-Path -LiteralPath $gitAiExe) {
+            $failures += "git-ai.exe still present under $installDir"
+          }
+          # 2. Postcondition of uninstall.rs::revert_trace2_config: any eventTarget
+          #    pointing into ~/.git-ai is removed. On Windows install configures a
+          #    named pipe (\\.\pipe\git-ai-<hash>-trace2) with no '.git-ai'
+          #    component, which that guard leaves untouched by design — so assert
+          #    the target is unset OR does not point into ~/.git-ai.
+          $trace2Target = git config --global --get trace2.eventTarget 2>$null
+          if ($LASTEXITCODE -ne 0) { $trace2Target = $null }
+          if ($trace2Target -and ($trace2Target -match '\.git-ai')) {
+            $failures += "trace2.eventTarget still points into ~/.git-ai: $trace2Target"
+          } elseif ($trace2Target) {
+            Write-Host "NOTE: trace2.eventTarget left as '$trace2Target' (named pipe — uninstall.rs only reverts targets containing '.git-ai')"
+          }
+          # 3. Without --purge the ~/.git-ai data dir (config + local databases) is
+          #    kept, and uninstall.rs only LOADS install-manifest.json to drive the
+          #    removal — it never deletes the manifest file.
+          foreach ($kept in @(
+            (Join-Path $env:USERPROFILE ".git-ai\install-manifest.json"),
+            (Join-Path $env:USERPROFILE ".git-ai\config.json")
+          )) {
+            if (-not (Test-Path -LiteralPath $kept)) {
+              $failures += "$kept missing — uninstall without --purge must keep ~/.git-ai"
+            }
+          }
+          # 4. rc fence: install.ps1 wrote a fenced block to ~/.bashrc, but the
+          #    binary resolves home via the Windows known-folder API
+          #    (dirs::home_dir), which ignores this job's USERPROFILE redirection,
+          #    so the fence in the redirected test home is not cleaned here.
+          #    Report it as a diagnostic only — the fence-removal contract is
+          #    asserted for real on the Unix jobs.
+          foreach ($rc in @((Join-Path $env:USERPROFILE ".bashrc"), (Join-Path $env:USERPROFILE ".bash_profile"))) {
+            if ((Test-Path -LiteralPath $rc) -and (Select-String -Path $rc -Pattern '# >>> git-ai >>>' -SimpleMatch -Quiet)) {
+              Write-Host "NOTE: git-ai fence block still present in $rc (known: dirs::home_dir ignores the USERPROFILE redirection used by this job)"
+            }
+          }
+          if ($failures.Count -gt 0) {
+            Write-Host "=== uninstall E2E verification FAILED — remaining artifacts ==="
+            foreach ($f in $failures) { Write-Host "FAIL: $f" }
+            if (Test-Path -LiteralPath $installDir) { Get-ChildItem -Recurse -LiteralPath $installDir | Out-Host }
+            $dataDir = Join-Path $env:USERPROFILE ".git-ai"
+            if (Test-Path -LiteralPath $dataDir) { Get-ChildItem -LiteralPath $dataDir | Out-Host }
+            Get-Process -Name "git-ai*" -ErrorAction SilentlyContinue | Out-Host
+            git config --global --list 2>$null | Out-Host
+            throw "uninstall E2E verification failed: $($failures -join '; ')"
+          }
+          Write-Host "uninstall.ps1 E2E verification passed"
+          exit 0
 
       - name: Upload E2E test results
         if: always()

@@ -920,23 +920,7 @@ fn commit_is_ancestor(
 ) -> Result<bool, GitAiError> {
     let ancestor = repo.revparse_single(ancestor_sha)?.id();
     let descendant = repo.revparse_single(descendant_sha)?.id();
-
-    let mut args = repo.global_args_for_exec();
-    args.push("merge-base".to_string());
-    args.push("--is-ancestor".to_string());
-    args.push(ancestor);
-    args.push(descendant);
-
-    let output = exec_git_allow_nonzero(&args)?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        code => Err(GitAiError::GitCliError {
-            code,
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            args,
-        }),
-    }
+    repo.is_ancestor(&ancestor, &descendant)
 }
 
 #[cfg(test)]

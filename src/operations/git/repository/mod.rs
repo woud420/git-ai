@@ -9,6 +9,7 @@
 //! profiles/env) lives in `crate::clients::git_cli`
 //! for the same reason.
 
+mod ancestry;
 mod commits;
 mod core;
 mod diff;

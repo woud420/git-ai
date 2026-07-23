@@ -50,16 +50,7 @@ pub(super) fn derive_mappings_from_range_diff(
 }
 
 fn is_ancestor(repo: &Repository, ancestor: &str, descendant: &str) -> bool {
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "merge-base".to_string(),
-        "--is-ancestor".to_string(),
-        ancestor.to_string(),
-        descendant.to_string(),
-    ]);
-    exec_git_allow_nonzero(&args)
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    repo.is_ancestor(ancestor, descendant).unwrap_or(false)
 }
 
 pub(super) fn find_merge_base(repo: &Repository, a: &str, b: &str) -> Option<String> {

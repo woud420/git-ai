@@ -5,85 +5,17 @@
 //! for all six agents, gitignore filtering, and full handle_bash_tool
 //! orchestration.
 
+use crate::bash_tool_common::{add_and_commit, post_hook, pre_hook, repo_root};
 use crate::repos::test_repo::TestRepo;
-use git_ai::model::working_log::AgentId;
 use git_ai::operations::commands::checkpoint_agent::bash_tool::{
-    Agent, BashCheckpointAction, BashPostHookResult, StatDiffResult, StatEntry, StatFileType,
-    StatSnapshot, ToolClass, build_gitignore, classify_tool, diff, git_status_fallback,
-    handle_bash_post_tool_use, handle_bash_pre_tool_use_with_context, normalize_path,
-    set_daemon_socket_for_test, snapshot,
+    Agent, BashCheckpointAction, StatDiffResult, StatEntry, StatFileType, StatSnapshot, ToolClass,
+    build_gitignore, classify_tool, diff, git_status_fallback, normalize_path, snapshot,
 };
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Write a file into the test repo, creating parent directories as needed.
-fn write_file(repo: &TestRepo, rel_path: &str, contents: &str) {
-    let abs = repo.path().join(rel_path);
-    if let Some(parent) = abs.parent() {
-        fs::create_dir_all(parent).expect("parent directory should be creatable");
-    }
-    fs::write(&abs, contents).expect("file write should succeed");
-}
-
-/// Stage and commit a file so it appears in `git ls-files` (tracked).
-fn add_and_commit(repo: &TestRepo, rel_path: &str, contents: &str, message: &str) {
-    write_file(repo, rel_path, contents);
-    repo.git_og(&["add", rel_path])
-        .expect("git add should succeed");
-    repo.git_og(&["commit", "-m", message])
-        .expect("git commit should succeed");
-}
-
-/// Canonical repo root path (resolves /tmp -> /private/tmp on macOS).
-fn repo_root(repo: &TestRepo) -> std::path::PathBuf {
-    set_daemon_socket_for_test(repo.daemon_control_socket_path());
-    repo.canonical_path()
-}
-
-fn dummy_agent_id() -> AgentId {
-    AgentId {
-        tool: "test".to_string(),
-        id: "test".to_string(),
-        model: String::new(),
-    }
-}
-
-fn dummy_trace_id() -> &'static str {
-    "t_test123456789a"
-}
-
-fn pre_hook(root: &std::path::Path, session_id: &str, tool_use_id: &str) {
-    handle_bash_pre_tool_use_with_context(
-        root,
-        session_id,
-        tool_use_id,
-        &dummy_agent_id(),
-        None,
-        dummy_trace_id(),
-        None,
-    )
-    .expect("pre-hook should succeed");
-}
-
-fn post_hook(root: &std::path::Path, session_id: &str, tool_use_id: &str) -> BashPostHookResult {
-    handle_bash_post_tool_use(
-        root,
-        session_id,
-        tool_use_id,
-        &dummy_agent_id(),
-        None,
-        dummy_trace_id(),
-        None,
-    )
-    .expect("post-hook should succeed")
-}
 
 // ===========================================================================
 // Section 5.1 — File Mutations
@@ -96,7 +28,7 @@ fn test_bash_tool_detect_file_creation() {
 
     let pre = snapshot(&root, "sess", "t1", None).expect("pre-snapshot should succeed");
 
-    write_file(&repo, "new.txt", "hello");
+    repo.write_file("new.txt", "hello");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
     let result = diff(&pre, &post);
@@ -125,7 +57,7 @@ fn test_bash_tool_detect_modification() {
 
     // Allow filesystem time granularity to advance so the stat-tuple changes.
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "existing.txt", "bar");
+    repo.write_file("existing.txt", "bar");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
     let result = diff(&pre, &post);
@@ -336,8 +268,8 @@ fn test_bash_tool_multiple_mutations_combined() {
 
     // Perform multiple mutations
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "modify-me.txt", "changed");
-    write_file(&repo, "brand-new.txt", "fresh");
+    repo.write_file("modify-me.txt", "changed");
+    repo.write_file("brand-new.txt", "fresh");
     fs::remove_file(repo.path().join("delete-me.txt")).expect("delete should succeed");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
@@ -405,7 +337,7 @@ fn test_bash_tool_post_hook_detects_changes() {
 
     // Mutate between pre and post
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "target.txt", "after");
+    repo.write_file("target.txt", "after");
 
     // Post-hook
     let post_action = post_hook(&root, "sess", "tool2");
@@ -429,7 +361,7 @@ fn test_bash_tool_post_hook_without_pre_uses_fallback() {
     // Do NOT call PreToolUse first. PostToolUse should fall back to git status.
     // Create a tracked file and then modify it so git status shows changes.
     add_and_commit(&repo, "changed.txt", "original", "initial");
-    write_file(&repo, "changed.txt", "modified");
+    repo.write_file("changed.txt", "modified");
 
     let post_action = post_hook(&root, "sess", "missing-pre");
 
@@ -468,7 +400,7 @@ fn test_bash_tool_orchestration_create_file() {
     pre_hook(&root, "orch-sess", "orch-tool");
 
     // Simulate bash creating a new file
-    write_file(&repo, "generated.rs", "fn main() {}");
+    repo.write_file("generated.rs", "fn main() {}");
 
     // Post-hook
     let action = post_hook(&root, "orch-sess", "orch-tool");
@@ -519,7 +451,7 @@ fn test_bash_tool_orchestration_multiple_tool_uses() {
 
     // First tool use: create file
     pre_hook(&root, "multi-sess", "use1");
-    write_file(&repo, "first.txt", "first");
+    repo.write_file("first.txt", "first");
     let action1 = post_hook(&root, "multi-sess", "use1");
     assert!(
         matches!(action1.action, BashCheckpointAction::Checkpoint(_)),
@@ -529,7 +461,7 @@ fn test_bash_tool_orchestration_multiple_tool_uses() {
     // Second tool use: modify file
     pre_hook(&root, "multi-sess", "use2");
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "first.txt", "modified-first");
+    repo.write_file("first.txt", "modified-first");
     let action2 = post_hook(&root, "multi-sess", "use2");
     assert!(
         matches!(action2.action, BashCheckpointAction::Checkpoint(_)),
@@ -649,8 +581,8 @@ fn test_bash_tool_gitignore_excludes_new_untracked_files() {
     let pre = snapshot(&root, "sess", "t1", None).expect("pre-snapshot should succeed");
 
     // Create both an ignored and a non-ignored file
-    write_file(&repo, "debug.log", "log output");
-    write_file(&repo, "result.txt", "result data");
+    repo.write_file("debug.log", "log output");
+    repo.write_file("result.txt", "result data");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
     let result = diff(&pre, &post);
@@ -690,10 +622,10 @@ fn test_bash_tool_gitignore_excludes_directory_patterns() {
     let pre = snapshot(&root, "sess", "t1", None).expect("pre-snapshot should succeed");
 
     // Create files matching glob-based ignore patterns
-    write_file(&repo, "build/output.o", "binary");
-    write_file(&repo, "cache/module.pyc", "bytecode");
+    repo.write_file("build/output.o", "binary");
+    repo.write_file("cache/module.pyc", "bytecode");
     // Also create a non-ignored file
-    write_file(&repo, "src/main.rs", "fn main() {}");
+    repo.write_file("src/main.rs", "fn main() {}");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
     let result = diff(&pre, &post);
@@ -772,7 +704,7 @@ fn test_git_status_fallback_detects_changes() {
     let root = repo_root(&repo);
 
     add_and_commit(&repo, "tracked.txt", "original", "initial");
-    write_file(&repo, "tracked.txt", "modified");
+    repo.write_file("tracked.txt", "modified");
 
     let changed = git_status_fallback(&root).expect("git_status_fallback should succeed");
 
@@ -790,7 +722,7 @@ fn test_git_status_fallback_detects_untracked() {
 
     // Make an initial commit so we have a valid repo
     add_and_commit(&repo, "base.txt", "base", "init");
-    write_file(&repo, "untracked.txt", "new file");
+    repo.write_file("untracked.txt", "new file");
 
     let changed = git_status_fallback(&root).expect("git_status_fallback should succeed");
 
@@ -874,8 +806,8 @@ fn test_diff_result_all_changed_paths_combines_categories() {
     let pre = snapshot(&root, "sess", "t1", None).expect("pre-snapshot should succeed");
 
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "modify.txt", "changed");
-    write_file(&repo, "create.txt", "new");
+    repo.write_file("modify.txt", "changed");
+    repo.write_file("create.txt", "new");
     fs::remove_file(repo.path().join("delete.txt")).expect("delete should succeed");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
@@ -919,8 +851,8 @@ fn test_bash_tool_detect_file_in_subdirectory() {
     let pre = snapshot(&root, "sess", "t1", None).expect("pre-snapshot should succeed");
 
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "src/lib.rs", "pub fn bar() {}");
-    write_file(&repo, "src/nested/deep/module.rs", "mod deep;");
+    repo.write_file("src/lib.rs", "pub fn bar() {}");
+    repo.write_file("src/nested/deep/module.rs", "mod deep;");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
     let result = diff(&pre, &post);
@@ -1027,8 +959,8 @@ fn test_snapshot_nested_gitignore_excludes_matching_new_files() {
     let pre = snapshot(&root, "sess", "t1", None).expect("pre-snapshot should succeed");
 
     // Create both an ignored and a non-ignored file under src/
-    write_file(&repo, "src/output.generated", "generated code");
-    write_file(&repo, "src/real.rs", "fn real() {}");
+    repo.write_file("src/output.generated", "generated code");
+    repo.write_file("src/real.rs", "fn real() {}");
 
     let post = snapshot(&root, "sess", "t2", None).expect("post-snapshot should succeed");
     let result = diff(&pre, &post);
@@ -1144,7 +1076,7 @@ fn test_git_status_fallback_merge_conflict() {
     // Create a branch, modify the file, commit
     repo.git_og(&["checkout", "-b", "feature"])
         .expect("checkout should succeed");
-    write_file(&repo, "conflict.txt", "feature content");
+    repo.write_file("conflict.txt", "feature content");
     repo.git_og(&["add", "conflict.txt"])
         .expect("add should succeed");
     repo.git_og(&["commit", "-m", "feature change"])
@@ -1154,7 +1086,7 @@ fn test_git_status_fallback_merge_conflict() {
     repo.git_og(&["checkout", "master"])
         .or_else(|_| repo.git_og(&["checkout", "main"]))
         .expect("checkout main should succeed");
-    write_file(&repo, "conflict.txt", "main diverged content");
+    repo.write_file("conflict.txt", "main diverged content");
     repo.git_og(&["add", "conflict.txt"])
         .expect("add should succeed");
     repo.git_og(&["commit", "-m", "main diverged"])

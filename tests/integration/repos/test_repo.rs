@@ -2498,6 +2498,16 @@ impl TestRepo {
             .expect("failed to canonicalize test repo path")
     }
 
+    /// Write raw file contents into the repo, creating parent directories as
+    /// needed. Plain `fs::write` — no checkpoint side effects.
+    pub fn write_file(&self, rel: &str, contents: &str) {
+        let abs = self.path.join(rel);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent).expect("parent directory should be creatable");
+        }
+        fs::write(&abs, contents).expect("file write should succeed");
+    }
+
     pub fn test_db_path(&self) -> &PathBuf {
         &self.test_db_path
     }
@@ -2733,6 +2743,25 @@ impl TestRepo {
         }
 
         Err("git_og_with_env failed after retries".to_string())
+    }
+
+    /// Write a file and commit it via `git_og` (bypassing git-ai hooks), with
+    /// NO checkpoint fired — the commit lands as a fully untracked change.
+    /// A trailing newline is appended if missing for clean 3-way merge
+    /// behaviour.
+    pub fn commit_untracked_file(&self, filename: &str, content: &str, message: &str) {
+        let path = self.path.join(filename);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent dirs");
+        }
+        let content_with_nl = if content.ends_with('\n') {
+            content.to_string()
+        } else {
+            format!("{}\n", content)
+        };
+        fs::write(&path, content_with_nl.as_bytes()).expect("write file");
+        self.git_og(&["add", filename]).expect("git add");
+        self.git_og(&["commit", "-m", message]).expect("git commit");
     }
 
     pub fn benchmark_git(&self, args: &[&str]) -> Result<BenchmarkResult, String> {

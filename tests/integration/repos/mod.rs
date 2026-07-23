@@ -1,5 +1,6 @@
 #[macro_use]
 pub mod test_file;
+pub mod diff_hostility;
 pub mod test_repo;
 
 #[macro_export]

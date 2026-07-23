@@ -8,14 +8,8 @@ use crate::repos::test_repo::TestRepo;
 /// Issue: Files with Chinese (or other non-ASCII) characters in filenames were
 /// incorrectly classified as human-written because git outputs such filenames
 /// with octal escape sequences (e.g., `"\344\270\255\346\226\207.txt"` for "中文.txt").
+use crate::test_utils::extract_json_object;
 use git_ai::operations::authorship::stats::CommitStats;
-
-/// Extract the first complete JSON object from mixed stdout/stderr output.
-fn extract_json_object(output: &str) -> String {
-    let start = output.find('{').unwrap_or(0);
-    let end = output.rfind('}').unwrap_or(output.len().saturating_sub(1));
-    output[start..=end].to_string()
-}
 
 #[test]
 fn test_chinese_filename_ai_attribution() {

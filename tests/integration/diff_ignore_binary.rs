@@ -11,11 +11,6 @@ fn write_bytes(repo: &TestRepo, path: &str, bytes: &[u8]) {
     fs::write(abs_path, bytes).expect("file write should succeed");
 }
 
-/// Helper: write text content to a file in the test repo
-fn write_file(repo: &TestRepo, path: &str, contents: &str) {
-    write_bytes(repo, path, contents.as_bytes());
-}
-
 /// Helper: run git-ai diff --json and parse the result
 fn diff_json(repo: &TestRepo, args: &[&str]) -> Value {
     let output = repo.git_ai(args).expect("git-ai diff should succeed");
@@ -36,7 +31,7 @@ fn test_diff_json_ignores_binary_files_in_output() {
     let repo = TestRepo::new();
 
     // Create initial commit with a text file
-    write_file(&repo, "README.md", "# hello\n");
+    repo.write_file("README.md", "# hello\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Add a binary file (PNG header bytes) and modify the text file
@@ -47,7 +42,7 @@ fn test_diff_json_ignores_binary_files_in_output() {
         0x08, 0x02, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
     ];
     write_bytes(&repo, "image.png", &png_bytes);
-    write_file(&repo, "README.md", "# hello\nupdated\n");
+    repo.write_file("README.md", "# hello\nupdated\n");
 
     repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
     let commit = repo.stage_all_and_commit("add binary and text").unwrap();
@@ -79,13 +74,13 @@ fn test_diff_json_ignores_binary_files_in_output() {
 fn test_diff_terminal_handles_binary_files_without_error() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "README.md", "# hello\n");
+    repo.write_file("README.md", "# hello\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Add a binary file alongside text changes
     let binary_bytes: Vec<u8> = (0..256).map(|i| i as u8).collect();
     write_bytes(&repo, "data.bin", &binary_bytes);
-    write_file(&repo, "README.md", "# hello\nworld\n");
+    repo.write_file("README.md", "# hello\nworld\n");
 
     repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
     let commit = repo.stage_all_and_commit("add binary").unwrap();
@@ -102,7 +97,7 @@ fn test_diff_terminal_handles_binary_files_without_error() {
 fn test_diff_json_with_only_binary_changes() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "README.md", "# repo\n");
+    repo.write_file("README.md", "# repo\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Only binary file change
@@ -130,7 +125,7 @@ fn test_diff_json_with_only_binary_changes() {
 fn test_diff_json_handles_non_utf8_file_content() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "README.md", "# repo\n");
+    repo.write_file("README.md", "# repo\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Create a file with invalid UTF-8 sequences (Latin-1 encoded text)
@@ -139,7 +134,7 @@ fn test_diff_json_handles_non_utf8_file_content() {
     content.extend_from_slice(&[0xC0, 0xE9, 0xF1, 0xFC]); // invalid UTF-8 bytes (Latin-1 chars)
     content.push(b'\n');
     write_bytes(&repo, "legacy.txt", &content);
-    write_file(&repo, "README.md", "# repo\nupdated\n");
+    repo.write_file("README.md", "# repo\nupdated\n");
 
     repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
     let commit = repo.stage_all_and_commit("add non-utf8 file").unwrap();
@@ -163,12 +158,11 @@ fn test_diff_json_handles_non_utf8_file_content() {
 fn test_diff_json_handles_mixed_utf8_and_binary_content() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "app.js", "console.log('hello');\n");
+    repo.write_file("app.js", "console.log('hello');\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Valid UTF-8 with multi-byte characters (CJK, emoji, etc.)
-    write_file(
-        &repo,
+    repo.write_file(
         "app.js",
         "console.log('hello');\nconsole.log('\u{4e16}\u{754c}');\nconsole.log('\u{1F600}');\n",
     );
@@ -200,13 +194,11 @@ fn test_diff_json_handles_complex_utf8_characters() {
     let repo = TestRepo::new();
 
     // Initial commit with a file containing ASCII only
-    write_file(&repo, "i18n.txt", "hello world\n");
+    repo.write_file("i18n.txt", "hello world\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Update with complex UTF-8: CJK, Arabic, emoji, combining characters
-    write_file(
-        &repo,
-        "i18n.txt",
+    repo.write_file("i18n.txt",
         "hello world\n\u{4e16}\u{754c}\u{4f60}\u{597d}\n\u{0645}\u{0631}\u{062d}\u{0628}\u{0627}\n\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}\ne\u{0301}\n",
     );
 
@@ -230,7 +222,7 @@ fn test_diff_json_handles_complex_utf8_characters() {
 fn test_diff_terminal_handles_non_utf8_without_error() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "README.md", "# repo\n");
+    repo.write_file("README.md", "# repo\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Create file with invalid UTF-8
@@ -238,7 +230,7 @@ fn test_diff_terminal_handles_non_utf8_without_error() {
     content.extend_from_slice(&[0x80, 0x81, 0x82, 0xFE, 0xFF]); // invalid UTF-8
     content.push(b'\n');
     write_bytes(&repo, "bad_encoding.txt", &content);
-    write_file(&repo, "README.md", "# repo\nchanged\n");
+    repo.write_file("README.md", "# repo\nchanged\n");
 
     repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
     let commit = repo.stage_all_and_commit("add bad encoding").unwrap();
@@ -259,14 +251,14 @@ fn test_diff_terminal_handles_non_utf8_without_error() {
 fn test_diff_json_respects_default_ignore_patterns() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/main.rs", "fn main() {}\n");
+    repo.write_file("src/main.rs", "fn main() {}\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Modify a source file and add changes to default-ignored files
-    write_file(&repo, "src/main.rs", "fn main() {}\nfn added() {}\n");
-    write_file(&repo, "Cargo.lock", "# lock content\nline 2\nline 3\n");
-    write_file(&repo, "package-lock.json", "{\"lockfileVersion\": 1}\n");
-    write_file(&repo, "dist/bundle.min.js", "var a=1;\n");
+    repo.write_file("src/main.rs", "fn main() {}\nfn added() {}\n");
+    repo.write_file("Cargo.lock", "# lock content\nline 2\nline 3\n");
+    repo.write_file("package-lock.json", "{\"lockfileVersion\": 1}\n");
+    repo.write_file("dist/bundle.min.js", "var a=1;\n");
 
     repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
     let commit = repo
@@ -305,22 +297,16 @@ fn test_diff_json_respects_default_ignore_patterns() {
 fn test_diff_json_respects_gitattributes_linguist_generated() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/app.ts", "export const app = 1;\n");
+    repo.write_file("src/app.ts", "export const app = 1;\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Set up .gitattributes with linguist-generated
-    write_file(
-        &repo,
-        ".gitattributes",
-        "generated/** linguist-generated=true\n",
-    );
-    write_file(
-        &repo,
+    repo.write_file(".gitattributes", "generated/** linguist-generated=true\n");
+    repo.write_file(
         "src/app.ts",
         "export const app = 1;\nexport const next = 2;\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "generated/schema.ts",
         "export const schema = {};\nexport const types = {};\n",
     );
@@ -352,13 +338,13 @@ fn test_diff_json_respects_gitattributes_linguist_generated() {
 fn test_diff_json_respects_git_ai_ignore_file() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/main.rs", "fn main() {}\n");
+    repo.write_file("src/main.rs", "fn main() {}\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Set up .git-ai-ignore
-    write_file(&repo, ".git-ai-ignore", "docs/**\n*.pdf\n");
-    write_file(&repo, "src/main.rs", "fn main() {}\nfn added() {}\n");
-    write_file(&repo, "docs/guide.md", "# Guide\nLine 1\nLine 2\n");
+    repo.write_file(".git-ai-ignore", "docs/**\n*.pdf\n");
+    repo.write_file("src/main.rs", "fn main() {}\nfn added() {}\n");
+    repo.write_file("docs/guide.md", "# Guide\nLine 1\nLine 2\n");
 
     repo.git_ai(&["checkpoint", "mock_ai", "src/main.rs", "docs/guide.md"])
         .unwrap();
@@ -385,29 +371,23 @@ fn test_diff_json_respects_git_ai_ignore_file() {
 fn test_diff_json_respects_union_of_all_ignore_sources() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/app.ts", "export const app = 1;\n");
+    repo.write_file("src/app.ts", "export const app = 1;\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Set up both .gitattributes and .git-ai-ignore
-    write_file(
-        &repo,
-        ".gitattributes",
-        "generated/** linguist-generated=true\n",
-    );
-    write_file(&repo, ".git-ai-ignore", "docs/**\n");
+    repo.write_file(".gitattributes", "generated/** linguist-generated=true\n");
+    repo.write_file(".git-ai-ignore", "docs/**\n");
 
-    write_file(
-        &repo,
+    repo.write_file(
         "src/app.ts",
         "export const app = 1;\nexport const next = 2;\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "generated/out.ts",
         "export const gen = 1;\nexport const gen2 = 2;\n",
     );
-    write_file(&repo, "docs/api.md", "# API\nendpoint 1\nendpoint 2\n");
-    write_file(&repo, "Cargo.lock", "# lock\nline2\n");
+    repo.write_file("docs/api.md", "# API\nendpoint 1\nendpoint 2\n");
+    repo.write_file("Cargo.lock", "# lock\nline2\n");
 
     repo.git_ai(&[
         "checkpoint",
@@ -450,13 +430,13 @@ fn test_diff_json_respects_union_of_all_ignore_sources() {
 fn test_diff_terminal_respects_ignore_patterns() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/main.rs", "fn main() {}\n");
+    repo.write_file("src/main.rs", "fn main() {}\n");
     repo.stage_all_and_commit("initial").unwrap();
 
-    write_file(&repo, ".git-ai-ignore", "docs/**\n");
-    write_file(&repo, "src/main.rs", "fn main() {}\nfn added() {}\n");
-    write_file(&repo, "docs/guide.md", "# Guide\nLine 1\n");
-    write_file(&repo, "Cargo.lock", "# lock\nline2\n");
+    repo.write_file(".git-ai-ignore", "docs/**\n");
+    repo.write_file("src/main.rs", "fn main() {}\nfn added() {}\n");
+    repo.write_file("docs/guide.md", "# Guide\nLine 1\n");
+    repo.write_file("Cargo.lock", "# lock\nline2\n");
 
     repo.git_ai(&["checkpoint", "mock_ai", "src/main.rs", "docs/guide.md"])
         .unwrap();
@@ -484,48 +464,41 @@ fn test_diff_terminal_respects_ignore_patterns() {
 fn test_diff_json_ignores_protobuf_generated_files_by_default() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/main.rs", "fn main() {}\n");
+    repo.write_file("src/main.rs", "fn main() {}\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Add a real source file change and several protobuf-generated files
-    write_file(&repo, "src/main.rs", "fn main() {}\nfn added() {}\n");
-    write_file(
-        &repo,
+    repo.write_file("src/main.rs", "fn main() {}\nfn added() {}\n");
+    repo.write_file(
         "proto/gen/service.pb.go",
         "package gen\n\ntype Service struct{}\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "ios/Proto/Message.pbobjc.h",
         "#import <Foundation/Foundation.h>\n@interface Message\n@end\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "ios/Proto/Message.pbobjc.m",
         "#import \"Message.pbobjc.h\"\n@implementation Message\n@end\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "backend/api/types_pb2.py",
         "# Generated by protoc\nclass Types:\n    pass\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "backend/api/service_pb2_grpc.py",
         "# Generated by protoc\nclass ServiceStub:\n    pass\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "cpp/protos/message.pb.h",
         "#pragma once\nclass Message {};\n",
     );
-    write_file(
-        &repo,
+    repo.write_file(
         "cpp/protos/message.pb.cc",
         "#include \"message.pb.h\"\nMessage::Message() {}\n",
     );
-    write_file(&repo, "swift/Proto/message.pb.swift", "struct Message {}\n");
-    write_file(&repo, "dart/lib/message.pb.dart", "class Message {}\n");
+    repo.write_file("swift/Proto/message.pb.swift", "struct Message {}\n");
+    repo.write_file("dart/lib/message.pb.dart", "class Message {}\n");
 
     repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
     let commit = repo

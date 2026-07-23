@@ -7,12 +7,12 @@
 //! modified, and deleted files across a wide variety of real-world shell
 //! commands.
 
+use crate::bash_tool_common::{add_and_commit, post_hook, pre_hook, repo_root};
 use crate::repos::test_repo::TestRepo;
-use git_ai::model::working_log::AgentId;
 use git_ai::operations::commands::checkpoint_agent::bash_tool::{
-    BashCheckpointAction, BashPostHookResult, diff, git_status_fallback, handle_bash_post_tool_use,
-    handle_bash_pre_tool_use_with_context, set_daemon_socket_for_test, snapshot,
+    BashCheckpointAction, BashPostHookResult, diff, git_status_fallback, snapshot,
 };
+#[cfg(unix)]
 use std::fs;
 use std::process::Command;
 use std::thread;
@@ -21,68 +21,6 @@ use std::time::Duration;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Write a file into the test repo, creating parent directories as needed.
-fn write_file(repo: &TestRepo, rel_path: &str, contents: &str) {
-    let abs = repo.path().join(rel_path);
-    if let Some(parent) = abs.parent() {
-        fs::create_dir_all(parent).expect("parent directory should be creatable");
-    }
-    fs::write(&abs, contents).expect("file write should succeed");
-}
-
-/// Stage and commit a file so it appears in `git ls-files` (tracked).
-fn add_and_commit(repo: &TestRepo, rel_path: &str, contents: &str, message: &str) {
-    write_file(repo, rel_path, contents);
-    repo.git_og(&["add", rel_path])
-        .expect("git add should succeed");
-    repo.git_og(&["commit", "-m", message])
-        .expect("git commit should succeed");
-}
-
-/// Canonical repo root path (resolves /tmp -> /private/tmp on macOS).
-fn repo_root(repo: &TestRepo) -> std::path::PathBuf {
-    set_daemon_socket_for_test(repo.daemon_control_socket_path());
-    repo.canonical_path()
-}
-
-fn dummy_agent_id() -> AgentId {
-    AgentId {
-        tool: "test".to_string(),
-        id: "test".to_string(),
-        model: String::new(),
-    }
-}
-
-fn dummy_trace_id() -> &'static str {
-    "t_test123456789a"
-}
-
-fn pre_hook(root: &std::path::Path, session_id: &str, tool_use_id: &str) {
-    handle_bash_pre_tool_use_with_context(
-        root,
-        session_id,
-        tool_use_id,
-        &dummy_agent_id(),
-        None,
-        dummy_trace_id(),
-        None,
-    )
-    .expect("pre-hook should succeed");
-}
-
-fn post_hook(root: &std::path::Path, session_id: &str, tool_use_id: &str) -> BashPostHookResult {
-    handle_bash_post_tool_use(
-        root,
-        session_id,
-        tool_use_id,
-        &dummy_agent_id(),
-        None,
-        dummy_trace_id(),
-        None,
-    )
-    .expect("post-hook should succeed")
-}
 
 /// Run a bash command in the repo and assert it succeeds.
 fn run_bash(repo: &TestRepo, program: &str, args: &[&str]) -> std::process::Output {
@@ -464,7 +402,7 @@ fn test_bash_provenance_git_checkout_restore() {
 
     // Modify the file so git checkout -- will revert it
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "restorable.txt", "modified content");
+    repo.write_file("restorable.txt", "modified content");
 
     pre_hook(&root, "checkout-sess", "checkout-t1");
 
@@ -485,7 +423,7 @@ fn test_bash_provenance_git_stash_pop() {
 
     // Modify and stash
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "stashed.txt", "modified for stash");
+    repo.write_file("stashed.txt", "modified for stash");
     repo.git_og(&["add", "stashed.txt"])
         .expect("git add should succeed");
     repo.git_og(&["stash", "push", "-m", "test stash"])
@@ -522,7 +460,7 @@ fn test_bash_provenance_git_apply_patch() {
 +line TWO PATCHED
  line three
 ";
-    write_file(&repo, "fix.patch", patch_content);
+    repo.write_file("fix.patch", patch_content);
 
     pre_hook(&root, "patch-sess", "patch-t1");
 
@@ -1208,7 +1146,7 @@ fn test_git_status_fallback_files_with_spaces() {
     add_and_commit(&repo, "file with spaces.txt", "original", "add spaced file");
 
     // Modify it so git status reports it
-    write_file(&repo, "file with spaces.txt", "modified");
+    repo.write_file("file with spaces.txt", "modified");
 
     let changed = git_status_fallback(&root).unwrap();
     assert!(
@@ -1224,7 +1162,7 @@ fn test_git_status_fallback_new_untracked_with_spaces() {
     let root = repo_root(&repo);
 
     // Create an untracked file with spaces
-    write_file(&repo, "my new file.rs", "content");
+    repo.write_file("my new file.rs", "content");
 
     let changed = git_status_fallback(&root).unwrap();
     assert!(
@@ -1357,7 +1295,7 @@ exit 0
     pre_hook(&root, "fmt-sess", "fmt-t1");
 
     // AI agent creates and stages a Python file
-    write_file(&repo, "main.py", "print('hello')\n");
+    repo.write_file("main.py", "print('hello')\n");
     run_git_with_hooks(&repo, &["add", "main.py"]);
 
     // AI agent commits — the pre-commit hook will modify main.py
@@ -1406,7 +1344,7 @@ exit 0
 
     pre_hook(&root, "fmtstage-sess", "fmtstage-t1");
 
-    write_file(&repo, "app.py", "x = 1   \ny = 2   \n");
+    repo.write_file("app.py", "x = 1   \ny = 2   \n");
     run_git_with_hooks(&repo, &["add", "app.py"]);
 
     let commit_output = run_git_with_hooks(&repo, &["commit", "-m", "add app.py"]);
@@ -1447,7 +1385,7 @@ exit 0
 
     pre_hook(&root, "hooknew-sess", "hooknew-t1");
 
-    write_file(&repo, "feature.py", "def feature(): pass\n");
+    repo.write_file("feature.py", "def feature(): pass\n");
     run_git_with_hooks(&repo, &["add", "feature.py"]);
 
     let commit_output = run_git_with_hooks(&repo, &["commit", "-m", "add feature"]);
@@ -1496,7 +1434,7 @@ exit 0
 
     // AI agent creates a completely different file
     thread::sleep(Duration::from_millis(50));
-    write_file(&repo, "new-feature.rs", "fn new_feature() {}\n");
+    repo.write_file("new-feature.rs", "fn new_feature() {}\n");
     run_git_with_hooks(&repo, &["add", "new-feature.rs"]);
 
     let commit_output = run_git_with_hooks(&repo, &["commit", "-m", "add new feature"]);
@@ -1546,10 +1484,10 @@ exit 0
     pre_hook(&root, "multi-fmt-sess", "multi-fmt-t1");
 
     // AI agent creates multiple Python files
-    write_file(&repo, "src/api.py", "def api(): pass\n");
-    write_file(&repo, "src/models.py", "class Model: pass\n");
-    write_file(&repo, "src/utils.py", "def util(): pass\n");
-    write_file(&repo, "readme.md", "# Project\n"); // Not .py — won't be formatted
+    repo.write_file("src/api.py", "def api(): pass\n");
+    repo.write_file("src/models.py", "class Model: pass\n");
+    repo.write_file("src/utils.py", "def util(): pass\n");
+    repo.write_file("readme.md", "# Project\n"); // Not .py — won't be formatted
 
     run_git_with_hooks(&repo, &["add", "."]);
 
@@ -1610,7 +1548,7 @@ exit 1
 
     pre_hook(&root, "hookfail-sess", "hookfail-t1");
 
-    write_file(&repo, "broken.py", "x=1\n");
+    repo.write_file("broken.py", "x=1\n");
     run_git_with_hooks(&repo, &["add", "broken.py"]);
 
     // The commit will FAIL because the hook exits 1

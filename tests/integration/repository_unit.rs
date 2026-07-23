@@ -29,6 +29,9 @@ fn init_test_git_config() {
     });
 }
 
+/// Unlike the shared `raw_git`, this suite resolves the real git binary via
+/// `Config::get().git_cmd()` (fork-bomb-safe when a git-ai shim shadows `git`
+/// in PATH) and points at an isolated global config first.
 fn run_git(cwd: &Path, args: &[&str]) {
     init_test_git_config();
     let output = Command::new(git_ai::config::Config::get().git_cmd())

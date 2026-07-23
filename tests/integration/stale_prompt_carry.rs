@@ -7,21 +7,6 @@ use std::fs;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Write `content` to `filename`, stage, and commit via `git_og` (bypasses
-/// git-ai hooks completely).  This creates a commit with zero AI involvement —
-/// no checkpoints, no authorship note.
-fn write_raw_commit(repo: &TestRepo, filename: &str, content: &str, message: &str) {
-    let path = repo.path().join(filename);
-    let with_nl = if content.ends_with('\n') {
-        content.to_string()
-    } else {
-        format!("{}\n", content)
-    };
-    fs::write(&path, with_nl.as_bytes()).expect("write file");
-    repo.git_og(&["add", filename]).expect("git add");
-    repo.git_og(&["commit", "-m", message]).expect("git commit");
-}
-
 /// Read the authorship note for HEAD, parse it, and return the full log.
 fn head_authorship_log(repo: &TestRepo) -> AuthorshipLog {
     let sha = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
@@ -52,7 +37,7 @@ fn test_stale_prompt_not_carried_to_subsequent_human_commits() {
     let repo = TestRepo::new();
 
     // Base commit (via git_og — no hooks, clean slate)
-    write_raw_commit(&repo, "base.txt", "Base content", "Initial commit");
+    repo.commit_untracked_file("base.txt", "Base content", "Initial commit");
 
     // Commit A: AI writes code — creates prompts in the note
     let mut ai_file = repo.filename("pi.md");
@@ -131,7 +116,7 @@ fn test_stale_prompt_not_carried_to_subsequent_human_commits() {
 fn test_prompt_present_when_ai_lines_committed() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "base.txt", "Base content", "Initial commit");
+    repo.commit_untracked_file("base.txt", "Base content", "Initial commit");
 
     let mut ai_file = repo.filename("code.rs");
     ai_file.set_contents(crate::lines![
@@ -313,7 +298,7 @@ fn test_amend_stale_initial_prompt_not_in_amended_human_commit() {
 fn test_amend_stale_blame_prompt_not_in_amended_human_commit() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "base.txt", "Base content", "Initial commit");
+    repo.commit_untracked_file("base.txt", "Base content", "Initial commit");
 
     // Commit A: AI lines committed (no unstaged leftovers — all lines land)
     let mut ai_file = repo.filename("ai_module.rs");
@@ -375,7 +360,7 @@ fn test_amend_stale_blame_prompt_not_in_amended_human_commit() {
 fn test_amend_preserves_prompt_when_ai_lines_survive() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "base.txt", "Base content", "Initial commit");
+    repo.commit_untracked_file("base.txt", "Base content", "Initial commit");
 
     // Commit with AI lines
     let mut ai_file = repo.filename("code.rs");
@@ -429,7 +414,7 @@ fn test_rebase_stale_prompt_not_in_rebased_human_commit() {
     let repo = TestRepo::new();
 
     // Initial commit on main (via git_og — clean, no hooks)
-    write_raw_commit(&repo, "shared.txt", "shared content", "Initial commit");
+    repo.commit_untracked_file("shared.txt", "shared content", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Create feature branch
@@ -470,7 +455,7 @@ fn test_rebase_stale_prompt_not_in_rebased_human_commit() {
 
     // Advance main with a non-conflicting raw commit
     repo.git_og(&["checkout", &default_branch]).unwrap();
-    write_raw_commit(&repo, "main_only.txt", "main-only content", "Main advances");
+    repo.commit_untracked_file("main_only.txt", "main-only content", "Main advances");
 
     // Rebase feature onto main
     repo.git_og(&["checkout", "feature"]).unwrap();
@@ -502,7 +487,7 @@ fn test_rebase_stale_prompt_not_in_rebased_human_commit() {
 fn test_rebase_preserves_prompt_when_ai_lines_present() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "shared.txt", "shared content", "Initial commit");
+    repo.commit_untracked_file("shared.txt", "shared content", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Feature branch with an AI commit
@@ -517,7 +502,7 @@ fn test_rebase_preserves_prompt_when_ai_lines_present() {
 
     // Advance main
     repo.git(&["checkout", &default_branch]).unwrap();
-    write_raw_commit(&repo, "main_only.txt", "main-only content", "Main advances");
+    repo.commit_untracked_file("main_only.txt", "main-only content", "Main advances");
 
     // Rebase feature onto main
     repo.git(&["checkout", "feature"]).unwrap();

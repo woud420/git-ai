@@ -1,5 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
+use crate::test_utils::isolated_bash_history_db_path;
 use git_ai::metrics::{EventAttributes, MetricEvent, PosEncoded, SessionEventValues};
 use git_ai::model::authorship_log::LineRange;
 use git_ai::model::authorship_log_serialization::{AuthorshipLog, generate_session_id};
@@ -149,12 +150,6 @@ fn session_ids_for_tool(authorship_log: &AuthorshipLog, tool: &str) -> Vec<Strin
         .collect::<Vec<_>>();
     session_ids.sort();
     session_ids
-}
-
-fn isolated_bash_history_db_path() -> (tempfile::TempDir, String) {
-    let dir = tempfile::tempdir().expect("failed to create isolated bash history db dir");
-    let path = dir.path().join("bash-history.db");
-    (dir, path.to_string_lossy().to_string())
 }
 
 fn insert_bash_call(

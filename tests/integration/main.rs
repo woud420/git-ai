@@ -18,6 +18,7 @@ mod attribution_tracker_comprehensive;
 mod background_agent_attribution;
 mod bash_attribution;
 mod bash_tool_benchmark;
+mod bash_tool_common;
 mod bash_tool_conformance;
 mod bash_tool_provenance;
 mod bash_tool_timeouts;

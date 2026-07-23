@@ -1,4 +1,5 @@
 use crate::repos::test_repo::TestRepo;
+use crate::test_utils::extract_json_object;
 use git_ai::operations::authorship::stats::CommitStats;
 use serde::Deserialize;
 use std::fs;
@@ -8,12 +9,6 @@ use std::fs;
 struct StatusOutput {
     stats: CommitStats,
     checkpoints: Vec<serde_json::Value>,
-}
-
-fn extract_json_object(output: &str) -> String {
-    let start = output.find('{').unwrap_or(0);
-    let end = output.rfind('}').unwrap_or(output.len().saturating_sub(1));
-    output[start..=end].to_string()
 }
 
 fn status_json(repo: &TestRepo) -> StatusOutput {
@@ -39,14 +34,6 @@ fn status_json_with_args(repo: &TestRepo, args: &[&str]) -> DiffOnlyStatusOutput
     serde_json::from_str(&json).expect("valid status json")
 }
 
-fn write_file(repo: &TestRepo, path: &str, contents: &str) {
-    let abs_path = repo.path().join(path);
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent).expect("parent directory should be creatable");
-    }
-    fs::write(abs_path, contents).expect("file write should succeed");
-}
-
 /// Migrated from src/commands/status.rs test_get_working_dir_diff_stats_post_filter_equivalence
 ///
 /// Creates two files, commits them, then modifies both. A checkpoint is created
@@ -56,13 +43,13 @@ fn write_file(repo: &TestRepo, path: &str, contents: &str) {
 fn test_working_dir_diff_stats_single_file_checkpoint() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "a.txt", "L1\nL2\nL3\n");
-    write_file(&repo, "b.txt", "hello\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\n");
+    repo.write_file("b.txt", "hello\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Modify both in working dir
-    write_file(&repo, "a.txt", "L1\nL2\nL3\nL4\nL5\n");
-    write_file(&repo, "b.txt", "hello\nworld\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\nL4\nL5\n");
+    repo.write_file("b.txt", "hello\nworld\n");
 
     // Checkpoint only a.txt -- the status command scopes its diff to checkpointed files
     repo.git_ai(&["checkpoint", "mock_ai", "a.txt"]).unwrap();
@@ -85,13 +72,13 @@ fn test_working_dir_diff_stats_single_file_checkpoint() {
 fn test_working_dir_diff_stats_exclusion_by_checkpoint() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "a.txt", "L1\nL2\nL3\n");
-    write_file(&repo, "b.txt", "hello\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\n");
+    repo.write_file("b.txt", "hello\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Modify both in working dir
-    write_file(&repo, "a.txt", "L1\nL2\nL3\nL4\nL5\n");
-    write_file(&repo, "b.txt", "hello\nworld\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\nL4\nL5\n");
+    repo.write_file("b.txt", "hello\nworld\n");
 
     // Checkpoint only a.txt
     repo.git_ai(&["checkpoint", "mock_ai", "a.txt"]).unwrap();
@@ -113,13 +100,13 @@ fn test_working_dir_diff_stats_exclusion_by_checkpoint() {
 fn test_working_dir_diff_stats_all_files_checkpointed() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "a.txt", "L1\nL2\nL3\n");
-    write_file(&repo, "b.txt", "hello\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\n");
+    repo.write_file("b.txt", "hello\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Modify both in working dir
-    write_file(&repo, "a.txt", "L1\nL2\nL3\nL4\nL5\n");
-    write_file(&repo, "b.txt", "hello\nworld\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\nL4\nL5\n");
+    repo.write_file("b.txt", "hello\nworld\n");
 
     // Checkpoint both files -- pathspecs include all modified files
     repo.git_ai(&["checkpoint", "mock_ai", "a.txt", "b.txt"])
@@ -142,7 +129,7 @@ fn test_working_dir_diff_stats_all_files_checkpointed() {
 fn test_working_dir_diff_stats_no_changes_returns_zero() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "a.txt", "L1\nL2\n");
+    repo.write_file("a.txt", "L1\nL2\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // No modifications to the working directory after commit
@@ -164,13 +151,13 @@ fn test_working_dir_diff_stats_no_changes_returns_zero() {
 fn test_working_dir_diff_stats_with_rename() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "old_name.txt", "L1\nL2\nL3\n");
+    repo.write_file("old_name.txt", "L1\nL2\nL3\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Rename old_name.txt -> new_name.txt and add a line.
     // Stage the rename so git diff HEAD sees it.
     fs::remove_file(repo.path().join("old_name.txt")).unwrap();
-    write_file(&repo, "new_name.txt", "L1\nL2\nL3\nL4\n");
+    repo.write_file("new_name.txt", "L1\nL2\nL3\nL4\n");
     // Stage everything so git diff HEAD picks up the rename
     repo.git(&["add", "-A"]).unwrap();
 
@@ -201,12 +188,12 @@ fn test_working_dir_diff_stats_with_rename() {
 fn test_working_dir_diff_stats_respects_ignore_patterns() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/lib.rs", "pub fn a() {}\n");
-    write_file(&repo, "Cargo.lock", "# lock\n");
+    repo.write_file("src/lib.rs", "pub fn a() {}\n");
+    repo.write_file("Cargo.lock", "# lock\n");
     repo.stage_all_and_commit("initial").unwrap();
 
-    write_file(&repo, "src/lib.rs", "pub fn a() {}\npub fn b() {}\n");
-    write_file(&repo, "Cargo.lock", "# lock\n# lock-2\n# lock-3\n");
+    repo.write_file("src/lib.rs", "pub fn a() {}\npub fn b() {}\n");
+    repo.write_file("Cargo.lock", "# lock\n# lock-2\n# lock-3\n");
 
     // Checkpoint both files -- Cargo.lock should be ignored by default patterns
     repo.git_ai(&["checkpoint", "mock_ai", "src/lib.rs", "Cargo.lock"])
@@ -230,13 +217,13 @@ fn test_working_dir_diff_stats_respects_ignore_patterns() {
 fn test_ai_accepted_respects_ignore_patterns() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "src/lib.rs", "pub fn a() {}\n");
-    write_file(&repo, "Cargo.lock", "# lock\n");
+    repo.write_file("src/lib.rs", "pub fn a() {}\n");
+    repo.write_file("Cargo.lock", "# lock\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     // Modify both files
-    write_file(&repo, "src/lib.rs", "pub fn a() {}\npub fn b() {}\n");
-    write_file(&repo, "Cargo.lock", "# lock\n# lock-2\n# lock-3\n");
+    repo.write_file("src/lib.rs", "pub fn a() {}\npub fn b() {}\n");
+    repo.write_file("Cargo.lock", "# lock\n# lock-2\n# lock-3\n");
 
     // Checkpoint both as AI edits
     repo.git_ai(&["checkpoint", "mock_ai", "src/lib.rs", "Cargo.lock"])
@@ -303,10 +290,10 @@ fn test_status_preserves_lowercase_agent_identifier() {
 fn test_diff_only_omits_checkpoints_but_keeps_stats() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "a.txt", "L1\nL2\nL3\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\n");
     repo.stage_all_and_commit("initial").unwrap();
 
-    write_file(&repo, "a.txt", "L1\nL2\nL3\nL4\nL5\n");
+    repo.write_file("a.txt", "L1\nL2\nL3\nL4\nL5\n");
     repo.git_ai(&["checkpoint", "mock_ai", "a.txt"]).unwrap();
 
     // Default mode includes the checkpoints array.
@@ -343,7 +330,7 @@ fn test_diff_only_omits_checkpoints_but_keeps_stats() {
 fn test_diff_only_no_changes_omits_checkpoints() {
     let repo = TestRepo::new();
 
-    write_file(&repo, "a.txt", "L1\nL2\n");
+    repo.write_file("a.txt", "L1\nL2\n");
     repo.stage_all_and_commit("initial").unwrap();
 
     let diff_only = status_json_with_args(&repo, &["status", "--json", "--diff-only"]);

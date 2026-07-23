@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
-use crate::test_utils::fixture_path;
+use crate::test_utils::{fixture_path, isolated_bash_history_db_path};
 use git_ai::model::repository::bash_history_db::BashHistoryDatabase;
 use git_ai::model::working_log::AgentId;
 use git_ai::operations::commands::checkpoint_agent::bash_tool::{
@@ -11,12 +11,6 @@ use serde_json::json;
 use std::fs;
 use std::thread;
 use std::time::Duration;
-
-fn isolated_bash_history_db_path() -> (tempfile::TempDir, String) {
-    let dir = tempfile::tempdir().expect("failed to create isolated bash history db dir");
-    let path = dir.path().join("bash-history.db");
-    (dir, path.to_string_lossy().to_string())
-}
 
 #[test]
 fn test_bash_pre_legacy_checkpoint_recovers_dirty_edge_attribution() {

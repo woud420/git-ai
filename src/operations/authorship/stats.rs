@@ -67,7 +67,7 @@ pub fn stats_command(
         refname
     );
 
-    let stats = stats_for_commit_stats(repo, &target, ignore_patterns)?;
+    let stats = super::recent_stats::stats_for_commit(repo, &target, ignore_patterns)?;
 
     if json {
         let json_str = serde_json::to_string(&stats)?;

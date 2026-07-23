@@ -8,7 +8,10 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::config::{ConfigPatch, NotesBackendConfig, NotesBackendKind};
 use git_ai::model::repository::notes_db::NotesDatabase;
+use git_ai::operations::authorship::stats::CommitStats;
 use std::fs;
+use std::io::{BufRead, BufReader};
+use std::process::Stdio;
 
 fn sqlite_backend_repo() -> (TestRepo, tempfile::TempDir, std::path::PathBuf) {
     let temp_root = std::env::temp_dir();
@@ -77,6 +80,67 @@ fn test_commit_writes_note_to_sqlite_not_refs() {
         refs_list.trim().is_empty(),
         "sqlite backend must not write refs/notes/ai, got: {refs_list}"
     );
+}
+
+#[test]
+fn test_stats_wait_observes_note_written_to_sqlite_primary_backend() {
+    let (repo, _db_dir, db_path) = sqlite_backend_repo();
+    let head = commit_with_ai_line(&repo);
+    let note = NotesDatabase::open_at_path(&db_path)
+        .expect("open source notes db")
+        .get_note(&head)
+        .expect("query source notes db")
+        .expect("source note should exist");
+    assert!(
+        repo.git(&["notes", "--ref=ai", "list"])
+            .unwrap_or_default()
+            .trim()
+            .is_empty(),
+        "test requires the authorship note to exist only in sqlite"
+    );
+
+    let waiting_db_dir = tempfile::tempdir().expect("create waiting notes-db directory");
+    let waiting_db_path = waiting_db_dir.path().join("notes-db");
+    let waiting_db_path_string = waiting_db_path.to_string_lossy().to_string();
+    let mut command = repo.git_ai_command_without_pre_sync_for_test(
+        &["stats", &head, "--json"],
+        &[
+            ("GIT_AI_TEST_FORCE_TTY", "1"),
+            ("GIT_AI_TEST_NOTES_DB_PATH", waiting_db_path_string.as_str()),
+        ],
+    );
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("stats should start");
+    let mut waiting_message = String::new();
+    BufReader::new(child.stderr.take().expect("stats stderr should be piped"))
+        .read_line(&mut waiting_message)
+        .expect("stats should write its waiting indicator");
+    assert!(
+        waiting_message.contains("Waiting for git-ai to process this commit"),
+        "sqlite-backed stats should show a waiting indicator, got:\n{waiting_message}"
+    );
+
+    NotesDatabase::open_at_path(&waiting_db_path)
+        .expect("open waiting notes db")
+        .upsert_local_note(&head, &note)
+        .expect("write note to sqlite while stats is waiting");
+
+    let output = child.wait_with_output().expect("stats should finish");
+    assert!(
+        output.status.success(),
+        "stats failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stats stdout should be UTF-8");
+    let json_start = stdout.find('{').expect("stats output should contain JSON");
+    let json_end = stdout.rfind('}').expect("stats output should contain JSON");
+    let stats: CommitStats =
+        serde_json::from_str(&stdout[json_start..=json_end]).expect("valid stats JSON");
+    assert_eq!(stats.ai_additions, 1);
+    assert_eq!(stats.unknown_additions, 0);
 }
 
 #[test]

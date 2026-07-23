@@ -12,6 +12,8 @@
 //! reads fall back to `refs/notes/ai` (and backfill the cache) so repositories
 //! with pre-existing git notes keep working without migration.
 
+mod primary_backend;
+
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
@@ -24,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 
 // Re-export CommitAuthorship so callers don't need to import from refs directly.
 pub use crate::operations::git::refs::CommitAuthorship;
+pub(crate) use primary_backend::read_authorship as read_authorship_from_primary_backend;
 
 /// Per-SHA note-write pair: `(commit_sha, serialized_note_content)`.
 ///
@@ -133,24 +136,18 @@ pub fn read_authorship(repo: &Repository, commit_sha: &str) -> Option<Authorship
             SqliteNoteStore::new()
                 .read_note(commit_sha)
                 .or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
-                .and_then(|content| {
-                    AuthorshipLog::deserialize_from_string(&content)
-                        .map_err(|e| tracing::debug!("notes deserialization error: {}", e))
-                        .ok()
-                })
+                .and_then(primary_backend::deserialize_authorship)
         }
         NotesBackendKind::Http => {
             // Check the cache first; fall through to git notes on miss.
             if let Some(content) = HttpNoteStore::new().read_note(commit_sha) {
-                AuthorshipLog::deserialize_from_string(&content)
-                    .map_err(|e| tracing::debug!("notes deserialization error: {}", e))
-                    .ok()
+                primary_backend::deserialize_authorship(content)
             } else {
                 crate::operations::git::refs::get_authorship(repo, commit_sha)
             }
         }
         NotesBackendKind::GitNotes => {
-            crate::operations::git::refs::get_authorship(repo, commit_sha)
+            primary_backend::read_authorship(repo, commit_sha, NotesBackendKind::GitNotes)
         }
     }
 }

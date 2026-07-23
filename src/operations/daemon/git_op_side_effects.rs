@@ -1,4 +1,3 @@
-use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
 use crate::model::working_log::InitialAttributions;
 use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
@@ -294,12 +293,9 @@ pub fn is_non_auxiliary_ref(reference: &str) -> bool {
 /// Check whether `ancestor` is an ancestor of `descendant` using
 /// `git merge-base --is-ancestor`.
 pub fn is_ancestor_commit(repository: &Repository, ancestor: &str, descendant: &str) -> bool {
-    let mut args = repository.global_args_for_exec();
-    args.push("merge-base".to_string());
-    args.push("--is-ancestor".to_string());
-    args.push(ancestor.to_string());
-    args.push(descendant.to_string());
-    crate::clients::git_cli::exec_git(&args).is_ok()
+    repository
+        .is_ancestor(ancestor, descendant)
+        .unwrap_or(false)
 }
 
 pub fn repo_is_ancestor(
@@ -307,12 +303,7 @@ pub fn repo_is_ancestor(
     ancestor: &str,
     descendant: &str,
 ) -> bool {
-    let mut args = repository.global_args_for_exec();
-    args.push("merge-base".to_string());
-    args.push("--is-ancestor".to_string());
-    args.push(ancestor.to_string());
-    args.push(descendant.to_string());
-    exec_git(&args).is_ok()
+    is_ancestor_commit(repository, ancestor, descendant)
 }
 
 pub fn rebase_is_control_mode(cmd: &crate::model::domain::NormalizedCommand) -> bool {

@@ -20,7 +20,7 @@ src/operations/authorship/post_commit.rs	1432
 src/operations/authorship/rewrite_stash.rs	825
 src/operations/authorship/secrets.rs	711
 src/operations/authorship/stats.rs	851
-src/operations/ci/ci_context.rs	1083
+src/operations/ci/ci_context.rs	1031
 src/operations/ci/gitlab.rs	800
 src/operations/commands/checkpoint_agent/orchestrator.rs	604
 src/operations/commands/checkpoint_agent/presets/cline.rs	654

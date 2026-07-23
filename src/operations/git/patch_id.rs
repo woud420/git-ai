@@ -166,15 +166,26 @@ mod tests {
     #[test]
     fn preserves_input_order_and_duplicates() {
         let (repo, first, second) = repo_with_two_patches();
-        let input = vec![second.clone(), first, second];
+        let input = vec![second.clone(), first.clone(), second.clone()];
 
         let patch_ids =
             stable_patch_ids_for_commits(repo.gitai_repo(), &input, PatchDiffMode::Configured)
                 .expect("patch ids");
+        let reference = stable_patch_ids_for_commits(
+            repo.gitai_repo(),
+            &[first, second],
+            PatchDiffMode::Configured,
+        )
+        .expect("reference patch ids");
 
-        assert_eq!(patch_ids.len(), input.len());
-        assert!(patch_ids.iter().all(Option::is_some));
-        assert_eq!(patch_ids[0], patch_ids[2]);
+        assert_eq!(
+            patch_ids,
+            vec![
+                reference[1].clone(),
+                reference[0].clone(),
+                reference[1].clone(),
+            ]
+        );
     }
 
     #[test]

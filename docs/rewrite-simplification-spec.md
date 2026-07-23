@@ -588,8 +588,10 @@ Input:
   - new_commits: Vec<String>  // all new commits since pre_command_head, in order
 
 Pass 1 (patch-id anchoring):
-  For each new commit, compute patch-id (git show <sha> | git patch-id --stable)
-  For each source, compute patch-id
+  Combine the source and new commit SHAs, removing duplicate work
+  Compute all patch-ids through the shared operations/git primitive
+    (git log --stdin --no-walk ... -p | git patch-id --stable)
+  Project results back onto both inputs in their original order
   Match pairs where patch-ids are identical (definitive for clean picks)
   Mark both sides as matched
 
@@ -604,7 +606,7 @@ Output:
   (skipped sources are simply absent from the output)
 ```
 
-This is O(n) after patch-id computation and handles all cases reliably. The order-preservation invariant of cherry-pick guarantees the positional fallback is correct.
+This uses two Git subprocesses for the whole batch, then O(n) in-memory work, and handles all cases reliably. The order-preservation invariant of cherry-pick guarantees the positional fallback is correct.
 
 ### `--no-commit` cherry-picks
 

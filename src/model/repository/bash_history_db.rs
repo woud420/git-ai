@@ -211,16 +211,14 @@ impl BashHistoryDatabase {
     }
 
     pub fn open_at_path(path: &Path) -> Result<Self, GitAiError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(path)?;
-        let mut db = Self {
-            conn,
-            enabled: true,
-        };
-        db.initialize_schema()?;
-        Ok(db)
+        crate::model::repository::sqlite::open_at_path(path, |conn| {
+            let mut db = Self {
+                conn,
+                enabled: true,
+            };
+            db.initialize_schema()?;
+            Ok(db)
+        })
     }
 
     fn new() -> Result<Self, GitAiError> {
@@ -246,71 +244,20 @@ impl BashHistoryDatabase {
     }
 
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
-        let version_check: Result<usize, _> = self.conn.query_row(
-            "SELECT value FROM schema_metadata WHERE key = 'version'",
-            [],
-            |row| {
-                let version_str: String = row.get(0)?;
-                version_str
-                    .parse::<usize>()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            },
-        );
+        use crate::model::repository::sqlite;
 
-        if let Ok(current_version) = version_check {
-            if current_version == SCHEMA_VERSION {
-                return Ok(());
-            }
-            if current_version > SCHEMA_VERSION {
-                return Err(PersistenceError::schema_version(
-                    "bash history",
-                    current_version,
-                    SCHEMA_VERSION,
-                ));
-            }
-        }
-
-        self.conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS schema_metadata (
-                key TEXT PRIMARY KEY NOT NULL,
-                value TEXT NOT NULL
-            );
-            "#,
-        )?;
-
-        let current_version: usize = self
-            .conn
-            .query_row(
-                "SELECT value FROM schema_metadata WHERE key = 'version'",
-                [],
-                |row| {
-                    let version_str: String = row.get(0)?;
-                    version_str
-                        .parse::<usize>()
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                },
-            )
-            .unwrap_or(0);
-
-        for target_version in current_version..SCHEMA_VERSION {
-            self.apply_migration(target_version)?;
-            self.conn.execute(
-                r#"
-                INSERT INTO schema_metadata (key, value)
-                VALUES ('version', ?1)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value
-                WHERE CAST(schema_metadata.value AS INTEGER) < CAST(excluded.value AS INTEGER)
-                "#,
-                params![(target_version + 1).to_string()],
-            )?;
-        }
-
-        Ok(())
+        sqlite::ensure_schema_metadata_table(&self.conn)?;
+        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
+        sqlite::migration_runner(
+            &mut self.conn,
+            "bash history",
+            current_version,
+            SCHEMA_VERSION,
+            Self::apply_migration,
+        )
     }
 
-    fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
+    fn apply_migration(conn: &mut Connection, from_version: usize) -> Result<(), GitAiError> {
         if from_version >= MIGRATIONS.len() {
             return Err(PersistenceError::no_migration_path(
                 "bash history",
@@ -319,7 +266,7 @@ impl BashHistoryDatabase {
             ));
         }
 
-        let tx = self.conn.transaction()?;
+        let tx = conn.transaction()?;
         tx.execute_batch(MIGRATIONS[from_version])?;
         tx.commit()?;
         Ok(())

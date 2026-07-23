@@ -148,21 +148,14 @@ impl InternalDatabase {
     /// Create a new database connection
     fn new() -> Result<Self, GitAiError> {
         let db_path = Self::database_path()?;
-
-        // Ensure parent directory exists
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(&db_path)?;
-
-        let mut db = Self {
-            conn,
-            _db_path: db_path,
-        };
-        db.initialize_schema()?;
-
-        Ok(db)
+        crate::model::repository::sqlite::open_at_path(&db_path, |conn| {
+            let mut db = Self {
+                conn,
+                _db_path: db_path.clone(),
+            };
+            db.initialize_schema()?;
+            Ok(db)
+        })
     }
 
     /// Get database path: ~/.git-ai/internal/db
@@ -186,20 +179,11 @@ impl InternalDatabase {
     /// This is the ONLY place where schema changes should be made
     /// Failures are FATAL - the program cannot continue without a valid database
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
+        use crate::model::repository::sqlite;
+
         // FAST PATH: Check if database is already at current version
         // This avoids expensive schema operations on every process start
-        let version_check: Result<usize, _> = self.conn.query_row(
-            "SELECT value FROM schema_metadata WHERE key = 'version'",
-            [],
-            |row| {
-                let version_str: String = row.get(0)?;
-                version_str
-                    .parse::<usize>()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            },
-        );
-
-        if let Ok(current_version) = version_check {
+        if let Some(current_version) = sqlite::read_schema_version(&self.conn) {
             if current_version == SCHEMA_VERSION {
                 // Database is up-to-date, no migrations needed
                 return Ok(());
@@ -212,32 +196,14 @@ impl InternalDatabase {
             }
             // Fall through to apply missing migrations (current_version < SCHEMA_VERSION)
         }
-        // If query failed, table doesn't exist - proceed with full initialization
+        // If the read found nothing, the table doesn't exist - proceed with full
+        // initialization.
 
         // Step 1: Create schema_metadata table (this is the only table we create directly)
-        self.conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS schema_metadata (
-                key TEXT PRIMARY KEY NOT NULL,
-                value TEXT NOT NULL
-            );
-            "#,
-        )?;
+        sqlite::ensure_schema_metadata_table(&self.conn)?;
 
         // Step 2: Get current schema version (0 if brand new database)
-        let current_version: usize = self
-            .conn
-            .query_row(
-                "SELECT value FROM schema_metadata WHERE key = 'version'",
-                [],
-                |row| {
-                    let version_str: String = row.get(0)?;
-                    version_str
-                        .parse::<usize>()
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                },
-            )
-            .unwrap_or(0); // Default to version 0 for new databases
+        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
 
         // Step 3: Apply all missing migrations sequentially
         for target_version in current_version..SCHEMA_VERSION {

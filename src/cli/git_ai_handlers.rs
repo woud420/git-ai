@@ -1,3 +1,8 @@
+use crate::cli::fail::{fail, resolve_repo_in_cwd_or_fail, resolve_repo_or_fail};
+use crate::cli::hook_input::{decode_hook_input_bytes, strip_utf8_bom};
+use crate::cli::machine_json::{
+    emit_machine_json_error, parse_machine_json_arg, print_machine_json,
+};
 use crate::config;
 use crate::model::daemon_control::ControlRequest;
 use crate::model::repository::internal_db::InternalDatabase;
@@ -7,14 +12,12 @@ use crate::operations::authorship::range_authorship;
 use crate::operations::authorship::stats::stats_command;
 use crate::operations::commands;
 use crate::operations::git::find_repository;
-use crate::operations::git::find_repository_in_path;
 use crate::operations::git::repository::{CommitRange, Repository};
 use crate::operations::git::sync_authorship::{
     NotesExistence, fetch_authorship_notes, push_authorship_notes,
 };
 use crate::utils::is_interactive_terminal;
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::io::IsTerminal;
 use std::io::Read;
 
@@ -165,15 +168,11 @@ pub fn handle_git_ai(args: &[String]) {
                     log_message("install-hooks", "info", Some(statuses_value));
                 }
             }
-            Err(e) => {
-                eprintln!("Install hooks failed: {}", e);
-                std::process::exit(1);
-            }
+            Err(e) => fail("Install hooks", e),
         },
         "uninstall" => {
             if let Err(e) = commands::uninstall::run_uninstall_all(&args[1..]) {
-                eprintln!("Uninstall failed: {}", e);
-                std::process::exit(1);
+                fail("Uninstall", e);
             }
         }
         "uninstall-hooks" => match commands::install_hooks::run_uninstall(&args[1..]) {
@@ -182,10 +181,7 @@ pub fn handle_git_ai(args: &[String]) {
                     log_message("uninstall-hooks", "info", Some(statuses_value));
                 }
             }
-            Err(e) => {
-                eprintln!("Uninstall hooks failed: {}", e);
-                std::process::exit(1);
-            }
+            Err(e) => fail("Uninstall hooks", e),
         },
         "git-hooks" => {
             handle_git_hooks(&args[1..]);
@@ -315,8 +311,7 @@ fn handle_notes_serve(args: &[String]) {
     }
 
     if let Err(e) = crate::notes::reference_server::run_blocking(&bind) {
-        eprintln!("notes reference server failed: {}", e);
-        std::process::exit(1);
+        fail("notes reference server", e);
     }
 }
 
@@ -607,73 +602,6 @@ fn handle_checkpoint(args: &[String]) {
     }
 }
 
-fn strip_utf8_bom(input: String) -> String {
-    let stripped = crate::config::strip_utf8_bom(input.as_bytes());
-    if stripped.len() == input.len() {
-        return input;
-    }
-    String::from_utf8(stripped.to_vec()).unwrap_or(input)
-}
-
-fn decode_hook_input_bytes(bytes: Vec<u8>) -> Result<String, String> {
-    if bytes.starts_with(&[0xFF, 0xFE]) {
-        return decode_utf16_hook_input(&bytes[2..], Utf16Endian::Little);
-    }
-    if bytes.starts_with(&[0xFE, 0xFF]) {
-        return decode_utf16_hook_input(&bytes[2..], Utf16Endian::Big);
-    }
-
-    match likely_utf16_endian(&bytes) {
-        Some(endian) => decode_utf16_hook_input(&bytes, endian),
-        None => String::from_utf8(bytes).map_err(|e| e.to_string()),
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Utf16Endian {
-    Little,
-    Big,
-}
-
-fn likely_utf16_endian(bytes: &[u8]) -> Option<Utf16Endian> {
-    let sample_len = bytes.len().min(512);
-    if sample_len < 8 {
-        return None;
-    }
-
-    let sample = &bytes[..sample_len];
-    let even_nuls = sample.iter().step_by(2).filter(|&&b| b == 0).count();
-    let odd_nuls = sample
-        .iter()
-        .skip(1)
-        .step_by(2)
-        .filter(|&&b| b == 0)
-        .count();
-    let min_nuls = sample_len / 8;
-
-    if odd_nuls > min_nuls && odd_nuls > even_nuls.saturating_mul(4) {
-        Some(Utf16Endian::Little)
-    } else if even_nuls > min_nuls && even_nuls > odd_nuls.saturating_mul(4) {
-        Some(Utf16Endian::Big)
-    } else {
-        None
-    }
-}
-
-fn decode_utf16_hook_input(bytes: &[u8], endian: Utf16Endian) -> Result<String, String> {
-    let chunks = bytes.chunks_exact(2);
-    if !chunks.remainder().is_empty() {
-        return Err("UTF-16 hook input has an odd byte length".to_string());
-    }
-
-    let code_units = chunks.map(|chunk| match endian {
-        Utf16Endian::Little => u16::from_le_bytes([chunk[0], chunk[1]]),
-        Utf16Endian::Big => u16::from_be_bytes([chunk[0], chunk[1]]),
-    });
-
-    String::from_utf16(&code_units.collect::<Vec<u16>>()).map_err(|e| e.to_string())
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct EffectiveIgnorePatternsRequest {
@@ -708,36 +636,6 @@ struct FetchAuthorshipNotesResponse {
 #[derive(Debug, Serialize)]
 struct PushAuthorshipNotesResponse {
     ok: bool,
-}
-
-fn parse_machine_json_arg(args: &[String], command: &str) -> Result<String, String> {
-    if args.len() != 2 || args[0] != "--json" {
-        return Err(format!("Usage: git-ai {} --json '<json-payload>'", command));
-    }
-
-    let payload = strip_utf8_bom(args[1].clone());
-    if payload.trim().is_empty() {
-        return Err("JSON payload cannot be empty".to_string());
-    }
-
-    Ok(payload)
-}
-
-fn emit_machine_json_error(message: impl AsRef<str>) -> ! {
-    let payload = serde_json::json!({ "error": message.as_ref() });
-    if let Ok(json) = serde_json::to_string(&payload) {
-        eprintln!("{}", json);
-    } else {
-        eprintln!(r#"{{"error":"failed to serialize error payload"}}"#);
-    }
-    std::process::exit(1);
-}
-
-fn print_machine_json(value: &serde_json::Value) {
-    match serde_json::to_string(value) {
-        Ok(json) => println!("{}", json),
-        Err(e) => emit_machine_json_error(format!("Failed to serialize JSON output: {}", e)),
-    }
 }
 
 fn disable_debug_logs_for_machine_command() {
@@ -859,17 +757,7 @@ fn handle_ai_blame(args: &[String]) {
     }
 
     // Find the git repository from current directory
-    let current_dir = env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
-        .to_string();
-    let repo = match find_repository_in_path(&current_dir) {
-        Ok(repo) => repo,
-        Err(e) => {
-            eprintln!("Failed to find repository: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let (repo, current_dir) = resolve_repo_in_cwd_or_fail();
 
     // Parse blame arguments
     let (file_path, mut options) = match commands::blame::parse_blame_args(args) {
@@ -935,38 +823,20 @@ fn handle_ai_blame(args: &[String]) {
     };
 
     if let Err(e) = repo.blame(&file_path, &options) {
-        eprintln!("Blame failed: {}", e);
-        std::process::exit(1);
+        fail("Blame", e);
     }
 }
 
 fn handle_ai_diff(args: &[String]) {
-    let current_dir = env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .to_string_lossy()
-        .to_string();
-    let repo = match find_repository_in_path(&current_dir) {
-        Ok(repo) => repo,
-        Err(e) => {
-            eprintln!("Failed to find repository: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let (repo, _current_dir) = resolve_repo_in_cwd_or_fail();
     if let Err(e) = commands::diff::handle_diff(&repo, args) {
-        eprintln!("Diff failed: {}", e);
-        std::process::exit(1);
+        fail("Diff", e);
     }
 }
 
 fn handle_stats(args: &[String]) {
     // Find the git repository
-    let repo = match find_repository(&Vec::<String>::new()) {
-        Ok(repo) => repo,
-        Err(e) => {
-            eprintln!("Failed to find repository: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let repo = resolve_repo_or_fail();
     // Parse stats-specific arguments
     let mut json_output = false;
     let mut commit_sha = None;
@@ -1059,10 +929,7 @@ fn handle_stats(args: &[String]) {
                     range_authorship::print_range_authorship_stats(&stats);
                 }
             }
-            Err(e) => {
-                eprintln!("Range authorship failed: {}", e);
-                std::process::exit(1);
-            }
+            Err(e) => fail("Range authorship", e),
         }
         return;
     }
@@ -1112,13 +979,7 @@ fn normalize_head_rev(rev: &str) -> String {
 fn handle_git_hooks(args: &[String]) {
     match args.first().map(String::as_str) {
         Some("remove") | Some("uninstall") => {
-            let repo = match find_repository(&Vec::<String>::new()) {
-                Ok(repo) => repo,
-                Err(e) => {
-                    eprintln!("Failed to find repository: {}", e);
-                    std::process::exit(1);
-                }
-            };
+            let repo = resolve_repo_or_fail();
 
             match commands::git_hook_handlers::remove_repo_hooks(&repo, false) {
                 Ok(report) => {

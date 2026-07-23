@@ -1,6 +1,6 @@
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
-use rusqlite::params;
+use rusqlite::{Connection, params};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -98,19 +98,7 @@ impl MetricsDatabase {
 
     /// Create a new database connection
     pub(super) fn new() -> Result<Self, GitAiError> {
-        let db_path = Self::database_path()?;
-
-        // Ensure parent directory exists
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(&db_path)?;
-
-        let mut db = Self { conn };
-        db.initialize_schema()?;
-
-        Ok(db)
+        Self::open_at_path_impl(&Self::database_path()?)
     }
 
     pub(super) fn new_fallback() -> Result<Self, GitAiError> {
@@ -119,11 +107,15 @@ impl MetricsDatabase {
     }
 
     pub(super) fn new_fallback_at_path(path: &std::path::Path) -> Result<Self, GitAiError> {
-        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(path)?;
+        Self::open_at_path_impl(path)
+    }
 
-        let mut db = Self { conn };
-        db.initialize_schema()?;
-        Ok(db)
+    fn open_at_path_impl(path: &std::path::Path) -> Result<Self, GitAiError> {
+        crate::model::repository::sqlite::open_at_path(path, |conn| {
+            let mut db = Self { conn };
+            db.initialize_schema()?;
+            Ok(db)
+        })
     }
 
     #[cfg(test)]
@@ -146,15 +138,7 @@ impl MetricsDatabase {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn open_at_path(path: &std::path::Path) -> Result<Self, GitAiError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(path)?;
-
-        let mut db = Self { conn };
-        db.initialize_schema()?;
-
-        Ok(db)
+        Self::open_at_path_impl(path)
     }
 
     /// Get database path: ~/.git-ai/internal/metrics-db
@@ -171,78 +155,21 @@ impl MetricsDatabase {
 
     /// Initialize schema and handle migrations
     pub(super) fn initialize_schema(&mut self) -> Result<(), GitAiError> {
-        // FAST PATH: Check if database is already at current version
-        let version_check: Result<usize, _> = self.conn.query_row(
-            "SELECT value FROM schema_metadata WHERE key = 'version'",
-            [],
-            |row| {
-                let version_str: String = row.get(0)?;
-                version_str
-                    .parse::<usize>()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            },
-        );
+        use crate::model::repository::sqlite;
 
-        if let Ok(current_version) = version_check {
-            if current_version == SCHEMA_VERSION {
-                return Ok(());
-            }
-            if current_version > SCHEMA_VERSION {
-                return Err(PersistenceError::schema_version(
-                    "metrics",
-                    current_version,
-                    SCHEMA_VERSION,
-                ));
-            }
-        }
-
-        // Create schema_metadata table
-        self.conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS schema_metadata (
-                key TEXT PRIMARY KEY NOT NULL,
-                value TEXT NOT NULL
-            );
-            "#,
-        )?;
-
-        // Get current schema version (0 if brand new database)
-        let current_version: usize = self
-            .conn
-            .query_row(
-                "SELECT value FROM schema_metadata WHERE key = 'version'",
-                [],
-                |row| {
-                    let version_str: String = row.get(0)?;
-                    version_str
-                        .parse::<usize>()
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                },
-            )
-            .unwrap_or(0);
-
-        // Apply all missing migrations sequentially
-        for target_version in current_version..SCHEMA_VERSION {
-            self.apply_migration(target_version)?;
-
-            // Use an upsert so concurrent initializers do not race on version row creation.
-            self.conn.execute(
-                r#"
-                INSERT INTO schema_metadata (key, value)
-                VALUES ('version', ?1)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value
-                WHERE CAST(schema_metadata.value AS INTEGER) < CAST(excluded.value AS INTEGER)
-                "#,
-                params![(target_version + 1).to_string()],
-            )?;
-        }
-
-        Ok(())
+        sqlite::ensure_schema_metadata_table(&self.conn)?;
+        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
+        sqlite::migration_runner(
+            &mut self.conn,
+            "metrics",
+            current_version,
+            SCHEMA_VERSION,
+            Self::apply_migration,
+        )
     }
 
     /// Apply a single migration
-    fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
+    fn apply_migration(conn: &mut Connection, from_version: usize) -> Result<(), GitAiError> {
         if from_version >= MIGRATIONS.len() {
             return Err(PersistenceError::no_migration_path(
                 "metrics",
@@ -252,131 +179,135 @@ impl MetricsDatabase {
         }
 
         if from_version == 2 {
-            self.add_row_level_retry_columns()?;
+            add_row_level_retry_columns(conn)?;
         }
         if from_version == 3 {
-            self.add_event_metadata_columns()?;
+            add_event_metadata_columns(conn)?;
         }
 
         let migration_sql = MIGRATIONS[from_version];
-        let tx = self.conn.transaction()?;
+        let tx = conn.transaction()?;
         tx.execute_batch(migration_sql)?;
         tx.commit()?;
 
         Ok(())
     }
+}
 
-    fn add_row_level_retry_columns(&mut self) -> Result<(), GitAiError> {
-        for (name, sql) in [
-            (
-                "delivered_ts",
-                "ALTER TABLE metrics ADD COLUMN delivered_ts INTEGER",
-            ),
-            (
-                "attempts",
-                "ALTER TABLE metrics ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "last_sync_error",
-                "ALTER TABLE metrics ADD COLUMN last_sync_error TEXT",
-            ),
-            (
-                "last_sync_at",
-                "ALTER TABLE metrics ADD COLUMN last_sync_at INTEGER",
-            ),
-            (
-                "next_retry_at",
-                "ALTER TABLE metrics ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0",
-            ),
-            (
-                "processing_started_at",
-                "ALTER TABLE metrics ADD COLUMN processing_started_at INTEGER",
-            ),
-        ] {
-            self.add_column_if_missing("metrics", name, sql)?;
-        }
-        Ok(())
+fn add_row_level_retry_columns(conn: &Connection) -> Result<(), GitAiError> {
+    for (name, sql) in [
+        (
+            "delivered_ts",
+            "ALTER TABLE metrics ADD COLUMN delivered_ts INTEGER",
+        ),
+        (
+            "attempts",
+            "ALTER TABLE metrics ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "last_sync_error",
+            "ALTER TABLE metrics ADD COLUMN last_sync_error TEXT",
+        ),
+        (
+            "last_sync_at",
+            "ALTER TABLE metrics ADD COLUMN last_sync_at INTEGER",
+        ),
+        (
+            "next_retry_at",
+            "ALTER TABLE metrics ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "processing_started_at",
+            "ALTER TABLE metrics ADD COLUMN processing_started_at INTEGER",
+        ),
+    ] {
+        add_column_if_missing(conn, "metrics", name, sql)?;
+    }
+    Ok(())
+}
+
+fn add_event_metadata_columns(conn: &Connection) -> Result<(), GitAiError> {
+    for (name, sql) in [
+        (
+            "event_ts",
+            "ALTER TABLE metrics ADD COLUMN event_ts INTEGER DEFAULT NULL",
+        ),
+        (
+            "event_kind",
+            "ALTER TABLE metrics ADD COLUMN event_kind INTEGER DEFAULT NULL",
+        ),
+        (
+            "trace_id",
+            "ALTER TABLE metrics ADD COLUMN trace_id TEXT DEFAULT NULL",
+        ),
+        (
+            "session_id",
+            "ALTER TABLE metrics ADD COLUMN session_id TEXT DEFAULT NULL",
+        ),
+        (
+            "parent_session_id",
+            "ALTER TABLE metrics ADD COLUMN parent_session_id TEXT DEFAULT NULL",
+        ),
+        (
+            "tool",
+            "ALTER TABLE metrics ADD COLUMN tool TEXT DEFAULT NULL",
+        ),
+        (
+            "external_session_id",
+            "ALTER TABLE metrics ADD COLUMN external_session_id TEXT DEFAULT NULL",
+        ),
+        (
+            "external_parent_session_id",
+            "ALTER TABLE metrics ADD COLUMN external_parent_session_id TEXT DEFAULT NULL",
+        ),
+        (
+            "external_event_id",
+            "ALTER TABLE metrics ADD COLUMN external_event_id TEXT DEFAULT NULL",
+        ),
+        (
+            "external_parent_event_id",
+            "ALTER TABLE metrics ADD COLUMN external_parent_event_id TEXT DEFAULT NULL",
+        ),
+        (
+            "external_tool_use_id",
+            "ALTER TABLE metrics ADD COLUMN external_tool_use_id TEXT DEFAULT NULL",
+        ),
+    ] {
+        add_column_if_missing(conn, "metrics", name, sql)?;
+    }
+    Ok(())
+}
+
+pub(super) fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    alter_sql: &str,
+) -> Result<(), GitAiError> {
+    if column_exists(conn, table, column)? {
+        return Ok(());
     }
 
-    fn add_event_metadata_columns(&mut self) -> Result<(), GitAiError> {
-        for (name, sql) in [
-            (
-                "event_ts",
-                "ALTER TABLE metrics ADD COLUMN event_ts INTEGER DEFAULT NULL",
-            ),
-            (
-                "event_kind",
-                "ALTER TABLE metrics ADD COLUMN event_kind INTEGER DEFAULT NULL",
-            ),
-            (
-                "trace_id",
-                "ALTER TABLE metrics ADD COLUMN trace_id TEXT DEFAULT NULL",
-            ),
-            (
-                "session_id",
-                "ALTER TABLE metrics ADD COLUMN session_id TEXT DEFAULT NULL",
-            ),
-            (
-                "parent_session_id",
-                "ALTER TABLE metrics ADD COLUMN parent_session_id TEXT DEFAULT NULL",
-            ),
-            (
-                "tool",
-                "ALTER TABLE metrics ADD COLUMN tool TEXT DEFAULT NULL",
-            ),
-            (
-                "external_session_id",
-                "ALTER TABLE metrics ADD COLUMN external_session_id TEXT DEFAULT NULL",
-            ),
-            (
-                "external_parent_session_id",
-                "ALTER TABLE metrics ADD COLUMN external_parent_session_id TEXT DEFAULT NULL",
-            ),
-            (
-                "external_event_id",
-                "ALTER TABLE metrics ADD COLUMN external_event_id TEXT DEFAULT NULL",
-            ),
-            (
-                "external_parent_event_id",
-                "ALTER TABLE metrics ADD COLUMN external_parent_event_id TEXT DEFAULT NULL",
-            ),
-            (
-                "external_tool_use_id",
-                "ALTER TABLE metrics ADD COLUMN external_tool_use_id TEXT DEFAULT NULL",
-            ),
-        ] {
-            self.add_column_if_missing("metrics", name, sql)?;
+    match conn.execute(alter_sql, []) {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+            if message.contains("duplicate column name") =>
+        {
+            Ok(())
         }
-        Ok(())
+        Err(e) => Err(e.into()),
     }
+}
 
-    pub(super) fn add_column_if_missing(
-        &mut self,
-        table: &str,
-        column: &str,
-        alter_sql: &str,
-    ) -> Result<(), GitAiError> {
-        if self.column_exists(table, column)? {
-            return Ok(());
-        }
-
-        match self.conn.execute(alter_sql, []) {
-            Ok(_) => Ok(()),
-            Err(rusqlite::Error::SqliteFailure(_, Some(message)))
-                if message.contains("duplicate column name") =>
-            {
-                Ok(())
-            }
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    pub(super) fn column_exists(&self, table: &str, column: &str) -> Result<bool, GitAiError> {
-        let count: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
-            params![column],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
-    }
+pub(super) fn column_exists(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<bool, GitAiError> {
+    let count: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+        params![column],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }

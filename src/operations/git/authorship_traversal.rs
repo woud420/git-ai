@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 #[cfg(test)]
 use crate::clients::git_cli::exec_git;
-use crate::clients::git_cli::exec_git_stdin;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
+use crate::operations::git::cat_file::batch_read_blob_contents;
 use crate::operations::git::notes_api::{commits_with_notes, read_note_blob_oids};
 use crate::operations::git::repository::Repository;
 
@@ -31,7 +31,7 @@ pub async fn load_ai_touched_files_for_commits(
         let mut blob_oids: Vec<String> = unique_blob_oids.into_iter().collect();
         blob_oids.sort();
 
-        let blob_contents = batch_read_blobs_with_oids(&repo.global_args_for_exec(), &blob_oids)?;
+        let blob_contents = batch_read_blob_contents(&repo, &blob_oids)?;
 
         let mut all_files = HashSet::new();
         for blob_oid in note_blob_map.into_values() {
@@ -89,87 +89,6 @@ fn get_notes_list(global_args: &[String]) -> Result<Vec<(String, String)>, GitAi
     }
 
     Ok(mappings)
-}
-
-pub(crate) fn batch_read_blobs_with_oids(
-    global_args: &[String],
-    blob_oids: &[String],
-) -> Result<std::collections::HashMap<String, String>, GitAiError> {
-    if blob_oids.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-
-    let mut args = global_args.to_vec();
-    args.push("cat-file".to_string());
-    args.push("--batch".to_string());
-
-    let stdin_data = blob_oids.join("\n") + "\n";
-    let output = exec_git_stdin(&args, stdin_data.as_bytes())?;
-
-    let results = parse_cat_file_batch_output_with_oids(&output.stdout)?;
-    for oid in blob_oids {
-        if !results.contains_key(oid) {
-            return Err(GitAiError::Generic(format!(
-                "missing git blob object referenced by authorship note: {}",
-                oid
-            )));
-        }
-    }
-    Ok(results)
-}
-
-fn parse_cat_file_batch_output_with_oids(
-    data: &[u8],
-) -> Result<std::collections::HashMap<String, String>, GitAiError> {
-    let mut results = std::collections::HashMap::new();
-    let mut pos = 0usize;
-
-    while pos < data.len() {
-        let header_end = match data[pos..].iter().position(|&b| b == b'\n') {
-            Some(idx) => pos + idx,
-            None => break,
-        };
-
-        let header = std::str::from_utf8(&data[pos..header_end])?;
-        let parts: Vec<&str> = header.split_whitespace().collect();
-        if parts.len() < 2 {
-            pos = header_end + 1;
-            continue;
-        }
-
-        let oid = parts[0].to_string();
-        if parts[1] == "missing" {
-            pos = header_end + 1;
-            continue;
-        }
-
-        if parts.len() < 3 {
-            pos = header_end + 1;
-            continue;
-        }
-
-        let size: usize = parts[2]
-            .parse()
-            .map_err(|e| GitAiError::Generic(format!("Invalid size in cat-file output: {}", e)))?;
-
-        let content_start = header_end + 1;
-        let content_end = content_start + size;
-        if content_end > data.len() {
-            return Err(GitAiError::Generic(
-                "Malformed cat-file --batch output: truncated content".to_string(),
-            ));
-        }
-
-        let content = String::from_utf8_lossy(&data[content_start..content_end]).to_string();
-        results.insert(oid, content);
-
-        pos = content_end;
-        if pos < data.len() && data[pos] == b'\n' {
-            pos += 1;
-        }
-    }
-
-    Ok(results)
 }
 
 /// Extract file paths from a note blob content
@@ -311,68 +230,6 @@ mod tests {
 
         // Non-existent commits don't have notes
         assert!(!result);
-    }
-
-    #[test]
-    fn test_parse_cat_file_batch_output_empty() {
-        let result = parse_cat_file_batch_output_with_oids(b"").unwrap();
-        assert!(result.is_empty(), "Empty input should return empty map");
-    }
-
-    #[test]
-    fn test_parse_cat_file_batch_output_missing() {
-        let data = b"abc123 missing\n";
-        let result = parse_cat_file_batch_output_with_oids(data).unwrap();
-        assert!(
-            result.is_empty(),
-            "Missing blobs should not be included in result"
-        );
-    }
-
-    #[test]
-    fn test_parse_cat_file_batch_output_single_blob() {
-        let data = b"abc123 blob 11\nhello world\n";
-        let result = parse_cat_file_batch_output_with_oids(data).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result.get("abc123"), Some(&"hello world".to_string()));
-    }
-
-    #[test]
-    fn test_parse_cat_file_batch_output_multiple_blobs() {
-        let data = b"abc123 blob 5\nhello\ndef456 blob 5\nworld\n";
-        let result = parse_cat_file_batch_output_with_oids(data).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result.get("abc123"), Some(&"hello".to_string()));
-        assert_eq!(result.get("def456"), Some(&"world".to_string()));
-    }
-
-    #[test]
-    fn test_parse_cat_file_batch_output_truncated() {
-        // Size says 20 bytes but only 5 provided
-        let data = b"abc123 blob 20\nhello";
-        let result = parse_cat_file_batch_output_with_oids(data);
-        assert!(result.is_err(), "Truncated content should return error");
-    }
-
-    #[test]
-    fn test_parse_cat_file_batch_output_invalid_size() {
-        let data = b"abc123 blob notanumber\n";
-        let result = parse_cat_file_batch_output_with_oids(data);
-        assert!(result.is_err(), "Invalid size should return error");
-    }
-
-    #[test]
-    fn test_parse_cat_file_batch_output_malformed_header() {
-        let data = b"abc123\n";
-        let result = parse_cat_file_batch_output_with_oids(data).unwrap();
-        assert!(result.is_empty(), "Malformed header should skip that entry");
-    }
-
-    #[test]
-    fn test_batch_read_blobs_with_oids_empty() {
-        let repo = find_repository_in_path(".").unwrap();
-        let result = batch_read_blobs_with_oids(&repo.global_args_for_exec(), &[]).unwrap();
-        assert!(result.is_empty(), "Empty OID list should return empty map");
     }
 
     #[test]

@@ -2,6 +2,7 @@ use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::{AUTHORSHIP_LOG_VERSION, AuthorshipLog};
 use crate::model::working_log::Checkpoint;
+use crate::operations::git::cat_file::batch_read_blob_contents;
 use crate::operations::git::repository::Repository;
 use serde_json;
 use std::collections::{HashMap, HashSet};
@@ -67,86 +68,6 @@ pub fn parse_batch_check_blob_oid(line: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-fn parse_cat_file_batch_output_with_oids(
-    data: &[u8],
-) -> Result<HashMap<String, String>, GitAiError> {
-    let mut results = HashMap::new();
-    let mut pos = 0usize;
-
-    while pos < data.len() {
-        let header_end = match data[pos..].iter().position(|&b| b == b'\n') {
-            Some(idx) => pos + idx,
-            None => break,
-        };
-
-        let header = std::str::from_utf8(&data[pos..header_end])?;
-        let parts: Vec<&str> = header.split_whitespace().collect();
-        if parts.len() < 2 {
-            pos = header_end + 1;
-            continue;
-        }
-
-        let oid = parts[0].to_string();
-        if parts[1] == "missing" {
-            pos = header_end + 1;
-            continue;
-        }
-
-        if parts.len() < 3 {
-            pos = header_end + 1;
-            continue;
-        }
-
-        let size: usize = parts[2]
-            .parse()
-            .map_err(|e| GitAiError::Generic(format!("Invalid size in cat-file output: {}", e)))?;
-
-        let content_start = header_end + 1;
-        let content_end = content_start + size;
-        if content_end > data.len() {
-            return Err(GitAiError::Generic(
-                "Malformed cat-file --batch output: truncated content".to_string(),
-            ));
-        }
-
-        let content = String::from_utf8_lossy(&data[content_start..content_end]).to_string();
-        results.insert(oid, content);
-
-        pos = content_end;
-        if pos < data.len() && data[pos] == b'\n' {
-            pos += 1;
-        }
-    }
-
-    Ok(results)
-}
-
-fn batch_read_blob_contents(
-    repo: &Repository,
-    blob_oids: &[String],
-) -> Result<HashMap<String, String>, GitAiError> {
-    if blob_oids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut args = repo.global_args_for_exec();
-    args.push("cat-file".to_string());
-    args.push("--batch".to_string());
-
-    let stdin_data = blob_oids.join("\n") + "\n";
-    let output = exec_git_stdin(&args, stdin_data.as_bytes())?;
-    let results = parse_cat_file_batch_output_with_oids(&output.stdout)?;
-    for oid in blob_oids {
-        if !results.contains_key(oid) {
-            return Err(GitAiError::Generic(format!(
-                "missing git blob object referenced by authorship note: {}",
-                oid
-            )));
-        }
-    }
-    Ok(results)
 }
 
 /// Resolve authorship note blob OIDs for a set of commits using one batched cat-file call.

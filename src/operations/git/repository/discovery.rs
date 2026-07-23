@@ -6,6 +6,7 @@ use super::core::Repository;
 use super::discovery_no_exec::worktree_storage_ai_dir;
 use crate::clients::git_cli::{exec_git, exec_git_stdin};
 use crate::error::GitAiError;
+use crate::operations::git::cat_file::batch_read_blob_contents;
 use crate::operations::git::repo_storage::RepoStorage;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -365,10 +366,7 @@ pub(crate) fn batch_read_paths_at_treeishes(
         }
     }
 
-    let blob_contents = crate::operations::git::authorship_traversal::batch_read_blobs_with_oids(
-        &repo.global_args_for_exec(),
-        &unique_blob_oids,
-    )?;
+    let blob_contents = batch_read_blob_contents(repo, &unique_blob_oids)?;
 
     let mut contents = HashMap::new();
     for (request, blob_oid) in request_blob_oids {

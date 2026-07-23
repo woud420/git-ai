@@ -1,6 +1,7 @@
 use crate::error::GitAiError;
 use crate::model::domain::RewriteEvent;
 use crate::operations::git::cli_parser::explicit_rebase_branch_arg;
+use crate::operations::git::oid::is_non_zero_oid;
 use std::collections::HashMap;
 
 fn revert_destination_changes(
@@ -10,10 +11,8 @@ fn revert_destination_changes(
         .iter()
         .filter(|change| {
             change.reference == "HEAD"
-                && super::is_valid_oid(&change.old)
-                && !super::is_zero_oid(&change.old)
-                && super::is_valid_oid(&change.new)
-                && !super::is_zero_oid(&change.new)
+                && is_non_zero_oid(&change.old)
+                && is_non_zero_oid(&change.new)
                 && change.old != change.new
         })
         .collect()
@@ -186,28 +185,20 @@ pub(crate) fn strict_rebase_original_head_from_command(
         && let Some(old_head) = cmd
             .ref_changes
             .iter()
-            .find(|change| {
-                change.reference == branch_ref
-                    && super::is_valid_oid(&change.old)
-                    && !super::is_zero_oid(&change.old)
-            })
+            .find(|change| change.reference == branch_ref && is_non_zero_oid(&change.old))
             .map(|change| change.old.clone())
     {
         return Some(old_head);
     }
 
-    if super::is_valid_oid(semantic_old_head) && !super::is_zero_oid(semantic_old_head) {
+    if is_non_zero_oid(semantic_old_head) {
         return Some(semantic_old_head.to_string());
     }
 
     if let Some(old_head) = cmd
         .ref_changes
         .iter()
-        .find(|change| {
-            change.reference.starts_with("refs/heads/")
-                && super::is_valid_oid(&change.old)
-                && !super::is_zero_oid(&change.old)
-        })
+        .find(|change| change.reference.starts_with("refs/heads/") && is_non_zero_oid(&change.old))
         .map(|change| change.old.clone())
     {
         return Some(old_head);
@@ -216,11 +207,7 @@ pub(crate) fn strict_rebase_original_head_from_command(
     if let Some(old_head) = cmd
         .ref_changes
         .iter()
-        .find(|change| {
-            change.reference == "HEAD"
-                && super::is_valid_oid(&change.old)
-                && !super::is_zero_oid(&change.old)
-        })
+        .find(|change| change.reference == "HEAD" && is_non_zero_oid(&change.old))
         .map(|change| change.old.clone())
     {
         return Some(old_head);

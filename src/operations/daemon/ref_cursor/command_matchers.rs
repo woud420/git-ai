@@ -455,10 +455,6 @@ pub(super) fn valid_ref_transition(old: &str, new: &str) -> bool {
     is_valid_git_oid(old) && is_valid_git_oid(new) && old != new
 }
 
-pub(super) fn valid_non_zero_oid(value: &str) -> bool {
-    is_valid_git_oid(value) && !value.chars().all(|ch| ch == '0')
-}
-
 pub(super) fn zero_oid() -> String {
     "0000000000000000000000000000000000000000".to_string()
 }
@@ -514,4 +510,34 @@ pub(super) fn head_key(git_dir: &Path) -> String {
         .to_string_lossy()
         .to_string();
     format!("worktree:{}:HEAD", normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_hex_oid_prefix;
+    use crate::operations::git::oid::is_full_oid;
+
+    #[test]
+    fn oid_prefixes_remain_distinct_from_full_oids() {
+        for len in [4, 39, 41, 63] {
+            let value = "a".repeat(len);
+            assert!(is_hex_oid_prefix(&value), "expected {len}-byte prefix");
+            assert!(!is_full_oid(&value), "unexpected {len}-byte full OID");
+        }
+
+        for len in [40, 64] {
+            let value = "A".repeat(len);
+            assert!(is_hex_oid_prefix(&value), "expected {len}-byte prefix");
+            assert!(is_full_oid(&value), "expected {len}-byte full OID");
+        }
+
+        for value in [
+            "a".repeat(3),
+            "a".repeat(65),
+            format!("{}g", "a".repeat(39)),
+        ] {
+            assert!(!is_hex_oid_prefix(&value));
+            assert!(!is_full_oid(&value));
+        }
+    }
 }

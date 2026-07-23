@@ -3,6 +3,7 @@ use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::{AUTHORSHIP_LOG_VERSION, AuthorshipLog};
 use crate::model::working_log::Checkpoint;
 use crate::operations::git::cat_file::batch_read_blob_contents;
+use crate::operations::git::oid::is_full_oid;
 use crate::operations::git::repository::Repository;
 use serde_json;
 use std::collections::{HashMap, HashSet};
@@ -58,12 +59,7 @@ pub fn fanout_note_pathspec_for_ref(notes_ref: &str, commit_sha: &str) -> String
 pub fn parse_batch_check_blob_oid(line: &str) -> Option<String> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     let oid = parts.first().copied().unwrap_or_default();
-    let valid_oid_len = oid.len() == 40 || oid.len() == 64;
-    if parts.len() >= 2
-        && parts[1] == "blob"
-        && valid_oid_len
-        && oid.as_bytes().iter().all(|b| b.is_ascii_hexdigit())
-    {
+    if parts.len() >= 2 && parts[1] == "blob" && is_full_oid(oid) {
         Some(oid.to_string())
     } else {
         None

@@ -4,7 +4,7 @@ use crate::model::domain::{
 };
 use crate::operations::daemon::analyzers::{AnalysisView, CommandAnalyzer, command_args};
 use crate::operations::git::cli_parser::explicit_rebase_branch_arg;
-use crate::operations::git::repo_state::is_valid_git_oid;
+use crate::operations::git::oid::{is_non_zero_oid, is_zero_oid};
 
 #[derive(Default)]
 pub struct HistoryAnalyzer;
@@ -120,16 +120,8 @@ impl CommandAnalyzer for HistoryAnalyzer {
     }
 }
 
-fn is_zero_oid(oid: &str) -> bool {
-    matches!(oid.len(), 40 | 64) && oid.chars().all(|c| c == '0')
-}
-
 fn sanitize_base(base: Option<String>, new_head: &str) -> Option<String> {
     base.filter(|candidate| candidate != new_head && !is_zero_oid(candidate))
-}
-
-fn valid_non_zero_oid(value: &str) -> bool {
-    is_valid_git_oid(value) && !is_zero_oid(value)
 }
 
 fn squash_source_head(
@@ -181,19 +173,16 @@ fn resolve_revision_from_ref_state(
     revision: &str,
     refs: &std::collections::HashMap<String, String>,
 ) -> Option<String> {
-    if valid_non_zero_oid(revision) {
+    if is_non_zero_oid(revision) {
         return Some(revision.to_string());
     }
     if revision == "HEAD" {
-        return refs
-            .get("HEAD")
-            .filter(|oid| valid_non_zero_oid(oid))
-            .cloned();
+        return refs.get("HEAD").filter(|oid| is_non_zero_oid(oid)).cloned();
     }
     if revision.starts_with("refs/") {
         return refs
             .get(revision)
-            .filter(|oid| valid_non_zero_oid(oid))
+            .filter(|oid| is_non_zero_oid(oid))
             .cloned();
     }
 
@@ -203,7 +192,7 @@ fn resolve_revision_from_ref_state(
         format!("refs/tags/{}", revision),
     ] {
         if let Some(oid) = refs.get(&reference)
-            && valid_non_zero_oid(oid)
+            && is_non_zero_oid(oid)
         {
             return Some(oid.clone());
         }
@@ -215,7 +204,7 @@ fn resolve_revision_from_ref_state(
 fn valid_ref_transition(change: &crate::model::domain::RefChange) -> Option<(String, String)> {
     let old = change.old.trim();
     let new = change.new.trim();
-    if old == new || !valid_non_zero_oid(old) || !valid_non_zero_oid(new) {
+    if old == new || !is_non_zero_oid(old) || !is_non_zero_oid(new) {
         return None;
     }
     Some((old.to_string(), new.to_string()))
@@ -238,7 +227,7 @@ fn current_head_from_ref_data(
         .find(|change| change.reference == "HEAD")
         .map(|change| change.new.clone())
         .or_else(|| refs.get("HEAD").cloned())
-        .filter(|head| valid_non_zero_oid(head))
+        .filter(|head| is_non_zero_oid(head))
 }
 
 fn amend_head_change(cmd: &NormalizedCommand) -> Option<(String, String)> {

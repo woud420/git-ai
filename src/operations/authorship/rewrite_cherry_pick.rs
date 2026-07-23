@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use crate::clients::git_cli::exec_git_stdin;
+use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::repository::Repository;
 
 /// Pairs source commits with their cherry-picked counterparts using a two-pass algorithm.
@@ -17,18 +17,11 @@ pub fn match_cherry_pick_pairs(
         return Ok(Vec::new());
     }
 
-    let patch_ids = compute_patch_ids(repo, sources, new_commits)?;
-
-    // Compute patch-ids for both sides
-    let source_patch_ids: Vec<Option<String>> = sources
-        .iter()
-        .map(|sha| patch_ids.get(sha).cloned())
-        .collect();
-
-    let new_patch_ids: Vec<Option<String>> = new_commits
-        .iter()
-        .map(|sha| patch_ids.get(sha).cloned())
-        .collect();
+    let mut commits = Vec::with_capacity(sources.len() + new_commits.len());
+    commits.extend_from_slice(sources);
+    commits.extend_from_slice(new_commits);
+    let patch_ids = stable_patch_ids_for_commits(repo, &commits, PatchDiffMode::Configured)?;
+    let (source_patch_ids, new_patch_ids) = patch_ids.split_at(sources.len());
 
     // Build map: patch_id -> list of indices in new_commits
     let mut new_by_patch_id: HashMap<String, Vec<usize>> = HashMap::new();
@@ -81,86 +74,8 @@ pub fn match_cherry_pick_pairs(
     Ok(pairs)
 }
 
-fn compute_patch_ids(
-    repo: &Repository,
-    sources: &[String],
-    new_commits: &[String],
-) -> Result<HashMap<String, String>, crate::error::GitAiError> {
-    let mut commits = Vec::new();
-    let mut seen = HashSet::new();
-    for sha in sources.iter().chain(new_commits.iter()) {
-        if seen.insert(sha.clone()) {
-            commits.push(sha.clone());
-        }
-    }
-    if commits.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    stable_patch_ids_for_commits(repo, &commits)
-}
-
-pub(crate) fn stable_patch_ids_for_commits(
-    repo: &Repository,
-    commit_shas: &[String],
-) -> Result<HashMap<String, String>, crate::error::GitAiError> {
-    let mut commits = Vec::new();
-    let mut seen = HashSet::new();
-    for sha in commit_shas {
-        if seen.insert(sha.clone()) {
-            commits.push(sha.clone());
-        }
-    }
-    if commits.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut log_args = repo.global_args_for_exec();
-    log_args.extend([
-        "log".to_string(),
-        "--stdin".to_string(),
-        "--no-walk".to_string(),
-        "--reverse".to_string(),
-        "--no-ext-diff".to_string(),
-        "--no-textconv".to_string(),
-        "--no-color".to_string(),
-        "--format=medium".to_string(),
-        "-p".to_string(),
-    ]);
-    let stdin_data = commits.join("\n") + "\n";
-    let log_output = exec_git_stdin(&log_args, stdin_data.as_bytes())?;
-    if log_output.stdout.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut patch_args = repo.global_args_for_exec();
-    patch_args.extend(["patch-id".to_string(), "--stable".to_string()]);
-    let patch_output = exec_git_stdin(&patch_args, &log_output.stdout)?;
-
-    let stdout = String::from_utf8_lossy(&patch_output.stdout);
-    let mut patch_ids = HashMap::new();
-    for line in stdout.lines() {
-        let mut parts = line.split_whitespace();
-        let Some(patch_id) = parts.next() else {
-            continue;
-        };
-        let Some(commit_sha) = parts.next() else {
-            continue;
-        };
-        patch_ids.insert(commit_sha.to_string(), patch_id.to_string());
-    }
-
-    Ok(patch_ids)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::stable_patch_ids_for_commits;
-
-    fn looks_like_hex_id(value: &str) -> bool {
-        matches!(value.len(), 40 | 64) && value.chars().all(|c| c.is_ascii_hexdigit())
-    }
-
     #[test]
     fn match_cherry_pick_pairs_empty_sources() {
         // Cannot call with a real repo in unit tests, but we can verify the early return
@@ -216,27 +131,6 @@ mod tests {
         let pairs = positional_pair(&sources, &new_commits);
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0], ("a".repeat(40), "d".repeat(40)));
-    }
-
-    #[test]
-    fn stable_patch_ids_for_commits_batches_multiple_commits() {
-        let tmp = crate::operations::git::test_utils::TmpRepo::new().expect("tmp repo");
-        tmp.write_file("one.txt", "one\n", false)
-            .expect("write first");
-        let first = tmp.commit_all("first").expect("first commit");
-        tmp.write_file("two.txt", "two\n", false)
-            .expect("write second");
-        let second = tmp.commit_all("second").expect("second commit");
-
-        let patch_ids =
-            stable_patch_ids_for_commits(tmp.gitai_repo(), &[first.clone(), second.clone()])
-                .expect("patch ids");
-
-        let first_patch_id = patch_ids.get(&first).expect("first patch id");
-        let second_patch_id = patch_ids.get(&second).expect("second patch id");
-        assert!(looks_like_hex_id(first_patch_id));
-        assert!(looks_like_hex_id(second_patch_id));
-        assert_ne!(first_patch_id, second_patch_id);
     }
 
     /// Helper that simulates pass-2 positional pairing without patch-id (for unit testing).

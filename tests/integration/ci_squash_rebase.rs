@@ -552,23 +552,42 @@ fn test_ci_local_open_pr_rebase_two_commits() {
     );
 
     // --- Run the new open-PR sync command ---
+    let spawn_log = repo.test_home_path().join("ci-sync-spawns.log");
     let output = repo
-        .git_ai(&[
-            "ci",
-            "local",
-            "sync",
-            "--previous-head-sha",
-            previous_head_sha.as_str(),
-            "--base-ref",
-            "main",
-            "--base-sha",
-            base_sha.as_str(),
-            "--head-sha",
-            new_sha2.as_str(),
-            "--skip-fetch-notes",
-            "--skip-push",
-        ])
+        .git_ai_with_env(
+            &[
+                "ci",
+                "local",
+                "sync",
+                "--previous-head-sha",
+                previous_head_sha.as_str(),
+                "--base-ref",
+                "main",
+                "--base-sha",
+                base_sha.as_str(),
+                "--head-sha",
+                new_sha2.as_str(),
+                "--skip-fetch-notes",
+                "--skip-push",
+            ],
+            &[(
+                "GIT_AI_SPAWN_LOG",
+                spawn_log.to_str().expect("spawn log path should be UTF-8"),
+            )],
+        )
         .expect("ci local sync should succeed");
+
+    let spawns = std::fs::read_to_string(&spawn_log).expect("read CI sync spawn log");
+    assert_eq!(
+        spawns.lines().filter(|line| *line == "log").count(),
+        1,
+        "CI range comparison should read all commit patches with one git log process; spawns:\n{spawns}"
+    );
+    assert_eq!(
+        spawns.lines().filter(|line| *line == "patch-id").count(),
+        1,
+        "CI range comparison should batch all commits into one patch-id process; spawns:\n{spawns}"
+    );
 
     assert!(
         output.contains("Local CI (sync): authorship rewritten successfully"),

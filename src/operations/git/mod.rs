@@ -4,6 +4,7 @@ pub mod command_classification;
 pub mod fast_reader;
 pub mod notes_api;
 pub(crate) mod notes_store;
+pub(crate) mod patch_id;
 pub mod refs;
 pub mod repo_state;
 pub mod repository;

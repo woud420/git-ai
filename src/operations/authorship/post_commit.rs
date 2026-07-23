@@ -18,6 +18,7 @@ use crate::operations::authorship::virtual_attribution::{
     AuthorshipLogDiffContext, VirtualAttributions,
 };
 use crate::operations::git::notes_api::write_note;
+use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
@@ -1079,12 +1080,10 @@ fn parse_commit_metric_metadata_output(output: &str) -> CommitMetricMetadata {
 }
 
 pub(crate) fn stable_patch_id_for_commit(repo: &Repository, commit_sha: &str) -> Option<String> {
-    crate::operations::authorship::rewrite_cherry_pick::stable_patch_ids_for_commits(
-        repo,
-        &[commit_sha.to_string()],
-    )
-    .ok()
-    .and_then(|patch_ids| patch_ids.get(commit_sha).cloned())
+    stable_patch_ids_for_commits(repo, &[commit_sha.to_string()], PatchDiffMode::Configured)
+        .ok()
+        .and_then(|patch_ids| patch_ids.into_iter().next())
+        .flatten()
 }
 
 pub(crate) fn commit_metric_attrs(

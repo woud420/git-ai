@@ -1,9 +1,10 @@
-use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin};
+use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::domain::RewriteEvent;
 use crate::operations::authorship::rewrite::handle_rewrite_event;
 use crate::operations::git::notes_api::{read_authorship_v3, read_note};
+use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::refs::{
     AI_AUTHORSHIP_FORK_TRACKING_REF, copy_missing_notes_for_commits_from_ref, ref_exists,
 };
@@ -895,50 +896,6 @@ fn sync_fetch_remote_supports_lazy_blobs(
     }
 }
 
-fn stable_patch_id_for_commit(repo: &Repository, commit_sha: &str) -> Result<String, GitAiError> {
-    let mut show_args = repo.global_args_for_exec();
-    show_args.extend(
-        [
-            "show",
-            "--format=",
-            "--no-notes",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-color",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "--diff-algorithm=default",
-            "--indent-heuristic",
-            commit_sha,
-        ]
-        .iter()
-        .map(|s| s.to_string()),
-    );
-    let patch = exec_git(&show_args)?;
-
-    let mut patch_id_args = repo.global_args_for_exec();
-    patch_id_args.push("patch-id".to_string());
-    patch_id_args.push("--stable".to_string());
-    let patch_id_output = exec_git_stdin(&patch_id_args, &patch.stdout)?;
-    let stdout = String::from_utf8_lossy(&patch_id_output.stdout);
-    let patch_id = stdout
-        .split_whitespace()
-        .next()
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "empty-patch".to_string());
-    Ok(patch_id)
-}
-
-fn stable_patch_ids_for_commits(
-    repo: &Repository,
-    commit_shas: &[String],
-) -> Result<Vec<String>, GitAiError> {
-    commit_shas
-        .iter()
-        .map(|sha| stable_patch_id_for_commit(repo, sha))
-        .collect()
-}
-
 fn commit_ranges_have_same_patch_ids(
     repo: &Repository,
     original_commits: &[String],
@@ -948,8 +905,11 @@ fn commit_ranges_have_same_patch_ids(
         return Ok(false);
     }
 
-    let original_patch_ids = stable_patch_ids_for_commits(repo, original_commits)?;
-    let new_patch_ids = stable_patch_ids_for_commits(repo, new_commits)?;
+    let mut commits = Vec::with_capacity(original_commits.len() + new_commits.len());
+    commits.extend_from_slice(original_commits);
+    commits.extend_from_slice(new_commits);
+    let patch_ids = stable_patch_ids_for_commits(repo, &commits, PatchDiffMode::Canonical)?;
+    let (original_patch_ids, new_patch_ids) = patch_ids.split_at(original_commits.len());
     Ok(original_patch_ids == new_patch_ids)
 }
 
@@ -983,6 +943,105 @@ fn commit_is_ancestor(
 mod tests {
     use super::*;
     use crate::operations::git::test_utils::TmpRepo;
+
+    fn repo_with_distinct_patches() -> (TmpRepo, String, String) {
+        let repo = TmpRepo::new().expect("test repo");
+        repo.write_file("base.txt", "base\n", false)
+            .expect("write base");
+        repo.commit_all("base").expect("base commit");
+        repo.write_file("one.txt", "one\n", false)
+            .expect("write first patch");
+        let first = repo.commit_all("first").expect("first commit");
+        repo.write_file("two.txt", "two\n", false)
+            .expect("write second patch");
+        let second = repo.commit_all("second").expect("second commit");
+        (repo, first, second)
+    }
+
+    fn repo_with_equivalent_patches() -> (TmpRepo, String, String) {
+        let repo = TmpRepo::new().expect("test repo");
+        repo.write_file("file.txt", "base\n", false)
+            .expect("write base");
+        let base = repo.commit_all("base").expect("base commit");
+
+        repo.write_file("file.txt", "changed\n", false)
+            .expect("write first patch");
+        let first = repo.commit_all("first version").expect("first commit");
+
+        repo.git_command(&["reset", "--hard", &base])
+            .expect("reset to base");
+        repo.write_file("file.txt", "changed\n", false)
+            .expect("write equivalent patch");
+        let equivalent = repo
+            .commit_all("equivalent version")
+            .expect("equivalent commit");
+
+        assert_ne!(first, equivalent, "test requires distinct commit IDs");
+        (repo, first, equivalent)
+    }
+
+    #[test]
+    fn patch_id_ranges_match_equal_patches() {
+        let (repo, first, equivalent) = repo_with_equivalent_patches();
+
+        assert!(
+            commit_ranges_have_same_patch_ids(repo.gitai_repo(), &[first], &[equivalent])
+                .expect("compare equal patches")
+        );
+    }
+
+    #[test]
+    fn patch_id_ranges_reject_reordered_commits() {
+        let (repo, first, second) = repo_with_distinct_patches();
+
+        assert!(
+            !commit_ranges_have_same_patch_ids(
+                repo.gitai_repo(),
+                &[first.clone(), second.clone()],
+                &[second, first],
+            )
+            .expect("compare reordered ranges")
+        );
+    }
+
+    #[test]
+    fn patch_id_ranges_reject_changed_patches() {
+        let (repo, first, second) = repo_with_distinct_patches();
+
+        assert!(
+            !commit_ranges_have_same_patch_ids(repo.gitai_repo(), &[first], &[second],)
+                .expect("compare changed ranges")
+        );
+    }
+
+    #[test]
+    fn patch_id_ranges_reject_length_mismatch() {
+        let (repo, first, _) = repo_with_distinct_patches();
+
+        assert!(
+            !commit_ranges_have_same_patch_ids(repo.gitai_repo(), &[first], &[])
+                .expect("compare different-length ranges")
+        );
+    }
+
+    #[test]
+    fn patch_id_ranges_treat_distinct_empty_commits_as_equal() {
+        let repo = TmpRepo::new().expect("test repo");
+        repo.write_file("base.txt", "base\n", false)
+            .expect("write base");
+        repo.commit_all("base").expect("base commit");
+        let first_empty = repo.commit_all("empty one").expect("first empty commit");
+        let second_empty = repo.commit_all("empty two").expect("second empty commit");
+        assert_ne!(
+            first_empty, second_empty,
+            "test requires distinct empty commits"
+        );
+
+        assert!(
+            commit_ranges_have_same_patch_ids(repo.gitai_repo(), &[first_empty], &[second_empty])
+                .expect("compare empty commits")
+        );
+    }
 
     #[test]
     fn test_ci_event_debug() {

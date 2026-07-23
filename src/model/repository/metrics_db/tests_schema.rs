@@ -1,3 +1,4 @@
+use super::schema::column_exists;
 use super::test_support::*;
 use super::*;
 use rusqlite::params;
@@ -226,7 +227,7 @@ fn test_migrates_version_2_with_preexisting_retry_columns() {
         "external_parent_event_id",
         "external_tool_use_id",
     ] {
-        assert!(db.column_exists("metrics", column).unwrap());
+        assert!(column_exists(&db.conn, "metrics", column).unwrap());
     }
     assert_eq!(db.count_retryable().unwrap(), 1);
 }
@@ -275,8 +276,8 @@ fn test_migrates_version_3_to_event_metadata_schema_without_sync_backfill() {
         )
         .unwrap();
     assert_eq!(version, "5");
-    assert!(db.column_exists("metrics", "event_ts").unwrap());
-    assert!(db.column_exists("metrics", "event_kind").unwrap());
+    assert!(column_exists(&db.conn, "metrics", "event_ts").unwrap());
+    assert!(column_exists(&db.conn, "metrics", "event_kind").unwrap());
     for index in [
         "metrics_event_ts_kind",
         "metrics_session_kind_ts",

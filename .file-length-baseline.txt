@@ -2,7 +2,7 @@
 # recorded ceiling. The file_length_policy test fails when a listed file
 # grows past its ceiling, when a new src file exceeds 600 lines, or when a
 # listed file drops to the cap (remove its entry). Shrink me over time.
-src/cli/git_ai_handlers.rs	1294
+src/cli/git_ai_handlers.rs	1155
 src/config/file.rs	970
 src/config/mod.rs	638
 src/config/tests.rs	1119

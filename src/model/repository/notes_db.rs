@@ -92,28 +92,16 @@ impl NotesDatabase {
     /// Open a database at an explicit path. Useful for tests that need an isolated
     /// DB instance without relying on the process-global OnceLock singleton.
     pub fn open_at_path(path: &std::path::Path) -> Result<Self, GitAiError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(path)?;
-        let mut db = Self { conn };
-        db.initialize_schema()?;
-        Ok(db)
+        crate::model::repository::sqlite::open_at_path(path, |conn| {
+            let mut db = Self { conn };
+            db.initialize_schema()?;
+            Ok(db)
+        })
     }
 
     /// Open (or create) the database at the configured path.
     fn new() -> Result<Self, GitAiError> {
-        let db_path = Self::database_path()?;
-
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let conn = crate::model::repository::sqlite::open_writable_with_memory_limits(&db_path)?;
-
-        let mut db = Self { conn };
-        db.initialize_schema()?;
-        Ok(db)
+        Self::open_at_path(&Self::database_path()?)
     }
 
     /// Resolve the on-disk path for the notes database.
@@ -132,77 +120,20 @@ impl NotesDatabase {
 
     /// Apply schema migrations until the DB is at `SCHEMA_VERSION`.
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
-        // Fast path: if the metadata table and version already match, skip migrations.
-        let version_check: Result<usize, _> = self.conn.query_row(
-            "SELECT value FROM schema_metadata WHERE key = 'version'",
-            [],
-            |row| {
-                let version_str: String = row.get(0)?;
-                version_str
-                    .parse::<usize>()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            },
-        );
+        use crate::model::repository::sqlite;
 
-        if let Ok(current_version) = version_check {
-            if current_version == SCHEMA_VERSION {
-                return Ok(());
-            }
-            if current_version > SCHEMA_VERSION {
-                return Err(PersistenceError::schema_version(
-                    "notes",
-                    current_version,
-                    SCHEMA_VERSION,
-                ));
-            }
-        }
-
-        // Ensure schema_metadata table exists.
-        self.conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS schema_metadata (
-                key   TEXT PRIMARY KEY NOT NULL,
-                value TEXT NOT NULL
-            );
-            "#,
-        )?;
-
-        // Read current version (0 for a brand-new database).
-        let current_version: usize = self
-            .conn
-            .query_row(
-                "SELECT value FROM schema_metadata WHERE key = 'version'",
-                [],
-                |row| {
-                    let version_str: String = row.get(0)?;
-                    version_str
-                        .parse::<usize>()
-                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                },
-            )
-            .unwrap_or(0);
-
-        // Apply each missing migration in sequence.
-        for target_version in current_version..SCHEMA_VERSION {
-            self.apply_migration(target_version)?;
-
-            // Use an upsert so concurrent initializers do not race on the version row.
-            self.conn.execute(
-                r#"
-                INSERT INTO schema_metadata (key, value)
-                VALUES ('version', ?1)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value
-                WHERE CAST(schema_metadata.value AS INTEGER) < CAST(excluded.value AS INTEGER)
-                "#,
-                params![(target_version + 1).to_string()],
-            )?;
-        }
-
-        Ok(())
+        sqlite::ensure_schema_metadata_table(&self.conn)?;
+        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
+        sqlite::migration_runner(
+            &mut self.conn,
+            "notes",
+            current_version,
+            SCHEMA_VERSION,
+            Self::apply_migration,
+        )
     }
 
-    fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
+    fn apply_migration(conn: &mut Connection, from_version: usize) -> Result<(), GitAiError> {
         if from_version >= MIGRATIONS.len() {
             return Err(PersistenceError::no_migration_path(
                 "notes",
@@ -212,7 +143,7 @@ impl NotesDatabase {
         }
 
         let migration_sql = MIGRATIONS[from_version];
-        let tx = self.conn.transaction()?;
+        let tx = conn.transaction()?;
         tx.execute_batch(migration_sql)?;
         tx.commit()?;
 

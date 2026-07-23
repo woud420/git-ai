@@ -20,14 +20,8 @@ use super::snapshot::system_time_to_nanos;
 
 /// Normalize a path for use as HashMap key.
 /// On case-insensitive filesystems (macOS, Windows), case-fold to lowercase.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn normalize_path(p: &Path) -> PathBuf {
-    PathBuf::from(p.to_string_lossy().to_lowercase())
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn normalize_path(p: &Path) -> PathBuf {
-    p.to_path_buf()
+    super::super::path_utils::normalize_for_comparison(p)
 }
 
 // ---------------------------------------------------------------------------

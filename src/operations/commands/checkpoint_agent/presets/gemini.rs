@@ -7,6 +7,8 @@ use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
+use crate::operations::commands::checkpoint_agent::path_utils::normalize_for_comparison;
+use crate::operations::mdm::utils::gemini_config_dir;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -27,6 +29,9 @@ impl AgentPreset for GeminiPreset {
         let is_bash = tool_name
             .map(|n| bash_tool::classify_tool(Agent::Gemini, n) == ToolClass::Bash)
             .unwrap_or(false);
+        let mut file_paths = parse::file_paths_from_tool_input(&data, cwd);
+        let internal_tmp_dir = normalize_for_comparison(&gemini_config_dir().join("tmp"));
+        file_paths.retain(|path| !normalize_for_comparison(path).starts_with(&internal_tmp_dir));
 
         let context = PresetContext {
             agent_id: AgentId {
@@ -67,7 +72,7 @@ impl AgentPreset for GeminiPreset {
             }),
             (true, false) => ParsedHookEvent::PreFileEdit(PreFileEdit {
                 context,
-                file_paths: parse::file_paths_from_tool_input(&data, cwd),
+                file_paths,
                 dirty_files: None,
                 tool_use_id: Some(tool_use_id.to_string()),
             }),
@@ -79,7 +84,7 @@ impl AgentPreset for GeminiPreset {
             }),
             (false, false) => ParsedHookEvent::PostFileEdit(PostFileEdit {
                 context,
-                file_paths: parse::file_paths_from_tool_input(&data, cwd),
+                file_paths,
                 dirty_files: None,
                 stream_source,
                 tool_use_id: Some(tool_use_id.to_string()),

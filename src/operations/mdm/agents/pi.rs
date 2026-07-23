@@ -1,70 +1,68 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-use crate::operations::mdm::utils::{binary_exists, generate_diff, home_dir, write_atomic};
-use std::fs;
-use std::path::{Path, PathBuf};
+use crate::operations::mdm::plugin_drop::{self, FileDropSpec};
+use crate::operations::mdm::utils::home_dir;
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 
 const PI_EXTENSION_CONTENT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/agent-support/pi/git-ai.ts"
 ));
 
+fn pi_extension_path() -> PathBuf {
+    home_dir()
+        .join(".pi")
+        .join("agent")
+        .join("extensions")
+        .join("git-ai.ts")
+}
+
+fn pi_global_config_dir() -> PathBuf {
+    home_dir().join(".pi")
+}
+
+const PI_SPEC: FileDropSpec = FileDropSpec {
+    name: "Pi",
+    id: "pi",
+    template: PI_EXTENSION_CONTENT,
+    dest_path: pi_extension_path,
+    global_config_dir: pi_global_config_dir,
+    local_config_dir: ".pi",
+    detect_binary_names: &["pi"],
+    // Pi does not participate in post-update process-restart detection (no
+    // override of HookInstaller::process_names below, matching pre-refactor
+    // behavior of relying on the trait's default empty list).
+    process_names: &[],
+};
+
 pub struct PiInstaller;
 
+// Test-only convenience wrappers kept so existing content-generation tests
+// below don't need to reach into `PI_SPEC` directly.
+#[cfg(test)]
 impl PiInstaller {
     fn extension_path() -> PathBuf {
-        home_dir()
-            .join(".pi")
-            .join("agent")
-            .join("extensions")
-            .join("git-ai.ts")
+        (PI_SPEC.dest_path)()
     }
 
     fn generate_extension_content(binary_path: &Path) -> String {
-        let path_str = binary_path.display().to_string().replace('\\', "\\\\");
-        PI_EXTENSION_CONTENT.replace("__GIT_AI_BINARY_PATH__", &path_str)
+        plugin_drop::generate_content(&PI_SPEC, binary_path)
     }
 }
 
 impl HookInstaller for PiInstaller {
     fn name(&self) -> &str {
-        "Pi"
+        PI_SPEC.name
     }
 
     fn id(&self) -> &str {
-        "pi"
+        PI_SPEC.id
     }
 
     fn check_hooks(&self, params: &HookInstallerParams) -> Result<HookCheckResult, GitAiError> {
-        let has_binary = binary_exists("pi");
-        let has_global_config = home_dir().join(".pi").exists();
-        let has_local_config = Path::new(".pi").exists();
-
-        if !has_binary && !has_global_config && !has_local_config {
-            return Ok(HookCheckResult {
-                tool_installed: false,
-                hooks_installed: false,
-                hooks_up_to_date: false,
-            });
-        }
-
-        let extension_path = Self::extension_path();
-        if !extension_path.exists() {
-            return Ok(HookCheckResult {
-                tool_installed: true,
-                hooks_installed: false,
-                hooks_up_to_date: false,
-            });
-        }
-
-        let current_content = fs::read_to_string(&extension_path).unwrap_or_default();
-        let expected_content = Self::generate_extension_content(&params.binary_path);
-
-        Ok(HookCheckResult {
-            tool_installed: true,
-            hooks_installed: true,
-            hooks_up_to_date: current_content.trim() == expected_content.trim(),
-        })
+        plugin_drop::file_drop_check_hooks(&PI_SPEC, params)
     }
 
     fn install_hooks(
@@ -72,35 +70,7 @@ impl HookInstaller for PiInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let extension_path = Self::extension_path();
-
-        if let Some(dir) = extension_path.parent()
-            && !dry_run
-        {
-            fs::create_dir_all(dir)?;
-        }
-
-        let existing_content = if extension_path.exists() {
-            fs::read_to_string(&extension_path)?
-        } else {
-            String::new()
-        };
-        let new_content = Self::generate_extension_content(&params.binary_path);
-
-        if existing_content.trim() == new_content.trim() {
-            return Ok(None);
-        }
-
-        let diff_output = generate_diff(&extension_path, &existing_content, &new_content);
-
-        if !dry_run {
-            if let Some(dir) = extension_path.parent() {
-                fs::create_dir_all(dir)?;
-            }
-            write_atomic(&extension_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+        plugin_drop::file_drop_install(&PI_SPEC, params, dry_run)
     }
 
     fn uninstall_hooks(
@@ -108,26 +78,16 @@ impl HookInstaller for PiInstaller {
         _params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let extension_path = Self::extension_path();
-
-        if !extension_path.exists() {
-            return Ok(None);
-        }
-
-        let existing_content = fs::read_to_string(&extension_path)?;
-        let diff_output = generate_diff(&extension_path, &existing_content, "");
-
-        if !dry_run {
-            fs::remove_file(&extension_path)?;
-        }
-
-        Ok(Some(diff_output))
+        plugin_drop::file_drop_uninstall(&PI_SPEC, dry_run)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+    use std::fs;
+    use tempfile::TempDir;
 
     fn create_test_binary_path() -> PathBuf {
         PathBuf::from("/usr/local/bin/git-ai")
@@ -179,5 +139,160 @@ mod tests {
         assert!(content.contains("git-ai.override.json"));
         assert!(content.contains("normalizeToolPolicy"));
         assert!(content.contains("override?.tools ?? {}"));
+    }
+
+    // ---- Detection / check_hooks / install_hooks / uninstall_hooks (trait-level) ----
+
+    fn with_temp_home<F: FnOnce(&Path)>(f: F) {
+        let temp_dir = TempDir::new().unwrap();
+        let home = temp_dir.path().to_path_buf();
+
+        let prev_home = std::env::var_os("HOME");
+        let prev_userprofile = std::env::var_os("USERPROFILE");
+
+        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("USERPROFILE", &home);
+        }
+
+        f(&home);
+
+        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            match prev_userprofile {
+                Some(v) => std::env::set_var("USERPROFILE", v),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+    }
+
+    fn with_empty_path<F: FnOnce()>(f: F) {
+        let temp_dir = TempDir::new().unwrap();
+        let prev_path = std::env::var_os("PATH");
+
+        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
+        unsafe {
+            std::env::set_var("PATH", temp_dir.path());
+        }
+
+        f();
+
+        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
+        unsafe {
+            match prev_path {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_pi_no_binary_no_config_not_detected() {
+        with_temp_home(|_home| {
+            with_empty_path(|| {
+                let installer = PiInstaller;
+                let params = HookInstallerParams {
+                    binary_path: create_test_binary_path(),
+                };
+                let result = installer.check_hooks(&params).unwrap();
+                assert!(!result.tool_installed);
+                assert!(!result.hooks_installed);
+            });
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_pi_install_hooks_creates_extension_via_trait() {
+        with_temp_home(|home| {
+            let installer = PiInstaller;
+            let params = HookInstallerParams {
+                binary_path: create_test_binary_path(),
+            };
+
+            let result = installer.install_hooks(&params, false).unwrap();
+            assert!(result.is_some(), "install_hooks should produce a diff");
+
+            let extension_path = home
+                .join(".pi")
+                .join("agent")
+                .join("extensions")
+                .join("git-ai.ts");
+            assert!(extension_path.exists());
+
+            let content = fs::read_to_string(&extension_path).unwrap();
+            assert!(content.contains("'checkpoint', 'pi', '--hook-input', 'stdin'"));
+            assert!(!content.contains("__GIT_AI_BINARY_PATH__"));
+
+            // check_hooks should now report installed + up to date
+            let check = installer.check_hooks(&params).unwrap();
+            assert!(check.tool_installed);
+            assert!(check.hooks_installed);
+            assert!(check.hooks_up_to_date);
+
+            // A second install_hooks call is a no-op (already up to date)
+            let second = installer.install_hooks(&params, false).unwrap();
+            assert!(second.is_none());
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_pi_install_hooks_dry_run_does_not_write() {
+        with_temp_home(|home| {
+            let installer = PiInstaller;
+            let params = HookInstallerParams {
+                binary_path: create_test_binary_path(),
+            };
+
+            let result = installer.install_hooks(&params, true).unwrap();
+            assert!(result.is_some(), "dry_run should still report a diff");
+
+            let extension_path = home
+                .join(".pi")
+                .join("agent")
+                .join("extensions")
+                .join("git-ai.ts");
+            assert!(!extension_path.exists(), "dry_run must not write the file");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_pi_uninstall_hooks_removes_extension() {
+        with_temp_home(|home| {
+            let installer = PiInstaller;
+            let params = HookInstallerParams {
+                binary_path: create_test_binary_path(),
+            };
+            installer.install_hooks(&params, false).unwrap();
+
+            let extension_path = home
+                .join(".pi")
+                .join("agent")
+                .join("extensions")
+                .join("git-ai.ts");
+            assert!(extension_path.exists());
+
+            let result = installer.uninstall_hooks(&params, false).unwrap();
+            assert!(result.is_some());
+            assert!(!extension_path.exists());
+
+            // Uninstalling again is a no-op
+            let second = installer.uninstall_hooks(&params, false).unwrap();
+            assert!(second.is_none());
+        });
+    }
+
+    #[test]
+    fn test_pi_process_names_is_empty_by_default() {
+        let installer = PiInstaller;
+        assert!(installer.process_names().is_empty());
     }
 }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::clients::git_cli::{exec_git, exec_git_stdin_streaming};
 use crate::error::GitAiError;
 use crate::model::hunk_shift::{DiffHunk, parse_hunk_header};
-use crate::operations::git::repo_state::is_valid_git_oid;
+use crate::operations::git::oid::is_full_oid;
 use crate::operations::git::repository::Repository;
 
 use super::DiffTreeResult;
@@ -235,13 +235,13 @@ fn parse_batched_diff_tree_output(output: &str, expected_pairs: usize) -> Vec<Di
 
 fn is_tree_pair_separator(line: &str) -> bool {
     // "tree1 tree2" — two git OIDs separated by a single space. Validate both
-    // halves structurally via is_valid_git_oid so this accepts both the 81-byte
+    // halves structurally via is_full_oid so this accepts both the 81-byte
     // SHA-1 separator and the 129-byte SHA-256 separator (rather than a
     // hard-coded length).
     let Some((old, new)) = line.split_once(' ') else {
         return false;
     };
-    is_valid_git_oid(old) && is_valid_git_oid(new)
+    is_full_oid(old) && is_full_oid(new)
 }
 
 /// Incremental parser for a single tree pair's diff-tree patch.

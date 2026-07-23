@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn is_valid_git_oid(value: &str) -> bool {
-    matches!(value.len(), 40 | 64) && value.chars().all(|c| c.is_ascii_hexdigit())
-}
+pub use super::oid::is_full_oid as is_valid_git_oid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadState {

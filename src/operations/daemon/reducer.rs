@@ -3,6 +3,7 @@ use crate::model::domain::{
     AnalysisResult, AppliedCommand, FamilyState, GlobalState, NormalizedCommand, WorktreeState,
 };
 use crate::operations::daemon::analyzers::{AnalysisView, AnalyzerRegistry};
+use crate::operations::git::oid::is_zero_oid;
 use std::path::PathBuf;
 
 /// Convenience wrapper around [`reduce_family_command_with_ref_snapshot`] for
@@ -99,10 +100,6 @@ fn apply_ref_changes(state: &mut FamilyState, cmd: &NormalizedCommand) {
                 .insert(change.reference.clone(), change.new.clone());
         }
     }
-}
-
-fn is_zero_oid(value: &str) -> bool {
-    matches!(value.len(), 40 | 64) && value.chars().all(|ch| ch == '0')
 }
 
 fn apply_worktree_state(
@@ -362,23 +359,25 @@ mod tests {
     }
 
     #[test]
-    fn reducer_removes_refs_deleted_with_zero_oid() {
-        let mut state = family_state();
-        state.refs.insert(
-            "refs/heads/feature".to_string(),
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
-        );
-        let registry = AnalyzerRegistry::new();
-        let mut cmd = normalized();
-        cmd.ref_changes = vec![RefChange {
-            reference: "refs/heads/feature".to_string(),
-            old: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
-            new: "0000000000000000000000000000000000000000".to_string(),
-        }];
+    fn reducer_removes_refs_deleted_with_full_width_zero_oid() {
+        for zero_oid in ["0".repeat(40), "0".repeat(64)] {
+            let mut state = family_state();
+            state.refs.insert(
+                "refs/heads/feature".to_string(),
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            );
+            let registry = AnalyzerRegistry::new();
+            let mut cmd = normalized();
+            cmd.ref_changes = vec![RefChange {
+                reference: "refs/heads/feature".to_string(),
+                old: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+                new: zero_oid,
+            }];
 
-        let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+            let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
 
-        assert!(!state.refs.contains_key("refs/heads/feature"));
+            assert!(!state.refs.contains_key("refs/heads/feature"));
+        }
     }
 
     #[test]

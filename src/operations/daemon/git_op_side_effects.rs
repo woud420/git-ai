@@ -8,6 +8,8 @@ use crate::operations::daemon::side_effect_helpers::{
 };
 use crate::operations::git::cli_parser::summarize_rebase_args;
 use crate::operations::git::find_repository_in_path;
+use crate::operations::git::oid::is_non_zero_oid;
+pub use crate::operations::git::oid::{is_full_oid as is_valid_oid, is_zero_oid};
 use crate::operations::git::repository::Repository;
 use crate::operations::git::sync_authorship::{fetch_authorship_notes, fetch_remote_from_args};
 
@@ -283,14 +285,6 @@ pub fn family_key_for_repository(repo: &Repository) -> String {
         .to_string_lossy()
         .to_string()
 }
-pub fn is_valid_oid(oid: &str) -> bool {
-    matches!(oid.len(), 40 | 64) && oid.chars().all(|c| c.is_ascii_hexdigit())
-}
-
-pub fn is_zero_oid(oid: &str) -> bool {
-    is_valid_oid(oid) && oid.chars().all(|c| c == '0')
-}
-
 pub fn is_non_auxiliary_ref(reference: &str) -> bool {
     !(reference.starts_with("refs/notes/")
         || reference.starts_with("refs/tags/")
@@ -336,10 +330,8 @@ pub fn rebase_onto_from_command(
         .iter()
         .filter(|change| {
             change.reference == "HEAD"
-                && is_valid_oid(&change.old)
-                && !is_zero_oid(&change.old)
-                && is_valid_oid(&change.new)
-                && !is_zero_oid(&change.new)
+                && is_non_zero_oid(&change.old)
+                && is_non_zero_oid(&change.new)
                 && change.old != change.new
         })
         .collect::<Vec<_>>();
@@ -366,11 +358,7 @@ pub fn rebase_onto_from_command(
 }
 
 pub fn valid_non_zero_ref_change(change: &crate::model::domain::RefChange) -> bool {
-    is_valid_oid(&change.old)
-        && !is_zero_oid(&change.old)
-        && is_valid_oid(&change.new)
-        && !is_zero_oid(&change.new)
-        && change.old != change.new
+    is_non_zero_oid(&change.old) && is_non_zero_oid(&change.new) && change.old != change.new
 }
 
 pub fn rewrite_metric_branch_for_ref(reference: &str) -> Option<String> {

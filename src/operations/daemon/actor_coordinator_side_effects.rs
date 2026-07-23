@@ -7,6 +7,7 @@ use crate::operations::daemon::cherry_pick_helpers::{
 };
 use crate::operations::daemon::revert_rebase_helpers::strict_rebase_original_head_from_command;
 use crate::operations::git::find_repository_in_path;
+use crate::operations::git::oid::is_non_zero_oid;
 use std::ops::ControlFlow;
 #[cfg(feature = "test-support")]
 use std::time::Duration;
@@ -223,10 +224,8 @@ impl ActorDaemonCoordinator {
             .iter()
             .find(|change| {
                 change.reference == "HEAD"
-                    && is_valid_oid(&change.old)
-                    && !is_zero_oid(&change.old)
-                    && is_valid_oid(&change.new)
-                    && !is_zero_oid(&change.new)
+                    && is_non_zero_oid(&change.old)
+                    && is_non_zero_oid(&change.new)
             })
             .map(|change| (change.old.clone(), change.new.clone()));
         let pull_has_rebase_start =

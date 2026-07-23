@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero};
 use crate::error::GitAiError;
 use crate::operations::git::notes_api;
+use crate::operations::git::oid::{is_full_oid, is_zero_oid};
 use crate::operations::git::repository::Repository;
 
 /// Derive old→new commit mappings by running `git range-diff` between the
@@ -49,16 +50,7 @@ pub(super) fn derive_mappings_from_range_diff(
 }
 
 fn is_ancestor(repo: &Repository, ancestor: &str, descendant: &str) -> bool {
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "merge-base".to_string(),
-        "--is-ancestor".to_string(),
-        ancestor.to_string(),
-        descendant.to_string(),
-    ]);
-    exec_git_allow_nonzero(&args)
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    repo.is_ancestor(ancestor, descendant).unwrap_or(false)
 }
 
 pub(super) fn find_merge_base(repo: &Repository, a: &str, b: &str) -> Option<String> {
@@ -125,7 +117,7 @@ fn parse_range_diff_output(output: &str) -> Vec<(String, String)> {
             continue;
         }
 
-        // Find first 40-char hex SHA
+        // Find the first full-width Git OID.
         let Some((old_sha, rest)) = find_next_sha(trimmed) else {
             continue;
         };
@@ -139,7 +131,7 @@ fn parse_range_diff_output(output: &str) -> Vec<(String, String)> {
         match status_char {
             '<' => {
                 // Dropped commit (squashed into a later commit)
-                if !old_sha.chars().all(|c| c == '0') {
+                if !is_zero_oid(&old_sha) {
                     if let Some(new_sha) = previous_new_sha.as_ref() {
                         mappings.push((old_sha, new_sha.clone()));
                     } else {
@@ -153,7 +145,7 @@ fn parse_range_diff_output(output: &str) -> Vec<(String, String)> {
                 let Some((new_sha, _)) = find_next_sha(after_status) else {
                     continue;
                 };
-                if old_sha.chars().all(|c| c == '0') || new_sha.chars().all(|c| c == '0') {
+                if is_zero_oid(&old_sha) || is_zero_oid(&new_sha) {
                     continue;
                 }
                 // Map any preceding dropped commits to this new commit (squash)
@@ -195,10 +187,10 @@ fn find_next_sha(s: &str) -> Option<(String, &str)> {
         while end < bytes.len() && bytes[end].is_ascii_hexdigit() {
             end += 1;
         }
-        let run_len = end - start;
-        if run_len == 40 || run_len == 64 {
+        let candidate = &s[start..end];
+        if is_full_oid(candidate) {
             // The run is all ASCII hex, so slicing here is always char-safe.
-            return Some((s[start..end].to_string(), &s[end..]));
+            return Some((candidate.to_string(), &s[end..]));
         }
         // Not an OID-length run; skip past it entirely and keep scanning.
         i = end;
@@ -509,5 +501,16 @@ mod tests {
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].0, old);
         assert_eq!(mappings[0].1, new);
+    }
+
+    #[test]
+    fn test_parse_range_diff_output_skips_sha256_zero_oid() {
+        let zero = "0".repeat(64);
+        let old = "1".repeat(64);
+        let new = "2".repeat(64);
+        let output =
+            format!(" 1:  {zero} = 1:  {new} Zero old\n 2:  {old} = 2:  {zero} Zero new\n");
+
+        assert!(parse_range_diff_output(&output).is_empty());
     }
 }

@@ -9,6 +9,7 @@ use crate::operations::daemon::cherry_pick_helpers::{
 };
 use crate::operations::daemon::revert_rebase_helpers::apply_cherry_pick_complete_rewrite;
 use crate::operations::git::find_repository_in_path;
+use crate::operations::git::oid::is_non_zero_oid;
 use std::path::Path;
 
 impl ActorDaemonCoordinator {
@@ -263,10 +264,8 @@ impl ActorDaemonCoordinator {
                 continue;
             };
             if reference != "HEAD" && !reference.starts_with("refs/heads/")
-                || !is_valid_oid(old)
-                || is_zero_oid(old)
-                || !is_valid_oid(new)
-                || is_zero_oid(new)
+                || !is_non_zero_oid(old)
+                || !is_non_zero_oid(new)
                 || old == new
             {
                 continue;

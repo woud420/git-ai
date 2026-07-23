@@ -24,7 +24,7 @@ adapter** · **Network adapter** · **Orchestration** · **Interface**
 | `config/*` | Orchestration (bootstrap) | still imports `Repository` for the prompt-storage checks; the `is_allowed_repository` wrapper moved out in P9.2 (see below) |
 | `clients/{api, auth, http}` | Network adapter | dependency-clean after P9.2: no `operations/` imports |
 | `clients/git_cli/` | Git adapter (spawn layer) | dependency-clean: no `operations/` imports |
-| `operations/git/*` | Git adapter | `repository/`, `refs`, `notes_api` (notes choke point), `cat_file` (batched object reads), `status`, `repo_state`, `repo_storage`, `sync_authorship`, `fast_reader`, `cli_parser`, `command_classification`, `authorship_traversal` |
+| `operations/git/*` | Git adapter | `repository/`, `refs`, `notes_api` (notes choke point), `cat_file` (batched object reads), `oid` (object ID syntax), `status`, `repo_state`, `repo_storage`, `sync_authorship`, `fast_reader`, `cli_parser`, `command_classification`, `authorship_traversal` |
 | `operations/daemon/*` | Orchestration | actors/coordinator/reducer/analyzers/ref_cursor + socket listeners; reducer + analyzers are IO-free (keep it that way) |
 | `operations/commands/*` | Orchestration | command handlers; several still oversized (see `.file-length-baseline.txt`) |
 | `operations/authorship/*` | Mixed by design | `virtual_attribution/`, `range_authorship`, `rewrite*` entangle computation with git/notes IO; the pure Domain modules (`attribution_tracker/`, `hunk_shift`, `imara_diff_utils`, `move_detection`, `transcript`) moved to `model/` in P9.3 |

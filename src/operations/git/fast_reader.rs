@@ -3,9 +3,7 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 
-fn is_valid_git_oid(value: &str) -> bool {
-    matches!(value.len(), 40 | 64) && value.chars().all(|c| c.is_ascii_hexdigit())
-}
+use super::oid::is_full_oid;
 
 fn oid_byte_len(oid: &str) -> usize {
     oid.len() / 2
@@ -50,7 +48,7 @@ impl<'a> FastRefReader<'a> {
             }
         }
 
-        if is_valid_git_oid(trimmed) {
+        if is_full_oid(trimmed) {
             return Some(HeadKind::Detached(trimmed.to_string()));
         }
 
@@ -75,7 +73,7 @@ impl<'a> FastRefReader<'a> {
             let path = base.join(refname);
             if let Ok(contents) = fs::read_to_string(&path) {
                 let candidate = contents.trim();
-                if is_valid_git_oid(candidate) {
+                if is_full_oid(candidate) {
                     return Some(candidate.to_string());
                 }
                 // One level of symbolic ref indirection
@@ -95,7 +93,7 @@ impl<'a> FastRefReader<'a> {
             let path = base.join(refname);
             if let Ok(contents) = fs::read_to_string(&path) {
                 let candidate = contents.trim();
-                if is_valid_git_oid(candidate) {
+                if is_full_oid(candidate) {
                     return Some(candidate.to_string());
                 }
             }
@@ -115,7 +113,7 @@ impl<'a> FastRefReader<'a> {
             let mut parts = line.split_whitespace();
             let oid = parts.next()?;
             let name = parts.next()?;
-            if name == refname && is_valid_git_oid(oid) {
+            if name == refname && is_full_oid(oid) {
                 return Some(oid.to_string());
             }
         }
@@ -145,7 +143,7 @@ impl<'a> FastObjectReader<'a> {
     }
 
     fn object_path(&self, oid: &str) -> Option<std::path::PathBuf> {
-        if !is_valid_git_oid(oid) {
+        if !is_full_oid(oid) {
             return None;
         }
         Some(
@@ -204,7 +202,7 @@ impl<'a> FastObjectReader<'a> {
         let first_line = body.lines().next()?;
         let tree_oid = first_line.strip_prefix("tree ")?;
         let tree_oid = tree_oid.trim();
-        if is_valid_git_oid(tree_oid) {
+        if is_full_oid(tree_oid) {
             Some(tree_oid.to_string())
         } else {
             None

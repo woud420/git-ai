@@ -4,6 +4,7 @@ use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
 use crate::operations::daemon::cherry_pick_helpers::rebase_new_tip_from_command;
 use crate::operations::git::find_repository_in_path;
+use crate::operations::git::oid::is_non_zero_oid;
 use std::collections::HashMap;
 
 impl ActorDaemonCoordinator {
@@ -33,8 +34,8 @@ impl ActorDaemonCoordinator {
             .ref_changes
             .iter()
             .filter(|rc| rc.reference.starts_with("refs/heads/"))
-            .filter(|rc| is_valid_oid(&rc.old) && !is_zero_oid(&rc.old))
-            .filter(|rc| is_valid_oid(&rc.new) && !is_zero_oid(&rc.new))
+            .filter(|rc| is_non_zero_oid(&rc.old))
+            .filter(|rc| is_non_zero_oid(&rc.new))
             .cloned()
             .collect();
 
@@ -44,8 +45,8 @@ impl ActorDaemonCoordinator {
                 .ref_changes
                 .iter()
                 .filter(|rc| rc.reference == "HEAD")
-                .filter(|rc| is_valid_oid(&rc.old) && !is_zero_oid(&rc.old))
-                .filter(|rc| is_valid_oid(&rc.new) && !is_zero_oid(&rc.new))
+                .filter(|rc| is_non_zero_oid(&rc.old))
+                .filter(|rc| is_non_zero_oid(&rc.new))
                 .cloned()
                 .collect();
             if !head_changes.is_empty() {
@@ -73,7 +74,7 @@ impl ActorDaemonCoordinator {
             .ref_changes
             .iter()
             .filter(|rc| rc.reference == "HEAD")
-            .filter(|rc| is_valid_oid(&rc.new) && !is_zero_oid(&rc.new))
+            .filter(|rc| is_non_zero_oid(&rc.new))
             .map(|rc| rc.new.clone())
             .next();
 
@@ -196,7 +197,7 @@ impl ActorDaemonCoordinator {
         }
 
         let (_, new_head) = Self::resolve_heads_for_command(command);
-        if new_head.is_empty() || !is_valid_oid(&new_head) || is_zero_oid(&new_head) {
+        if !is_non_zero_oid(&new_head) {
             return HashMap::new();
         }
 

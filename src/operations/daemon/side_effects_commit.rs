@@ -4,6 +4,7 @@ use crate::error::GitAiError;
 use crate::model::domain::RewriteEvent;
 use crate::operations::daemon::actor_coordinator_side_effects::RebaseMode;
 use crate::operations::git::find_repository_in_path;
+use crate::operations::git::oid::is_non_zero_oid;
 use std::path::Path;
 
 impl ActorDaemonCoordinator {
@@ -167,14 +168,7 @@ impl ActorDaemonCoordinator {
         new_head: &str,
         commit_file_timestamp_snapshots: &mut CommitFileTimestampSnapshotHandles,
     ) -> Result<(), GitAiError> {
-        if old_head.is_empty()
-            || new_head.is_empty()
-            || old_head == new_head
-            || !is_valid_oid(old_head)
-            || is_zero_oid(old_head)
-            || !is_valid_oid(new_head)
-            || is_zero_oid(new_head)
-        {
+        if old_head == new_head || !is_non_zero_oid(old_head) || !is_non_zero_oid(new_head) {
             return Ok(());
         }
         let repo = find_repository_in_path(worktree)?;

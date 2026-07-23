@@ -3,10 +3,11 @@ use std::path::Path;
 
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
+use crate::operations::git::oid::is_non_zero_oid;
 use crate::operations::git::repository::Repository;
 
 use super::{
-    is_valid_oid, is_zero_oid, parsed_invocation_for_normalized_command, rebase_is_control_mode,
+    is_valid_oid, parsed_invocation_for_normalized_command, rebase_is_control_mode,
     valid_non_zero_ref_change,
 };
 use crate::clients::git_cli::exec_git_stdin;
@@ -69,11 +70,7 @@ pub(crate) fn cherry_pick_destination_commits(
         .iter()
         .filter(|change| change.reference == "HEAD")
         .filter(|change| {
-            is_valid_oid(&change.old)
-                && !is_zero_oid(&change.old)
-                && is_valid_oid(&change.new)
-                && !is_zero_oid(&change.new)
-                && change.old != change.new
+            is_non_zero_oid(&change.old) && is_non_zero_oid(&change.new) && change.old != change.new
         })
         .map(|change| change.new.clone())
         .collect()
@@ -84,10 +81,8 @@ fn first_head_transition_old(cmd: &crate::model::domain::NormalizedCommand) -> O
         .iter()
         .find(|change| {
             change.reference == "HEAD"
-                && is_valid_oid(&change.old)
-                && !is_zero_oid(&change.old)
-                && is_valid_oid(&change.new)
-                && !is_zero_oid(&change.new)
+                && is_non_zero_oid(&change.old)
+                && is_non_zero_oid(&change.new)
                 && change.old != change.new
         })
         .map(|change| change.old.clone())

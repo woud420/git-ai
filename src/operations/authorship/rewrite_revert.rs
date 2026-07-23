@@ -310,7 +310,7 @@ fn batch_rev_parse_verify(
             let mut parts = line.split_whitespace();
             if let (Some(oid), Some(kind)) = (parts.next(), parts.next())
                 && kind != "missing"
-                && crate::operations::git::repo_state::is_valid_git_oid(oid)
+                && crate::operations::git::oid::is_full_oid(oid)
             {
                 out.insert(spec.clone(), oid.to_string());
             }

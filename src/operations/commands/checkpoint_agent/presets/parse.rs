@@ -1,7 +1,16 @@
 use crate::error::GitAiError;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// Parse a checkpoint hook's raw JSON payload into `T` (usually `serde_json::Value`
+/// or a preset-specific hook-input struct), producing the same
+/// `GitAiError::PresetError` text every preset's `parse()` already raised inline.
+pub fn hook_json<T: DeserializeOwned>(hook_input: &str) -> Result<T, GitAiError> {
+    serde_json::from_str(hook_input)
+        .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))
+}
 
 pub fn required_str<'a>(data: &'a Value, key: &str) -> Result<&'a str, GitAiError> {
     data.get(key)

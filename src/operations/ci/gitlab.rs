@@ -1,3 +1,4 @@
+use crate::clients::api::{ApiError, error::http_status_error};
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
 use crate::operations::ci::ci_context::{CiContext, CiEvent};
@@ -135,26 +136,22 @@ fn fetch_mr_base_sha(
     }
 }
 
+/// Read a required CI env var, failing with `"{name} environment variable not set"`.
+fn require_env(name: &'static str) -> Result<String, GitAiError> {
+    std::env::var(name)
+        .map_err(|_| GitAiError::Generic(format!("{name} environment variable not set")))
+}
+
 /// Query GitLab API for recently merged MRs and find one matching the current commit SHA.
 /// Returns None if no matching MR is found (this is not an error - just means this commit
 /// wasn't from a merged MR).
 pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
     // Read required environment variables
-    let api_url = std::env::var("CI_API_V4_URL").map_err(|_| {
-        GitAiError::Generic("CI_API_V4_URL environment variable not set".to_string())
-    })?;
-    let project_id = std::env::var("CI_PROJECT_ID").map_err(|_| {
-        GitAiError::Generic("CI_PROJECT_ID environment variable not set".to_string())
-    })?;
-    let commit_sha = std::env::var("CI_COMMIT_SHA").map_err(|_| {
-        GitAiError::Generic("CI_COMMIT_SHA environment variable not set".to_string())
-    })?;
-    let server_url = std::env::var("CI_SERVER_URL").map_err(|_| {
-        GitAiError::Generic("CI_SERVER_URL environment variable not set".to_string())
-    })?;
-    let project_path = std::env::var("CI_PROJECT_PATH").map_err(|_| {
-        GitAiError::Generic("CI_PROJECT_PATH environment variable not set".to_string())
-    })?;
+    let api_url = require_env("CI_API_V4_URL")?;
+    let project_id = require_env("CI_PROJECT_ID")?;
+    let commit_sha = require_env("CI_COMMIT_SHA")?;
+    let server_url = require_env("CI_SERVER_URL")?;
+    let project_path = require_env("CI_PROJECT_PATH")?;
 
     println!("[GitLab CI] Environment:");
     println!("  CI_COMMIT_SHA: {}", commit_sha);
@@ -191,21 +188,24 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
     );
 
     println!("[GitLab CI] Querying API: {}", endpoint);
-
-    let response = gitlab_api_get(&endpoint, auth_header_name, &auth_token)
-        .map_err(|e| GitAiError::Generic(format!("GitLab API request failed: {}", e)))?;
+    const OP: &str = "gitlab merge request lookup";
+    let response =
+        gitlab_api_get(&endpoint, auth_header_name, &auth_token).map_err(|message| ApiError {
+            operation: OP,
+            status: None,
+            message,
+        })?;
 
     if response.status_code != 200 {
-        return Err(GitAiError::Generic(format!(
-            "GitLab API returned status {}: {}",
-            response.status_code,
-            response.as_str().unwrap_or("unknown error")
-        )));
+        let body = response.as_str().unwrap_or("unknown error");
+        return Err(http_status_error(OP, response.status_code, body, "unknown error").into());
     }
 
     let merge_requests: Vec<GitLabMergeRequest> =
-        serde_json::from_str(response.as_str().unwrap_or("[]")).map_err(|e| {
-            GitAiError::Generic(format!("Failed to parse GitLab API response: {}", e))
+        serde_json::from_str(response.as_str().unwrap_or("[]")).map_err(|e| ApiError {
+            operation: OP,
+            status: Some(response.status_code),
+            message: format!("Failed to parse GitLab API response: {}", e),
         })?;
 
     println!(

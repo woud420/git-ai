@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::clients::git_cli::{disable_internal_git_hooks, exec_git_allow_nonzero_with_env};
 use crate::error::GitAiError;
@@ -49,11 +48,8 @@ fn filtered_stash_working_log_base(stash_sha: &str) -> String {
 }
 
 fn working_log_for_dir(repo: &Repository, dir: PathBuf, base_commit: &str) -> PersistedWorkingLog {
-    let canonical_workdir = repo
-        .storage
-        .repo_workdir
-        .canonicalize()
-        .unwrap_or_else(|_| repo.storage.repo_workdir.clone());
+    let canonical_workdir =
+        crate::operations::git::canonicalize::canonicalize_or_self(&repo.storage.repo_workdir);
     PersistedWorkingLog::new(
         dir,
         base_commit,
@@ -134,10 +130,7 @@ pub fn handle_stash_create(
 
     let metadata = StashMetadata {
         base_commit: head_sha.to_string(),
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
+        timestamp: crate::model::clock::now_secs(),
         pathspecs: pathspecs.clone(),
     };
 
@@ -645,10 +638,7 @@ fn reconstruct_stash_applied_contents(
     let unique = format!(
         "git-ai-stash-apply-{}-{}",
         std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
+        crate::model::clock::now_nanos()
     );
     let temp_dir = std::env::temp_dir().join(unique);
     let index_path = temp_dir.join("index");

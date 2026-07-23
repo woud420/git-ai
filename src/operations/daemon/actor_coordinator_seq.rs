@@ -130,9 +130,7 @@ impl ActorDaemonCoordinator {
         let started_at_ns = trace_payload_root_started_at_ns(payload)
             .or_else(|| trace_payload_time_ns(payload))
             .unwrap_or_else(now_unix_nanos);
-        let family = common_dir
-            .canonicalize()
-            .unwrap_or(common_dir)
+        let family = crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
             .to_string_lossy()
             .to_string();
         self.append_pending_root_entry(&family, root_sid, started_at_ns)

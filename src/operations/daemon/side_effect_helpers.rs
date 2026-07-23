@@ -350,7 +350,8 @@ pub fn resolve_checkpoint_request(
     };
 
     let repo_workdir = repo.workdir()?;
-    let canonical_workdir = repo_workdir.canonicalize().unwrap_or(repo_workdir.clone());
+    let canonical_workdir =
+        crate::operations::git::canonicalize::canonicalize_or_self(&repo_workdir);
     let ignore_patterns = effective_ignore_patterns(repo, &[], &[]);
     let ignore_matcher = build_ignore_matcher(&ignore_patterns);
 
@@ -376,9 +377,7 @@ pub fn resolve_checkpoint_request(
             continue;
         }
 
-        let relative_path = abs_path
-            .canonicalize()
-            .unwrap_or(abs_path.clone())
+        let relative_path = crate::operations::git::canonicalize::canonicalize_or_self(&abs_path)
             .strip_prefix(&canonical_workdir)
             .map(|p| normalize_to_posix(&p.to_string_lossy()))
             .unwrap_or_else(|_| {
@@ -411,10 +410,7 @@ pub fn resolve_checkpoint_request(
         return Ok(None);
     }
 
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let ts = crate::model::clock::now_millis();
 
     Ok(Some(
         crate::operations::daemon::checkpoint::ResolvedCheckpointExecution {

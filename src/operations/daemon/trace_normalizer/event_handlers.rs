@@ -39,9 +39,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
         let family_key = if let Some(worktree) = worktree.as_deref() {
             if let Some(common_dir) = common_dir_for_worktree(worktree) {
                 let family = FamilyKey::new(
-                    common_dir
-                        .canonicalize()
-                        .unwrap_or(common_dir)
+                    crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
                         .to_string_lossy()
                         .to_string(),
                 );
@@ -170,9 +168,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
 
         let family = common_dir_for_repo_path(&repo).map(|common_dir| {
             FamilyKey::new(
-                common_dir
-                    .canonicalize()
-                    .unwrap_or(common_dir)
+                crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
                     .to_string_lossy()
                     .to_string(),
             )
@@ -340,9 +336,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
         {
             pending.family_key = common_dir_for_worktree(worktree).map(|common_dir| {
                 FamilyKey::new(
-                    common_dir
-                        .canonicalize()
-                        .unwrap_or(common_dir)
+                    crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
                         .to_string_lossy()
                         .to_string(),
                 )
@@ -427,9 +421,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
             for candidate in candidates {
                 if let Some(common_dir) = common_dir_for_repo_path(&candidate) {
                     let resolved_family = FamilyKey::new(
-                        common_dir
-                            .canonicalize()
-                            .unwrap_or(common_dir)
+                        crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
                             .to_string_lossy()
                             .to_string(),
                     );

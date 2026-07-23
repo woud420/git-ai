@@ -278,9 +278,7 @@ pub fn recent_checkout_switch_prerequisite_from_command(
     })
 }
 pub fn family_key_for_repository(repo: &Repository) -> String {
-    repo.common_dir()
-        .canonicalize()
-        .unwrap_or_else(|_| repo.common_dir().to_path_buf())
+    crate::operations::git::canonicalize::canonicalize_or_self(repo.common_dir())
         .to_string_lossy()
         .to_string()
 }

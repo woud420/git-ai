@@ -312,10 +312,8 @@ fn clone_prefers_target_family_over_source_cwd_family() {
 
     assert_eq!(cmd.primary_command.as_deref(), Some("clone"));
     assert_eq!(cmd.worktree.as_ref(), Some(&cloned_repo));
-    let expected_family = cloned_repo
-        .join(".git")
-        .canonicalize()
-        .unwrap_or_else(|_| cloned_repo.join(".git"));
+    let expected_family =
+        crate::operations::git::canonicalize::canonicalize_or_self(&cloned_repo.join(".git"));
     assert_eq!(
         cmd.family_key.as_ref().map(|family| family.0.as_str()),
         Some(expected_family.to_string_lossy().as_ref())

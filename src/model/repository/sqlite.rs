@@ -1,5 +1,16 @@
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+/// Recover a poisoned mutex by taking its inner guard anyway.
+///
+/// A panic while holding the lock cannot corrupt an in-memory connection or
+/// counter the way it could corrupt on-disk state, so callers that just need
+/// continued access (as opposed to `PersistenceError::LockPoisoned`'s
+/// fail-closed sites) recover rather than propagate.
+pub fn poisoned_lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Negative SQLite cache_size values are kibibytes. Keep each connection's
 /// page cache capped at 2 MiB unless a caller deliberately changes it later.

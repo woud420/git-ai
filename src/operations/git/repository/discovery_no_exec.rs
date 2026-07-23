@@ -29,12 +29,9 @@ pub fn worktree_storage_ai_dir(git_dir: &Path, git_common_dir: &Path) -> PathBuf
             .join(relative_worktree_path);
     }
 
-    let canonical_git_dir = git_dir
-        .canonicalize()
-        .unwrap_or_else(|_| git_dir.to_path_buf());
-    let canonical_common_dir = git_common_dir
-        .canonicalize()
-        .unwrap_or_else(|_| git_common_dir.to_path_buf());
+    let canonical_git_dir = crate::operations::git::canonicalize::canonicalize_or_self(git_dir);
+    let canonical_common_dir =
+        crate::operations::git::canonicalize::canonicalize_or_self(git_common_dir);
 
     if canonical_git_dir == canonical_common_dir {
         return git_common_dir.join("ai");
@@ -271,7 +268,7 @@ pub fn from_bare_repository(git_dir: &Path) -> Result<Repository, GitAiError> {
         .to_path_buf();
     let global_args = vec!["-C".to_string(), git_dir.to_string_lossy().to_string()];
 
-    let canonical_workdir = workdir.canonicalize().unwrap_or_else(|_| workdir.clone());
+    let canonical_workdir = crate::operations::git::canonicalize::canonicalize_or_self(&workdir);
 
     let worktree_ai_dir = worktree_storage_ai_dir(git_dir, git_dir);
     let storage = if worktree_ai_dir == git_dir.join("ai") {

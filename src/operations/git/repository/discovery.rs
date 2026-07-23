@@ -217,15 +217,10 @@ pub fn find_repository_for_file(
     };
 
     // Canonicalize paths for consistent comparison
-    let start_dir = start_dir
-        .canonicalize()
-        .unwrap_or_else(|_| start_dir.clone());
+    let start_dir = crate::operations::git::canonicalize::canonicalize_or_self(&start_dir);
 
-    let workspace_boundary = workspace_root.map(|root| {
-        PathBuf::from(root)
-            .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from(root))
-    });
+    let workspace_boundary = workspace_root
+        .map(|root| crate::operations::git::canonicalize::canonicalize_or_self(Path::new(root)));
 
     // Walk up the directory tree looking for a .git directory
     let mut current_dir = Some(start_dir.as_path());

@@ -61,8 +61,7 @@ impl AgentPreset for WindsurfPreset {
         // inside JSON string values (e.g. captured command output in `tool_info`). Strict
         // serde_json rejects those, so escape them inside string literals before parsing.
         let sanitized = escape_control_chars_in_json_strings(hook_input);
-        let data: serde_json::Value = serde_json::from_str(&sanitized)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let data: serde_json::Value = parse::hook_json(&sanitized)?;
 
         let trajectory_id = parse::required_str(&data, "trajectory_id")?.to_string();
         let agent_action = parse::optional_str(&data, "agent_action_name");

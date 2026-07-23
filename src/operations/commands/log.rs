@@ -20,7 +20,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::process::{Child, ExitStatus};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const LOG_BATCH_SIZE: usize = 24;
 const GIT_LOG_FIELD_COUNT: usize = 8;
@@ -1049,10 +1048,7 @@ impl Drop for Spool {
 }
 
 fn unique_spool_path() -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
+    let nanos = crate::model::clock::now_nanos();
     std::env::temp_dir().join(format!("git-ai-log-{}-{}.tmp", std::process::id(), nanos))
 }
 

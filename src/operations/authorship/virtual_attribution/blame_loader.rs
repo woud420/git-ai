@@ -5,7 +5,6 @@ use crate::model::working_log::CheckpointKind;
 use crate::operations::commands::blame::{GitAiBlameOptions, OLDEST_AI_BLAME_DATE};
 use crate::operations::git::repository::Repository;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 impl VirtualAttributions {
     /// Create a new VirtualAttributions for the given base commit with initial pathspecs
@@ -15,10 +14,7 @@ impl VirtualAttributions {
         pathspecs: &[String],
         blame_start_commit: Option<String>,
     ) -> Result<Self, GitAiError> {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
+        let ts = crate::model::clock::now_millis();
 
         let mut virtual_attrs = VirtualAttributions {
             repo,

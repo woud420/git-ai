@@ -35,6 +35,7 @@ pub use prompt_storage::PromptStorageMode;
 
 // Internal re-exports used by submodules or tests
 pub(crate) use file::build_config;
+pub(crate) use file::strip_utf8_bom;
 pub(crate) use patterns::{remote_matches_patterns, repo_root_matches_patterns};
 
 /// Default API base URL for comparison

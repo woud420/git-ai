@@ -16,8 +16,7 @@ pub struct GeminiPreset;
 
 impl AgentPreset for GeminiPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let data: serde_json::Value = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let data: serde_json::Value = parse::hook_json(hook_input)?;
 
         let cwd = parse::required_str(&data, "cwd")?;
         let session_id = parse::required_str(&data, "session_id")?.to_string();

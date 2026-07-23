@@ -11,8 +11,7 @@ pub struct GithubCopilotPreset;
 
 impl AgentPreset for GithubCopilotPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let data: serde_json::Value = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let data: serde_json::Value = parse::hook_json(hook_input)?;
 
         let hook_event_name =
             parse::optional_str_multi(&data, &["hook_event_name", "hookEventName"])

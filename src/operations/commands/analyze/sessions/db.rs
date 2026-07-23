@@ -11,7 +11,6 @@ use crate::operations::commands::analyze::cube::{CubeClient, QueryArgs};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Map, Value};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Idempotently add the derived funnel-gap columns. Skips any that already
 /// exist (so it is safe to run on every `open_db`, new DB or old).
@@ -449,8 +448,5 @@ pub(super) fn session_prs_json(
 }
 
 pub(super) fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    crate::model::clock::now_secs() as i64
 }

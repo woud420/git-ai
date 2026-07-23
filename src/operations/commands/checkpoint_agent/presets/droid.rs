@@ -14,8 +14,7 @@ pub struct DroidPreset;
 
 impl AgentPreset for DroidPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let data: serde_json::Value = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let data: serde_json::Value = parse::hook_json(hook_input)?;
 
         // session_id is optional — generate a fallback if not present
         let session_id =

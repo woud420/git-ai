@@ -27,8 +27,7 @@ impl AgentPreset for CursorBackgroundPreset {
 
 impl AgentPreset for CursorPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let data: serde_json::Value = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let data: serde_json::Value = parse::hook_json(hook_input)?;
 
         // conversation_id is required for session_id
         let conversation_id = parse::required_str(&data, "conversation_id")?.to_string();

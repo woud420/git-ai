@@ -171,10 +171,9 @@ pub fn daemon_socket_health_check_loop(
 
     loop {
         {
-            let guard = coordinator
-                .shutdown_condvar_mutex
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let guard = crate::model::repository::sqlite::poisoned_lock(
+                &coordinator.shutdown_condvar_mutex,
+            );
             if coordinator.is_shutting_down() {
                 return;
             }
@@ -233,10 +232,9 @@ pub fn daemon_update_check_loop(coordinator: Arc<ActorDaemonCoordinator>, starte
 
     loop {
         {
-            let guard = coordinator
-                .shutdown_condvar_mutex
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let guard = crate::model::repository::sqlite::poisoned_lock(
+                &coordinator.shutdown_condvar_mutex,
+            );
             if coordinator.is_shutting_down() {
                 return;
             }

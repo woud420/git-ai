@@ -99,10 +99,7 @@ impl MetricsDatabase {
     /// rows cannot be aged by event timestamp, so delivered malformed rows fall back to
     /// `delivered_ts`.
     pub(super) fn prune_old_metrics_if_due(&mut self) -> Result<(), GitAiError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = crate::model::clock::now_secs();
 
         let last_prune: Option<i64> = self
             .conn

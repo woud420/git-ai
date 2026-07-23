@@ -170,7 +170,8 @@ impl ActorDaemonCoordinator {
 
         if let Some(worktree) = worktree_hint.clone() {
             if let Some(common_dir) = common_dir_for_worktree(&worktree) {
-                let family = common_dir.canonicalize().unwrap_or(common_dir);
+                let family =
+                    crate::operations::git::canonicalize::canonicalize_or_self(&common_dir);
                 ingress
                     .root_families
                     .insert(root.clone(), family.to_string_lossy().to_string());

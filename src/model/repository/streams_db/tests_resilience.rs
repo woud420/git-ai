@@ -172,10 +172,7 @@ fn test_mutex_poison_recovery() {
 
     // Spawn a thread that panics while holding the lock
     let handle = thread::spawn(move || {
-        let conn = db_clone
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&db_clone.conn);
         // Force a panic (commented out to not actually poison in this test)
         // panic!("Simulated panic");
         drop(conn);

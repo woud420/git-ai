@@ -10,7 +10,6 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
 
 pub use crate::model::working_log::InitialAttributions;
 
@@ -79,10 +78,8 @@ impl RepoStorage {
     ) -> Result<PersistedWorkingLog, GitAiError> {
         let working_log_dir = self.working_logs.join(sha);
         fs::create_dir_all(&working_log_dir)?;
-        let canonical_workdir = self
-            .repo_workdir
-            .canonicalize()
-            .unwrap_or_else(|_| self.repo_workdir.clone());
+        let canonical_workdir =
+            crate::operations::git::canonicalize::canonicalize_or_self(&self.repo_workdir);
         Ok(PersistedWorkingLog::new(
             working_log_dir,
             sha,
@@ -105,10 +102,7 @@ impl RepoStorage {
 
             // Write a timestamp marker so we know when it was archived
             let marker = old_dir.join(".archived_at");
-            let now = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_secs();
+            let now = crate::model::clock::now_secs();
             // Best-effort; don't fail the commit if we can't write the marker
             let _ = fs::write(&marker, now.to_string());
 
@@ -131,10 +125,7 @@ impl RepoStorage {
     /// Errors are intentionally swallowed so pruning never breaks the commit flow.
     #[doc(hidden)]
     pub fn prune_expired_old_working_logs(&self) {
-        let now_secs = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_secs();
+        let now_secs = crate::model::clock::now_secs();
 
         let entries = match fs::read_dir(&self.working_logs) {
             Ok(e) => e,
@@ -197,10 +188,8 @@ impl RepoStorage {
     ) -> Result<(), GitAiError> {
         copy_dir_contents(&old_dir.join("blobs"), &new_dir.join("blobs"))?;
 
-        let canonical = self
-            .repo_workdir
-            .canonicalize()
-            .unwrap_or_else(|_| self.repo_workdir.clone());
+        let canonical =
+            crate::operations::git::canonicalize::canonicalize_or_self(&self.repo_workdir);
         let old_log = PersistedWorkingLog::new(
             old_dir.to_path_buf(),
             old_sha,
@@ -390,15 +379,10 @@ impl PersistedWorkingLog {
         let canonical_workdir = &self.canonical_workdir;
 
         #[cfg(not(windows))]
-        let canonical_workdir = match self.repo_workdir.canonicalize() {
-            Ok(p) => p,
-            Err(_) => self.repo_workdir.clone(),
-        };
+        let canonical_workdir =
+            crate::operations::git::canonicalize::canonicalize_or_self(&self.repo_workdir);
 
-        let canonical_path = match path.canonicalize() {
-            Ok(p) => p,
-            Err(_) => path.to_path_buf(),
-        };
+        let canonical_path = crate::operations::git::canonicalize::canonicalize_or_self(path);
 
         #[cfg(windows)]
         if canonical_path.starts_with(canonical_workdir) {

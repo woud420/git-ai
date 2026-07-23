@@ -265,12 +265,7 @@ pub fn file_time_fallback(meta: &std::fs::Metadata, is_first_event: bool) -> u32
     };
     time.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as u32)
-        .unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as u32
-        })
+        .unwrap_or_else(|| crate::model::clock::now_secs() as u32)
 }
 
 const ALL_AGENT_TYPES: &[&str] = &[

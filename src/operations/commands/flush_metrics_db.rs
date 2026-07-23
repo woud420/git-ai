@@ -170,8 +170,5 @@ pub fn handle_flush_metrics_db(_args: &[String]) {
 }
 
 fn current_unix_ts() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::model::clock::now_secs()
 }

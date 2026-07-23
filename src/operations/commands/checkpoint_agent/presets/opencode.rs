@@ -241,8 +241,7 @@ impl OpenCodePreset {
 
 impl AgentPreset for OpenCodePreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let hook_input: OpenCodeHookInput = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let hook_input: OpenCodeHookInput = super::parse::hook_json(hook_input)?;
 
         let is_bash = hook_input
             .tool_name

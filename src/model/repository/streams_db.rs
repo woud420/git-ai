@@ -183,10 +183,7 @@ impl StreamsDatabase {
 
     /// Run database migrations to bring schema up to current version.
     fn migrate(&self) -> Result<(), StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
 
         // Check if schema_version table exists
         let table_exists: bool = conn
@@ -237,10 +234,7 @@ impl StreamsDatabase {
 
     /// Insert a new stream record.
     pub fn insert_stream(&self, record: &StreamRecord) -> Result<(), StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
 
         conn.execute(
             r#"
@@ -315,10 +309,7 @@ impl StreamsDatabase {
         stream_kind: &str,
         stream_path: &str,
     ) -> Result<Option<StreamRecord>, StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
         conn.query_row(
             r#"
             SELECT session_id, stream_kind, tool, stream_path, stream_format,
@@ -345,10 +336,7 @@ impl StreamsDatabase {
         stream_path: &str,
         watermark: &dyn WatermarkStrategy,
     ) -> Result<(), StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
         let now = Utc::now().timestamp();
         let watermark_value = watermark.serialize();
 
@@ -378,10 +366,7 @@ impl StreamsDatabase {
         file_size: u64,
         modified: Option<DateTime<Utc>>,
     ) -> Result<(), StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
         let modified_ts = modified.map(|dt| dt.timestamp());
 
         let rows_changed = conn.execute(
@@ -409,10 +394,7 @@ impl StreamsDatabase {
         stream_path: &str,
         repo_work_dir: &str,
     ) -> Result<(), StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
 
         let rows_changed = conn
             .execute(
@@ -440,10 +422,7 @@ impl StreamsDatabase {
         stream_path: &str,
         error_message: &str,
     ) -> Result<(), StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
 
         let rows_changed = conn.execute(
             "UPDATE tracked_streams SET processing_errors = processing_errors + 1, last_error = ?1 WHERE session_id = ?2 AND stream_kind = ?3 AND stream_path = ?4",
@@ -469,10 +448,7 @@ impl StreamsDatabase {
         stream_kind: &str,
         stream_path: &str,
     ) -> Result<(), StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
 
         let rows_changed = conn
             .execute(
@@ -494,10 +470,7 @@ impl StreamsDatabase {
 
     /// Get all stream records.
     pub fn all_streams(&self) -> Result<Vec<StreamRecord>, StreamError> {
-        let conn = self
-            .conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
         let mut stmt = conn
             .prepare(
                 r#"

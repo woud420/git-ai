@@ -638,8 +638,8 @@ impl StreamWorker {
 
     /// Handle a checkpoint notification.
     async fn handle_checkpoint_notification(&mut self, notification: CheckpointNotification) {
-        let canonical_path = std::fs::canonicalize(&notification.stream_path)
-            .unwrap_or_else(|_| notification.stream_path.clone());
+        let canonical_path =
+            crate::operations::git::canonicalize::canonicalize_or_self(&notification.stream_path);
 
         let mut enqueued: HashSet<(PathBuf, String)> = HashSet::new();
         let tasks = self.enqueue_streams_for_session(
@@ -713,7 +713,7 @@ impl StreamWorker {
 
             let session_id = generate_session_id(&external_session_id, "claude");
 
-            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            let canonical = crate::operations::git::canonicalize::canonicalize_or_self(&path);
             let dedup_key = (canonical.clone(), "transcript".to_string());
             if self.in_flight.contains(&dedup_key) {
                 continue;
@@ -1150,12 +1150,8 @@ impl StreamWorker {
                         Some(meta) => {
                             agent.extract_event_timestamp(&raw_event, meta, is_first_event)
                         }
-                        None => extract_event_timestamp(&raw_event).unwrap_or_else(|| {
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs() as u32
-                        }),
+                        None => extract_event_timestamp(&raw_event)
+                            .unwrap_or_else(|| crate::model::clock::now_secs() as u32),
                     };
                     let trace_id = generate_trace_id();
                     let mut event_attrs = base_attrs.clone().trace_id(trace_id);

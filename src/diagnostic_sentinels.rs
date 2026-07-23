@@ -21,8 +21,8 @@ pub fn debug_self_check_root() -> PathBuf {
 
 pub fn path_is_in_debug_self_check_root(path: &Path) -> bool {
     let root = debug_self_check_root();
-    let root = std::fs::canonicalize(&root).unwrap_or(root);
-    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let root = crate::operations::git::canonicalize::canonicalize_or_self(&root);
+    let path = crate::operations::git::canonicalize::canonicalize_or_self(path);
     path.starts_with(root)
 }
 

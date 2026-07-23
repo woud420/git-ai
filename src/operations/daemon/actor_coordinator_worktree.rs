@@ -8,9 +8,7 @@ use std::path::Path;
 impl ActorDaemonCoordinator {
     pub(crate) fn worktree_state_key(worktree: &Path) -> String {
         let normalized = worktree_root_for_path(worktree).unwrap_or_else(|| worktree.to_path_buf());
-        normalized
-            .canonicalize()
-            .unwrap_or(normalized)
+        crate::operations::git::canonicalize::canonicalize_or_self(&normalized)
             .to_string_lossy()
             .to_string()
     }

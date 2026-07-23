@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 
-use crate::test_utils::fixture_path;
+use crate::test_utils::{fixture_path, raw_git};
 use git_ai::model::attribution_tracker::LineAttribution;
 use git_ai::model::authorship_log::PromptRecord;
 use git_ai::model::working_log::{AgentId, CheckpointKind};
@@ -20,21 +20,6 @@ fn stats_from_args(repo: &crate::repos::test_repo::TestRepo, args: &[&str]) -> C
     let start = raw.find('{').unwrap_or(0);
     let end = raw.rfind('}').unwrap_or(raw.len().saturating_sub(1));
     serde_json::from_str(&raw[start..=end]).expect("valid stats json")
-}
-
-fn run_git(cwd: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("git command should run");
-    assert!(
-        output.status.success(),
-        "git {:?} failed:\nstdout: {}\nstderr: {}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn run_git_stdout(cwd: &Path, args: &[&str]) -> String {
@@ -319,7 +304,7 @@ crate::worktree_test_wrappers! {
         let main_repo_dir = common_dir.parent().expect("main repo dir");
         let second_worktree = unique_worktree_path();
 
-        run_git(
+        raw_git(
             main_repo_dir,
             &["worktree", "add", second_worktree.to_str().unwrap()],
         );
@@ -552,7 +537,7 @@ fn checkpoint_routes_to_linked_worktree_when_cwd_is_main_repo() {
 
     // Create a second linked worktree alongside the main working tree.
     let linked_wt = unique_worktree_path();
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "add", linked_wt.to_str().unwrap()],
     );
@@ -623,7 +608,7 @@ fn checkpoint_routes_to_linked_worktree_when_cwd_is_main_repo() {
     );
 
     // Cleanup the temporary worktree.
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "remove", "--force", linked_wt.to_str().unwrap()],
     );
@@ -648,7 +633,7 @@ fn checkpoint_routes_to_nested_linked_worktree_when_cwd_is_main_repo() {
 
     // Worktree lives INSIDE the main repo's working tree.
     let linked_wt = main_repo_root.join(".worktrees").join("feature");
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "add", "--detach", linked_wt.to_str().unwrap()],
     );
@@ -727,7 +712,7 @@ fn checkpoint_routes_to_nested_linked_worktree_when_cwd_is_main_repo() {
         "checkpoint entry should use the worktree-relative path"
     );
 
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "remove", "--force", linked_wt.to_str().unwrap()],
     );
@@ -744,7 +729,7 @@ fn human_checkpoint_routes_to_linked_worktree_when_cwd_is_main_repo() {
     let main_repo_root = repo.path().to_path_buf();
 
     let linked_wt = unique_worktree_path();
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "add", linked_wt.to_str().unwrap()],
     );
@@ -786,7 +771,7 @@ fn human_checkpoint_routes_to_linked_worktree_when_cwd_is_main_repo() {
         "expected a Human checkpoint in the linked worktree's working log"
     );
 
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "remove", "--force", linked_wt.to_str().unwrap()],
     );
@@ -807,7 +792,7 @@ fn human_checkpoint_routes_to_nested_linked_worktree_when_cwd_is_main_repo() {
 
     // Worktree is INSIDE the main repo's working tree.
     let linked_wt = main_repo_root.join(".worktrees").join("pre-feature");
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "add", "--detach", linked_wt.to_str().unwrap()],
     );
@@ -844,7 +829,7 @@ fn human_checkpoint_routes_to_nested_linked_worktree_when_cwd_is_main_repo() {
          if this fails the .git FILE boundary detection is broken for PreToolUse"
     );
 
-    run_git(
+    raw_git(
         &main_repo_root,
         &["worktree", "remove", "--force", linked_wt.to_str().unwrap()],
     );

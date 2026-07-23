@@ -4,6 +4,7 @@
 //! The actual transcript processing and metrics emission are tested via
 //! daemon tests and manual verification.
 
+use crate::test_utils::transcript_fixture_path;
 use git_ai::metrics::{
     EventAttributes, MetricEvent, OtelTraceValues, PosEncoded, SessionEventValues,
 };
@@ -20,15 +21,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
-
-#[allow(dead_code)]
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("transcripts")
-        .join("fixtures")
-        .join(name)
-}
 
 fn test_fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -310,7 +302,7 @@ fn test_full_pipeline_claude_session_ids_flow_through() {
     let db_path = temp_dir.path().join("transcripts.db");
     let db = Arc::new(StreamsDatabase::open(&db_path).unwrap());
 
-    let fixture = fixture_path("claude_with_ids.jsonl");
+    let fixture = transcript_fixture_path("claude_with_ids.jsonl");
     let now = chrono::Utc::now().timestamp();
 
     let session = StreamRecord {

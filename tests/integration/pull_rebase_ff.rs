@@ -4,6 +4,7 @@ use git_ai::model::working_log::AgentId;
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};
+use crate::test_utils::isolated_bash_history_db_path;
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -226,12 +227,6 @@ fn setup_pull_rebase_skip_test() -> (TestRepo, TestRepo, String) {
         .expect("reset back to local ai commit should succeed");
 
     (local, upstream, local_ai.commit_sha)
-}
-
-fn isolated_bash_history_db_path() -> (tempfile::TempDir, String) {
-    let dir = tempfile::tempdir().expect("failed to create isolated bash history db dir");
-    let path = dir.path().join("bash-history.db");
-    (dir, path.to_string_lossy().to_string())
 }
 
 fn insert_bash_recovery_call_covering_now(db_path: &str, repo: &TestRepo) {

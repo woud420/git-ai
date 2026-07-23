@@ -33,16 +33,8 @@ fn raw_commit_all(repo: &TestRepo, message: &str) -> String {
     raw_head(repo)
 }
 
-fn write_file(repo: &TestRepo, path: &str, content: &str) {
-    let full_path = repo.path().join(path);
-    if let Some(parent) = full_path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(full_path, content).unwrap();
-}
-
 fn raw_commit_file(repo: &TestRepo, path: &str, content: &str, message: &str) -> String {
-    write_file(repo, path, content);
+    repo.write_file(path, content);
     raw_commit_all(repo, message)
 }
 
@@ -59,7 +51,7 @@ fn raw_clone(source: &TestRepo, target_path: &std::path::Path) -> TestRepo {
 }
 
 fn traced_ai_commit_file(repo: &TestRepo, path: &str, content: &str, message: &str) -> String {
-    write_file(repo, path, content);
+    repo.write_file(path, content);
     repo.git_ai(&["checkpoint", "mock_ai", path])
         .unwrap_or_else(|error| panic!("mock_ai checkpoint for {} failed: {}", path, error));
     repo.stage_all_and_commit(message)
@@ -150,7 +142,7 @@ fn test_cold_repo_first_traced_commit_is_processed() {
     let mut repo = cold_repo();
     let raw_first = raw_commit_file(&repo, "history.txt", "base\n", "raw base");
     let raw_second = raw_commit_file(&repo, "history.txt", "base\nraw\n", "raw second");
-    write_file(&repo, "traced.txt", "first traced commit\n");
+    repo.write_file("traced.txt", "first traced commit\n");
     raw_git(&repo, &["add", "traced.txt"]);
 
     start_cold_daemon(&mut repo);
@@ -170,7 +162,7 @@ fn test_cold_repo_commit_message_trailing_whitespace_preserves_ai_authorship() {
     raw_commit_file(&repo, "tracked.txt", "base\n", "raw base");
 
     start_cold_daemon(&mut repo);
-    write_file(&repo, "tracked.txt", "base\nAI line\n");
+    repo.write_file("tracked.txt", "base\nAI line\n");
     repo.git_ai(&["checkpoint", "mock_ai", "tracked.txt"])
         .expect("mock_ai checkpoint should succeed");
     repo.git(&["add", "tracked.txt"])
@@ -265,7 +257,7 @@ fn stress_cold_repo_first_traced_pull_rebase_preserves_rebased_ai_authorship() {
 fn test_traced_commit_after_untraced_head_move_creates_authorship_note() {
     let repo = TestRepo::new_dedicated_daemon();
 
-    write_file(&repo, "base.txt", "base\n");
+    repo.write_file("base.txt", "base\n");
     repo.git(&["add", "base.txt"]).unwrap();
     run_traced_git(&repo, &["commit", "-m", "traced base"]);
     let traced_base = raw_head(&repo);
@@ -274,7 +266,7 @@ fn test_traced_commit_after_untraced_head_move_creates_authorship_note() {
     let raw_unseen = raw_commit_file(&repo, "raw.txt", "raw unseen\n", "raw unseen");
     assert_no_ai_authorship_for_commit(&repo, &raw_unseen);
 
-    write_file(&repo, "next.txt", "next traced\n");
+    repo.write_file("next.txt", "next traced\n");
     repo.git(&["add", "next.txt"]).unwrap();
     run_traced_git(&repo, &["commit", "-m", "traced after raw"]);
     let traced_after_raw = raw_head(&repo);
@@ -286,7 +278,7 @@ fn test_traced_commit_after_untraced_head_move_creates_authorship_note() {
 fn test_traced_commit_after_untraced_duplicate_message_head_move_notes_traced_commit() {
     let repo = TestRepo::new_dedicated_daemon();
 
-    write_file(&repo, "base.txt", "base\n");
+    repo.write_file("base.txt", "base\n");
     repo.git(&["add", "base.txt"]).unwrap();
     run_traced_git(&repo, &["commit", "-m", "traced base"]);
     let traced_base = raw_head(&repo);
@@ -295,7 +287,7 @@ fn test_traced_commit_after_untraced_duplicate_message_head_move_notes_traced_co
     let raw_unseen = raw_commit_file(&repo, "raw.txt", "raw unseen\n", "same message");
     assert_no_authorship_note(&repo, &raw_unseen);
 
-    write_file(&repo, "next.txt", "next traced\n");
+    repo.write_file("next.txt", "next traced\n");
     repo.git(&["add", "next.txt"]).unwrap();
     run_traced_git(&repo, &["commit", "-m", "same message"]);
     let traced_after_raw = raw_head(&repo);
@@ -308,7 +300,7 @@ fn test_traced_commit_after_untraced_duplicate_message_head_move_notes_traced_co
 fn test_cold_repo_first_traced_amend_is_processed() {
     let mut repo = cold_repo();
     let original = raw_commit_file(&repo, "amend.txt", "before\n", "raw before amend");
-    write_file(&repo, "amend.txt", "before\namended\n");
+    repo.write_file("amend.txt", "before\namended\n");
     raw_git(&repo, &["add", "amend.txt"]);
 
     start_cold_daemon(&mut repo);
@@ -404,9 +396,7 @@ fn test_cold_repo_first_traced_conflict_rebase_ignores_stale_rebase_reflog_histo
         "rebase should stop for a conflict, got: {:?}",
         rebase
     );
-    write_file(
-        &repo,
-        "jokes-animals.csv",
+    repo.write_file("jokes-animals.csv",
         "setup,punchline\nWhat do you call a bear with no teeth?,A gummy bear\nWhat's a cat's favorite color?,Purr-ple\nWhat do you call a sleeping bull?,A dozer\n",
     );
     repo.git(&["add", "jokes-animals.csv"]).unwrap();
@@ -448,7 +438,7 @@ fn test_cold_repo_mid_rebase_continue_preserves_ai_conflict_resolution() {
     repo.restart_dedicated_daemon_for_test();
     repo.git_ai(&["checkpoint", "human", "conflict.txt"])
         .unwrap();
-    write_file(&repo, "conflict.txt", "resolved by ai\n");
+    repo.write_file("conflict.txt", "resolved by ai\n");
     repo.git_ai(&["checkpoint", "mock_ai", "conflict.txt"])
         .unwrap();
     repo.git(&["add", "conflict.txt"]).unwrap();
@@ -484,7 +474,7 @@ fn test_cold_repo_mid_cherry_pick_continue_preserves_ai_conflict_resolution() {
     repo.restart_dedicated_daemon_for_test();
     repo.git_ai(&["checkpoint", "human", "conflict.txt"])
         .unwrap();
-    write_file(&repo, "conflict.txt", "resolved by ai\n");
+    repo.write_file("conflict.txt", "resolved by ai\n");
     repo.git_ai(&["checkpoint", "mock_ai", "conflict.txt"])
         .unwrap();
     repo.git(&["add", "conflict.txt"]).unwrap();
@@ -524,7 +514,7 @@ fn test_cold_repo_mid_merge_commit_preserves_ai_conflict_resolution() {
     repo.restart_dedicated_daemon_for_test();
     repo.git_ai(&["checkpoint", "human", "conflict.txt"])
         .unwrap();
-    write_file(&repo, "conflict.txt", "resolved by ai\n");
+    repo.write_file("conflict.txt", "resolved by ai\n");
     repo.git_ai(&["checkpoint", "mock_ai", "conflict.txt"])
         .unwrap();
     repo.git(&["add", "conflict.txt"]).unwrap();
@@ -656,7 +646,7 @@ fn test_cold_repo_first_traced_merge_is_processed() {
 fn test_cold_repo_first_traced_stash_pop_is_processed() {
     let mut repo = cold_repo();
     raw_commit_file(&repo, "stash.txt", "base\n", "raw base");
-    write_file(&repo, "stash.txt", "base\nstashed\n");
+    repo.write_file("stash.txt", "base\nstashed\n");
     raw_git(&repo, &["stash", "push", "-m", "raw stash"]);
     assert_eq!(read_file(&repo, "stash.txt"), "base\n");
 
@@ -676,12 +666,12 @@ fn test_cold_repo_first_traced_stash_pop_is_processed() {
 fn test_cold_repo_traced_stash_after_raw_stash_history_preserves_current_ai_attribution() {
     let mut repo = cold_repo();
     raw_commit_file(&repo, "stash.txt", "base\n", "raw base");
-    write_file(&repo, "stash.txt", "base\nold raw stash\n");
+    repo.write_file("stash.txt", "base\nold raw stash\n");
     raw_git(&repo, &["stash", "push"]);
     assert_eq!(read_file(&repo, "stash.txt"), "base\n");
 
     start_cold_daemon(&mut repo);
-    write_file(&repo, "stash.txt", "base\ncurrent ai stash\n");
+    repo.write_file("stash.txt", "base\ncurrent ai stash\n");
     repo.git_ai(&["checkpoint", "mock_ai", "stash.txt"])
         .unwrap_or_else(|error| panic!("mock_ai checkpoint failed: {}", error));
     run_traced_git_without_sync(&repo, &["stash", "push"]);

@@ -1,5 +1,6 @@
 //! Integration tests for Claude Code transcript reader.
 
+use crate::test_utils::transcript_fixture_path;
 use git_ai::model::stream_watermark::ByteOffsetWatermark;
 use git_ai::operations::streams::agent::Agent;
 use git_ai::operations::streams::agents::ClaudeAgent;
@@ -9,17 +10,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("transcripts")
-        .join("fixtures")
-        .join(name)
-}
-
 #[test]
 fn test_claude_reader_raw_event_fidelity() {
-    let path = fixture_path("claude_simple.jsonl");
+    let path = transcript_fixture_path("claude_simple.jsonl");
     let agent = ClaudeAgent::new();
     let watermark = Box::new(ByteOffsetWatermark::new(0));
     let result = agent
@@ -129,7 +122,7 @@ fn test_claude_reader_file_not_found() {
 
 #[test]
 fn test_claude_transcript_ids_extracted_from_fixture() {
-    let fixture = fixture_path("claude_with_ids.jsonl");
+    let fixture = transcript_fixture_path("claude_with_ids.jsonl");
     let agent = ClaudeAgent::new();
     let watermark = Box::new(ByteOffsetWatermark::new(0));
     let batch = agent
@@ -215,8 +208,9 @@ fn test_claude_subagent_parent_detection_from_path() {
 
 #[test]
 fn test_claude_subagent_transcript_reads_with_correct_ids() {
-    let subagent_fixture =
-        fixture_path("claude_subagent/sess-parent-abc/subagents/agent-a1b2c3d4e5f6.jsonl");
+    let subagent_fixture = transcript_fixture_path(
+        "claude_subagent/sess-parent-abc/subagents/agent-a1b2c3d4e5f6.jsonl",
+    );
     let agent = ClaudeAgent::new();
     let watermark = Box::new(ByteOffsetWatermark::new(0));
     let batch = agent

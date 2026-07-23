@@ -9,35 +9,14 @@
 //! Timeouts are injected via thread-local overrides so parallel tests in other
 //! modules are never affected.
 
+use crate::bash_tool_common::{dummy_agent_id, dummy_trace_id, repo_root};
 use crate::repos::test_repo::TestRepo;
-use git_ai::model::working_log::AgentId;
 use git_ai::operations::commands::checkpoint_agent::bash_tool::{
     BashCheckpointAction, handle_bash_post_tool_use, handle_bash_pre_tool_use_with_context,
-    reset_timeout_overrides_for_test, set_daemon_socket_for_test, set_hook_timeout_ms_for_test,
-    set_walk_timeout_ms_for_test, snapshot,
+    reset_timeout_overrides_for_test, set_hook_timeout_ms_for_test, set_walk_timeout_ms_for_test,
+    snapshot,
 };
 use std::fs;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn repo_root(repo: &TestRepo) -> std::path::PathBuf {
-    set_daemon_socket_for_test(repo.daemon_control_socket_path());
-    repo.canonical_path()
-}
-
-fn dummy_agent_id() -> AgentId {
-    AgentId {
-        tool: "test".to_string(),
-        id: "test".to_string(),
-        model: String::new(),
-    }
-}
-
-fn dummy_trace_id() -> &'static str {
-    "t_test123456789a"
-}
 
 // ---------------------------------------------------------------------------
 // Walk-timeout tests

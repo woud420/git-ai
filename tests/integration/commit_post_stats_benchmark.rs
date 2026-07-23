@@ -6,6 +6,7 @@
 //! Run with:
 //! `cargo test benchmark_stats_hunk_density_hotspot -- --ignored --nocapture`
 
+use crate::test_utils::raw_git;
 use git_ai::operations::authorship::diff_ai_accepted::diff_ai_accepted_stats;
 use git_ai::operations::authorship::post_commit::estimate_stats_cost_for_head;
 use git_ai::operations::authorship::stats::{get_git_diff_stats, stats_for_commit_stats};
@@ -29,23 +30,6 @@ struct CommitPerfBreakdown {
     git_ms: u64,
     post_command_ms: u64,
     total_ms: u64,
-}
-
-fn run_git(repo_path: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_path)
-        .args(args)
-        .output()
-        .expect("failed to execute git command");
-
-    assert!(
-        output.status.success(),
-        "git {:?} failed:\nstdout: {}\nstderr: {}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn write_lines(path: &Path, line_count: usize) {
@@ -82,15 +66,15 @@ fn setup_repo_with_many_changed_files(file_count: usize) -> TempDir {
     let tmp = TempDir::new().expect("failed to create tempdir");
     let repo = tmp.path();
 
-    run_git(repo, &["init", "-q"]);
-    run_git(repo, &["config", "user.name", "Perf User"]);
-    run_git(repo, &["config", "user.email", "perf@example.com"]);
+    raw_git(repo, &["init", "-q"]);
+    raw_git(repo, &["config", "user.name", "Perf User"]);
+    raw_git(repo, &["config", "user.email", "perf@example.com"]);
 
     for i in 1..=file_count {
         fs::write(repo.join(format!("f{:05}.txt", i)), "base\n").expect("failed to write file");
     }
-    run_git(repo, &["add", "-A"]);
-    run_git(repo, &["commit", "-q", "-m", "initial"]);
+    raw_git(repo, &["add", "-A"]);
+    raw_git(repo, &["commit", "-q", "-m", "initial"]);
 
     for i in 1..=file_count {
         fs::write(
@@ -99,8 +83,8 @@ fn setup_repo_with_many_changed_files(file_count: usize) -> TempDir {
         )
         .expect("failed to write changed file");
     }
-    run_git(repo, &["add", "-A"]);
-    run_git(repo, &["commit", "-q", "-m", "thousands-of-files-workload"]);
+    raw_git(repo, &["add", "-A"]);
+    raw_git(repo, &["commit", "-q", "-m", "thousands-of-files-workload"]);
 
     tmp
 }
@@ -109,9 +93,9 @@ fn setup_repo_and_commit(case: &str) -> TempDir {
     let tmp = TempDir::new().expect("failed to create tempdir");
     let repo = tmp.path();
 
-    run_git(repo, &["init", "-q"]);
-    run_git(repo, &["config", "user.name", "Perf User"]);
-    run_git(repo, &["config", "user.email", "perf@example.com"]);
+    raw_git(repo, &["init", "-q"]);
+    raw_git(repo, &["config", "user.name", "Perf User"]);
+    raw_git(repo, &["config", "user.email", "perf@example.com"]);
 
     match case {
         // Many files, one contiguous added block per file (low hunk density)
@@ -120,8 +104,8 @@ fn setup_repo_and_commit(case: &str) -> TempDir {
                 let path = repo.join(format!("f{}.txt", i));
                 write_lines(&path, 200);
             }
-            run_git(repo, &["add", "-A"]);
-            run_git(repo, &["commit", "-q", "-m", "initial"]);
+            raw_git(repo, &["add", "-A"]);
+            raw_git(repo, &["commit", "-q", "-m", "initial"]);
 
             for i in 1..=80 {
                 let path = repo.join(format!("f{}.txt", i));
@@ -134,8 +118,8 @@ fn setup_repo_and_commit(case: &str) -> TempDir {
                 let path = repo.join(format!("m{}.txt", i));
                 write_lines(&path, 240);
             }
-            run_git(repo, &["add", "-A"]);
-            run_git(repo, &["commit", "-q", "-m", "initial"]);
+            raw_git(repo, &["add", "-A"]);
+            raw_git(repo, &["commit", "-q", "-m", "initial"]);
 
             for i in 1..=60 {
                 let path = repo.join(format!("m{}.txt", i));
@@ -145,8 +129,8 @@ fn setup_repo_and_commit(case: &str) -> TempDir {
         _ => panic!("unknown benchmark case: {}", case),
     }
 
-    run_git(repo, &["add", "-A"]);
-    run_git(repo, &["commit", "-q", "-m", "workload"]);
+    raw_git(repo, &["add", "-A"]);
+    raw_git(repo, &["commit", "-q", "-m", "workload"]);
     tmp
 }
 
@@ -298,36 +282,36 @@ fn benchmark_commit_post_command_hunk_density_hotspot() {
     // Setup and stage contiguous case (without committing workload yet)
     let contiguous_repo = TempDir::new().expect("failed to create tempdir");
     let contiguous_path = contiguous_repo.path();
-    run_git(contiguous_path, &["init", "-q"]);
-    run_git(contiguous_path, &["config", "user.name", "Perf User"]);
-    run_git(
+    raw_git(contiguous_path, &["init", "-q"]);
+    raw_git(contiguous_path, &["config", "user.name", "Perf User"]);
+    raw_git(
         contiguous_path,
         &["config", "user.email", "perf@example.com"],
     );
     for i in 1..=80 {
         write_lines(&contiguous_path.join(format!("f{}.txt", i)), 200);
     }
-    run_git(contiguous_path, &["add", "-A"]);
-    run_git(contiguous_path, &["commit", "-q", "-m", "initial"]);
+    raw_git(contiguous_path, &["add", "-A"]);
+    raw_git(contiguous_path, &["commit", "-q", "-m", "initial"]);
     for i in 1..=80 {
         append_block(&contiguous_path.join(format!("f{}.txt", i)), 20);
     }
-    run_git(contiguous_path, &["add", "-A"]);
+    raw_git(contiguous_path, &["add", "-A"]);
 
     // Setup and stage scattered case
     let scattered_repo = TempDir::new().expect("failed to create tempdir");
     let scattered_path = scattered_repo.path();
-    run_git(scattered_path, &["init", "-q"]);
-    run_git(scattered_path, &["config", "user.name", "Perf User"]);
-    run_git(
+    raw_git(scattered_path, &["init", "-q"]);
+    raw_git(scattered_path, &["config", "user.name", "Perf User"]);
+    raw_git(
         scattered_path,
         &["config", "user.email", "perf@example.com"],
     );
     for i in 1..=60 {
         write_lines(&scattered_path.join(format!("m{}.txt", i)), 240);
     }
-    run_git(scattered_path, &["add", "-A"]);
-    run_git(scattered_path, &["commit", "-q", "-m", "initial"]);
+    raw_git(scattered_path, &["add", "-A"]);
+    raw_git(scattered_path, &["commit", "-q", "-m", "initial"]);
     for i in 1..=60 {
         mutate_file_with_scattered_replacements(
             &scattered_path.join(format!("m{}.txt", i)),
@@ -335,7 +319,7 @@ fn benchmark_commit_post_command_hunk_density_hotspot() {
             4,
         );
     }
-    run_git(scattered_path, &["add", "-A"]);
+    raw_git(scattered_path, &["add", "-A"]);
 
     let contiguous_perf = benchmark_commit_with_git_ai(contiguous_path, "contiguous");
     let scattered_perf = benchmark_commit_with_git_ai(scattered_path, "scattered");
@@ -439,9 +423,9 @@ fn setup_repo_with_mass_deletion(file_count: usize, lines_per_file: usize) -> Te
     let tmp = TempDir::new().expect("failed to create tempdir");
     let repo = tmp.path();
 
-    run_git(repo, &["init", "-q"]);
-    run_git(repo, &["config", "user.name", "Perf User"]);
-    run_git(repo, &["config", "user.email", "perf@example.com"]);
+    raw_git(repo, &["init", "-q"]);
+    raw_git(repo, &["config", "user.name", "Perf User"]);
+    raw_git(repo, &["config", "user.email", "perf@example.com"]);
 
     // Create many files with many lines each
     for i in 1..=file_count {
@@ -450,15 +434,15 @@ fn setup_repo_with_mass_deletion(file_count: usize, lines_per_file: usize) -> Te
             .collect::<String>();
         fs::write(repo.join(format!("f{:03}.txt", i)), content).expect("failed to write file");
     }
-    run_git(repo, &["add", "-A"]);
-    run_git(repo, &["commit", "-q", "-m", "initial"]);
+    raw_git(repo, &["add", "-A"]);
+    raw_git(repo, &["commit", "-q", "-m", "initial"]);
 
     // Delete all files — this is the commit that triggers the hang
     for i in 1..=file_count {
         fs::remove_file(repo.join(format!("f{:03}.txt", i))).expect("failed to delete file");
     }
-    run_git(repo, &["add", "-A"]);
-    run_git(repo, &["commit", "-q", "-m", "mass-deletion"]);
+    raw_git(repo, &["add", "-A"]);
+    raw_git(repo, &["commit", "-q", "-m", "mass-deletion"]);
 
     tmp
 }

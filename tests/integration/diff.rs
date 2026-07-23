@@ -1,3 +1,6 @@
+use crate::repos::diff_hostility::{
+    configure_hostile_diff_settings, configure_repo_external_diff_helper,
+};
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{NewCommit, TestRepo};
 use git_ai::model::transcript::{AiTranscript, Message};
@@ -482,51 +485,6 @@ fn assert_stats_exact(
             "tool_model_breakdown mismatch for {}",
             key
         );
-    }
-}
-
-fn configure_repo_external_diff_helper(repo: &TestRepo) -> String {
-    let marker = "EXTERNAL_DIFF_MARKER";
-    let helper_path = repo.path().join("ext-diff-helper.sh");
-    let helper_path_posix = helper_path
-        .to_str()
-        .expect("helper path must be valid UTF-8")
-        .replace('\\', "/");
-
-    fs::write(&helper_path, format!("#!/bin/sh\necho {marker}\nexit 0\n"))
-        .expect("should write external diff helper");
-    #[cfg(unix)]
-    {
-        let mut perms = fs::metadata(&helper_path)
-            .expect("helper metadata should exist")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&helper_path, perms).expect("helper should be executable");
-    }
-
-    repo.git_og(&["config", "diff.external", &helper_path_posix])
-        .expect("configuring diff.external should succeed");
-
-    marker.to_string()
-}
-
-fn configure_hostile_diff_settings(repo: &TestRepo) {
-    let settings = [
-        ("diff.noprefix", "true"),
-        ("diff.mnemonicprefix", "true"),
-        ("diff.srcPrefix", "SRC/"),
-        ("diff.dstPrefix", "DST/"),
-        ("diff.renames", "copies"),
-        ("diff.relative", "true"),
-        ("diff.algorithm", "histogram"),
-        ("diff.indentHeuristic", "false"),
-        ("diff.interHunkContext", "8"),
-        ("color.diff", "always"),
-        ("color.ui", "always"),
-    ];
-    for (key, value) in settings {
-        repo.git_og(&["config", key, value])
-            .unwrap_or_else(|err| panic!("setting {key}={value} should succeed: {err}"));
     }
 }
 
@@ -1927,7 +1885,8 @@ fn test_diff_ignores_repo_external_diff_helper_but_proxy_uses_it() {
     file.set_contents(crate::lines!["line one".human(), "line two".ai()]);
     repo.stage_all_and_commit("second").unwrap();
 
-    let marker = configure_repo_external_diff_helper(&repo);
+    let marker =
+        configure_repo_external_diff_helper(&repo, "EXTERNAL_DIFF_MARKER", "ext-diff-helper.sh");
 
     let proxied_diff = repo
         .git(&["diff", "HEAD^", "HEAD"])
@@ -1996,7 +1955,8 @@ fn test_checkpoint_and_commit_ignore_repo_external_diff_helper() {
     repo.stage_all_and_commit("initial").unwrap();
 
     file.set_contents(crate::lines!["base".human(), "added by ai".ai()]);
-    let marker = configure_repo_external_diff_helper(&repo);
+    let marker =
+        configure_repo_external_diff_helper(&repo, "EXTERNAL_DIFF_MARKER", "ext-diff-helper.sh");
     let proxied_diff = repo
         .git(&["diff", "HEAD"])
         .expect("proxied git diff should succeed");

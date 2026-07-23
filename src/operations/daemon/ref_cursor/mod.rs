@@ -39,6 +39,8 @@ use types::*;
 #[cfg(test)]
 mod tests_commit;
 #[cfg(test)]
+mod tests_fixtures;
+#[cfg(test)]
 mod tests_pull_stash;
 #[cfg(test)]
 mod tests_rebase_cherry_pick;

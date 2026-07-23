@@ -30,24 +30,6 @@ use git_ai::operations::git::repository as GitAiRepository;
 // Shared helpers — ALL note/blame reads go through TestRepo helpers
 // ============================================================================
 
-/// Write `content` to `filename`, add, and commit via git_og (bypassing
-/// git-ai hooks).  Adds a trailing newline so 3-way merges work when a
-/// feature branch later appends via set_contents (which omits newlines).
-fn write_raw_commit(repo: &TestRepo, filename: &str, content: &str, message: &str) {
-    let path = repo.path().join(filename);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("create parent dirs");
-    }
-    let with_nl = if content.ends_with('\n') {
-        content.to_string()
-    } else {
-        format!("{}\n", content)
-    };
-    fs::write(&path, with_nl.as_bytes()).expect("write file");
-    repo.git_og(&["add", filename]).expect("git add");
-    repo.git_og(&["commit", "-m", message]).expect("git commit");
-}
-
 /// Parse the authorship note for `sha`.  Panics if the note is absent.
 /// Uses repo.read_authorship_note() for daemon-safe access.
 fn parse_note(repo: &TestRepo, sha: &str) -> AuthorshipLog {
@@ -162,7 +144,7 @@ fn assert_note_no_forbidden_files(repo: &TestRepo, sha: &str, ctx: &str, forbidd
 }
 
 /// Like `assert_note_no_forbidden_files` but silently passes when the commit has no note.
-/// Use for human commits (created via `write_raw_commit`) that correctly produce no note
+/// Use for human commits (created via `commit_untracked_file`) that correctly produce no note
 /// after rebase — if a note does exist (e.g. implementation creates empty propagation
 /// notes), the forbidden-file check is still enforced.
 fn assert_note_no_forbidden_files_if_present(
@@ -499,32 +481,26 @@ fn test_fast_path_python_microservice_5_endpoints() {
 
     // === MAIN BRANCH: 5 human commits on DIFFERENT files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/test_base.py",
         "import unittest\nclass BaseTest(unittest.TestCase): pass\n",
         "test: add base test class",
     );
-    write_raw_commit(
-        &repo,
-        ".github/ci.yml",
+    repo.commit_untracked_file(".github/ci.yml",
         "name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v3\n      - run: python -m pytest\n",
         "ci: add github actions workflow",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "conftest.py",
         "import pytest\n\n@pytest.fixture\ndef db():\n    return MockDatabase()\n",
         "test: add pytest conftest",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Makefile",
         "test:\n\tpython -m pytest tests/\nlint:\n\tflake8 .\n.PHONY: test lint\n",
         "build: add Makefile",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "setup.cfg",
         "[metadata]\nname = microservice\nversion = 0.1.0\n[options]\npython_requires = >=3.9\n",
         "build: add setup.cfg",
@@ -900,33 +876,25 @@ fn test_fast_path_typescript_frontend_5_components() {
 
     // === MAIN BRANCH: 5 human commits on config files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "vite.config.ts",
         "import { defineConfig } from 'vite';\nexport default defineConfig({ plugins: [] });\n",
         "build: add vite config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".eslintrc.json",
         "{\"extends\": [\"eslint:recommended\", \"plugin:@typescript-eslint/recommended\"]}\n",
         "lint: add eslint config",
     );
-    write_raw_commit(
-        &repo,
-        "tsconfig.json",
+    repo.commit_untracked_file("tsconfig.json",
         "{\"compilerOptions\": {\"target\": \"ES2020\", \"module\": \"ESNext\", \"jsx\": \"react-jsx\", \"strict\": true}}\n",
         "build: add tsconfig",
     );
-    write_raw_commit(
-        &repo,
-        "package.json",
+    repo.commit_untracked_file("package.json",
         "{\"name\": \"frontend\", \"version\": \"1.0.0\", \"scripts\": {\"dev\": \"vite\", \"build\": \"vite build\"}}\n",
         "build: add package.json",
     );
-    write_raw_commit(
-        &repo,
-        "tailwind.config.js",
+    repo.commit_untracked_file("tailwind.config.js",
         "module.exports = { content: ['./src/**/*.{ts,tsx}'], theme: { extend: {} }, plugins: [] };\n",
         "style: add tailwind config",
     );
@@ -1244,32 +1212,26 @@ fn test_fast_path_rust_library_5_modules() {
 
     // === MAIN BRANCH: 5 human commits on different files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "build: add Cargo.toml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "build.rs",
         "fn main() { println!(\"cargo:rerun-if-changed=build.rs\"); }\n",
         "build: add build script",
     );
-    write_raw_commit(
-        &repo,
-        "benches/bench.rs",
+    repo.commit_untracked_file("benches/bench.rs",
         "use criterion::{criterion_group, criterion_main, Criterion};\nfn bench(_c: &mut Criterion) {}\ncriterion_group!(benches, bench);\ncriterion_main!(benches);\n",
         "bench: add criterion benchmark stub",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "examples/demo.rs",
         "fn main() { println!(\"demo\"); }\n",
         "examples: add demo",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/integration.rs",
         "#[test]\nfn integration_placeholder() { assert!(true); }\n",
         "test: add integration test placeholder",
@@ -1614,32 +1576,26 @@ fn test_fast_path_go_service_5_handlers() {
 
     // === MAIN BRANCH: 5 human commits on different files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "go.mod",
         "module example.com/service\n\ngo 1.21\n",
         "build: add go.mod",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "cmd/main.go",
         "package main\n\nfunc main() {}\n",
         "build: add cmd/main.go",
     );
-    write_raw_commit(
-        &repo,
-        "Dockerfile",
+    repo.commit_untracked_file("Dockerfile",
         "FROM golang:1.21\nWORKDIR /app\nCOPY . .\nRUN go build -o server cmd/main.go\nCMD [\"./server\"]\n",
         "build: add Dockerfile",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "docker-compose.yml",
         "version: '3.8'\nservices:\n  app:\n    build: .\n    ports:\n      - '8080:8080'\n",
         "build: add docker-compose.yml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Makefile",
         "build:\n\tgo build ./...\ntest:\n\tgo test ./...\n.PHONY: build test\n",
         "build: add Makefile",
@@ -1858,8 +1814,7 @@ fn test_fast_path_mixed_ai_and_human_feature_commits() {
     repo.git(&["checkout", "-b", "feature"]).unwrap();
 
     // C1: human-only commit — config.py (plain string, no .ai())
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "DATABASE_URL = 'sqlite:///app.db'\nDEBUG = False\nSECRET_KEY = 'changeme'\n",
         "config: add app config",
@@ -1903,8 +1858,7 @@ fn test_fast_path_mixed_ai_and_human_feature_commits() {
         .unwrap();
 
     // C4: human-only commit — requirements.txt
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "requirements.txt",
         "flask==3.0.0\nsqlalchemy==2.0.23\nclick==8.1.7\n",
         "deps: add requirements.txt",
@@ -1929,32 +1883,26 @@ fn test_fast_path_mixed_ai_and_human_feature_commits() {
 
     // === MAIN BRANCH: 5 human commits on different files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/test_smoke.py",
         "def test_smoke(): assert True\n",
         "test: add smoke test",
     );
-    write_raw_commit(
-        &repo,
-        ".github/workflows/test.yml",
+    repo.commit_untracked_file(".github/workflows/test.yml",
         "name: Test\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: [{uses: actions/checkout@v3}, {run: pytest}]\n",
         "ci: add test workflow",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "pyproject.toml",
         "[build-system]\nrequires = ['setuptools']\nbuild-backend = 'setuptools.build_meta'\n",
         "build: add pyproject.toml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".gitignore",
         "__pycache__/\n*.pyc\n.env\nvenv/\n",
         "git: add .gitignore",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "README.rst",
         "Python App\n==========\n\nInstall and run the app.\n",
         "docs: add README",
@@ -1967,7 +1915,7 @@ fn test_fast_path_mixed_ai_and_human_feature_commits() {
     // === VERIFY AT EVERY COMMIT ===
     let chain = get_commit_chain(&repo, 5);
 
-    // sha0 = C1': human commit (write_raw_commit — no AI tracking, no note after rebase).
+    // sha0 = C1': human commit (commit_untracked_file — no AI tracking, no note after rebase).
     // Verify no AI files leak in if a note somehow exists.
     assert_note_no_forbidden_files_if_present(
         &repo,
@@ -2019,7 +1967,7 @@ fn test_fast_path_mixed_ai_and_human_feature_commits() {
         &[("class AuthService:", true), ("def hash_password", true)],
     );
 
-    // sha3 = C4': human commit (write_raw_commit — no note expected).
+    // sha3 = C4': human commit (commit_untracked_file — no note expected).
     // Just verify no future AI file leaked into a note if one exists.
     assert_note_no_forbidden_files_if_present(&repo, &chain[3], "sha3_no_future", &["router.py"]);
 
@@ -2237,32 +2185,25 @@ fn test_fast_path_10_commits_javascript_utilities() {
 
     // === MAIN BRANCH: 5 human commits on different files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "package.json",
         "{\"name\":\"utils\",\"version\":\"1.0.0\",\"type\":\"module\"}\n",
         "build: add package.json",
     );
-    write_raw_commit(
-        &repo,
-        ".eslintrc.cjs",
+    repo.commit_untracked_file(".eslintrc.cjs",
         "module.exports={env:{browser:true,es2021:true},extends:['eslint:recommended'],parserOptions:{ecmaVersion:'latest',sourceType:'module'}};\n",
         "lint: add eslint config",
     );
-    write_raw_commit(
-        &repo,
-        "vitest.config.js",
+    repo.commit_untracked_file("vitest.config.js",
         "import { defineConfig } from 'vitest/config';\nexport default defineConfig({test:{environment:'jsdom'}});\n",
         "test: add vitest config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".prettierrc",
         "{\"singleQuote\":true,\"semi\":false,\"trailingComma\":\"es5\"}\n",
         "style: add prettier config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "README.md",
         "# JS Utilities\n\nA collection of JavaScript utility functions.\n",
         "docs: add README",
@@ -2918,32 +2859,26 @@ fn test_fast_path_nested_directory_structure() {
 
     // === MAIN BRANCH: 5 human commits in tests/, docs/, .github/, scripts/, . ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/conftest.py",
         "import pytest\n\n@pytest.fixture\ndef client(app):\n    return app.test_client()\n",
         "test: add pytest conftest",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "docs/architecture.md",
         "# Architecture\n\nThis is a Flask-based API.\n",
         "docs: add architecture overview",
     );
-    write_raw_commit(
-        &repo,
-        ".github/workflows/lint.yml",
+    repo.commit_untracked_file(".github/workflows/lint.yml",
         "name: Lint\non: [push]\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps: [{uses: actions/checkout@v3}, {run: flake8 src/}]\n",
         "ci: add lint workflow",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "scripts/seed_db.py",
         "#!/usr/bin/env python3\nprint('Seeding database...')\n",
         "scripts: add db seed script",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "alembic.ini",
         "[alembic]\nscript_location = migrations\nsqlalchemy.url = sqlite:///app.db\n",
         "db: add alembic config",
@@ -3320,32 +3255,26 @@ fn test_fast_path_single_file_grows_across_commits() {
 
     // === MAIN BRANCH: 5 human commits on different files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/test_service.py",
         "def test_placeholder(): pass\n",
         "test: add service test placeholder",
     );
-    write_raw_commit(
-        &repo,
-        "docker/Dockerfile.dev",
+    repo.commit_untracked_file("docker/Dockerfile.dev",
         "FROM python:3.11-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install -r requirements.txt\n",
         "build: add dev Dockerfile",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".env.example",
         "DATABASE_URL=redis://localhost:6379/0\nCACHE_URL=memcached://localhost:11211\n",
         "config: add .env.example",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "CHANGELOG.md",
         "# Changelog\n\n## [Unreleased]\n\n### Added\n- DataService class\n",
         "docs: add CHANGELOG",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "setup.py",
         "from setuptools import setup\nsetup(name='dataservice', version='0.1.0')\n",
         "build: add setup.py",
@@ -3579,32 +3508,27 @@ fn test_fast_path_feature_deletes_file_then_recreates() {
 
     // === MAIN BRANCH: 5 human commits on different files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/test_utils.py",
         "def test_placeholder(): pass\n",
         "test: add utils test placeholder",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "pyproject.toml",
         "[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n",
         "build: add pyproject.toml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".flake8",
         "[flake8]\nmax-line-length=120\nexclude=.git,__pycache__\n",
         "lint: add flake8 config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "MANIFEST.in",
         "include *.py\ninclude *.md\n",
         "build: add MANIFEST.in",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tox.ini",
         "[tox]\nenvlist = py311\n[testenv]\ncommands = pytest\n",
         "test: add tox config",
@@ -3981,32 +3905,25 @@ fn test_fast_path_multi_file_commits_2_files_each() {
 
     // === MAIN BRANCH: 5 human commits on different files ===
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "settings.py",
         "DEBUG = True\nINSTALLED_APPS = ['django.contrib.admin']\n",
         "config: add Django settings",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "requirements.txt",
         "django==4.2\ndjangorestframework==3.14\ncelery==5.3\npydantic==2.0\n",
         "deps: add requirements.txt",
     );
-    write_raw_commit(
-        &repo,
-        "Dockerfile",
+    repo.commit_untracked_file("Dockerfile",
         "FROM python:3.11\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install -r requirements.txt\n",
         "build: add Dockerfile",
     );
-    write_raw_commit(
-        &repo,
-        "docker-compose.yml",
+    repo.commit_untracked_file("docker-compose.yml",
         "version: '3.9'\nservices:\n  web:\n    build: .\n    ports: ['8000:8000']\n  worker:\n    build: .\n    command: celery -A app worker\n",
         "build: add docker-compose.yml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".env.example",
         "SECRET_KEY=change-me\nDEBUG=1\nDATABASE_URL=postgresql://localhost/app\n",
         "config: add .env.example",
@@ -4387,42 +4304,32 @@ fn test_slow_path_python_utils_main_prepends_feature_appends() {
     let repo = TestRepo::new();
 
     // Initial: utils.py with trailing newline so 3-way merge works cleanly.
-    write_raw_commit(
-        &repo,
-        "utils.py",
-        "def base_util(): pass\n",
-        "Initial commit",
-    );
+    repo.commit_untracked_file("utils.py", "def base_util(): pass\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: prepend module header (changes blob → forces slow path on feature commits)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "utils.py",
         "# utils module\nimport logging\n\ndef base_util(): pass\n",
         "main: prepend module header to utils.py",
     );
     // 4 more human commits on different files
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "constants.py",
         "MAX_RETRIES = 3\nTIMEOUT = 30\n",
         "main: add constants",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "exceptions.py",
         "class AppError(Exception): pass\nclass ValidationError(AppError): pass\n",
         "main: add exceptions",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "import os\nDATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///app.db')\n",
         "main: add config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "setup.cfg",
         "[metadata]\nname = myapp\nversion = 0.1\n",
         "main: add setup.cfg",
@@ -4683,36 +4590,31 @@ fn test_slow_path_rust_lib_rs_main_prepends_feature_adds_impls() {
     let repo = TestRepo::new();
 
     // Initial: src/lib.rs with trailing newline
-    write_raw_commit(&repo, "src/lib.rs", "pub mod types;\n", "Initial commit");
+    repo.commit_untracked_file("src/lib.rs", "pub mod types;\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: prepend crate-level docs + deny(warnings)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/lib.rs",
         "//! Library crate\n#![deny(warnings)]\n\npub mod types;\n",
         "main: prepend crate docs and deny(warnings)",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/error.rs",
         "pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;\n",
         "main: add error types",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "build.rs",
         "fn main() { println!(\"cargo:rerun-if-changed=build.rs\"); }\n",
         "main: add build script",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "main: add Cargo.toml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "README.md",
         "# mylib\n\nA Rust library.\n",
         "main: add README",
@@ -5163,8 +5065,7 @@ fn test_slow_path_typescript_routes_main_prepends_feature_adds_handlers() {
     let repo = TestRepo::new();
 
     // Initial: src/routes.ts with trailing newline
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/routes.ts",
         "import express from 'express';\n",
         "Initial commit",
@@ -5172,33 +5073,24 @@ fn test_slow_path_typescript_routes_main_prepends_feature_adds_handlers() {
     let main_branch = repo.current_branch();
 
     // Main: prepend auto-generated comment (forces slow path)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/routes.ts",
         "// Auto-generated routes\nimport express from 'express';\n",
         "main: prepend auto-generated comment",
     );
-    write_raw_commit(
-        &repo,
-        "src/middleware.ts",
+    repo.commit_untracked_file("src/middleware.ts",
         "export const logger = (req: any, res: any, next: any) => { console.log(req.method, req.path); next(); };\n",
         "main: add logger middleware",
     );
-    write_raw_commit(
-        &repo,
-        "src/types.ts",
+    repo.commit_untracked_file("src/types.ts",
         "export interface User { id: number; email: string; name: string; }\nexport interface ApiResponse<T> { data: T; status: number; }\n",
         "main: add shared types",
     );
-    write_raw_commit(
-        &repo,
-        "tsconfig.json",
+    repo.commit_untracked_file("tsconfig.json",
         "{\"compilerOptions\":{\"target\":\"ES2020\",\"module\":\"commonjs\",\"strict\":true,\"outDir\":\"dist\"},\"include\":[\"src\"]}\n",
         "main: add tsconfig",
     );
-    write_raw_commit(
-        &repo,
-        "package.json",
+    repo.commit_untracked_file("package.json",
         "{\"name\":\"api\",\"version\":\"1.0.0\",\"scripts\":{\"build\":\"tsc\",\"start\":\"node dist/index.js\"}}\n",
         "main: add package.json",
     );
@@ -5417,8 +5309,7 @@ fn test_slow_path_config_file_both_add_different_sections() {
     let repo = TestRepo::new();
 
     // Initial: config.toml with trailing newline
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.toml",
         "[server]\nhost = \"localhost\"\nport = 8080\n",
         "Initial commit",
@@ -5426,32 +5317,27 @@ fn test_slow_path_config_file_both_add_different_sections() {
     let main_branch = repo.current_branch();
 
     // Main: prepend production comment (forces slow path on feature commits)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.toml",
         "# Production config\n\n[server]\nhost = \"localhost\"\nport = 8080\n",
         "main: prepend production config header",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".env.production",
         "APP_ENV=production\nLOG_LEVEL=warn\n",
         "main: add production env",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "docker-compose.prod.yml",
         "version: '3.9'\nservices:\n  app:\n    image: myapp:latest\n    ports: ['80:8080']\n",
         "main: add prod docker-compose",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "nginx.conf",
         "server { listen 80; location / { proxy_pass http://app:8080; } }\n",
         "main: add nginx config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Makefile",
         "deploy:\n\tdocker-compose -f docker-compose.prod.yml up -d\n",
         "main: add Makefile",
@@ -5682,36 +5568,29 @@ fn test_slow_path_growing_shared_file_10_commits() {
     let repo = TestRepo::new();
 
     // Initial: src/engine.rs with trailing newline
-    write_raw_commit(&repo, "src/engine.rs", "// Engine core\n", "Initial commit");
+    repo.commit_untracked_file("src/engine.rs", "// Engine core\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: prepend 3-line license header (forces slow path)
-    write_raw_commit(
-        &repo,
-        "src/engine.rs",
+    repo.commit_untracked_file("src/engine.rs",
         "// Copyright 2024 MyOrg\n// Licensed under MIT License\n// See LICENSE file for details\n\n// Engine core\n",
         "main: prepend license header to engine.rs",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/error.rs",
         "#[derive(Debug)]\npub enum EngineError { NotFound, InvalidInput, Timeout }\n",
         "main: add engine errors",
     );
-    write_raw_commit(
-        &repo,
-        "src/config.rs",
+    repo.commit_untracked_file("src/config.rs",
         "pub struct EngineConfig { pub workers: usize, pub stack_size: usize }\nimpl Default for EngineConfig { fn default() -> Self { Self { workers: 4, stack_size: 2 * 1024 * 1024 } } }\n",
         "main: add engine config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "benches/engine_bench.rs",
         "fn main() { /* bench placeholder */ }\n",
         "main: add bench placeholder",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/engine_test.rs",
         "#[test]\nfn smoke_test() { assert!(true); }\n",
         "main: add smoke test",
@@ -6083,14 +5962,12 @@ fn test_slow_path_multiple_shared_files_both_modified() {
     let repo = TestRepo::new();
 
     // Initial: both shared files with trailing newline
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "models.py",
         "class BaseModel: pass\n",
         "Initial commit: models.py",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "services.py",
         "class BaseService: pass\n",
         "Initial commit: services.py",
@@ -6098,32 +5975,26 @@ fn test_slow_path_multiple_shared_files_both_modified() {
     let main_branch = repo.current_branch();
 
     // Main: prepend headers to BOTH files (two separate commits, then 3 more human commits)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "models.py",
         "# Domain models\nfrom dataclasses import dataclass\n\nclass BaseModel: pass\n",
         "main: prepend header to models.py",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "services.py",
         "# Business services\nfrom typing import Any\n\nclass BaseService: pass\n",
         "main: prepend header to services.py",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "exceptions.py",
         "class NotFound(Exception): pass\nclass Conflict(Exception): pass\n",
         "main: add exceptions",
     );
-    write_raw_commit(
-        &repo,
-        "validators.py",
+    repo.commit_untracked_file("validators.py",
         "def validate_not_empty(val, name):\n    if not val: raise ValueError(f'{name} must not be empty')\n",
         "main: add validators",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "constants.py",
         "DEFAULT_PAGE_SIZE = 20\nMAX_PAGE_SIZE = 100\n",
         "main: add constants",
@@ -6433,8 +6304,7 @@ fn test_slow_path_mixed_unique_and_shared_files() {
     let repo = TestRepo::new();
 
     // Initial: core.rs with trailing newline
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "core.rs",
         "// Core module\npub fn init() {}\n",
         "Initial commit",
@@ -6442,27 +6312,18 @@ fn test_slow_path_mixed_unique_and_shared_files() {
     let main_branch = repo.current_branch();
 
     // Main: prepend module-level docs to core.rs (forces slow path)
-    write_raw_commit(
-        &repo,
-        "core.rs",
+    repo.commit_untracked_file("core.rs",
         "//! Core module\n//! Provides fundamental functionality.\n\n// Core module\npub fn init() {}\n",
         "main: prepend module docs to core.rs",
     );
-    write_raw_commit(&repo, "lib.rs", "pub mod core;\n", "main: add lib.rs");
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file("lib.rs", "pub mod core;\n", "main: add lib.rs");
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"myapp\"\nversion = \"0.1.0\"\n",
         "main: add Cargo.toml",
     );
-    write_raw_commit(
-        &repo,
-        "benches/bench.rs",
-        "fn main() {}\n",
-        "main: add bench stub",
-    );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file("benches/bench.rs", "fn main() {}\n", "main: add bench stub");
+    repo.commit_untracked_file(
         "examples/usage.rs",
         "fn main() { println!(\"example\"); }\n",
         "main: add usage example",
@@ -6723,36 +6584,31 @@ fn test_slow_path_feature_has_human_commits_intermixed() {
     let repo = TestRepo::new();
 
     // Initial: api.py with trailing newline
-    write_raw_commit(&repo, "api.py", "# API module\n", "Initial commit");
+    repo.commit_untracked_file("api.py", "# API module\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: prepend import block to api.py (forces slow path)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "api.py",
         "from flask import Flask, request, jsonify\nfrom functools import wraps\n\n# API module\n",
         "main: prepend imports to api.py",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "wsgi.py",
         "from api import app\nif __name__ == '__main__': app.run()\n",
         "main: add wsgi.py",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "gunicorn.conf.py",
         "bind = '0.0.0.0:8000'\nworkers = 4\ntimeout = 30\n",
         "main: add gunicorn config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".flake8",
         "[flake8]\nmax-line-length = 120\n",
         "main: add flake8 config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "pytest.ini",
         "[pytest]\ntestpaths = tests\naddopts = -v\n",
         "main: add pytest config",
@@ -6767,9 +6623,7 @@ fn test_slow_path_feature_has_human_commits_intermixed() {
     repo.git(&["checkout", "-b", "feature", &base_sha]).unwrap();
 
     // C1: HUMAN only — adds config.py (plain write, no AI)
-    write_raw_commit(
-        &repo,
-        "config.py",
+    repo.commit_untracked_file("config.py",
         "import os\nDATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///app.db')\nSECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret')\nDEBUG = os.getenv('DEBUG', '0') == '1'\nALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost').split(',')\n",
         "config: add application config",
     );
@@ -6828,8 +6682,7 @@ fn test_slow_path_feature_has_human_commits_intermixed() {
         .unwrap();
 
     // C4: HUMAN only — adds requirements.txt (no AI)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "requirements.txt",
         "flask==3.0.0\ngunicorn==21.2.0\nrequests==2.31.0\npytest==7.4.0\ncoverage==7.3.0\n",
         "deps: add requirements.txt",
@@ -6880,7 +6733,7 @@ fn test_slow_path_feature_has_human_commits_intermixed() {
     let chain = get_commit_chain(&repo, 5);
     // chain[0]=C1'(human), chain[1]=C2'(AI), chain[2]=C3'(AI), chain[3]=C4'(human), chain[4]=C5'(AI)
 
-    // sha0 = C1' (human-only commit: config.py via write_raw_commit, no note expected).
+    // sha0 = C1' (human-only commit: config.py via commit_untracked_file, no note expected).
     assert_note_no_forbidden_files_if_present(&repo, &chain[0], "sha0_no_api", &["api.py"]);
 
     // sha1 = C2' (first AI commit): api.py
@@ -6911,7 +6764,7 @@ fn test_slow_path_feature_has_human_commits_intermixed() {
         &[("def list_users", true), ("def create_user", true)],
     );
 
-    // sha3 = C4' (human-only commit: requirements.txt via write_raw_commit, no note expected).
+    // sha3 = C4' (human-only commit: requirements.txt via commit_untracked_file, no note expected).
     assert_note_no_forbidden_files_if_present(
         &repo,
         &chain[3],
@@ -6947,8 +6800,7 @@ fn test_slow_path_large_function_blocks_line_offset() {
     let repo = TestRepo::new();
 
     // Initial: processor.rs with two human lines + trailing newline
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "processor.rs",
         "// Processor module\nuse std::io;\n",
         "Initial commit",
@@ -6956,8 +6808,7 @@ fn test_slow_path_large_function_blocks_line_offset() {
     let main_branch = repo.current_branch();
 
     // Main: prepend a 20-line license header (forces slow path, creates big line offset)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "processor.rs",
         concat!(
             "// Copyright 2024 MyOrg. All rights reserved.\n",
@@ -6985,26 +6836,21 @@ fn test_slow_path_large_function_blocks_line_offset() {
         ),
         "main: prepend 20-line license header to processor.rs",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "error.rs",
         "#[derive(Debug)] pub enum ProcessError { Io(std::io::Error), Invalid(String) }\n",
         "main: add error types",
     );
-    write_raw_commit(
-        &repo,
-        "types.rs",
+    repo.commit_untracked_file("types.rs",
         "pub type Bytes = Vec<u8>;\npub type Result<T> = std::result::Result<T, crate::error::ProcessError>;\n",
         "main: add common types",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tests/smoke.rs",
         "#[test] fn smoke() { assert!(true); }\n",
         "main: add smoke test",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"processor\"\nversion = \"0.1.0\"\n",
         "main: add Cargo.toml",
@@ -7275,8 +7121,7 @@ fn test_slow_path_file_grows_then_unique_files_each_commit() {
     let repo = TestRepo::new();
 
     // Initial: shared_util.js with trailing newline
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared_util.js",
         "export const VERSION = '1.0';\n",
         "Initial commit",
@@ -7284,32 +7129,27 @@ fn test_slow_path_file_grows_then_unique_files_each_commit() {
     let main_branch = repo.current_branch();
 
     // Main: prepend 'use strict' directive (forces slow path)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared_util.js",
         "'use strict';\n\nexport const VERSION = '1.0';\n",
         "main: prepend use strict to shared_util.js",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "package.json",
         "{\"name\":\"helpers\",\"version\":\"1.0.0\",\"type\":\"module\"}\n",
         "main: add package.json",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".eslintrc.json",
         "{\"env\":{\"es2022\":true},\"extends\":[\"eslint:recommended\"]}\n",
         "main: add eslint config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "vitest.config.js",
         "export default {test:{environment:'node'}};\n",
         "main: add vitest config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "README.md",
         "# Helpers\n\nA collection of JavaScript helper modules.\n",
         "main: add README",
@@ -7772,36 +7612,31 @@ fn test_human_conflict_python_auth_c1_conflicts_rest_accumulate() {
     let repo = TestRepo::new();
 
     // Initial: auth.py with a single line
-    write_raw_commit(&repo, "auth.py", "# auth module\n", "Initial commit");
+    repo.commit_untracked_file("auth.py", "# auth module\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: edit auth.py header → will conflict with feature's C1
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "auth.py",
         "# authentication module — production\n",
         "main: update auth.py header",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "middleware.py",
         "class AuthMiddleware: pass\n",
         "main: add middleware",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "permissions.py",
         "class IsAuthenticated: pass\n",
         "main: add permissions",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tokens.py",
         "import secrets\ndef generate_token(): return secrets.token_hex(32)\n",
         "main: add tokens",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "urls.py",
         "from django.urls import path\nurlpatterns = []\n",
         "main: add urls",
@@ -7943,32 +7778,27 @@ fn test_human_conflict_python_auth_c1_conflicts_rest_accumulate() {
 fn test_human_conflict_rust_lib_c2_conflicts_surroundings_ok() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "src/lib.rs", "pub mod parser;\n", "Initial commit");
+    repo.commit_untracked_file("src/lib.rs", "pub mod parser;\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: changes the mod declaration → conflicts with feature C2's edit
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/lib.rs",
         "pub mod parser;\npub mod types;\n",
         "main: add types mod",
     );
-    write_raw_commit(&repo, "src/main.rs", "fn main() {}\n", "main: add main.rs");
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file("src/main.rs", "fn main() {}\n", "main: add main.rs");
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "main: add Cargo.toml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "README.md",
         "# mylib\nA Rust library.\n",
         "main: add README",
     );
-    write_raw_commit(
-        &repo,
-        ".github/workflows/ci.yml",
+    repo.commit_untracked_file(".github/workflows/ci.yml",
         "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: [{uses: actions/checkout@v3}]\n",
         "main: add CI workflow",
     );
@@ -8089,8 +7919,7 @@ fn test_human_conflict_rust_lib_c2_conflicts_surroundings_ok() {
 fn test_human_conflict_typescript_api_c3_conflicts_accumulation_intact() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/api.ts",
         "// api module\nexport {};\n",
         "Initial commit",
@@ -8098,32 +7927,27 @@ fn test_human_conflict_typescript_api_c3_conflicts_accumulation_intact() {
     let main_branch = repo.current_branch();
 
     // Main: replaces the export line in api.ts — conflicts with feature's C3 which also replaces it
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/api.ts",
         "// api module\nexport { version };\n",
         "main: export version",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/server.ts",
         "import express from 'express';\nconst app = express();\napp.listen(3000);\n",
         "main: add server",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/config.ts",
         "export const PORT = parseInt(process.env.PORT ?? '3000', 10);\n",
         "main: add config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/logger.ts",
         "export const log = (msg: string) => console.log(`[LOG] ${msg}`);\n",
         "main: add logger",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "tsconfig.json",
         "{\"compilerOptions\":{\"target\":\"ES2020\",\"module\":\"commonjs\",\"strict\":true}}\n",
         "main: add tsconfig",
@@ -8243,40 +8067,27 @@ fn test_human_conflict_typescript_api_c3_conflicts_accumulation_intact() {
 fn test_human_conflict_python_models_c5_last_commit_conflicts() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
-        "models.py",
-        "class User:\n    pass\n",
-        "Initial commit",
-    );
+    repo.commit_untracked_file("models.py", "class User:\n    pass\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: adds a class attribute to models.py — conflicts with C5's edit
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "models.py",
         "class User:\n    table_name = 'users'\n    pass\n",
         "main: add table_name attribute",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "db.py",
         "import sqlite3\nconn = sqlite3.connect(':memory:')\n",
         "main: add db",
     );
-    write_raw_commit(
-        &repo,
-        "migrations/__init__.py",
-        "",
-        "main: add migrations package",
-    );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file("migrations/__init__.py", "", "main: add migrations package");
+    repo.commit_untracked_file(
         "schema.sql",
         "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);\n",
         "main: add schema",
     );
-    write_raw_commit(&repo, "seeds.py", "def seed(): pass\n", "main: add seeds");
+    repo.commit_untracked_file("seeds.py", "def seed(): pass\n", "main: add seeds");
 
     let base_sha = repo
         .git(&["rev-parse", "HEAD~5"])
@@ -8392,8 +8203,7 @@ fn test_human_conflict_python_models_c5_last_commit_conflicts() {
 fn test_human_conflict_rust_config_c2_loses_attribution_rest_accumulate() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/config.rs",
         "pub const MAX_CONN: u32 = 10;\n",
         "Initial commit",
@@ -8401,32 +8211,26 @@ fn test_human_conflict_rust_config_c2_loses_attribution_rest_accumulate() {
     let main_branch = repo.current_branch();
 
     // Main: adds another constant → conflicts with feature's C2 edit
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/config.rs",
         "pub const MAX_CONN: u32 = 10;\npub const TIMEOUT_MS: u64 = 5000;\n",
         "main: add TIMEOUT_MS constant",
     );
-    write_raw_commit(
-        &repo,
-        "src/pool.rs",
+    repo.commit_untracked_file("src/pool.rs",
         "pub struct Pool { size: u32 }\nimpl Pool { pub fn new(size: u32) -> Self { Pool { size } } }\n",
         "main: add connection pool",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/metrics.rs",
         "pub fn record_latency(ms: u64) { eprintln!(\"latency: {}ms\", ms); }\n",
         "main: add metrics",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/health.rs",
         "pub fn is_healthy() -> bool { true }\n",
         "main: add health check",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/shutdown.rs",
         "pub fn graceful_shutdown() { eprintln!(\"shutting down\"); }\n",
         "main: add shutdown handler",
@@ -8546,8 +8350,7 @@ fn test_human_conflict_rust_config_c2_loses_attribution_rest_accumulate() {
 fn test_human_conflict_typescript_store_ai_created_file_conflict() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/store.ts",
         "export const store = {};\n",
         "Initial commit",
@@ -8555,32 +8358,27 @@ fn test_human_conflict_typescript_store_ai_created_file_conflict() {
     let main_branch = repo.current_branch();
 
     // Main: modifies store.ts initial export → conflict with feature C1
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/store.ts",
         "import { createStore } from 'redux';\nexport const store = createStore(() => ({}));\n",
         "main: convert store to redux",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/index.ts",
         "export { store } from './store';\n",
         "main: re-export store",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/types.ts",
         "export type RootState = ReturnType<typeof import('./store').store.getState>;\n",
         "main: add RootState type",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/constants.ts",
         "export const ACTIONS = { INCREMENT: 'INCREMENT', DECREMENT: 'DECREMENT' } as const;\n",
         "main: add action constants",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "package.json",
         "{\"name\":\"app\",\"version\":\"1.0.0\",\"dependencies\":{\"redux\":\"^4.0.0\"}}\n",
         "main: add package.json",
@@ -8697,41 +8495,31 @@ fn test_human_conflict_typescript_store_ai_created_file_conflict() {
 fn test_human_conflict_rust_server_c4_human_resolved_c5_accumulates() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
-        "src/server.rs",
-        "pub fn start() {}\n",
-        "Initial commit",
-    );
+    repo.commit_untracked_file("src/server.rs", "pub fn start() {}\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: adds a use statement that conflicts with feature C4's edit
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/server.rs",
         "use std::net::TcpListener;\npub fn start() {}\n",
         "main: add TcpListener import",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/router.rs",
         "pub struct Router;\nimpl Router { pub fn new() -> Self { Router } }\n",
         "main: add router",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/response.rs",
         "pub struct Response { pub status: u16, pub body: String }\n",
         "main: add Response type",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/request.rs",
         "pub struct Request { pub path: String, pub method: String }\n",
         "main: add Request type",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/middleware.rs",
         "pub trait Middleware { fn handle(&self, req: &str) -> String; }\n",
         "main: add Middleware trait",
@@ -8863,42 +8651,30 @@ fn test_human_conflict_rust_server_c4_human_resolved_c5_accumulates() {
 fn test_human_conflict_python_pipeline_mixed_baseline_c3_conflict() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
-        "pipeline.py",
+    repo.commit_untracked_file("pipeline.py",
         "class Pipeline:\n    def __init__(self): self.stages = []\n    def run(self, data): return data\n",
         "Initial commit",
     );
     let main_branch = repo.current_branch();
 
     // Main: adds a validate method to Pipeline — will conflict with feature C3 adding filter
-    write_raw_commit(
-        &repo,
-        "pipeline.py",
+    repo.commit_untracked_file("pipeline.py",
         "class Pipeline:\n    def __init__(self): self.stages = []\n    def run(self, data): return data\n    def validate(self, data): return bool(data)\n",
         "main: add Pipeline.validate",
     );
-    write_raw_commit(
-        &repo,
-        "source.py",
+    repo.commit_untracked_file("source.py",
         "class FileSource:\n    def __init__(self, path): self.path = path\n    def read(self): return open(self.path).read()\n",
         "main: add FileSource",
     );
-    write_raw_commit(
-        &repo,
-        "registry.py",
+    repo.commit_untracked_file("registry.py",
         "_registry = {}\ndef register(name, cls): _registry[name] = cls\ndef get(name): return _registry.get(name)\n",
         "main: add component registry",
     );
-    write_raw_commit(
-        &repo,
-        "executor.py",
+    repo.commit_untracked_file("executor.py",
         "from concurrent.futures import ThreadPoolExecutor\nexec_pool = ThreadPoolExecutor(max_workers=4)\n",
         "main: add thread pool executor",
     );
-    write_raw_commit(
-        &repo,
-        "scheduler.py",
+    repo.commit_untracked_file("scheduler.py",
         "import sched, time\ns = sched.scheduler(time.time, time.sleep)\ndef schedule(delay, fn): s.enter(delay, 1, fn)\n",
         "main: add scheduler",
     );
@@ -9025,8 +8801,7 @@ fn test_human_conflict_python_pipeline_mixed_baseline_c3_conflict() {
 fn test_human_conflict_typescript_component_ai_created_c2_conflict() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/Component.tsx",
         "export const Component = () => null;\n",
         "Initial commit",
@@ -9034,32 +8809,26 @@ fn test_human_conflict_typescript_component_ai_created_c2_conflict() {
     let main_branch = repo.current_branch();
 
     // Main: adds a CSS import to Component.tsx → conflict with feature C2's rewrite
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/Component.tsx",
         "import './Component.css';\nexport const Component = () => null;\n",
         "main: add CSS import to Component",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/Component.css",
         ".component { display: flex; }\n",
         "main: add component styles",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/App.tsx",
         "import { Component } from './Component';\nexport const App = () => <Component />;\n",
         "main: add App",
     );
-    write_raw_commit(
-        &repo,
-        "src/index.tsx",
+    repo.commit_untracked_file("src/index.tsx",
         "import React from 'react';\nimport ReactDOM from 'react-dom';\nimport { App } from './App';\nReactDOM.render(<App />, document.getElementById('root'));\n",
         "main: add entry point",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/theme.ts",
         "export const theme = { primary: '#007bff', secondary: '#6c757d' };\n",
         "main: add theme",
@@ -9178,8 +8947,7 @@ fn test_human_conflict_typescript_component_ai_created_c2_conflict() {
 fn test_human_conflict_rust_7_commit_chain_c4_conflict_surroundings_intact() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/shared.rs",
         "pub fn identity<T>(x: T) -> T { x }\n",
         "Initial commit",
@@ -9187,33 +8955,25 @@ fn test_human_conflict_rust_7_commit_chain_c4_conflict_surroundings_intact() {
     let main_branch = repo.current_branch();
 
     // Main: adds a constant and a function to shared.rs → conflict with feature C4 edit
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/shared.rs",
         "pub const VERSION: &str = \"1.0\";\npub fn identity<T>(x: T) -> T { x }\n",
         "main: add VERSION constant to shared.rs",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/log.rs",
         "pub fn log(msg: &str) { eprintln!(\"{}\", msg); }\n",
         "main: add log",
     );
-    write_raw_commit(
-        &repo,
-        "src/env.rs",
+    repo.commit_untracked_file("src/env.rs",
         "pub fn env_or(key: &str, default: &str) -> String { std::env::var(key).unwrap_or_else(|_| default.to_string()) }\n",
         "main: add env helper",
     );
-    write_raw_commit(
-        &repo,
-        "src/fs_utils.rs",
+    repo.commit_untracked_file("src/fs_utils.rs",
         "pub fn read_to_string(path: &str) -> std::io::Result<String> { std::fs::read_to_string(path) }\n",
         "main: add fs_utils",
     );
-    write_raw_commit(
-        &repo,
-        "src/assert_utils.rs",
+    repo.commit_untracked_file("src/assert_utils.rs",
         "pub fn assert_non_empty(s: &str) { assert!(!s.is_empty(), \"expected non-empty string\"); }\n",
         "main: add assert_utils",
     );
@@ -9373,17 +9133,12 @@ fn test_human_conflict_resolves_all_ai_lines_replaced() {
     let repo = TestRepo::new();
 
     // Base: compute.py with one human line
-    write_raw_commit(&repo, "compute.py", "result = 0\n", "Initial: result=0");
+    repo.commit_untracked_file("compute.py", "result = 0\n", "Initial: result=0");
     let main_branch = repo.current_branch();
 
     // Main: change result to 1 (forces slow path on feature)
-    write_raw_commit(&repo, "compute.py", "result = 1\n", "main: set result=1");
-    write_raw_commit(
-        &repo,
-        "main_extra.py",
-        "# main extra\n",
-        "main: add extra file",
-    );
+    repo.commit_untracked_file("compute.py", "result = 1\n", "main: set result=1");
+    repo.commit_untracked_file("main_extra.py", "# main extra\n", "main: add extra file");
 
     // Feature from base
     let base_sha = repo
@@ -9500,12 +9255,11 @@ fn test_human_conflict_ai_file_is_conflict_file_note_preserved() {
     let repo = TestRepo::new();
 
     // Initial: ai_file.py with one human line
-    write_raw_commit(&repo, "ai_file.py", "original line\n", "Initial commit");
+    repo.commit_untracked_file("ai_file.py", "original line\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: change ai_file.py → will conflict with feature
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "ai_file.py",
         "upstream changed line\n",
         "main: modify ai_file",
@@ -9571,8 +9325,8 @@ fn test_human_conflict_multicommit_chain_middle_conflict_all_notes_preserved() {
     let repo = TestRepo::new();
 
     // Initial: shared.py (will conflict) + base.txt
-    write_raw_commit(&repo, "shared.py", "base content\n", "Initial commit");
-    write_raw_commit(&repo, "base.txt", "base\n", "Add base.txt");
+    repo.commit_untracked_file("shared.py", "base content\n", "Initial commit");
+    repo.commit_untracked_file("base.txt", "base\n", "Add base.txt");
     let main_branch = repo.current_branch();
 
     // Feature branch from initial commits
@@ -9610,8 +9364,7 @@ fn test_human_conflict_multicommit_chain_middle_conflict_all_notes_preserved() {
 
     // Upstream: change shared.py to create conflict
     repo.git(&["checkout", &main_branch]).unwrap();
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared.py",
         "upstream version of shared\n",
         "main: modify shared.py",
@@ -9681,8 +9434,7 @@ fn test_conflict_ai_resolves_timeout_constant() {
     let repo = TestRepo::new();
 
     // Initial: config.py with a class and TIMEOUT constant (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "class Config:\n    TIMEOUT = 30\n    HOST = 'localhost'\n    PORT = 8080\n",
         "Initial commit",
@@ -9690,32 +9442,27 @@ fn test_conflict_ai_resolves_timeout_constant() {
     let main_branch = repo.current_branch();
 
     // Main: changes TIMEOUT to 120 and adds 4 more commits
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "class Config:\n    TIMEOUT = 120\n    HOST = 'localhost'\n    PORT = 8080\n",
         "main: increase TIMEOUT to 120",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "logging_config.py",
         "import logging\nlogging.basicConfig(level=logging.INFO)\n",
         "main: add logging config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "constants.py",
         "MAX_CONNECTIONS = 100\nDEFAULT_PAGE_SIZE = 20\n",
         "main: add constants",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "exceptions.py",
         "class AppError(Exception): pass\nclass ValidationError(AppError): pass\n",
         "main: add exceptions",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "utils.py",
         "def flatten(lst): return [x for sub in lst for x in sub]\n",
         "main: add utils",
@@ -9881,8 +9628,7 @@ fn test_conflict_ai_resolves_with_added_extra_lines() {
     let repo = TestRepo::new();
 
     // Initial: compute.rs with a function stub (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/compute.rs",
         "pub fn compute(data: &[f64]) -> f64 { 0.0 }\n",
         "Initial commit",
@@ -9890,32 +9636,26 @@ fn test_conflict_ai_resolves_with_added_extra_lines() {
     let main_branch = repo.current_branch();
 
     // Main: implements the function differently (human) → will conflict
-    write_raw_commit(
-        &repo,
-        "src/compute.rs",
+    repo.commit_untracked_file("src/compute.rs",
         "pub fn compute(data: &[f64]) -> f64 {\n    data.iter().sum::<f64>() / data.len() as f64\n}\n",
         "main: implement compute as mean",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/main.rs",
         "fn main() { println!(\"hello\"); }\n",
         "main: add main",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"compute\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "main: add Cargo.toml",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/tests.rs",
         "#[cfg(test)]\nmod tests { #[test] fn it_works() {} }\n",
         "main: add tests",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "README.md",
         "# compute\nA compute library.\n",
         "main: add README",
@@ -10100,41 +9840,32 @@ fn test_conflict_ai_resolves_preserving_human_context_lines() {
     let repo = TestRepo::new();
 
     // Initial: processor.py with a class (6 human lines)
-    write_raw_commit(
-        &repo,
-        "processor.py",
+    repo.commit_untracked_file("processor.py",
         "class Processor:\n    def method1(self): return 'method1'\n    def method2(self): pass\n    def method3(self): return 'method3'\n",
         "Initial commit",
     );
     let main_branch = repo.current_branch();
 
     // Main: human changes method2 differently → conflict
-    write_raw_commit(
-        &repo,
-        "processor.py",
+    repo.commit_untracked_file("processor.py",
         "class Processor:\n    def method1(self): return 'method1'\n    def method2(self): return 'human-method2'\n    def method3(self): return 'method3'\n",
         "main: implement method2",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "runner.py",
         "from processor import Processor\np = Processor()\np.method1()\n",
         "main: add runner",
     );
-    write_raw_commit(
-        &repo,
-        "tests/test_processor.py",
+    repo.commit_untracked_file("tests/test_processor.py",
         "from processor import Processor\ndef test_method1(): assert Processor().method1() == 'method1'\n",
         "main: add tests",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "setup.py",
         "from setuptools import setup\nsetup(name='processor', version='0.1.0')\n",
         "main: add setup.py",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "pyproject.toml",
         "[build-system]\nrequires = ['setuptools']\n",
         "main: add pyproject.toml",
@@ -10328,8 +10059,7 @@ fn test_conflict_ai_resolves_on_first_commit() {
     let repo = TestRepo::new();
 
     // Initial: version.py with VERSION = "1.0"
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "version.py",
         "VERSION = \"1.0\"\nCODENAME = \"alpha\"\n",
         "Initial commit",
@@ -10337,32 +10067,27 @@ fn test_conflict_ai_resolves_on_first_commit() {
     let main_branch = repo.current_branch();
 
     // Main: changes VERSION to "1.5" — will conflict with feature's C1
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "version.py",
         "VERSION = \"1.5\"\nCODENAME = \"beta\"\n",
         "main: bump version to 1.5",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "CHANGELOG.md",
         "## 1.5\n- Performance improvements\n",
         "main: add changelog",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "CONTRIBUTORS.md",
         "# Contributors\n- Alice\n- Bob\n",
         "main: add contributors",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "LICENSE",
         "MIT License\nCopyright 2024\n",
         "main: add license",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "docs/index.md",
         "# Docs\nWelcome to the docs.\n",
         "main: add docs",
@@ -10516,8 +10241,7 @@ fn test_conflict_ai_resolves_on_last_commit() {
     let repo = TestRepo::new();
 
     // Initial: schema.rs with a constant (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/schema.rs",
         "pub const MAX_CONNECTIONS: u32 = 10;\npub const SCHEMA_VERSION: u32 = 1;\n",
         "Initial commit",
@@ -10525,32 +10249,27 @@ fn test_conflict_ai_resolves_on_last_commit() {
     let main_branch = repo.current_branch();
 
     // Main: changes max_connections → will conflict with feature's C5
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/schema.rs",
         "pub const MAX_CONNECTIONS: u32 = 50;\npub const SCHEMA_VERSION: u32 = 1;\n",
         "main: increase max_connections to 50",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/migration.rs",
         "pub fn run_migrations() {}\n",
         "main: add migration runner",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/connection.rs",
         "pub struct Connection { id: u32 }\n",
         "main: add Connection type",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/pool.rs",
         "pub struct Pool { size: u32 }\n",
         "main: add Pool struct",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"schema\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "main: add Cargo.toml",
@@ -10727,14 +10446,12 @@ fn test_conflict_ai_resolves_multiple_files_in_same_commit() {
     let repo = TestRepo::new();
 
     // Initial: BOTH files exist at the shared base so C3's edits will conflict with main
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "DEBUG = False\nSECRET_KEY = 'changeme'\n",
         "Initial: config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "settings.py",
         "DATABASE_URL = 'sqlite:///dev.db'\nCACHE_BACKEND = 'locmem'\n",
         "Initial: settings",
@@ -10742,32 +10459,27 @@ fn test_conflict_ai_resolves_multiple_files_in_same_commit() {
     let main_branch = repo.current_branch();
 
     // Main: changes the same lines in both files → will conflict with feature's C3
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "DEBUG = True\nSECRET_KEY = 'changeme'\n",
         "main: enable DEBUG",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "settings.py",
         "DATABASE_URL = 'postgres://localhost/main_db'\nCACHE_BACKEND = 'redis'\n",
         "main: update settings",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "wsgi.py",
         "from app import create_app\napplication = create_app()\n",
         "main: add wsgi",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "asgi.py",
         "from app import create_app\napplication = create_app()\n",
         "main: add asgi",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "manage.py",
         "#!/usr/bin/env python\nimport sys\nif __name__ == '__main__': pass\n",
         "main: add manage.py",
@@ -10943,8 +10655,7 @@ fn test_conflict_ai_resolves_then_more_ai_builds_on_result() {
     let repo = TestRepo::new();
 
     // Initial: dispatcher.py stub (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "dispatcher.py",
         "class Dispatcher:\n    pass\n",
         "Initial commit",
@@ -10952,32 +10663,27 @@ fn test_conflict_ai_resolves_then_more_ai_builds_on_result() {
     let main_branch = repo.current_branch();
 
     // Main: human implements process() differently → will conflict with feature's C2
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "dispatcher.py",
         "class Dispatcher:\n    def process(self, msg): return msg.strip()\n",
         "main: implement process() simply",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "WORKERS = 4\nQUEUE_SIZE = 100\n",
         "main: add config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "queue.py",
         "import queue\nQ = queue.Queue()\n",
         "main: add queue",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "worker.py",
         "class Worker:\n    def __init__(self, q): self.q = q\n",
         "main: add worker",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "monitor.py",
         "class Monitor:\n    def check(self): return 'ok'\n",
         "main: add monitor",
@@ -11134,8 +10840,7 @@ fn test_conflict_ai_resolves_rust_struct_fields() {
     let repo = TestRepo::new();
 
     // Initial: models.rs with a struct (2 original fields, human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/models.rs",
         "pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n",
         "Initial commit",
@@ -11143,32 +10848,26 @@ fn test_conflict_ai_resolves_rust_struct_fields() {
     let main_branch = repo.current_branch();
 
     // Main: adds email and created_at fields → will conflict
-    write_raw_commit(
-        &repo,
-        "src/models.rs",
+    repo.commit_untracked_file("src/models.rs",
         "pub struct User {\n    pub id: u64,\n    pub name: String,\n    pub email: String,\n    pub created_at: u64,\n}\n",
         "main: add email and created_at to User",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/db.rs",
         "pub struct Db { url: String }\n",
         "main: add Db",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/repo.rs",
         "use crate::models::User;\npub struct UserRepo;\n",
         "main: add UserRepo",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/service.rs",
         "pub struct UserService;\n",
         "main: add UserService",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"models\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "main: add Cargo.toml",
@@ -11363,8 +11062,7 @@ fn test_conflict_ai_resolves_complex_function_with_error_handling() {
     let repo = TestRepo::new();
 
     // Initial: service.py with a function stub (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "service.py",
         "def process_payment(amount, card):\n    pass\n",
         "Initial commit",
@@ -11372,32 +11070,25 @@ fn test_conflict_ai_resolves_complex_function_with_error_handling() {
     let main_branch = repo.current_branch();
 
     // Main: human implements process_payment differently → will conflict
-    write_raw_commit(
-        &repo,
-        "service.py",
+    repo.commit_untracked_file("service.py",
         "def process_payment(amount, card):\n    if amount <= 0:\n        raise ValueError('amount must be positive')\n    return {'status': 'ok', 'amount': amount}\n",
         "main: implement process_payment",
     );
-    write_raw_commit(
-        &repo,
-        "tests/test_service.py",
+    repo.commit_untracked_file("tests/test_service.py",
         "from service import process_payment\ndef test_basic(): assert process_payment(10, '4111')['status'] == 'ok'\n",
         "main: add service tests",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "requirements.txt",
         "stripe==5.0.0\nrequests==2.31.0\n",
         "main: add requirements",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".env.example",
         "STRIPE_KEY=sk_test_xxx\nDATABASE_URL=sqlite:///dev.db\n",
         "main: add .env.example",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Makefile",
         "test:\n\tpython -m pytest\nlint:\n\tflake8 .\n.PHONY: test lint\n",
         "main: add Makefile",
@@ -11618,9 +11309,8 @@ fn test_conflict_mixed_ai_and_human_resolve_different_commits() {
     // Initial: config files with numeric values (0/10) so both sides can make
     // clearly conflicting changes. Using numbers avoids trailing-newline ambiguity
     // in git's merge and ensures non-empty rebased commits after resolution.
-    write_raw_commit(&repo, "config_a.py", "FLAG_A = 0\n", "Initial commit");
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file("config_a.py", "FLAG_A = 0\n", "Initial commit");
+    repo.commit_untracked_file(
         "config_b.py",
         "FLAG_B = 0\nBATCH = 10\n",
         "Initial config_b",
@@ -11628,36 +11318,23 @@ fn test_conflict_mixed_ai_and_human_resolve_different_commits() {
     let main_branch = repo.current_branch();
 
     // Main commits (human): set FLAG_A=1, FLAG_B=1/BATCH=50, then 3 more files
-    write_raw_commit(
-        &repo,
-        "config_a.py",
-        "FLAG_A = 1\n",
-        "main: set flag_a to 1",
-    );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file("config_a.py", "FLAG_A = 1\n", "main: set flag_a to 1");
+    repo.commit_untracked_file(
         "config_b.py",
         "FLAG_B = 1\nBATCH = 50\n",
         "main: set flag_b and batch 50",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "app.py",
         "print('app started')\n",
         "main: add app entry point",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "db.py",
         "class Database: pass\n",
         "main: add database class",
     );
-    write_raw_commit(
-        &repo,
-        "cache.py",
-        "class Cache: pass\n",
-        "main: add cache class",
-    );
+    repo.commit_untracked_file("cache.py", "class Cache: pass\n", "main: add cache class");
 
     // Feature branch from base (5 commits before main HEAD = the "Initial config_b" commit)
     let base_sha = repo
@@ -11827,29 +11504,21 @@ fn test_conflict_mixed_ai_and_human_resolve_different_commits() {
 fn test_conflict_working_log_is_sole_attribution_source() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
-        "config.py",
-        "TIMEOUT = 10\nRETRIES = 3\n",
-        "Initial commit",
-    );
+    repo.commit_untracked_file("config.py", "TIMEOUT = 10\nRETRIES = 3\n", "Initial commit");
     let main_branch = repo.current_branch();
 
     // Main: changes TIMEOUT → will conflict
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "TIMEOUT = 60\nRETRIES = 3\n",
         "main: increase timeout to 60",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "logging.py",
         "import logging\nlogging.basicConfig(level=logging.INFO)\n",
         "main: add logging config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "metrics.py",
         "class Metrics:\n    pass\n",
         "main: add metrics stub",
@@ -11939,8 +11608,7 @@ fn test_conflict_working_log_is_sole_attribution_source() {
 fn test_conflict_content_diff_wins_over_working_log() {
     let repo = TestRepo::new();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "settings.py",
         "MAX_RETRIES = 3\nTIMEOUT = 10\n",
         "Initial commit",
@@ -11948,24 +11616,17 @@ fn test_conflict_content_diff_wins_over_working_log() {
     let main_branch = repo.current_branch();
 
     // Main: changes MAX_RETRIES → will conflict
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "settings.py",
         "MAX_RETRIES = 10\nTIMEOUT = 10\n",
         "main: bump max retries",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "app.py",
         "from settings import MAX_RETRIES\n",
         "main: import settings",
     );
-    write_raw_commit(
-        &repo,
-        "server.py",
-        "import http.server\n",
-        "main: add server stub",
-    );
+    repo.commit_untracked_file("server.py", "import http.server\n", "main: add server stub");
 
     let base_sha = repo
         .git(&["rev-parse", "HEAD~3"])
@@ -12057,8 +11718,7 @@ fn test_conflict_ai_resolves_timeout_constant_standard_human() {
     let repo = TestRepo::new();
 
     // Initial: config.py with a class and TIMEOUT constant (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "class Config:\n    TIMEOUT = 30\n    HOST = 'localhost'\n    PORT = 8080\n",
         "Initial commit",
@@ -12066,32 +11726,27 @@ fn test_conflict_ai_resolves_timeout_constant_standard_human() {
     let main_branch = repo.current_branch();
 
     // Main: changes TIMEOUT to 120 and adds 4 more commits
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "class Config:\n    TIMEOUT = 120\n    HOST = 'localhost'\n    PORT = 8080\n",
         "main: increase TIMEOUT to 120",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "logging_config.py",
         "import logging\nlogging.basicConfig(level=logging.INFO)\n",
         "main: add logging config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "constants.py",
         "MAX_CONNECTIONS = 100\nDEFAULT_PAGE_SIZE = 20\n",
         "main: add constants",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "exceptions.py",
         "class AppError(Exception): pass\nclass ValidationError(AppError): pass\n",
         "main: add exceptions",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "utils.py",
         "def flatten(lst): return [x for sub in lst for x in sub]\n",
         "main: add utils",
@@ -12249,41 +11904,32 @@ fn test_conflict_ai_resolves_preserving_human_context_lines_standard_human() {
     let repo = TestRepo::new();
 
     // Initial: processor.py with a class (6 human lines)
-    write_raw_commit(
-        &repo,
-        "processor.py",
+    repo.commit_untracked_file("processor.py",
         "class Processor:\n    def method1(self): return 'method1'\n    def method2(self): pass\n    def method3(self): return 'method3'\n",
         "Initial commit",
     );
     let main_branch = repo.current_branch();
 
     // Main: human changes method2 differently → conflict
-    write_raw_commit(
-        &repo,
-        "processor.py",
+    repo.commit_untracked_file("processor.py",
         "class Processor:\n    def method1(self): return 'method1'\n    def method2(self): return 'human-method2'\n    def method3(self): return 'method3'\n",
         "main: implement method2",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "runner.py",
         "from processor import Processor\np = Processor()\np.method1()\n",
         "main: add runner",
     );
-    write_raw_commit(
-        &repo,
-        "tests/test_processor.py",
+    repo.commit_untracked_file("tests/test_processor.py",
         "from processor import Processor\ndef test_method1(): assert Processor().method1() == 'method1'\n",
         "main: add tests",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "setup.py",
         "from setuptools import setup\nsetup(name='processor', version='0.1.0')\n",
         "main: add setup.py",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "pyproject.toml",
         "[build-system]\nrequires = ['setuptools']\n",
         "main: add pyproject.toml",
@@ -12463,8 +12109,7 @@ fn test_conflict_ai_resolves_on_first_commit_standard_human() {
     let repo = TestRepo::new();
 
     // Initial: version.py with VERSION = "1.0"
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "version.py",
         "VERSION = \"1.0\"\nCODENAME = \"alpha\"\n",
         "Initial commit",
@@ -12472,32 +12117,27 @@ fn test_conflict_ai_resolves_on_first_commit_standard_human() {
     let main_branch = repo.current_branch();
 
     // Main: changes VERSION to "1.5" — will conflict with feature's C1
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "version.py",
         "VERSION = \"1.5\"\nCODENAME = \"beta\"\n",
         "main: bump version to 1.5",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "CHANGELOG.md",
         "## 1.5\n- Performance improvements\n",
         "main: add changelog",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "CONTRIBUTORS.md",
         "# Contributors\n- Alice\n- Bob\n",
         "main: add contributors",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "LICENSE",
         "MIT License\nCopyright 2024\n",
         "main: add license",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "docs/index.md",
         "# Docs\nWelcome to the docs.\n",
         "main: add docs",
@@ -12637,8 +12277,7 @@ fn test_conflict_ai_resolves_on_last_commit_standard_human() {
     let repo = TestRepo::new();
 
     // Initial: schema.rs with a constant (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/schema.rs",
         "pub const MAX_CONNECTIONS: u32 = 10;\npub const SCHEMA_VERSION: u32 = 1;\n",
         "Initial commit",
@@ -12646,32 +12285,27 @@ fn test_conflict_ai_resolves_on_last_commit_standard_human() {
     let main_branch = repo.current_branch();
 
     // Main: changes max_connections → will conflict with feature's C5
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/schema.rs",
         "pub const MAX_CONNECTIONS: u32 = 50;\npub const SCHEMA_VERSION: u32 = 1;\n",
         "main: increase max_connections to 50",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/migration.rs",
         "pub fn run_migrations() {}\n",
         "main: add migration runner",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/connection.rs",
         "pub struct Connection { id: u32 }\n",
         "main: add Connection type",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/pool.rs",
         "pub struct Pool { size: u32 }\n",
         "main: add Pool struct",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"schema\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "main: add Cargo.toml",
@@ -12834,14 +12468,12 @@ fn test_conflict_ai_resolves_multiple_files_in_same_commit_standard_human() {
     let repo = TestRepo::new();
 
     // Initial: BOTH files exist at the shared base so C3's edits will conflict with main
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "DEBUG = False\nSECRET_KEY = 'changeme'\n",
         "Initial: config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "settings.py",
         "DATABASE_URL = 'sqlite:///dev.db'\nCACHE_BACKEND = 'locmem'\n",
         "Initial: settings",
@@ -12849,32 +12481,27 @@ fn test_conflict_ai_resolves_multiple_files_in_same_commit_standard_human() {
     let main_branch = repo.current_branch();
 
     // Main: changes the same lines in both files → will conflict with feature's C3
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "DEBUG = True\nSECRET_KEY = 'changeme'\n",
         "main: enable DEBUG",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "settings.py",
         "DATABASE_URL = 'postgres://localhost/main_db'\nCACHE_BACKEND = 'redis'\n",
         "main: update settings",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "wsgi.py",
         "from app import create_app\napplication = create_app()\n",
         "main: add wsgi",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "asgi.py",
         "from app import create_app\napplication = create_app()\n",
         "main: add asgi",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "manage.py",
         "#!/usr/bin/env python\nimport sys\nif __name__ == '__main__': pass\n",
         "main: add manage.py",
@@ -13036,8 +12663,7 @@ fn test_conflict_ai_resolves_then_more_ai_builds_on_result_standard_human() {
     let repo = TestRepo::new();
 
     // Initial: dispatcher.py stub (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "dispatcher.py",
         "class Dispatcher:\n    pass\n",
         "Initial commit",
@@ -13045,32 +12671,27 @@ fn test_conflict_ai_resolves_then_more_ai_builds_on_result_standard_human() {
     let main_branch = repo.current_branch();
 
     // Main: human implements process() differently → will conflict with feature's C2
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "dispatcher.py",
         "class Dispatcher:\n    def process(self, msg): return msg.strip()\n",
         "main: implement process() simply",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "config.py",
         "WORKERS = 4\nQUEUE_SIZE = 100\n",
         "main: add config",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "queue.py",
         "import queue\nQ = queue.Queue()\n",
         "main: add queue",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "worker.py",
         "class Worker:\n    def __init__(self, q): self.q = q\n",
         "main: add worker",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "monitor.py",
         "class Monitor:\n    def check(self): return 'ok'\n",
         "main: add monitor",
@@ -13213,8 +12834,7 @@ fn test_conflict_ai_resolves_rust_struct_fields_standard_human() {
     let repo = TestRepo::new();
 
     // Initial: models.rs with a struct (2 original fields, human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/models.rs",
         "pub struct User {\n    pub id: u64,\n    pub name: String,\n}\n",
         "Initial commit",
@@ -13222,32 +12842,26 @@ fn test_conflict_ai_resolves_rust_struct_fields_standard_human() {
     let main_branch = repo.current_branch();
 
     // Main: adds email and created_at fields → will conflict
-    write_raw_commit(
-        &repo,
-        "src/models.rs",
+    repo.commit_untracked_file("src/models.rs",
         "pub struct User {\n    pub id: u64,\n    pub name: String,\n    pub email: String,\n    pub created_at: u64,\n}\n",
         "main: add email and created_at to User",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/db.rs",
         "pub struct Db { url: String }\n",
         "main: add Db",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/repo.rs",
         "use crate::models::User;\npub struct UserRepo;\n",
         "main: add UserRepo",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "src/service.rs",
         "pub struct UserService;\n",
         "main: add UserService",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Cargo.toml",
         "[package]\nname = \"models\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         "main: add Cargo.toml",
@@ -13428,8 +13042,7 @@ fn test_conflict_ai_resolves_complex_function_with_error_handling_standard_human
     let repo = TestRepo::new();
 
     // Initial: service.py with a function stub (human)
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "service.py",
         "def process_payment(amount, card):\n    pass\n",
         "Initial commit",
@@ -13437,32 +13050,25 @@ fn test_conflict_ai_resolves_complex_function_with_error_handling_standard_human
     let main_branch = repo.current_branch();
 
     // Main: human implements process_payment differently → will conflict
-    write_raw_commit(
-        &repo,
-        "service.py",
+    repo.commit_untracked_file("service.py",
         "def process_payment(amount, card):\n    if amount <= 0:\n        raise ValueError('amount must be positive')\n    return {'status': 'ok', 'amount': amount}\n",
         "main: implement process_payment",
     );
-    write_raw_commit(
-        &repo,
-        "tests/test_service.py",
+    repo.commit_untracked_file("tests/test_service.py",
         "from service import process_payment\ndef test_basic(): assert process_payment(10, '4111')['status'] == 'ok'\n",
         "main: add service tests",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "requirements.txt",
         "stripe==5.0.0\nrequests==2.31.0\n",
         "main: add requirements",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         ".env.example",
         "STRIPE_KEY=sk_test_xxx\nDATABASE_URL=sqlite:///dev.db\n",
         "main: add .env.example",
     );
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "Makefile",
         "test:\n\tpython -m pytest\nlint:\n\tflake8 .\n.PHONY: test lint\n",
         "main: add Makefile",

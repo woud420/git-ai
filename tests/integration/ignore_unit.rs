@@ -1,28 +1,11 @@
 use crate::repos::test_repo::TestRepo;
+use crate::test_utils::raw_git;
 use git_ai::operations::authorship::ignore::{
     effective_ignore_patterns, load_git_ai_ignore_patterns,
     load_linguist_generated_patterns_from_root_gitattributes,
 };
 use git_ai::operations::git::repository::from_bare_repository;
 use std::fs;
-use std::path::Path;
-use std::process::Command;
-
-// Helper for bare repo tests
-fn run_git(cwd: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("git command should run");
-    assert!(
-        output.status.success(),
-        "git {:?} failed:\nstdout: {}\nstderr: {}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
 
 fn make_bare_repo(
     root_gitattributes: Option<&str>,
@@ -36,18 +19,18 @@ fn make_bare_repo(
     let bare = temp.path().join("bare.git");
     fs::create_dir_all(&source).expect("create source");
 
-    run_git(&source, &["init"]);
-    run_git(&source, &["config", "user.name", "Test User"]);
-    run_git(&source, &["config", "user.email", "test@example.com"]);
+    raw_git(&source, &["init"]);
+    raw_git(&source, &["config", "user.name", "Test User"]);
+    raw_git(&source, &["config", "user.email", "test@example.com"]);
 
     fs::write(source.join("README.md"), "# repo\n").expect("write readme");
     if let Some(attrs) = root_gitattributes {
         fs::write(source.join(".gitattributes"), attrs).expect("write attrs");
     }
 
-    run_git(&source, &["add", "."]);
-    run_git(&source, &["commit", "-m", "initial"]);
-    run_git(
+    raw_git(&source, &["add", "."]);
+    raw_git(&source, &["commit", "-m", "initial"]);
+    raw_git(
         temp.path(),
         &[
             "clone",
@@ -79,9 +62,9 @@ fn make_bare_repo_with_ignore(
     let bare = temp.path().join("bare.git");
     fs::create_dir_all(&source).expect("create source");
 
-    run_git(&source, &["init"]);
-    run_git(&source, &["config", "user.name", "Test User"]);
-    run_git(&source, &["config", "user.email", "test@example.com"]);
+    raw_git(&source, &["init"]);
+    raw_git(&source, &["config", "user.name", "Test User"]);
+    raw_git(&source, &["config", "user.email", "test@example.com"]);
 
     fs::write(source.join("README.md"), "# repo\n").expect("write readme");
     if let Some(attrs) = root_gitattributes {
@@ -91,9 +74,9 @@ fn make_bare_repo_with_ignore(
         fs::write(source.join(".git-ai-ignore"), ignore).expect("write .git-ai-ignore");
     }
 
-    run_git(&source, &["add", "."]);
-    run_git(&source, &["commit", "-m", "initial"]);
-    run_git(
+    raw_git(&source, &["add", "."]);
+    raw_git(&source, &["commit", "-m", "initial"]);
+    raw_git(
         temp.path(),
         &[
             "clone",

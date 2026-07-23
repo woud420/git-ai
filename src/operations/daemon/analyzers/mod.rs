@@ -109,3 +109,38 @@ pub(crate) fn normalized_args(argv: &[String]) -> Vec<String> {
         argv.to_vec()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::domain::{CommandScope, Confidence};
+
+    /// Shared fixture builder for analyzer unit tests: a global-scope command
+    /// with no ref changes. `workspace.rs` and `transport.rs` import
+    /// this. `history.rs` keeps its own local variant (its default seeds a
+    /// HEAD ref change several tests rely on) and `generic.rs` keeps its
+    /// 1-arg variant (no argv needed there) — neither is a byte-identical
+    /// duplicate of this.
+    pub(super) fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
+        NormalizedCommand {
+            scope: CommandScope::Global,
+            family_key: None,
+            worktree: None,
+            root_sid: "r".to_string(),
+            raw_argv: argv.iter().map(|s| s.to_string()).collect(),
+            primary_command: Some(primary.to_string()),
+            invoked_command: Some(primary.to_string()),
+            invoked_args: argv.iter().skip(2).map(|s| s.to_string()).collect(),
+            observed_child_commands: Vec::new(),
+            exit_code: 0,
+            started_at_ns: 1,
+            finished_at_ns: 2,
+            reflog_start_offsets: std::collections::HashMap::new(),
+            stash_target_oid: None,
+            cherry_pick_source_oids: Vec::new(),
+            revert_source_oids: Vec::new(),
+            ref_changes: Vec::new(),
+            confidence: Confidence::Low,
+        }
+    }
+}

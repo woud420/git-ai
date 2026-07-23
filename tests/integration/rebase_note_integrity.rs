@@ -81,24 +81,6 @@ fn files_in_note(note: &str) -> Vec<String> {
         .collect()
 }
 
-/// Write `content` to `filename` in the repo's working directory, add, and
-/// commit via `git_og` (bypassing git-ai hooks). The content is written with
-/// a trailing newline so that 3-way merges work correctly when the feature
-/// branch later appends content via `set_contents` (which omits trailing
-/// newlines).
-fn write_raw_commit(repo: &TestRepo, filename: &str, content: &str, message: &str) {
-    let path = repo.path().join(filename);
-    // Ensure content ends with newline for clean 3-way merge behaviour
-    let content_with_nl = if content.ends_with('\n') {
-        content.to_string()
-    } else {
-        format!("{}\n", content)
-    };
-    std::fs::write(&path, content_with_nl.as_bytes()).expect("write file");
-    repo.git_og(&["add", filename]).expect("git add");
-    repo.git_og(&["commit", "-m", message]).expect("git commit");
-}
-
 // ---------------------------------------------------------------------------
 // Test 1: future-file attribution must not leak into earlier commit notes
 // ---------------------------------------------------------------------------
@@ -117,14 +99,13 @@ fn test_rebase_future_file_does_not_leak_into_earlier_commit_note() {
     // Initial commit: shared.rs with a proper trailing newline (via git_og).
     // Feature branch will APPEND lines; upstream will PREPEND.
     // 3-way merge: prepend (upstream) + append (feature) = non-conflicting.
-    write_raw_commit(&repo, "shared.rs", "fn original() {}", "Initial commit");
+    repo.commit_untracked_file("shared.rs", "fn original() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream PREPENDS a header line to shared.rs.
     // After rebasing, every feature commit that touches shared.rs will have a
     // different blob OID → fast path cannot fire → slow path runs.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared.rs",
         "// upstream header\nfn original() {}",
         "Upstream: prepend header to shared.rs",
@@ -238,12 +219,11 @@ fn test_rebase_future_file_does_not_leak_into_earlier_commit_note() {
 fn test_rebase_intermediate_commit_accepted_lines_not_inflated() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "impl.rs", "fn base() {}", "Initial commit");
+    repo.commit_untracked_file("impl.rs", "fn base() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends to impl.rs (diverges blobs → forces slow path).
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "impl.rs",
         "// upstream header\nfn base() {}",
         "Upstream: prepend to impl.rs",
@@ -355,12 +335,11 @@ fn test_rebase_intermediate_commit_accepted_lines_not_inflated() {
 fn test_rebase_three_commits_no_future_file_leakage() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "core.rs", "fn core_base() {}", "Initial commit");
+    repo.commit_untracked_file("core.rs", "fn core_base() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends to core.rs → forces slow path.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "core.rs",
         "// upstream\nfn core_base() {}",
         "Upstream: prepend to core.rs",
@@ -482,12 +461,11 @@ fn test_rebase_three_commits_no_future_file_leakage() {
 fn test_rebase_deleted_file_does_not_persist_in_later_notes() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "engine.rs", "fn engine_base() {}", "Initial commit");
+    repo.commit_untracked_file("engine.rs", "fn engine_base() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends to engine.rs → forces slow path.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "engine.rs",
         "// upstream\nfn engine_base() {}",
         "Upstream: prepend to engine.rs",
@@ -609,12 +587,11 @@ fn test_rebase_deleted_file_does_not_persist_in_later_notes() {
 fn test_rebase_slow_path_line_attribution_is_correct() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "main.rs", "fn original() {}", "Initial commit");
+    repo.commit_untracked_file("main.rs", "fn original() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends to main.rs → forces slow path.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "main.rs",
         "// upstream\nfn original() {}",
         "Upstream: prepend to main.rs",
@@ -731,12 +708,11 @@ fn test_rebase_slow_path_line_attribution_is_correct() {
 fn test_rebase_hunk_path_does_not_drop_ai_attribution_for_new_lines() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "shared.rs", "fn original() {}", "Initial commit");
+    repo.commit_untracked_file("shared.rs", "fn original() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends — forces slow path for all feature commits.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared.rs",
         "// upstream\nfn original() {}",
         "Upstream: prepend to shared.rs",
@@ -795,12 +771,11 @@ fn test_rebase_hunk_path_does_not_drop_ai_attribution_for_new_lines() {
 fn test_rebase_second_commit_note_attributes_its_own_ai_lines() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "work.rs", "fn base() {}", "Initial commit");
+    repo.commit_untracked_file("work.rs", "fn base() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends → slow path for all commits.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "work.rs",
         "// header\nfn base() {}",
         "Upstream: prepend to work.rs",
@@ -888,11 +863,10 @@ fn test_rebase_second_commit_note_attributes_its_own_ai_lines() {
 fn test_rebase_attribution_loss_compounds_across_three_commits() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "lib.rs", "fn base() {}", "Initial commit");
+    repo.commit_untracked_file("lib.rs", "fn base() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "lib.rs",
         "// upstream\nfn base() {}",
         "Upstream: prepend to lib.rs",
@@ -979,12 +953,11 @@ fn test_rebase_same_line_overwritten_by_consecutive_commits() {
     let repo = TestRepo::new();
 
     // Initial: a file with one human line.
-    write_raw_commit(&repo, "compute.rs", "fn base() {}", "Initial commit");
+    repo.commit_untracked_file("compute.rs", "fn base() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends a module comment → forces slow path for A′.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "compute.rs",
         "// module\nfn base() {}",
         "Upstream: prepend comment",
@@ -1049,12 +1022,11 @@ fn test_rebase_same_line_overwritten_by_consecutive_commits() {
 fn test_rebase_empty_file_does_not_panic_or_pollute_attribution() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "existing.rs", "fn base() {}\n", "Initial commit");
+    repo.commit_untracked_file("existing.rs", "fn base() {}\n", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends to existing.rs → forces slow path for the feature commits.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "existing.rs",
         "// upstream header\nfn base() {}\n",
         "Upstream: prepend header",
@@ -1119,12 +1091,11 @@ fn test_rebase_conflict_on_ai_file_preserves_note() {
     let repo = TestRepo::new();
 
     // shared.rs with trailing newline for clean conflict detection.
-    write_raw_commit(&repo, "shared.rs", "fn original() {}", "Initial commit");
+    repo.commit_untracked_file("shared.rs", "fn original() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream: completely different content for shared.rs → will conflict.
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared.rs",
         "fn upstream_version() {}",
         "Upstream: rewrite shared.rs",
@@ -1190,12 +1161,11 @@ fn test_rebase_metadata_only_notes_survive_slow_path() {
     let repo = TestRepo::new();
 
     // shared.rs with trailing newline via git_og for clean 3-way merge.
-    write_raw_commit(&repo, "shared.rs", "fn original() {}", "Initial commit");
+    repo.commit_untracked_file("shared.rs", "fn original() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
     // Upstream prepends to shared.rs → forces slow path (blob differs after rebase).
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared.rs",
         "// upstream header\nfn original() {}",
         "Upstream: prepend header to shared.rs",
@@ -1262,11 +1232,10 @@ fn test_rebase_metadata_only_notes_survive_slow_path() {
 fn test_rebase_mixed_ai_and_human_commits_all_retain_notes_after_slow_path() {
     let repo = TestRepo::new();
 
-    write_raw_commit(&repo, "shared.rs", "fn original() {}", "Initial commit");
+    repo.commit_untracked_file("shared.rs", "fn original() {}", "Initial commit");
     let default_branch = repo.current_branch();
 
-    write_raw_commit(
-        &repo,
+    repo.commit_untracked_file(
         "shared.rs",
         "// header\nfn original() {}",
         "Upstream: prepend",

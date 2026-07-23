@@ -119,30 +119,7 @@ fn current_branch_ref(_cmd: &NormalizedCommand) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::domain::CommandScope;
-
-    fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
-        NormalizedCommand {
-            scope: CommandScope::Global,
-            family_key: None,
-            worktree: None,
-            root_sid: "r".to_string(),
-            raw_argv: argv.iter().map(|s| s.to_string()).collect(),
-            primary_command: Some(primary.to_string()),
-            invoked_command: Some(primary.to_string()),
-            invoked_args: argv.iter().skip(2).map(|s| s.to_string()).collect(),
-            observed_child_commands: Vec::new(),
-            exit_code: 0,
-            started_at_ns: 1,
-            finished_at_ns: 2,
-            reflog_start_offsets: std::collections::HashMap::new(),
-            stash_target_oid: None,
-            cherry_pick_source_oids: Vec::new(),
-            revert_source_oids: Vec::new(),
-            ref_changes: Vec::new(),
-            confidence: Confidence::Low,
-        }
-    }
+    use crate::operations::daemon::analyzers::tests::command;
 
     #[test]
     fn stash_apply_maps_to_stash_operation() {

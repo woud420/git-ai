@@ -42,7 +42,7 @@ src/operations/git/cli_parser.rs	1032
 src/operations/git/command_classification.rs	720
 src/operations/git/fast_reader.rs	636
 src/operations/git/notes_api.rs	1239
-src/operations/git/refs.rs	1148
+src/operations/git/refs.rs	1068
 src/operations/git/repo_storage.rs	963
 src/operations/mdm/agents/claude_code.rs	1257
 src/operations/mdm/agents/cline.rs	648

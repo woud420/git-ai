@@ -187,7 +187,7 @@ pub fn read_authorship_v3(
 
 /// Return a map of commit SHA → note-blob OID for the given commits.
 ///
-/// Callers use the returned OIDs as git object IDs with `batch_read_blobs_with_oids`
+/// Callers use the returned OIDs as git object IDs with the batched `cat-file` reader
 /// (not purely presence checks). On Http/Sqlite backends notes live in notes-db, not in
 /// git refs, so an empty map is returned and callers fall back to `read_note`.
 pub fn read_note_blob_oids(

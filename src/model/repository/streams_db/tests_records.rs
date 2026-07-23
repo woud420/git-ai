@@ -238,10 +238,7 @@ fn test_indexes_created() {
     let temp_file = NamedTempFile::new().unwrap();
     let db = StreamsDatabase::open(temp_file.path()).unwrap();
 
-    let conn = db
-        .conn
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let conn = crate::model::repository::sqlite::poisoned_lock(&db.conn);
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name LIKE 'idx_streams_%'",
@@ -257,10 +254,7 @@ fn test_performance_pragmas_set() {
     let temp_file = NamedTempFile::new().unwrap();
     let db = StreamsDatabase::open(temp_file.path()).unwrap();
 
-    let conn = db
-        .conn
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let conn = crate::model::repository::sqlite::poisoned_lock(&db.conn);
 
     // synchronous returns an integer: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
     let synchronous: i32 = conn

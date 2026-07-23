@@ -6,15 +6,15 @@ use crate::operations::daemon::{
 use crate::utils::LockFile;
 #[cfg(windows)]
 use crate::utils::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
+#[cfg(windows)]
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-#[cfg(windows)]
-use std::{ffi::OsStr, path::Path};
 
 pub fn handle_daemon(args: &[String]) {
     if args.is_empty() || is_help(args[0].as_str()) {
@@ -764,9 +764,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 }
 
 fn default_repo_path() -> String {
-    PathBuf::from(".")
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from("."))
+    crate::operations::git::canonicalize::canonicalize_or_self(Path::new("."))
         .to_string_lossy()
         .to_string()
 }

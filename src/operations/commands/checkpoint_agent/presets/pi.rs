@@ -82,8 +82,7 @@ impl PiPreset {
 
 impl AgentPreset for PiPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let hook_input: PiHookInput = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {e}")))?;
+        let hook_input: PiHookInput = super::parse::hook_json(hook_input)?;
 
         let PiHookInput {
             hook_event_name,

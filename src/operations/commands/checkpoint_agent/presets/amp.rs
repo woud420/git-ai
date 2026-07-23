@@ -246,8 +246,7 @@ impl AmpPreset {
 
 impl AgentPreset for AmpPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let hook_input: AmpHookInput = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let hook_input: AmpHookInput = parse::hook_json(hook_input)?;
 
         let is_pre = hook_input.hook_event_name == "PreToolUse";
 

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle};
@@ -28,10 +27,7 @@ pub struct DaemonPidMeta {
 }
 
 pub fn now_unix_nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
+    crate::model::clock::now_nanos()
 }
 
 pub fn remove_socket_if_exists(path: &Path) -> Result<(), GitAiError> {

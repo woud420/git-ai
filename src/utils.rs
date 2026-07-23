@@ -11,7 +11,7 @@ pub fn normalize_to_posix(path: &str) -> String {
 }
 
 fn resolve_git_ai_exe_from_invocation_path(path: PathBuf) -> PathBuf {
-    let canonical_path = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+    let canonical_path = crate::operations::git::canonicalize::canonicalize_or_self(&path);
 
     // Get platform-specific executable names
     let git_name = if cfg!(windows) { "git.exe" } else { "git" };

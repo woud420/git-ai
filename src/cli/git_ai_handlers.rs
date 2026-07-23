@@ -608,11 +608,11 @@ fn handle_checkpoint(args: &[String]) {
 }
 
 fn strip_utf8_bom(input: String) -> String {
-    if let Some(stripped) = input.strip_prefix('\u{feff}') {
-        stripped.to_string()
-    } else {
-        input
+    let stripped = crate::config::strip_utf8_bom(input.as_bytes());
+    if stripped.len() == input.len() {
+        return input;
     }
+    String::from_utf8(stripped.to_vec()).unwrap_or(input)
 }
 
 fn decode_hook_input_bytes(bytes: Vec<u8>) -> Result<String, String> {

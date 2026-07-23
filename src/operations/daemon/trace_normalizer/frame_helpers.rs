@@ -30,10 +30,7 @@ pub(super) fn payload_timestamp_ns(payload: &Value) -> Result<u128, GitAiError> 
     if let Some(seconds) = payload.get("t_abs").and_then(Value::as_f64) {
         return Ok((seconds * 1_000_000_000_f64) as u128);
     }
-    Ok(std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos())
+    Ok(crate::model::clock::now_nanos())
 }
 
 pub(super) fn rfc3339_to_unix_nanos(value: &str) -> Option<u128> {

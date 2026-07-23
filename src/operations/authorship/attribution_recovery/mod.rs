@@ -190,11 +190,11 @@ fn recover_adjacent_edges(
 pub(super) fn repo_worktree_key(repo: &Repository) -> Result<String, GitAiError> {
     let workdir = repo.workdir()?;
     let normalized = worktree_root_for_path(&workdir).unwrap_or(workdir);
-    Ok(normalized
-        .canonicalize()
-        .unwrap_or(normalized)
-        .to_string_lossy()
-        .to_string())
+    Ok(
+        crate::operations::git::canonicalize::canonicalize_or_self(&normalized)
+            .to_string_lossy()
+            .to_string(),
+    )
 }
 
 pub(super) fn file_timestamps_ns(workdir: &std::path::Path, file_path: &str) -> Vec<u128> {
@@ -428,12 +428,10 @@ pub(super) fn record_recovery_metric(input: RecoveryMetricInput<'_>) {
         return;
     }
 
-    let checkpoint_ts = input.event_ts.map(u64::from).unwrap_or_else(|| {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    });
+    let checkpoint_ts = input
+        .event_ts
+        .map(u64::from)
+        .unwrap_or_else(crate::model::clock::now_secs);
     let mut values = CheckpointValues::new()
         .checkpoint_ts(checkpoint_ts)
         .kind(CheckpointKind::AiAgent.to_str())

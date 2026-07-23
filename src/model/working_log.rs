@@ -4,6 +4,7 @@ use crate::model::authorship_log_serialization::GIT_AI_VERSION;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+#[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CHECKPOINT_API_VERSION: &str = "checkpoint/1.0.0";
@@ -164,10 +165,7 @@ impl Checkpoint {
         author: String,
         entries: Vec<WorkingLogEntry>,
     ) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let timestamp = crate::model::clock::now_secs();
 
         Self {
             kind,

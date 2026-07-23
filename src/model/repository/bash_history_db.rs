@@ -631,17 +631,11 @@ fn invocation_key(session_id: &str, tool_use_id: &str) -> String {
 }
 
 pub fn unix_time_ns() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
+    crate::model::clock::now_nanos()
 }
 
 fn unix_now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    crate::model::clock::now_secs()
 }
 
 fn ns_to_i64(ns: u128) -> Result<i64, GitAiError> {

@@ -5,7 +5,7 @@ pub(super) fn current_worktree_branch_ref<'a>(
     state: &'a FamilyState,
 ) -> Option<&'a str> {
     let worktree = cmd.worktree.as_ref()?;
-    let canonical = worktree.canonicalize().unwrap_or_else(|_| worktree.clone());
+    let canonical = crate::operations::git::canonicalize::canonicalize_or_self(worktree);
     state
         .worktrees
         .get(&canonical)
@@ -504,9 +504,7 @@ pub(super) fn branch_arg_to_ref(branch: &str) -> String {
 }
 
 pub(super) fn head_key(git_dir: &Path) -> String {
-    let normalized = git_dir
-        .canonicalize()
-        .unwrap_or_else(|_| git_dir.to_path_buf())
+    let normalized = crate::operations::git::canonicalize::canonicalize_or_self(git_dir)
         .to_string_lossy()
         .to_string();
     format!("worktree:{}:HEAD", normalized)

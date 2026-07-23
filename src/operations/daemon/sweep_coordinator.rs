@@ -206,8 +206,8 @@ impl SweepCoordinator {
             || (modified.is_some() && modified != existing.last_modified))
     }
 
-    fn canonicalize_path(path: &PathBuf) -> PathBuf {
-        std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())
+    fn canonicalize_path(path: &Path) -> PathBuf {
+        crate::operations::git::canonicalize::canonicalize_or_self(path)
     }
 
     fn get_modified_timestamp(metadata: &std::fs::Metadata) -> Option<i64> {

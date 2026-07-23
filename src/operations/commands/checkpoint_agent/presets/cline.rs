@@ -1,4 +1,5 @@
 use super::opencode::OpenCodePreset;
+use super::parse;
 use super::{
     AgentPreset, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
     PresetContext,
@@ -242,8 +243,7 @@ fn is_multi_value_key(key: &str) -> bool {
 
 impl AgentPreset for ClinePreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let input: ClineHookInput = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let input: ClineHookInput = parse::hook_json(hook_input)?;
 
         if !matches!(input.hook_name.as_str(), "PreToolUse" | "PostToolUse") {
             return Ok(vec![]);

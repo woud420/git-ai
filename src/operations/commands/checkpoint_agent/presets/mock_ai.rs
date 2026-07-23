@@ -3,19 +3,12 @@ use crate::error::GitAiError;
 use crate::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct MockAiPreset;
 
 impl AgentPreset for MockAiPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let mock_agent_id = format!(
-            "ai-thread-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
+        let mock_agent_id = format!("ai-thread-{}", crate::model::clock::now_nanos());
 
         let (file_paths, cwd) = if hook_input.is_empty() {
             (

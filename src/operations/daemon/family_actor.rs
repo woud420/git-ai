@@ -28,46 +28,38 @@ pub struct FamilyActorHandle {
 }
 
 impl FamilyActorHandle {
-    pub async fn apply(&self, cmd: NormalizedCommand) -> Result<AppliedCommand, GitAiError> {
+    /// Send a request built by `make` and await its oneshot reply, wrapping
+    /// both the send and receive failure paths in a `GitAiError::Generic`
+    /// tagged with `op` (e.g. `"family actor apply send failed"`).
+    async fn request<T>(
+        &self,
+        make: impl FnOnce(oneshot::Sender<Result<T, GitAiError>>) -> FamilyMsg,
+        op: &'static str,
+    ) -> Result<T, GitAiError> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(FamilyMsg::Apply(Box::new(cmd), tx))
+            .send(make(tx))
             .await
-            .map_err(|_| GitAiError::Generic("family actor apply send failed".to_string()))?;
+            .map_err(|_| GitAiError::Generic(format!("family actor {op} send failed")))?;
         rx.await
-            .map_err(|_| GitAiError::Generic("family actor apply receive failed".to_string()))?
+            .map_err(|_| GitAiError::Generic(format!("family actor {op} receive failed")))?
+    }
+
+    pub async fn apply(&self, cmd: NormalizedCommand) -> Result<AppliedCommand, GitAiError> {
+        self.request(|tx| FamilyMsg::Apply(Box::new(cmd), tx), "apply")
+            .await
     }
 
     pub async fn apply_checkpoint(&self) -> Result<ApplyAck, GitAiError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(FamilyMsg::ApplyCheckpoint(tx))
-            .await
-            .map_err(|_| GitAiError::Generic("family actor checkpoint send failed".to_string()))?;
-        rx.await.map_err(|_| {
-            GitAiError::Generic("family actor checkpoint receive failed".to_string())
-        })?
+        self.request(FamilyMsg::ApplyCheckpoint, "checkpoint").await
     }
 
     pub async fn status(&self) -> Result<FamilyStatus, GitAiError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(FamilyMsg::Status(tx))
-            .await
-            .map_err(|_| GitAiError::Generic("family actor status send failed".to_string()))?;
-        rx.await
-            .map_err(|_| GitAiError::Generic("family actor status receive failed".to_string()))?
+        self.request(FamilyMsg::Status, "status").await
     }
 
     pub async fn watermarks(&self) -> Result<WatermarkState, GitAiError> {
-        let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(FamilyMsg::GetWatermarks(tx))
-            .await
-            .map_err(|_| GitAiError::Generic("family actor watermarks send failed".to_string()))?;
-        rx.await.map_err(|_| {
-            GitAiError::Generic("family actor watermarks receive failed".to_string())
-        })?
+        self.request(FamilyMsg::GetWatermarks, "watermarks").await
     }
 
     pub async fn update_watermarks(&self, update: WatermarkState) -> Result<(), GitAiError> {
@@ -113,7 +105,7 @@ pub fn spawn_family_actor(family_key: FamilyKey) -> FamilyActorHandle {
                     let canonical_worktree = cmd
                         .worktree
                         .as_deref()
-                        .map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf()));
+                        .map(crate::operations::git::canonicalize::canonicalize_or_self);
                     let result = ref_cursor.enrich_command(&mut cmd, &state).and_then(
                         |command_start_refs| {
                             reducer::reduce_family_command_with_ref_snapshot(

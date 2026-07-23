@@ -55,10 +55,7 @@ impl MetricEvent {
     /// Create a new metric event with current timestamp.
     pub fn new<V: EventValues>(values: &V, attrs: SparseArray) -> Self {
         Self {
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as u32,
+            timestamp: crate::model::clock::now_secs() as u32,
             event_id: V::event_id() as u16,
             values: values.to_sparse(),
             attrs,
@@ -68,10 +65,7 @@ impl MetricEvent {
     /// Create a new metric event by consuming the values (avoids cloning).
     pub fn from_values<V: EventValues>(values: V, attrs: SparseArray) -> Self {
         Self {
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as u32,
+            timestamp: crate::model::clock::now_secs() as u32,
             event_id: V::event_id() as u16,
             values: values.into_sparse(),
             attrs,
@@ -86,12 +80,7 @@ impl MetricEvent {
         event_ts: Option<u32>,
     ) -> Self {
         Self {
-            timestamp: event_ts.unwrap_or_else(|| {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as u32
-            }),
+            timestamp: event_ts.unwrap_or_else(|| crate::model::clock::now_secs() as u32),
             event_id: V::event_id() as u16,
             values: values.into_sparse(),
             attrs,

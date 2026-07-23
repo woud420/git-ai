@@ -19,8 +19,6 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-#[cfg(not(any(test, feature = "test-support")))]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Per-file line statistics (in-memory only, not persisted)
 #[derive(Debug, Clone, Default)]
@@ -50,10 +48,7 @@ const KNOWN_HUMAN_MIN_SECS_AFTER_AI: u64 = 1;
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) fn should_emit_agent_usage(agent_id: &AgentId) -> bool {
     let prompt_id = generate_short_hash(&agent_id.id, &agent_id.tool);
-    let now_ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now_ts = crate::model::clock::now_secs();
 
     let Ok(db) = crate::model::repository::metrics_db::MetricsDatabase::global() else {
         return true;
@@ -213,10 +208,7 @@ fn execute_resolved_checkpoint(
     // clippy would otherwise flag the comparisons as always-false for u64.
     #[cfg(not(any(test, feature = "test-support")))]
     if kind == CheckpointKind::KnownHuman {
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now_secs = crate::model::clock::now_secs();
         let too_soon = checkpoints.iter().rev().any(|cp| {
             cp.kind.is_ai()
                 && now_secs.saturating_sub(cp.timestamp) < KNOWN_HUMAN_MIN_SECS_AFTER_AI

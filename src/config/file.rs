@@ -212,10 +212,17 @@ pub(crate) fn resolve_telemetry_enabled(telemetry: Option<&str>, legacy_oss: Opt
     }
 }
 
+/// Strip a leading UTF-8 byte-order mark (`EF BB BF`, the encoding of
+/// `'\u{feff}'`) from `data`, if present. Shared by config-file parsing
+/// (Windows PowerShell 5.1 writes UTF-8 with BOM by default for
+/// `Out-File -Encoding UTF8`) and checkpoint hook-input decoding, both of
+/// which need to tolerate BOM-prefixed input.
+pub(crate) fn strip_utf8_bom(data: &[u8]) -> &[u8] {
+    data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(data)
+}
+
 pub(crate) fn parse_file_config_bytes(data: &[u8]) -> Result<FileConfig, serde_json::Error> {
-    // Windows PowerShell 5.1 writes UTF-8 with BOM by default for `Out-File -Encoding UTF8`.
-    // Tolerate BOM-prefixed config files so upgrades/installers don't brick config parsing.
-    let data = data.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(data);
+    let data = strip_utf8_bom(data);
     serde_json::from_slice::<FileConfig>(data)
 }
 

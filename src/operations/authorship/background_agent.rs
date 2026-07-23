@@ -175,9 +175,6 @@ pub fn fill_unattributed_lines(
 }
 
 fn placeholder_id(name: &str) -> String {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let ts = crate::model::clock::now_secs();
     format!("{name}_SESSION{ts}")
 }

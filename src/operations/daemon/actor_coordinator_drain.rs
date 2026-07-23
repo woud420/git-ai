@@ -340,10 +340,7 @@ impl ActorDaemonCoordinator {
                             std::collections::HashMap::new()
                         };
                         let per_worktree = if is_human_checkpoint {
-                            let now_ns = std::time::SystemTime::now()
-                                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_nanos();
+                            let now_ns = crate::model::clock::now_nanos();
                             std::collections::HashMap::from([(
                                 Self::worktree_state_key(Path::new(&repo_wd)),
                                 now_ns,

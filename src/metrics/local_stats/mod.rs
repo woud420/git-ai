@@ -245,10 +245,7 @@ fn compute_activity_from_records(
     let mut session_by_tool: Vec<(String, u32)> = session_tool_counts.into_iter().collect();
     session_by_tool.sort_by_key(|&(_, count)| Reverse(count));
 
-    let now_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as u32;
+    let now_ts = crate::model::clock::now_secs() as u32;
     let (tokens, cost_by_day) =
         build_token_summary(message_usage, codex_sessions, now_ts, since_ts);
 

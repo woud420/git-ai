@@ -573,7 +573,7 @@ fn execute_post_bash_call(e: PostBashCall) -> Result<Vec<CheckpointRequest>, Git
                 .iter()
                 .map(|p| {
                     let joined = repo_work_dir.join(p);
-                    fs::canonicalize(&joined).unwrap_or(joined)
+                    crate::operations::git::canonicalize::canonicalize_or_self(&joined)
                 })
                 .collect(),
             _ => vec![],

@@ -15,6 +15,7 @@ pub mod attribution_tracker;
 pub mod authorship_log;
 pub mod authorship_log_serialization;
 pub mod checkpoint_request;
+pub mod clock;
 pub mod daemon_control;
 pub mod diff_json;
 pub mod domain;

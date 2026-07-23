@@ -302,10 +302,7 @@ impl ActorDaemonCoordinator {
         }
         // Hold the condvar mutex so notify_all cannot race with the
         // check-then-wait sequence in daemon_update_check_loop.
-        let _guard = self
-            .shutdown_condvar_mutex
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::model::repository::sqlite::poisoned_lock(&self.shutdown_condvar_mutex);
         self.shutdown_condvar.notify_all();
     }
 
@@ -422,9 +419,9 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn canonicalize_path(path: &str) -> String {
-        std::fs::canonicalize(path)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| path.to_string())
+        crate::operations::git::canonicalize::canonicalize_or_self(std::path::Path::new(path))
+            .to_string_lossy()
+            .to_string()
     }
 
     pub(crate) fn register_pending_ai_edits(&self, family: &str, file_paths: &[String]) {

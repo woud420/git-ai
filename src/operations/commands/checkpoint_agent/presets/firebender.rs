@@ -10,7 +10,6 @@ use crate::utils::normalize_to_posix;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct FirebenderPreset;
 
@@ -104,8 +103,7 @@ impl FirebenderPreset {
 
 impl AgentPreset for FirebenderPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let hook_input: FirebenderHookInput = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let hook_input: FirebenderHookInput = parse::hook_json(hook_input)?;
 
         let FirebenderHookInput {
             hook_event_name,
@@ -174,12 +172,8 @@ impl AgentPreset for FirebenderPreset {
             }
         };
 
-        let session_id = completion_id.unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis().to_string())
-                .unwrap_or_else(|_| "0".to_string())
-        });
+        let session_id =
+            completion_id.unwrap_or_else(|| crate::model::clock::now_millis().to_string());
 
         let context = PresetContext {
             agent_id: AgentId {

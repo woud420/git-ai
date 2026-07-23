@@ -6,7 +6,6 @@ use crate::metrics::local_stats::{
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize)]
 struct UsageJsonOutput<'a> {
@@ -90,10 +89,7 @@ pub fn handle_usage(args: &[String]) {
 }
 
 fn days_ago(days: u64) -> u32 {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = crate::model::clock::now_secs();
     now.saturating_sub(days * 24 * 3600).min(u32::MAX as u64) as u32
 }
 

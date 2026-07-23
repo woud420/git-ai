@@ -4,14 +4,12 @@ use crate::error::GitAiError;
 use crate::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct AiTabPreset;
 
 impl AgentPreset for AiTabPreset {
     fn parse(&self, hook_input: &str, trace_id: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
-        let data: serde_json::Value = serde_json::from_str(hook_input)
-            .map_err(|e| GitAiError::PresetError(format!("Invalid JSON in hook_input: {}", e)))?;
+        let data: serde_json::Value = parse::hook_json(hook_input)?;
 
         let hook_event = parse::required_str(&data, "hook_event_name")?;
 
@@ -43,12 +41,7 @@ impl AgentPreset for AiTabPreset {
 
         let completion_id = parse::optional_str(&data, "completion_id")
             .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis().to_string())
-                    .unwrap_or_else(|_| "0".to_string())
-            });
+            .unwrap_or_else(|| crate::model::clock::now_millis().to_string());
         let session_id = format!("ai_tab-{}", completion_id);
 
         let context = PresetContext {

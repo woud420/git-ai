@@ -230,11 +230,11 @@ fn managed_git_hooks_dir_from_context() -> Option<PathBuf> {
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    crate::operations::git::canonicalize::canonicalize_or_self(path)
 }
 
 fn canonicalize_if_possible(path: PathBuf) -> PathBuf {
-    fs::canonicalize(&path).unwrap_or(path)
+    crate::operations::git::canonicalize::canonicalize_or_self(&path)
 }
 
 fn is_managed_hooks_path(path: &Path, repo: Option<&Repository>) -> bool {

@@ -87,11 +87,11 @@ impl SystemGitBackend {
         alias_name: &str,
     ) -> Result<Option<String>, GitAiError> {
         let family_key = match common_dir_for_worktree(worktree) {
-            Some(common_dir) => common_dir
-                .canonicalize()
-                .unwrap_or(common_dir)
-                .to_string_lossy()
-                .to_string(),
+            Some(common_dir) => {
+                crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
+                    .to_string_lossy()
+                    .to_string()
+            }
             None => return self.resolve_alias_uncached(worktree, alias_name),
         };
 
@@ -333,7 +333,7 @@ impl GitBackend for SystemGitBackend {
                 worktree.display()
             ))
         })?;
-        let common = common.canonicalize().unwrap_or(common);
+        let common = crate::operations::git::canonicalize::canonicalize_or_self(&common);
         Ok(FamilyKey::new(common.to_string_lossy().to_string()))
     }
 

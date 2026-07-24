@@ -18,6 +18,13 @@ use named_pipe::{
 #[cfg(windows)]
 use std::path::Path;
 
+/// Text-dedup constructor for the control/trace worker-panicked thread-joins
+/// below; Display output is unchanged from the sites it replaces.
+#[cfg(windows)]
+fn worker_panicked_error(what: &str) -> GitAiError {
+    GitAiError::Generic(format!("daemon {} worker panicked", what))
+}
+
 pub fn control_listener_loop_actor(
     control_socket_path: PathBuf,
     coordinator: Arc<ActorDaemonCoordinator>,
@@ -99,7 +106,7 @@ pub fn control_listener_loop_actor(
         for worker in workers {
             let result = worker
                 .join()
-                .map_err(|_| GitAiError::Generic("daemon control worker panicked".to_string()))?;
+                .map_err(|_| worker_panicked_error("control"))?;
             result?;
         }
 
@@ -353,9 +360,7 @@ pub fn trace_listener_loop_actor(
         wake_windows_pipe_workers(&trace_socket_path, worker_count);
 
         for worker in workers {
-            let result = worker
-                .join()
-                .map_err(|_| GitAiError::Generic("daemon trace worker panicked".to_string()))?;
+            let result = worker.join().map_err(|_| worker_panicked_error("trace"))?;
             result?;
         }
 

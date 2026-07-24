@@ -13,6 +13,38 @@ use crate::operations::git::repo_state::{
 use crate::operations::git::repo_storage::RepoStorage;
 use std::path::{Path, PathBuf};
 
+// Text-dedup constructors shared with `discovery.rs`'s git-exec-based
+// discovery, which validates and reports the same paths. Display output is
+// unchanged from the sites they replace.
+pub(super) fn require_dir(kind: &str, path: &Path) -> Result<(), GitAiError> {
+    if !path.is_dir() {
+        return Err(GitAiError::Generic(format!(
+            "{} does not exist: {}",
+            kind,
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn canonicalize_workdir(workdir: &Path) -> Result<PathBuf, GitAiError> {
+    workdir.canonicalize().map_err(|e| {
+        GitAiError::Generic(format!(
+            "Failed to canonicalize working directory {}: {}",
+            workdir.display(),
+            e
+        ))
+    })
+}
+
+pub(super) fn no_parent_error(kind: &str, path: &Path) -> GitAiError {
+    GitAiError::Generic(format!("{} has no parent: {}", kind, path.display()))
+}
+
+fn unable_to_resolve(what: &str, path: &Path) -> GitAiError {
+    GitAiError::Generic(format!("Unable to resolve {}: {}", what, path.display()))
+}
+
 #[doc(hidden)]
 pub fn worktree_storage_ai_dir(git_dir: &Path, git_common_dir: &Path) -> PathBuf {
     if git_dir == git_common_dir {
@@ -85,12 +117,8 @@ pub(super) fn discover_repository_paths_no_git_exec(
                     start.display()
                 ))
             })?;
-            let git_common_dir = common_dir_for_git_dir(&start).ok_or_else(|| {
-                GitAiError::Generic(format!(
-                    "Unable to resolve common dir for git dir: {}",
-                    start.display()
-                ))
-            })?;
+            let git_common_dir = common_dir_for_git_dir(&start)
+                .ok_or_else(|| unable_to_resolve("common dir for git dir", &start))?;
             return Ok(DiscoveredRepositoryPaths {
                 command_root: workdir.to_path_buf(),
                 workdir: workdir.to_path_buf(),
@@ -106,18 +134,10 @@ pub(super) fn discover_repository_paths_no_git_exec(
                     start.display()
                 ))
             })?;
-            let git_dir = git_dir_for_worktree(workdir).ok_or_else(|| {
-                GitAiError::Generic(format!(
-                    "Unable to resolve git dir for worktree: {}",
-                    workdir.display()
-                ))
-            })?;
-            let git_common_dir = common_dir_for_git_dir(&git_dir).ok_or_else(|| {
-                GitAiError::Generic(format!(
-                    "Unable to resolve common dir for git dir: {}",
-                    git_dir.display()
-                ))
-            })?;
+            let git_dir = git_dir_for_worktree(workdir)
+                .ok_or_else(|| unable_to_resolve("git dir for worktree", workdir))?;
+            let git_common_dir = common_dir_for_git_dir(&git_dir)
+                .ok_or_else(|| unable_to_resolve("common dir for git dir", &git_dir))?;
             return Ok(DiscoveredRepositoryPaths {
                 command_root: workdir.to_path_buf(),
                 workdir: workdir.to_path_buf(),
@@ -128,18 +148,10 @@ pub(super) fn discover_repository_paths_no_git_exec(
     }
 
     if let Some(worktree_root) = worktree_root_for_path(&start) {
-        let git_dir = git_dir_for_worktree(&worktree_root).ok_or_else(|| {
-            GitAiError::Generic(format!(
-                "Unable to resolve git dir for worktree: {}",
-                worktree_root.display()
-            ))
-        })?;
-        let git_common_dir = common_dir_for_git_dir(&git_dir).ok_or_else(|| {
-            GitAiError::Generic(format!(
-                "Unable to resolve common dir for git dir: {}",
-                git_dir.display()
-            ))
-        })?;
+        let git_dir = git_dir_for_worktree(&worktree_root)
+            .ok_or_else(|| unable_to_resolve("git dir for worktree", &worktree_root))?;
+        let git_common_dir = common_dir_for_git_dir(&git_dir)
+            .ok_or_else(|| unable_to_resolve("common dir for git dir", &git_dir))?;
         return Ok(DiscoveredRepositoryPaths {
             command_root: worktree_root.clone(),
             workdir: worktree_root,
@@ -151,9 +163,9 @@ pub(super) fn discover_repository_paths_no_git_exec(
     let mut current = Some(start.as_path());
     while let Some(dir) = current {
         if dir.join("HEAD").is_file() && dir.join("objects").is_dir() {
-            let workdir = dir.parent().ok_or_else(|| {
-                GitAiError::Generic(format!("Git directory has no parent: {}", dir.display()))
-            })?;
+            let workdir = dir
+                .parent()
+                .ok_or_else(|| no_parent_error("Git directory", dir))?;
             return Ok(DiscoveredRepositoryPaths {
                 command_root: dir.to_path_buf(),
                 workdir: workdir.to_path_buf(),
@@ -300,32 +312,11 @@ pub(super) fn repository_from_discovered_paths(
     git_dir: &Path,
     git_common_dir: &Path,
 ) -> Result<Repository, GitAiError> {
-    if !git_dir.is_dir() {
-        return Err(GitAiError::Generic(format!(
-            "Git directory does not exist: {}",
-            git_dir.display()
-        )));
-    }
-    if !git_common_dir.is_dir() {
-        return Err(GitAiError::Generic(format!(
-            "Git common directory does not exist: {}",
-            git_common_dir.display()
-        )));
-    }
-    if !workdir.is_dir() {
-        return Err(GitAiError::Generic(format!(
-            "Work directory does not exist: {}",
-            workdir.display()
-        )));
-    }
+    require_dir("Git directory", git_dir)?;
+    require_dir("Git common directory", git_common_dir)?;
+    require_dir("Work directory", workdir)?;
 
-    let canonical_workdir = workdir.canonicalize().map_err(|e| {
-        GitAiError::Generic(format!(
-            "Failed to canonicalize working directory {}: {}",
-            workdir.display(),
-            e
-        ))
-    })?;
+    let canonical_workdir = canonicalize_workdir(workdir)?;
 
     let worktree_ai_dir = worktree_storage_ai_dir(git_dir, git_common_dir);
     let storage = if worktree_ai_dir == git_dir.join("ai") {

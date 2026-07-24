@@ -14,6 +14,21 @@ pub const AI_AUTHORSHIP_FULL_REF: &str = "refs/notes/ai";
 pub const AI_AUTHORSHIP_FORK_TRACKING_REF: &str = "refs/notes/ai-remote/fork";
 pub const AI_AUTHORSHIP_PUSH_REFSPEC: &str = "refs/notes/ai:refs/notes/ai";
 
+fn parse_output_error(what: &str) -> GitAiError {
+    GitAiError::Generic(format!("Failed to parse {} output", what))
+}
+
+fn unexpected_note_object_type(entry: &LsTreeNoteEntry, notes_ref: &str) -> GitAiError {
+    GitAiError::Generic(format!(
+        "authorship note path {} in {} is {}, expected blob",
+        entry.path, notes_ref, entry.object_type
+    ))
+}
+
+fn malformed_ls_tree_output_error(missing: &str) -> GitAiError {
+    GitAiError::Generic(format!("Malformed ls-tree output: missing {}", missing))
+}
+
 pub(in crate::operations::git) fn notes_add(
     repo: &Repository,
     commit_sha: &str,
@@ -145,10 +160,7 @@ pub fn note_blob_oids_for_commits_from_ref(
     for entry in root_entries {
         if let Some(commit_sha) = path_to_commit.get(&entry.path) {
             if entry.object_type != "blob" {
-                return Err(GitAiError::Generic(format!(
-                    "authorship note path {} in {} is {}, expected blob",
-                    entry.path, notes_ref, entry.object_type
-                )));
+                return Err(unexpected_note_object_type(&entry, notes_ref));
             }
             result.entry(commit_sha.clone()).or_insert(entry.oid);
         }
@@ -160,10 +172,7 @@ pub fn note_blob_oids_for_commits_from_ref(
         for entry in entries {
             if let Some(commit_sha) = path_to_commit.get(&entry.path) {
                 if entry.object_type != "blob" {
-                    return Err(GitAiError::Generic(format!(
-                        "authorship note path {} in {} is {}, expected blob",
-                        entry.path, notes_ref, entry.object_type
-                    )));
+                    return Err(unexpected_note_object_type(&entry, notes_ref));
                 }
                 result.entry(commit_sha.clone()).or_insert(entry.oid);
             }
@@ -218,27 +227,19 @@ fn parse_ls_tree_note_entries(data: &[u8]) -> Result<Vec<LsTreeNoteEntry>, GitAi
     let mut entries = Vec::new();
     for raw in data.split(|byte| *byte == 0).filter(|raw| !raw.is_empty()) {
         let Some(tab_idx) = raw.iter().position(|byte| *byte == b'\t') else {
-            return Err(GitAiError::Generic(
-                "Malformed ls-tree output: missing path separator".to_string(),
-            ));
+            return Err(malformed_ls_tree_output_error("path separator"));
         };
         let meta = std::str::from_utf8(&raw[..tab_idx])?;
         let path = std::str::from_utf8(&raw[tab_idx + 1..])?.to_string();
         let mut parts = meta.split_whitespace();
         let Some(_mode) = parts.next() else {
-            return Err(GitAiError::Generic(
-                "Malformed ls-tree output: missing mode".to_string(),
-            ));
+            return Err(malformed_ls_tree_output_error("mode"));
         };
         let Some(object_type) = parts.next() else {
-            return Err(GitAiError::Generic(
-                "Malformed ls-tree output: missing object type".to_string(),
-            ));
+            return Err(malformed_ls_tree_output_error("object type"));
         };
         let Some(oid) = parts.next() else {
-            return Err(GitAiError::Generic(
-                "Malformed ls-tree output: missing object id".to_string(),
-            ));
+            return Err(malformed_ls_tree_output_error("object id"));
         };
         entries.push(LsTreeNoteEntry {
             object_type: object_type.to_string(),
@@ -494,8 +495,8 @@ pub(in crate::operations::git) fn get_commits_with_notes_from_list(
     }
 
     let output = exec_git(&args)?;
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|_| GitAiError::Generic("Failed to parse git rev-list output".to_string()))?;
+    let stdout =
+        String::from_utf8(output.stdout).map_err(|_| parse_output_error("git rev-list"))?;
 
     let mut commit_authors = HashMap::new();
     let lines: Vec<&str> = stdout.lines().collect();
@@ -789,8 +790,7 @@ fn list_all_notes(repo: &Repository, notes_ref: &str) -> Result<Vec<(String, Str
     ]);
 
     let output = exec_git(&args)?;
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|_| GitAiError::Generic("Failed to parse notes list output".to_string()))?;
+    let stdout = String::from_utf8(output.stdout).map_err(|_| parse_output_error("notes list"))?;
 
     Ok(stdout
         .lines()
@@ -811,7 +811,7 @@ fn rev_parse(repo: &Repository, rev: &str) -> Result<String, GitAiError> {
     args.extend_from_slice(&["rev-parse".to_string(), rev.to_string()]);
     let output = exec_git(&args)?;
     String::from_utf8(output.stdout)
-        .map_err(|_| GitAiError::Generic("Failed to parse rev-parse output".to_string()))
+        .map_err(|_| parse_output_error("rev-parse"))
         .map(|s| s.trim().to_string())
 }
 
@@ -841,8 +841,7 @@ pub(in crate::operations::git) fn grep_ai_notes(
     args.push("refs/notes/ai".to_string());
 
     let output = exec_git(&args)?;
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|_| GitAiError::Generic("Failed to parse git grep output".to_string()))?;
+    let stdout = String::from_utf8(output.stdout).map_err(|_| parse_output_error("git grep"))?;
 
     // Parse output format: refs/notes/ai:ab/cdef123...:line_number:matched_content
     // Extract the commit SHA from the path

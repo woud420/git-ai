@@ -218,25 +218,28 @@ pub fn set_daemon_client_stream_timeouts(
     }
 }
 
+/// Text-dedup constructor for the write/flush pair below; Display output is
+/// unchanged from the sites it replaces.
+fn daemon_request_io_error(action: &str, socket_path: &Path, e: std::io::Error) -> GitAiError {
+    GitAiError::Generic(format!(
+        "failed {} daemon request to {}: {}",
+        action,
+        socket_path.display(),
+        e
+    ))
+}
+
 fn write_all_daemon_client_stream(
     stream: &mut DaemonClientStream,
     socket_path: &Path,
     payload: &[u8],
 ) -> Result<(), GitAiError> {
-    stream.write_all(payload).map_err(|e| {
-        GitAiError::Generic(format!(
-            "failed writing daemon request to {}: {}",
-            socket_path.display(),
-            e
-        ))
-    })?;
-    stream.flush().map_err(|e| {
-        GitAiError::Generic(format!(
-            "failed flushing daemon request to {}: {}",
-            socket_path.display(),
-            e
-        ))
-    })?;
+    stream
+        .write_all(payload)
+        .map_err(|e| daemon_request_io_error("writing", socket_path, e))?;
+    stream
+        .flush()
+        .map_err(|e| daemon_request_io_error("flushing", socket_path, e))?;
     Ok(())
 }
 

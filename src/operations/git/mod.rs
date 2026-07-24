@@ -26,3 +26,4 @@ pub use repository::{
 pub mod repo_storage;
 pub mod status;
 pub mod sync_authorship;
+pub(crate) mod trace2_validation;

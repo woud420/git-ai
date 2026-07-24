@@ -12,8 +12,10 @@ mod json_output;
 mod output;
 mod overlay;
 mod porcelain;
+mod self_check_validation;
 
 pub use args::parse_blame_args;
+pub(crate) use self_check_validation::validate_self_check_blame_analysis;
 
 //🐰🥚 @todo use actual date Git AI was installed in each repo
 pub static OLDEST_AI_BLAME_DATE: LazyLock<DateTime<FixedOffset>> = LazyLock::new(|| {

@@ -32,7 +32,6 @@ adapter** · **Network adapter** · **Orchestration** · **Interface**
 | `cli/*`, `main.rs` | Interface | argv[0] dispatch is load-bearing |
 | `metrics/{types, events, attrs, pos_encoded, local_stats}` | Domain + Orchestration mix | event structs are model material; emission/local-stats are orchestration |
 | `tokio_runtime.rs`, `process_timeout.rs`, `http.rs`(clients) | Infrastructure glue | |
-| `diagnostics.rs` | **Mixed** | dissolution map below |
 | `observability/` | Orchestration | telemetry DTO leak resolved in P9.2; still dispatches to daemon submit fns (orchestration→orchestration, allowed) |
 | `notes/reference_server` | Test/reference infra | in-memory HTTP-contract server |
 
@@ -98,7 +97,7 @@ when `transcript.rs` moved to `model/transcript.rs`.
 
 - `feature_flags.rs:60,183-201,217,229` — `GIT_AI_*` env (by design; folds under config).
 - `metrics/mod.rs:69` — `current_dir`.
-- `diagnostics.rs:607,976` — `current_exe`.
+- `operations/daemon/self_check.rs:487`, `operations/daemon/attribution_self_check.rs:144` — `current_exe`.
 - `observability/mod.rs:68` — `var_os`.
 - Test-support env vars (`GIT_AI_TEST_*`) are cfg-gated and exempt.
 
@@ -118,7 +117,14 @@ when `transcript.rs` moved to `model/transcript.rs`.
 `operations/git/path_format.rs` (git adapter); git-exe discovery/spawn +
 Windows process-creation flags → `cli/git_ai_exe.rs`; terminal/
 background-agent/superuser detection → `cli/environment.rs`; `LockFile` →
-`model/repository/lock_file.rs` (persistence adapter). `diagnostics.rs`
-(1,482): self-check orchestration → daemon; trace2 validation → git adapter;
-blame formatting → commands; status helpers → control API. Burns down
-opportunistically with the ratchet.
+`model/repository/lock_file.rs` (persistence adapter).
+
+`diagnostics.rs` — dissolved (DRY E3): daemon-readiness self-check + shared
+`DiagnosticCheckResult`/`CommandRecord`/`GitDiagnosticTarget` types/command-running
+infra → `operations/daemon/self_check.rs`; attribution self-check (checkpoint →
+commit → blame round trip) → `operations/daemon/attribution_self_check.rs`;
+trace2 global-config and trace2-file self-checks → `operations/git/trace2_validation.rs`
+(git adapter); self-check blame-result classification → `operations/commands/blame/
+self_check_validation.rs`; daemon family-status polling helpers →
+`operations/daemon/control_api.rs` (next to the `FamilyStatus` DTO they query).
+Burns down opportunistically with the ratchet.

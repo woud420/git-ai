@@ -6,7 +6,6 @@ src/cli/git_ai_handlers.rs	1155
 src/config/file.rs	970
 src/config/mod.rs	638
 src/config/tests.rs	1119
-src/diagnostics.rs	1482
 src/model/metrics/attrs.rs	741
 src/model/metrics/pos_encoded.rs	637
 src/model/api_types.rs	610
@@ -27,7 +26,7 @@ src/operations/commands/checkpoint_agent/presets/cline.rs	634
 src/operations/commands/checkpoint_agent/presets/cursor.rs	659
 src/operations/commands/checkpoint_agent/presets/github_copilot/ide.rs	1014
 src/operations/commands/daemon.rs	788
-src/operations/commands/debug.rs	1659
+src/operations/commands/debug.rs	1666
 src/operations/commands/git_hook_handlers.rs	615
 src/operations/commands/install_hooks.rs	1280
 src/operations/commands/log.rs	1399

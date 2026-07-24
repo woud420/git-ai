@@ -3,7 +3,6 @@ pub mod cli;
 pub mod clients;
 pub mod config;
 pub mod diagnostic_sentinels;
-pub mod diagnostics;
 pub mod error;
 pub mod feature_flags;
 pub mod metrics;

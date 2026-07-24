@@ -1,10 +1,17 @@
 use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
-use crate::diagnostics::{DiagnosticCheckResult, GitDiagnosticTarget};
+use crate::operations::daemon::attribution_self_check::run_attribution_self_check;
+use crate::operations::daemon::self_check::{
+    DiagnosticCheckResult, DiagnosticStatus, GitDiagnosticTarget,
+    prepare_daemon_for_debug_self_checks,
+};
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::repository::{
     GitAuthorIdentity, GitConfigIdentityResolution, GitIdentityResolution,
     global_git_config_identity_resolution,
+};
+use crate::operations::git::trace2_validation::{
+    check_trace2_global_config, run_trace2_file_self_check,
 };
 use crate::process_timeout::{TimedCommandOutput, run_command_with_timeout_and_env};
 use std::env;
@@ -91,7 +98,7 @@ fn build_debug_report(options: DebugOptions) -> String {
     let git_cmd_realpath = realpath_for_display(&git_cmd);
     let shell_git_lookup = collect_shell_git_lookup();
     debug_progress("checking daemon readiness");
-    let daemon_diagnostics = crate::diagnostics::prepare_daemon_for_debug_self_checks(&git_cmd);
+    let daemon_diagnostics = prepare_daemon_for_debug_self_checks(&git_cmd);
     debug_progress(format!(
         "daemon readiness check {}",
         daemon_diagnostics.status.as_str()
@@ -541,7 +548,7 @@ fn collect_git_diagnostics(
             .iter()
             .map(|target| {
                 debug_progress(format!("checking Trace2 config for {}", target.label));
-                let result = crate::diagnostics::check_trace2_global_config(target);
+                let result = check_trace2_global_config(target);
                 debug_progress(format!(
                     "Trace2 config check for {} {}",
                     target.label,
@@ -558,7 +565,7 @@ fn collect_git_diagnostics(
             let label = target.label.clone();
             debug_progress(format!("starting attribution self-check for {}", label));
             std::thread::spawn(move || {
-                let result = crate::diagnostics::run_attribution_self_check(&target);
+                let result = run_attribution_self_check(&target);
                 debug_progress(format!(
                     "attribution self-check for {} {}",
                     label,
@@ -598,7 +605,7 @@ fn collect_git_diagnostics(
                     "starting Trace2 file self-check for {}",
                     target.label
                 ));
-                let result = crate::diagnostics::run_trace2_file_self_check(target);
+                let result = run_trace2_file_self_check(target);
                 debug_progress(format!(
                     "Trace2 file self-check for {} {}",
                     target.label,
@@ -679,7 +686,7 @@ fn append_diagnostic_check(
         append_indented_block_with_prefix(out, trace2_json, "      ");
     }
 
-    if check.status == crate::diagnostics::DiagnosticStatus::Failed {
+    if check.status == DiagnosticStatus::Failed {
         let _ = writeln!(out, "    command log:");
         for command in &check.commands {
             let _ = writeln!(out, "      $ {}", command.command);

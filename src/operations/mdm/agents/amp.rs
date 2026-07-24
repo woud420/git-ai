@@ -1,8 +1,10 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-use crate::operations::mdm::utils::{binary_exists, generate_diff, home_dir, write_atomic};
-use std::fs;
-use std::path::{Path, PathBuf};
+use crate::operations::mdm::plugin_drop::{self, FileDropSpec};
+use crate::operations::mdm::utils::home_dir;
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 
 // Amp plugin content (TypeScript), embedded from the source file
 const AMP_PLUGIN_CONTENT: &str = include_str!(concat!(
@@ -10,69 +12,60 @@ const AMP_PLUGIN_CONTENT: &str = include_str!(concat!(
     "/agent-support/amp/git-ai.ts"
 ));
 
+fn amp_plugin_path() -> PathBuf {
+    home_dir()
+        .join(".config")
+        .join("amp")
+        .join("plugins")
+        .join("git-ai.ts")
+}
+
+fn amp_global_config_dir() -> PathBuf {
+    home_dir().join(".config").join("amp")
+}
+
+const AMP_SPEC: FileDropSpec = FileDropSpec {
+    name: "Amp",
+    id: "amp",
+    template: AMP_PLUGIN_CONTENT,
+    dest_path: amp_plugin_path,
+    global_config_dir: amp_global_config_dir,
+    local_config_dir: ".amp",
+    detect_binary_names: &["amp"],
+    process_names: &["amp"],
+};
+
 pub struct AmpInstaller;
 
+// Test-only convenience wrappers kept so existing content-generation tests
+// below don't need to reach into `AMP_SPEC` directly.
+#[cfg(test)]
 impl AmpInstaller {
     fn plugin_path() -> PathBuf {
-        home_dir()
-            .join(".config")
-            .join("amp")
-            .join("plugins")
-            .join("git-ai.ts")
+        (AMP_SPEC.dest_path)()
     }
 
     /// Generate plugin content with the absolute binary path substituted in.
     fn generate_plugin_content(binary_path: &Path) -> String {
-        // Escape backslashes for TypeScript string literals (needed for Windows paths)
-        let path_str = binary_path.display().to_string().replace('\\', "\\\\");
-        AMP_PLUGIN_CONTENT.replace("__GIT_AI_BINARY_PATH__", &path_str)
+        plugin_drop::generate_content(&AMP_SPEC, binary_path)
     }
 }
 
 impl HookInstaller for AmpInstaller {
     fn name(&self) -> &str {
-        "Amp"
+        AMP_SPEC.name
     }
 
     fn id(&self) -> &str {
-        "amp"
+        AMP_SPEC.id
     }
 
     fn process_names(&self) -> Vec<&str> {
-        vec!["amp"]
+        AMP_SPEC.process_names.to_vec()
     }
 
     fn check_hooks(&self, params: &HookInstallerParams) -> Result<HookCheckResult, GitAiError> {
-        let has_binary = binary_exists("amp");
-        let has_global_config = home_dir().join(".config").join("amp").exists();
-        let has_local_config = Path::new(".amp").exists();
-
-        if !has_binary && !has_global_config && !has_local_config {
-            return Ok(HookCheckResult {
-                tool_installed: false,
-                hooks_installed: false,
-                hooks_up_to_date: false,
-            });
-        }
-
-        let plugin_path = Self::plugin_path();
-        if !plugin_path.exists() {
-            return Ok(HookCheckResult {
-                tool_installed: true,
-                hooks_installed: false,
-                hooks_up_to_date: false,
-            });
-        }
-
-        let current_content = fs::read_to_string(&plugin_path).unwrap_or_default();
-        let expected_content = Self::generate_plugin_content(&params.binary_path);
-        let is_up_to_date = current_content.trim() == expected_content.trim();
-
-        Ok(HookCheckResult {
-            tool_installed: true,
-            hooks_installed: true,
-            hooks_up_to_date: is_up_to_date,
-        })
+        plugin_drop::file_drop_check_hooks(&AMP_SPEC, params)
     }
 
     fn install_hooks(
@@ -80,35 +73,7 @@ impl HookInstaller for AmpInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let plugin_path = Self::plugin_path();
-
-        if let Some(dir) = plugin_path.parent()
-            && !dry_run
-        {
-            fs::create_dir_all(dir)?;
-        }
-
-        let existing_content = if plugin_path.exists() {
-            fs::read_to_string(&plugin_path)?
-        } else {
-            String::new()
-        };
-
-        let new_content = Self::generate_plugin_content(&params.binary_path);
-        if existing_content.trim() == new_content.trim() {
-            return Ok(None);
-        }
-
-        let diff_output = generate_diff(&plugin_path, &existing_content, &new_content);
-
-        if !dry_run {
-            if let Some(dir) = plugin_path.parent() {
-                fs::create_dir_all(dir)?;
-            }
-            write_atomic(&plugin_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+        plugin_drop::file_drop_install(&AMP_SPEC, params, dry_run)
     }
 
     fn uninstall_hooks(
@@ -116,26 +81,14 @@ impl HookInstaller for AmpInstaller {
         _params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let plugin_path = Self::plugin_path();
-
-        if !plugin_path.exists() {
-            return Ok(None);
-        }
-
-        let existing_content = fs::read_to_string(&plugin_path)?;
-        let diff_output = generate_diff(&plugin_path, &existing_content, "");
-
-        if !dry_run {
-            fs::remove_file(&plugin_path)?;
-        }
-
-        Ok(Some(diff_output))
+        plugin_drop::file_drop_uninstall(&AMP_SPEC, dry_run)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
 
@@ -175,6 +128,18 @@ mod tests {
         assert!(content.contains("checkpoint amp"));
         assert!(!content.contains("__GIT_AI_BINARY_PATH__"));
         assert!(content.contains(r#"const GIT_AI_BIN = '/usr/local/bin/git-ai'"#));
+    }
+
+    #[test]
+    fn test_amp_plugin_output_path() {
+        assert_eq!(
+            AmpInstaller::plugin_path(),
+            home_dir()
+                .join(".config")
+                .join("amp")
+                .join("plugins")
+                .join("git-ai.ts")
+        );
     }
 
     #[test]
@@ -248,5 +213,160 @@ mod tests {
         assert!(content.contains("tool.call"));
         assert!(content.contains("tool.result"));
         assert!(!content.contains("__GIT_AI_BINARY_PATH__"));
+    }
+
+    // ---- Detection / check_hooks / install_hooks / uninstall_hooks (trait-level) ----
+
+    fn with_temp_home<F: FnOnce(&Path)>(f: F) {
+        let temp_dir = TempDir::new().unwrap();
+        let home = temp_dir.path().to_path_buf();
+
+        let prev_home = std::env::var_os("HOME");
+        let prev_userprofile = std::env::var_os("USERPROFILE");
+
+        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("USERPROFILE", &home);
+        }
+
+        f(&home);
+
+        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            match prev_userprofile {
+                Some(v) => std::env::set_var("USERPROFILE", v),
+                None => std::env::remove_var("USERPROFILE"),
+            }
+        }
+    }
+
+    fn with_empty_path<F: FnOnce()>(f: F) {
+        let temp_dir = TempDir::new().unwrap();
+        let prev_path = std::env::var_os("PATH");
+
+        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
+        unsafe {
+            std::env::set_var("PATH", temp_dir.path());
+        }
+
+        f();
+
+        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
+        unsafe {
+            match prev_path {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_amp_no_binary_no_config_not_detected() {
+        with_temp_home(|_home| {
+            with_empty_path(|| {
+                let installer = AmpInstaller;
+                let params = HookInstallerParams {
+                    binary_path: create_test_binary_path(),
+                };
+                let result = installer.check_hooks(&params).unwrap();
+                assert!(!result.tool_installed);
+                assert!(!result.hooks_installed);
+            });
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_amp_install_hooks_creates_plugin_via_trait() {
+        with_temp_home(|home| {
+            let installer = AmpInstaller;
+            let params = HookInstallerParams {
+                binary_path: create_test_binary_path(),
+            };
+
+            let result = installer.install_hooks(&params, false).unwrap();
+            assert!(result.is_some(), "install_hooks should produce a diff");
+
+            let plugin_path = home
+                .join(".config")
+                .join("amp")
+                .join("plugins")
+                .join("git-ai.ts");
+            assert!(plugin_path.exists());
+
+            let content = fs::read_to_string(&plugin_path).unwrap();
+            assert!(content.contains("checkpoint amp"));
+            assert!(!content.contains("__GIT_AI_BINARY_PATH__"));
+
+            // check_hooks should now report installed + up to date
+            let check = installer.check_hooks(&params).unwrap();
+            assert!(check.tool_installed);
+            assert!(check.hooks_installed);
+            assert!(check.hooks_up_to_date);
+
+            // A second install_hooks call is a no-op (already up to date)
+            let second = installer.install_hooks(&params, false).unwrap();
+            assert!(second.is_none());
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_amp_install_hooks_dry_run_does_not_write() {
+        with_temp_home(|home| {
+            let installer = AmpInstaller;
+            let params = HookInstallerParams {
+                binary_path: create_test_binary_path(),
+            };
+
+            let result = installer.install_hooks(&params, true).unwrap();
+            assert!(result.is_some(), "dry_run should still report a diff");
+
+            let plugin_path = home
+                .join(".config")
+                .join("amp")
+                .join("plugins")
+                .join("git-ai.ts");
+            assert!(!plugin_path.exists(), "dry_run must not write the file");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn test_amp_uninstall_hooks_removes_plugin() {
+        with_temp_home(|home| {
+            let installer = AmpInstaller;
+            let params = HookInstallerParams {
+                binary_path: create_test_binary_path(),
+            };
+            installer.install_hooks(&params, false).unwrap();
+
+            let plugin_path = home
+                .join(".config")
+                .join("amp")
+                .join("plugins")
+                .join("git-ai.ts");
+            assert!(plugin_path.exists());
+
+            let result = installer.uninstall_hooks(&params, false).unwrap();
+            assert!(result.is_some());
+            assert!(!plugin_path.exists());
+
+            // Uninstalling again is a no-op
+            let second = installer.uninstall_hooks(&params, false).unwrap();
+            assert!(second.is_none());
+        });
+    }
+
+    #[test]
+    fn test_amp_process_names() {
+        let installer = AmpInstaller;
+        assert_eq!(installer.process_names(), vec!["amp"]);
     }
 }

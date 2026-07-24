@@ -38,8 +38,8 @@ fn internal_background_subcommands_must_use_spawn_helper() {
     ];
 
     for file in files {
-        // Utility layer is allowed to own the centralized spawn implementation.
-        if file.ends_with("src/utils.rs") {
+        // This module is allowed to own the centralized spawn implementation.
+        if file.ends_with("src/cli/git_ai_exe.rs") {
             continue;
         }
 

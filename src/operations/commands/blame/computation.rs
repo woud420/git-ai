@@ -6,9 +6,9 @@ use crate::model::authorship_log::PromptRecord;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::authorship::line_lookup::get_line_attribution;
 use crate::operations::git::notes_api::read_authorship_v3;
-use crate::operations::git::repository::Repository;
 #[cfg(windows)]
-use crate::utils::normalize_to_posix;
+use crate::operations::git::path_format::normalize_to_posix;
+use crate::operations::git::repository::Repository;
 
 use super::json_output::output_json_format;
 use super::output::output_default_format;

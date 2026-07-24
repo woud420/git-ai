@@ -1,6 +1,6 @@
 use crate::config;
 use crate::error::GitAiError;
-use crate::utils::LockFile;
+use crate::model::repository::lock_file::LockFile;
 #[cfg(not(windows))]
 use interprocess::local_socket::prelude::*;
 #[cfg(windows)]

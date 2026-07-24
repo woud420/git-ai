@@ -1,7 +1,7 @@
 //! Filesystem snapshot, diff, and git-status fallback for bash-tool attribution.
 
 use crate::error::GitAiError;
-use crate::utils::normalize_to_posix;
+use crate::operations::git::path_format::normalize_to_posix;
 use ignore::WalkBuilder;
 use std::collections::HashMap;
 use std::fs;

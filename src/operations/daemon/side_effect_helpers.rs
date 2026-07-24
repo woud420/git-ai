@@ -339,7 +339,7 @@ pub fn resolve_checkpoint_request(
     use crate::operations::authorship::ignore::{
         build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
     };
-    use crate::utils::normalize_to_posix;
+    use crate::operations::git::path_format::normalize_to_posix;
 
     let Some(first_file) = request.files.first() else {
         return Ok(None);

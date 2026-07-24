@@ -7,7 +7,7 @@ use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::git::notes_api::{read_authorship, read_authorship_from_primary_backend};
 use crate::operations::git::repository::Repository;
 use crate::operations::mdm::spinner::Spinner;
-use crate::utils::is_interactive_terminal;
+use crate::process_spawn::is_interactive_terminal;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::stats::{CommitStats, stats_for_commit_stats_with_authorship};

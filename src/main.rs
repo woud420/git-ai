@@ -1,5 +1,7 @@
 use clap::Parser;
-use git_ai::utils::{SuperuserCheckResult, check_superuser_guard, print_superuser_warning};
+use git_ai::cli::environment::{
+    SuperuserCheckResult, check_superuser_guard, print_superuser_warning,
+};
 use git_ai::{cli, operations};
 
 #[derive(Parser)]

@@ -1,11 +1,11 @@
+use crate::model::repository::lock_file::LockFile;
 use crate::operations::daemon::daemon_log_file_path;
 use crate::operations::daemon::{
     ControlRequest, DaemonConfig, local_socket_connects_with_timeout, read_daemon_pid,
     remove_stale_daemon_files, send_control_request, send_control_request_with_timeout,
 };
-use crate::utils::LockFile;
 #[cfg(windows)]
-use crate::utils::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
+use crate::process_spawn::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 #[cfg(windows)]
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -352,7 +352,7 @@ fn spawn_daemon_run_detached(config: &DaemonConfig) -> Result<(), String> {
     // symlinks. When the current exe is the git shim (e.g. ~/.local/bin/git),
     // current_exe() would spawn `git daemon run` which re-enters handle_git()
     // instead of handle_git_ai(), causing a fork bomb in async mode.
-    let exe = crate::utils::current_git_ai_exe().map_err(|e| e.to_string())?;
+    let exe = crate::cli::git_ai_exe::current_git_ai_exe().map_err(|e| e.to_string())?;
     let runtime_dir = daemon_runtime_dir(config)?;
 
     #[cfg(windows)]
@@ -428,7 +428,7 @@ fn spawn_daemon_run_detached(config: &DaemonConfig) -> Result<(), String> {
 fn spawn_daemon_run_with_piped_stderr(
     config: &DaemonConfig,
 ) -> Result<std::process::Child, String> {
-    let exe = crate::utils::current_git_ai_exe().map_err(|e| e.to_string())?;
+    let exe = crate::cli::git_ai_exe::current_git_ai_exe().map_err(|e| e.to_string())?;
     let runtime_dir = daemon_runtime_dir(config)?;
     let mut child = Command::new(exe);
     child

@@ -320,7 +320,7 @@ fn parse_porcelain_blame_output(stdout: &str, file_path: &str) -> Vec<BlameHunk>
             continue;
         }
         if let Some(rest) = line.strip_prefix("filename ") {
-            cur_meta.filename = Some(crate::utils::unescape_git_path(rest));
+            cur_meta.filename = Some(crate::operations::git::path_format::unescape_git_path(rest));
             continue;
         }
 

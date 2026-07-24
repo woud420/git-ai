@@ -73,9 +73,11 @@ pub(super) fn resolve_path_to_remotes(path: &str) -> Result<Vec<String>, String>
     // A repository without remotes is stored by its canonical root path,
     // which is matched as a path pattern.
     if remotes.is_empty() {
-        return Ok(vec![crate::utils::normalize_to_posix(
-            &repo.canonical_workdir().to_string_lossy(),
-        )]);
+        return Ok(vec![
+            crate::operations::git::path_format::normalize_to_posix(
+                &repo.canonical_workdir().to_string_lossy(),
+            ),
+        ]);
     }
 
     // Return all remote URLs

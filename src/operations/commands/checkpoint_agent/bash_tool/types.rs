@@ -1,6 +1,6 @@
 //! Core data types for bash-tool stat-diff snapshots.
 
-use crate::utils::normalize_to_posix;
+use crate::operations::git::path_format::normalize_to_posix;
 use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------

@@ -100,8 +100,10 @@ impl AgentPreset for DroidPreset {
         } else {
             let (jsonl_p, settings_p) = droid_session_paths(&session_id, cwd);
             (
-                crate::utils::normalize_to_posix(&jsonl_p.to_string_lossy()),
-                crate::utils::normalize_to_posix(&settings_p.to_string_lossy()),
+                crate::operations::git::path_format::normalize_to_posix(&jsonl_p.to_string_lossy()),
+                crate::operations::git::path_format::normalize_to_posix(
+                    &settings_p.to_string_lossy(),
+                ),
             )
         };
 
@@ -465,8 +467,10 @@ mod tests {
     #[test]
     fn test_droid_session_paths_helper() {
         let (jsonl, settings) = droid_session_paths("test-sess", "/home/user/project");
-        let jsonl_s = crate::utils::normalize_to_posix(&jsonl.to_string_lossy());
-        let settings_s = crate::utils::normalize_to_posix(&settings.to_string_lossy());
+        let jsonl_s =
+            crate::operations::git::path_format::normalize_to_posix(&jsonl.to_string_lossy());
+        let settings_s =
+            crate::operations::git::path_format::normalize_to_posix(&settings.to_string_lossy());
         assert!(jsonl_s.contains(".factory/sessions/"));
         assert!(jsonl_s.ends_with("test-sess.jsonl"));
         assert!(settings_s.ends_with("test-sess.settings.json"));

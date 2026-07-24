@@ -458,17 +458,22 @@ pub fn gemini_config_dir() -> PathBuf {
     home_dir().join(".gemini")
 }
 
+/// Text-dedup constructor for the atomic-write filesystem errors below;
+/// Display output is unchanged from the sites it replaces.
+fn atomic_write_io_error(
+    what: &str,
+    location: impl std::fmt::Display,
+    e: std::io::Error,
+) -> GitAiError {
+    GitAiError::Generic(format!("Failed to {} {}: {}", what, location, e))
+}
+
 /// Write data to a file atomically (write to temp, then rename)
 /// If the path is a symlink, writes to the target file (preserving the symlink)
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
     let target_path = if path.is_symlink() {
-        fs::canonicalize(path).map_err(|e| {
-            GitAiError::Generic(format!(
-                "Failed to resolve symlink {}: {}",
-                path.display(),
-                e
-            ))
-        })?
+        fs::canonicalize(path)
+            .map_err(|e| atomic_write_io_error("resolve symlink", path.display(), e))?
     } else {
         path.to_path_buf()
     };
@@ -480,23 +485,17 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
 
     let tmp_path = target_path.with_extension("tmp");
     {
-        let mut file = fs::File::create(&tmp_path).map_err(|e| {
-            GitAiError::Generic(format!(
-                "Failed to create temp file {}: {}",
-                tmp_path.display(),
-                e
-            ))
-        })?;
+        let mut file = fs::File::create(&tmp_path)
+            .map_err(|e| atomic_write_io_error("create temp file", tmp_path.display(), e))?;
         file.write_all(data)?;
         file.sync_all()?;
     }
     fs::rename(&tmp_path, &target_path).map_err(|e| {
-        GitAiError::Generic(format!(
-            "Failed to rename {} to {}: {}",
-            tmp_path.display(),
-            target_path.display(),
-            e
-        ))
+        atomic_write_io_error(
+            "rename",
+            format!("{} to {}", tmp_path.display(), target_path.display()),
+            e,
+        )
     })?;
     Ok(())
 }
@@ -504,13 +503,8 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
 /// Ensure parent directory exists
 pub fn ensure_parent_dir(path: &Path) -> Result<(), GitAiError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            GitAiError::Generic(format!(
-                "Failed to create directory {}: {}",
-                parent.display(),
-                e
-            ))
-        })?;
+        fs::create_dir_all(parent)
+            .map_err(|e| atomic_write_io_error("create directory", parent.display(), e))?;
     }
     Ok(())
 }

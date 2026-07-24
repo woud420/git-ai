@@ -3,13 +3,21 @@
 //! their containing repository and batch-read blob content at treeishes.
 
 use super::core::Repository;
-use super::discovery_no_exec::worktree_storage_ai_dir;
+use super::discovery_no_exec::{
+    canonicalize_workdir, no_parent_error, require_dir, worktree_storage_ai_dir,
+};
 use crate::clients::git_cli::{exec_git, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::operations::git::cat_file::batch_read_blob_contents;
 use crate::operations::git::repo_storage::RepoStorage;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+/// Text-dedup constructor for the "Missing --X output from git rev-parse"
+/// shape below; Display output is unchanged from the sites it replaces.
+fn missing_rev_parse_output(flag: &str) -> GitAiError {
+    GitAiError::Generic(format!("Missing --{} output from git rev-parse", flag))
+}
 
 pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError> {
     let mut rev_parse_args = global_args.to_owned();
@@ -38,18 +46,16 @@ pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError>
             )));
         }
         None => {
-            return Err(GitAiError::Generic(
-                "Missing --is-bare-repository output from git rev-parse".to_string(),
-            ));
+            return Err(missing_rev_parse_output("is-bare-repository"));
         }
     };
 
-    let git_dir_str = lines.next().ok_or_else(|| {
-        GitAiError::Generic("Missing --git-dir output from git rev-parse".to_string())
-    })?;
-    let git_common_dir_str = lines.next().ok_or_else(|| {
-        GitAiError::Generic("Missing --git-common-dir output from git rev-parse".to_string())
-    })?;
+    let git_dir_str = lines
+        .next()
+        .ok_or_else(|| missing_rev_parse_output("git-dir"))?;
+    let git_common_dir_str = lines
+        .next()
+        .ok_or_else(|| missing_rev_parse_output("git-common-dir"))?;
     let command_base_dir = resolve_command_base_dir(global_args)?;
     let git_dir = if Path::new(git_dir_str).is_relative() {
         command_base_dir.join(git_dir_str)
@@ -62,26 +68,14 @@ pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError>
         PathBuf::from(git_common_dir_str)
     };
 
-    if !git_dir.is_dir() {
-        return Err(GitAiError::Generic(format!(
-            "Git directory does not exist: {}",
-            git_dir.display()
-        )));
-    }
-    if !git_common_dir.is_dir() {
-        return Err(GitAiError::Generic(format!(
-            "Git common directory does not exist: {}",
-            git_common_dir.display()
-        )));
-    }
+    require_dir("Git directory", &git_dir)?;
+    require_dir("Git common directory", &git_common_dir)?;
 
     let workdir = if is_bare {
-        git_dir.parent().map(Path::to_path_buf).ok_or_else(|| {
-            GitAiError::Generic(format!(
-                "Git directory has no parent: {}",
-                git_dir.display()
-            ))
-        })?
+        git_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| no_parent_error("Git directory", &git_dir))?
     } else {
         let mut top_level_args = global_args.to_owned();
         top_level_args.push("rev-parse".to_string());
@@ -90,12 +84,7 @@ pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError>
         PathBuf::from(String::from_utf8(output.stdout)?.trim())
     };
 
-    if !workdir.is_dir() {
-        return Err(GitAiError::Generic(format!(
-            "Work directory does not exist: {}",
-            workdir.display()
-        )));
-    }
+    require_dir("Work directory", &workdir)?;
 
     // Ensure all internal git commands use a stable repository root consistently.
     let mut normalized_global_args = global_args.to_owned();
@@ -117,13 +106,7 @@ pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError>
     // Canonicalize workdir for reliable path comparisons (especially on Windows)
     // On Windows, canonical paths use the \\?\ UNC prefix, which makes path.starts_with()
     // comparisons work correctly. We store both regular and canonical versions.
-    let canonical_workdir = workdir.canonicalize().map_err(|e| {
-        GitAiError::Generic(format!(
-            "Failed to canonicalize working directory {}: {}",
-            workdir.display(),
-            e
-        ))
-    })?;
+    let canonical_workdir = canonicalize_workdir(&workdir)?;
 
     let worktree_ai_dir = worktree_storage_ai_dir(&git_dir, &git_common_dir);
     let storage = if worktree_ai_dir == git_dir.join("ai") {

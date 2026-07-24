@@ -69,6 +69,18 @@ pub struct StatusEntry {
     pub orig_path: Option<String>,
 }
 
+fn command_exit_status_error(cmd: &str, status: std::process::ExitStatus) -> GitAiError {
+    GitAiError::Generic(format!("git {} exited with status {}", cmd, status))
+}
+
+fn missing_field_error(field: &str) -> GitAiError {
+    GitAiError::Generic(format!("Missing {} field", field))
+}
+
+fn unexpected_xy_field_length_error(xy: &str) -> GitAiError {
+    GitAiError::Generic(format!("Unexpected XY field length: {}", xy))
+}
+
 impl Repository {
     // Get status for tracked files that changed
     pub fn get_staged_filenames(&self) -> Result<HashSet<String>, GitAiError> {
@@ -82,10 +94,7 @@ impl Repository {
         let output = exec_git_with_profile(&args, InternalGitProfile::RawDiffParse)?;
 
         if !output.status.success() {
-            return Err(GitAiError::Generic(format!(
-                "git diff exited with status {}",
-                output.status
-            )));
+            return Err(command_exit_status_error("diff", output.status));
         }
 
         // With -z, output is NUL-separated. The output may contain a trailing NUL.
@@ -113,10 +122,7 @@ impl Repository {
         let output = exec_git_with_profile(&args, InternalGitProfile::General)?;
 
         if !output.status.success() {
-            return Err(GitAiError::Generic(format!(
-                "git status exited with status {}",
-                output.status
-            )));
+            return Err(command_exit_status_error("status", output.status));
         }
 
         let entries = parse_porcelain_v2(&output.stdout)?;
@@ -178,10 +184,7 @@ impl Repository {
         let output = exec_git_with_profile(&args, InternalGitProfile::General)?;
 
         if !output.status.success() {
-            return Err(GitAiError::Generic(format!(
-                "git status exited with status {}",
-                output.status
-            )));
+            return Err(command_exit_status_error("status", output.status));
         }
 
         let mut entries = parse_porcelain_v2(&output.stdout)?;
@@ -223,14 +226,9 @@ fn parse_porcelain_v2(data: &[u8]) -> Result<Vec<StatusEntry>, GitAiError> {
             '1' | 'u' => {
                 let mut fields = record.splitn(9, ' ');
                 let _ = fields.next(); // tag
-                let xy = fields
-                    .next()
-                    .ok_or_else(|| GitAiError::Generic("Missing XY field".into()))?;
+                let xy = fields.next().ok_or_else(|| missing_field_error("XY"))?;
                 if xy.len() != 2 {
-                    return Err(GitAiError::Generic(format!(
-                        "Unexpected XY field length: {}",
-                        xy
-                    )));
+                    return Err(unexpected_xy_field_length_error(xy));
                 }
                 let staged = StatusCode::from(xy.chars().next().unwrap());
                 let unstaged = StatusCode::from(xy.chars().nth(1).unwrap());
@@ -243,7 +241,7 @@ fn parse_porcelain_v2(data: &[u8]) -> Result<Vec<StatusEntry>, GitAiError> {
                 let path = nfc_path(
                     fields
                         .next()
-                        .ok_or_else(|| GitAiError::Generic("Missing path field".into()))?
+                        .ok_or_else(|| missing_field_error("path"))?
                         .to_string(),
                 );
 
@@ -264,14 +262,9 @@ fn parse_porcelain_v2(data: &[u8]) -> Result<Vec<StatusEntry>, GitAiError> {
             '2' => {
                 let mut fields = record.splitn(10, ' ');
                 let _ = fields.next(); // tag
-                let xy = fields
-                    .next()
-                    .ok_or_else(|| GitAiError::Generic("Missing XY field".into()))?;
+                let xy = fields.next().ok_or_else(|| missing_field_error("XY"))?;
                 if xy.len() != 2 {
-                    return Err(GitAiError::Generic(format!(
-                        "Unexpected XY field length: {}",
-                        xy
-                    )));
+                    return Err(unexpected_xy_field_length_error(xy));
                 }
                 let staged = StatusCode::from(xy.chars().next().unwrap());
                 let unstaged = StatusCode::from(xy.chars().nth(1).unwrap());
@@ -284,7 +277,7 @@ fn parse_porcelain_v2(data: &[u8]) -> Result<Vec<StatusEntry>, GitAiError> {
                 let path = nfc_path(
                     fields
                         .next()
-                        .ok_or_else(|| GitAiError::Generic("Missing path field".into()))?
+                        .ok_or_else(|| missing_field_error("path"))?
                         .to_string(),
                 );
 

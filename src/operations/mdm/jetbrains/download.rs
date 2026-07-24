@@ -1,6 +1,9 @@
+use crate::clients::api::error::{ApiError, http_status_error};
 use crate::error::GitAiError;
 use std::io::{Cursor, Read};
 use std::path::Path;
+
+const JETBRAINS_DOWNLOAD_OPERATION: &str = "jetbrains plugin download";
 
 /// Download plugin from JetBrains Marketplace
 ///
@@ -19,23 +22,45 @@ pub fn download_plugin_from_marketplace(
 
     let agent = crate::clients::http::build_agent(Some(120));
     let request = agent.get(&url);
-    let response = crate::clients::http::send(request)
-        .map_err(|e| GitAiError::Generic(format!("Failed to download plugin: {}", e)))?;
+    let response = crate::clients::http::send(request).map_err(|message| {
+        GitAiError::Api(ApiError {
+            operation: JETBRAINS_DOWNLOAD_OPERATION,
+            status: None,
+            message,
+        })
+    })?;
 
     if response.status_code == 404 {
-        return Err(GitAiError::Generic(
-            "Plugin not found in JetBrains Marketplace. It may not be published yet.".to_string(),
-        ));
+        return Err(GitAiError::Api(ApiError {
+            operation: JETBRAINS_DOWNLOAD_OPERATION,
+            status: Some(404),
+            message: "Plugin not found in JetBrains Marketplace. It may not be published yet."
+                .to_string(),
+        }));
     }
 
     if response.status_code != 200 {
-        return Err(GitAiError::Generic(format!(
-            "JetBrains Marketplace returned status {}",
-            response.status_code
-        )));
+        let body = response.as_str().unwrap_or("");
+        return Err(http_status_error(
+            JETBRAINS_DOWNLOAD_OPERATION,
+            response.status_code,
+            body,
+            "unexpected error",
+        )
+        .into());
     }
 
     Ok(response.into_bytes())
+}
+
+/// Text-dedup constructors for the ZIP-extraction filesystem/read errors
+/// below; Display output is unchanged from the sites they replace.
+fn zip_path_io_error(what: &str, path: &Path, e: std::io::Error) -> GitAiError {
+    GitAiError::Generic(format!("Failed to {} {}: {}", what, path.display(), e))
+}
+
+fn zip_read_error(what: &str, e: impl std::fmt::Display) -> GitAiError {
+    GitAiError::Generic(format!("Failed to read {}: {}", what, e))
 }
 
 /// Extract plugin ZIP to plugins directory
@@ -47,23 +72,17 @@ pub fn install_plugin_to_directory(zip_data: &[u8], plugin_dir: &Path) -> Result
 
     // Ensure the plugins directory exists
     if !plugin_dir.exists() {
-        std::fs::create_dir_all(plugin_dir).map_err(|e| {
-            GitAiError::Generic(format!(
-                "Failed to create plugins directory {}: {}",
-                plugin_dir.display(),
-                e
-            ))
-        })?;
+        std::fs::create_dir_all(plugin_dir)
+            .map_err(|e| zip_path_io_error("create plugins directory", plugin_dir, e))?;
     }
 
     let cursor = Cursor::new(zip_data);
-    let mut archive = ZipArchive::new(cursor)
-        .map_err(|e| GitAiError::Generic(format!("Failed to read plugin ZIP: {}", e)))?;
+    let mut archive = ZipArchive::new(cursor).map_err(|e| zip_read_error("plugin ZIP", e))?;
 
     for i in 0..archive.len() {
         let mut file = archive
             .by_index(i)
-            .map_err(|e| GitAiError::Generic(format!("Failed to read ZIP entry: {}", e)))?;
+            .map_err(|e| zip_read_error("ZIP entry", e))?;
 
         let outpath = match file.enclosed_name() {
             Some(path) => plugin_dir.join(path),
@@ -72,43 +91,26 @@ pub fn install_plugin_to_directory(zip_data: &[u8], plugin_dir: &Path) -> Result
 
         if file.name().ends_with('/') {
             // Directory entry
-            std::fs::create_dir_all(&outpath).map_err(|e| {
-                GitAiError::Generic(format!(
-                    "Failed to create directory {}: {}",
-                    outpath.display(),
-                    e
-                ))
-            })?;
+            std::fs::create_dir_all(&outpath)
+                .map_err(|e| zip_path_io_error("create directory", &outpath, e))?;
         } else {
             // File entry
             if let Some(parent) = outpath.parent()
                 && !parent.exists()
             {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    GitAiError::Generic(format!(
-                        "Failed to create parent directory {}: {}",
-                        parent.display(),
-                        e
-                    ))
-                })?;
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| zip_path_io_error("create parent directory", parent, e))?;
             }
 
-            let mut outfile = std::fs::File::create(&outpath).map_err(|e| {
-                GitAiError::Generic(format!(
-                    "Failed to create file {}: {}",
-                    outpath.display(),
-                    e
-                ))
-            })?;
+            let mut outfile = std::fs::File::create(&outpath)
+                .map_err(|e| zip_path_io_error("create file", &outpath, e))?;
 
             let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer).map_err(|e| {
-                GitAiError::Generic(format!("Failed to read ZIP file contents: {}", e))
-            })?;
+            file.read_to_end(&mut buffer)
+                .map_err(|e| zip_read_error("ZIP file contents", e))?;
 
-            std::io::Write::write_all(&mut outfile, &buffer).map_err(|e| {
-                GitAiError::Generic(format!("Failed to write file {}: {}", outpath.display(), e))
-            })?;
+            std::io::Write::write_all(&mut outfile, &buffer)
+                .map_err(|e| zip_path_io_error("write file", &outpath, e))?;
 
             // Set executable permissions on Unix
             #[cfg(unix)]

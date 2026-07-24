@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::operations::git::repository::Repository;
 #[cfg(windows)]
-use crate::utils::CREATE_NO_WINDOW;
+use crate::process_spawn::CREATE_NO_WINDOW;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 

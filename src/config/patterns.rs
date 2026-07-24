@@ -17,10 +17,11 @@ where
 /// it equals the root, glob-matches it, or names a parent directory of it
 /// (an entry `/work/repos` matches every repository beneath `/work/repos`).
 pub(crate) fn repo_root_matches_patterns(patterns: &[Pattern], repo_root: &Path) -> bool {
-    let root = crate::utils::normalize_to_posix(&repo_root.to_string_lossy());
+    let root =
+        crate::operations::git::path_format::normalize_to_posix(&repo_root.to_string_lossy());
     let root = root.trim_end_matches('/');
     patterns.iter().any(|pattern| {
-        let normalized = crate::utils::normalize_to_posix(pattern.as_str());
+        let normalized = crate::operations::git::path_format::normalize_to_posix(pattern.as_str());
         let pattern_str = normalized.trim_end_matches('/');
         pattern_str == root
             || Pattern::new(pattern_str).is_ok_and(|glob| glob.matches(root))

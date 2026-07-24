@@ -202,7 +202,7 @@ fn resolve_hostname() -> Option<String> {
     let mut cmd = std::process::Command::new("hostname");
     #[cfg(windows)]
     {
-        use crate::utils::CREATE_NO_WINDOW;
+        use crate::process_spawn::CREATE_NO_WINDOW;
         std::os::windows::process::CommandExt::creation_flags(&mut cmd, CREATE_NO_WINDOW);
     }
     let output = cmd.output().ok()?;

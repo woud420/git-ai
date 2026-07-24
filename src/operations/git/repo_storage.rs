@@ -3,7 +3,7 @@ use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::generate_short_hash;
 use crate::model::working_log::{CHECKPOINT_API_VERSION, Checkpoint, CheckpointKind};
-use crate::utils::normalize_to_posix;
+use crate::operations::git::path_format::normalize_to_posix;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;

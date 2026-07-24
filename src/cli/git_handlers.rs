@@ -6,9 +6,9 @@ use crate::operations::git::cli_parser::{ParsedGitInvocation, parse_git_cli_args
 use crate::operations::git::find_repository;
 use crate::operations::git::repository::Repository;
 #[cfg(windows)]
-use crate::utils::CREATE_NO_WINDOW;
+use crate::process_spawn::CREATE_NO_WINDOW;
 #[cfg(windows)]
-use crate::utils::is_interactive_terminal;
+use crate::process_spawn::is_interactive_terminal;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 #[cfg(unix)]

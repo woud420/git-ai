@@ -56,4 +56,3 @@ src/operations/streams/agents/copilot.rs	970
 src/operations/streams/agents/copilot_otel.rs	1019
 src/operations/streams/agents/opencode.rs	703
 src/operations/streams/model_extraction.rs	746
-src/utils.rs	1240

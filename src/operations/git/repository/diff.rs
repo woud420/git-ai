@@ -317,7 +317,7 @@ fn has_non_ascii_pathspec(paths: &HashSet<String>) -> bool {
 }
 
 fn normalize_diff_path_token(path: &str) -> String {
-    let unescaped = crate::utils::unescape_git_path(path.trim_end());
+    let unescaped = crate::operations::git::path_format::unescape_git_path(path.trim_end());
     let prefixes = ["a/", "b/", "c/", "w/", "i/", "o/"];
     let stripped = prefixes
         .iter()

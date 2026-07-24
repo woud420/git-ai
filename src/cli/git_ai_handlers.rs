@@ -16,7 +16,7 @@ use crate::operations::git::repository::{CommitRange, Repository};
 use crate::operations::git::sync_authorship::{
     NotesExistence, fetch_authorship_notes, push_authorship_notes,
 };
-use crate::utils::is_interactive_terminal;
+use crate::process_spawn::is_interactive_terminal;
 use serde::{Deserialize, Serialize};
 use std::io::IsTerminal;
 use std::io::Read;
@@ -1120,7 +1120,7 @@ fn discover_dirty_files_from_status(cwd: &std::path::Path) -> Vec<String> {
             if raw_file.is_empty() {
                 return None;
             }
-            let unescaped = crate::utils::unescape_git_path(raw_file);
+            let unescaped = crate::operations::git::path_format::unescape_git_path(raw_file);
             let mut file = unescaped.as_str();
             // Renames show as "old_name -> new_name"; take only the new name
             if let Some(arrow_pos) = file.find(" -> ") {

@@ -107,7 +107,7 @@ pub fn daemon_socket_health_check_interval() -> u64 {
 /// instance.  Returns Ok if the process was spawned; the caller should
 /// still request_shutdown so the current daemon exits promptly.
 pub fn spawn_self_restart() -> Result<(), String> {
-    let exe = crate::utils::current_git_ai_exe().map_err(|e| e.to_string())?;
+    let exe = crate::cli::git_ai_exe::current_git_ai_exe().map_err(|e| e.to_string())?;
     tracing::info!(?exe, "spawning detached restart process");
 
     let mut cmd = std::process::Command::new(&exe);

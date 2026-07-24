@@ -3,7 +3,7 @@ use super::{AgentPreset, ParsedHookEvent, PresetContext, claude_wire};
 use crate::error::GitAiError;
 use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
-use crate::utils::normalize_to_posix;
+use crate::operations::git::path_format::normalize_to_posix;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;

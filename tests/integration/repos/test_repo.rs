@@ -9,9 +9,9 @@ use git_ai::operations::daemon::{
     send_control_request_with_timeout,
 };
 use git_ai::operations::git::cli_parser::{ParsedGitInvocation, extract_clone_target_directory};
+use git_ai::operations::git::path_format::normalize_to_posix;
 use git_ai::operations::git::repo_storage::PersistedWorkingLog;
 use git_ai::operations::git::repository as GitAiRepository;
-use git_ai::utils::normalize_to_posix;
 // BenchmarkResult for performance testing
 #[derive(Debug, Clone)]
 pub struct BenchmarkResult {

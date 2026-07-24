@@ -18,13 +18,13 @@ adapter** · **Network adapter** · **Orchestration** · **Interface**
 | `model/{attribution, diff_json, stream_watermark, telemetry}` | Domain | pure DTOs/value types moved in during P9.2 |
 | `model/{api_types, working_log, authorship_log_serialization}` | Domain | P9.2 leaks resolved; P9.3 residual resolved (`transcript::Message` now lives in `model/transcript.rs`) |
 | `model/{attribution_tracker, imara_diff_utils, move_detection, hunk_shift, transcript}` | Domain | pure attribution algebra moved in from `operations/authorship` during P9.3 |
-| `model/repository/*` (5 dbs + sqlite helpers) | Persistence | singletons by design until P9.5 |
+| `model/repository/*` (5 dbs + sqlite helpers + `lock_file`) | Persistence | singletons by design until P9.5 |
 | `error/`, `repo_url.rs`, `uuid.rs`, `checkpoint_content_budget.rs` | Domain | pure |
 | `feature_flags.rs` | Domain/config | reads `GIT_AI_*` env by design; P9 target: fold under `config/` |
 | `config/*` | Orchestration (bootstrap) | still imports `Repository` for the prompt-storage checks; the `is_allowed_repository` wrapper moved out in P9.2 (see below) |
 | `clients/{api, auth, http}` | Network adapter | dependency-clean after P9.2: no `operations/` imports |
 | `clients/git_cli/` | Git adapter (spawn layer) | dependency-clean: no `operations/` imports |
-| `operations/git/*` | Git adapter | `repository/`, `refs`, `notes_api` (notes choke point), `cat_file` (batched object reads), `oid` (object ID syntax), `status`, `repo_state`, `repo_storage`, `sync_authorship`, `fast_reader`, `cli_parser`, `command_classification`, `authorship_traversal` |
+| `operations/git/*` | Git adapter | `repository/`, `refs`, `notes_api` (notes choke point), `cat_file` (batched object reads), `oid` (object ID syntax), `status`, `repo_state`, `repo_storage`, `sync_authorship`, `fast_reader`, `cli_parser`, `command_classification`, `authorship_traversal`, `path_format` (POSIX normalization + quoted-path unescaping, ex-`utils.rs`) |
 | `operations/daemon/*` | Orchestration | actors/coordinator/reducer/analyzers/ref_cursor + socket listeners; reducer + analyzers are IO-free (keep it that way) |
 | `operations/commands/*` | Orchestration | command handlers; several still oversized (see `.file-length-baseline.txt`) |
 | `operations/authorship/*` | Mixed by design | `virtual_attribution/`, `range_authorship`, `rewrite*` entangle computation with git/notes IO; the pure Domain modules (`attribution_tracker/`, `hunk_shift`, `imara_diff_utils`, `move_detection`, `transcript`) moved to `model/` in P9.3 |
@@ -32,7 +32,7 @@ adapter** · **Network adapter** · **Orchestration** · **Interface**
 | `cli/*`, `main.rs` | Interface | argv[0] dispatch is load-bearing |
 | `metrics/{types, events, attrs, pos_encoded, local_stats}` | Domain + Orchestration mix | event structs are model material; emission/local-stats are orchestration |
 | `tokio_runtime.rs`, `process_timeout.rs`, `http.rs`(clients) | Infrastructure glue | |
-| `diagnostics.rs`, `utils.rs` | **Mixed** | dissolution maps below |
+| `diagnostics.rs` | **Mixed** | dissolution map below |
 | `observability/` | Orchestration | telemetry DTO leak resolved in P9.2; still dispatches to daemon submit fns (orchestration→orchestration, allowed) |
 | `notes/reference_server` | Test/reference infra | in-memory HTTP-contract server |
 
@@ -114,9 +114,11 @@ when `transcript.rs` moved to `model/transcript.rs`.
 
 ## Dissolution maps (no module may be named utils/helpers/common)
 
-`utils.rs` (1,240 lines): `normalize_to_posix` + `unescape_git_path` → path
-helpers next to their users (git adapter); git-exe discovery + terminal/
-background-agent/superuser detection → `cli/`; `LockFile` → persistence
-helper. `diagnostics.rs` (1,482): self-check orchestration → daemon;
-trace2 validation → git adapter; blame formatting → commands; status helpers
-→ control API. Both burn down opportunistically with the ratchet.
+`utils.rs` — dissolved (DRY E2): `normalize_to_posix` + `unescape_git_path` →
+`operations/git/path_format.rs` (git adapter); git-exe discovery/spawn +
+Windows process-creation flags → `cli/git_ai_exe.rs`; terminal/
+background-agent/superuser detection → `cli/environment.rs`; `LockFile` →
+`model/repository/lock_file.rs` (persistence adapter). `diagnostics.rs`
+(1,482): self-check orchestration → daemon; trace2 validation → git adapter;
+blame formatting → commands; status helpers → control API. Burns down
+opportunistically with the ratchet.

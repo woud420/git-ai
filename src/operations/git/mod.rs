@@ -8,6 +8,7 @@ pub mod notes_api;
 pub(crate) mod notes_store;
 pub mod oid;
 pub(crate) mod patch_id;
+pub mod path_format;
 pub mod refs;
 pub mod repo_state;
 pub mod repository;

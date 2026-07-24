@@ -9,9 +9,9 @@ use std::ffi::OsStr;
 use std::process::{Child, Command, Output};
 
 #[cfg(windows)]
-use crate::utils::CREATE_NO_WINDOW;
+use crate::process_spawn::CREATE_NO_WINDOW;
 #[cfg(windows)]
-use crate::utils::is_interactive_terminal;
+use crate::process_spawn::is_interactive_terminal;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 

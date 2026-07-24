@@ -1,8 +1,5 @@
 use super::parse;
-use super::{
-    AgentPreset, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
-    PresetContext,
-};
+use super::{AgentPreset, ParsedHookEvent, PresetContext, claude_wire};
 use crate::error::GitAiError;
 use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
@@ -199,34 +196,18 @@ impl AgentPreset for FirebenderPreset {
             .filter(|s| !s.is_empty())
             .map(ToString::to_string);
 
-        let event = match (hook_event_name.as_str(), is_bash) {
-            ("preToolUse", true) => ParsedHookEvent::PreBashCall(PreBashCall {
-                context,
-                tool_use_id: tool_use_id_str,
-                command: bash_command,
-            }),
-            ("preToolUse", false) => ParsedHookEvent::PreFileEdit(PreFileEdit {
-                context,
-                file_paths,
-                dirty_files: dirty,
-                tool_use_id: Some(tool_use_id_str),
-            }),
-            (_, true) => ParsedHookEvent::PostBashCall(PostBashCall {
-                context,
-                tool_use_id: tool_use_id_str,
-                command: bash_command,
-                stream_source: None,
-            }),
-            (_, false) => ParsedHookEvent::PostFileEdit(PostFileEdit {
-                context,
-                file_paths,
-                dirty_files: dirty,
-                stream_source: None,
-                tool_use_id: Some(tool_use_id_str),
-            }),
-        };
+        let is_pre = hook_event_name == "preToolUse";
 
-        Ok(vec![event])
+        Ok(vec![claude_wire::build_wire_event(
+            is_pre,
+            is_bash,
+            context,
+            tool_use_id_str,
+            bash_command,
+            file_paths,
+            dirty,
+            None,
+        )])
     }
 }
 

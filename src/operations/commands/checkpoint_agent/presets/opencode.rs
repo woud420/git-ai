@@ -1,7 +1,4 @@
-use super::{
-    AgentPreset, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
-    PresetContext, StreamFormat, StreamSource,
-};
+use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::working_log::AgentId;
@@ -308,34 +305,16 @@ impl AgentPreset for OpenCodePreset {
 
         let stream_source = transcript_result.map(|(source, _)| source);
 
-        let event = match (is_pre, is_bash) {
-            (true, true) => ParsedHookEvent::PreBashCall(PreBashCall {
-                context,
-                tool_use_id: tool_use_id_str,
-                command: bash_command,
-            }),
-            (true, false) => ParsedHookEvent::PreFileEdit(PreFileEdit {
-                context,
-                file_paths,
-                dirty_files: None,
-                tool_use_id: Some(tool_use_id_str),
-            }),
-            (false, true) => ParsedHookEvent::PostBashCall(PostBashCall {
-                context,
-                tool_use_id: tool_use_id_str,
-                command: bash_command,
-                stream_source,
-            }),
-            (false, false) => ParsedHookEvent::PostFileEdit(PostFileEdit {
-                context,
-                file_paths,
-                dirty_files: None,
-                stream_source,
-                tool_use_id: Some(tool_use_id_str),
-            }),
-        };
-
-        Ok(vec![event])
+        Ok(vec![claude_wire::build_wire_event(
+            is_pre,
+            is_bash,
+            context,
+            tool_use_id_str,
+            bash_command,
+            file_paths,
+            None,
+            stream_source,
+        )])
     }
 }
 

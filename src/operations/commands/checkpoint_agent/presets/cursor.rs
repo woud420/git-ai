@@ -1,8 +1,5 @@
 use super::parse;
-use super::{
-    AgentPreset, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
-    PresetContext, StreamFormat, StreamSource,
-};
+use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::working_log::AgentId;
@@ -141,35 +138,18 @@ impl AgentPreset for CursorPreset {
             .to_string();
 
         let bash_command = parse::bash_command_from_hook_input(&data);
-        let event = match (tool_class, is_pre) {
-            (ToolClass::Bash, true) => ParsedHookEvent::PreBashCall(PreBashCall {
-                context,
-                tool_use_id,
-                command: bash_command.clone(),
-            }),
-            (ToolClass::Bash, false) => ParsedHookEvent::PostBashCall(PostBashCall {
-                context,
-                tool_use_id,
-                command: bash_command,
-                stream_source,
-            }),
-            (ToolClass::FileEdit, true) => ParsedHookEvent::PreFileEdit(PreFileEdit {
-                context,
-                file_paths,
-                dirty_files: None,
-                tool_use_id: Some(tool_use_id),
-            }),
-            (ToolClass::FileEdit, false) => ParsedHookEvent::PostFileEdit(PostFileEdit {
-                context,
-                file_paths,
-                dirty_files: None,
-                stream_source,
-                tool_use_id: Some(tool_use_id),
-            }),
-            (ToolClass::Skip, _) => unreachable!("Skip handled above"),
-        };
+        let is_bash = tool_class == ToolClass::Bash;
 
-        Ok(vec![event])
+        Ok(vec![claude_wire::build_wire_event(
+            is_pre,
+            is_bash,
+            context,
+            tool_use_id,
+            bash_command,
+            file_paths,
+            None,
+            stream_source,
+        )])
     }
 }
 

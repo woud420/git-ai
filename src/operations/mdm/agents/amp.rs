@@ -88,6 +88,7 @@ impl HookInstaller for AmpInstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::mdm::test_env::{with_empty_path, with_temp_home};
     use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
@@ -216,54 +217,6 @@ mod tests {
     }
 
     // ---- Detection / check_hooks / install_hooks / uninstall_hooks (trait-level) ----
-
-    fn with_temp_home<F: FnOnce(&Path)>(f: F) {
-        let temp_dir = TempDir::new().unwrap();
-        let home = temp_dir.path().to_path_buf();
-
-        let prev_home = std::env::var_os("HOME");
-        let prev_userprofile = std::env::var_os("USERPROFILE");
-
-        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("USERPROFILE", &home);
-        }
-
-        f(&home);
-
-        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
-        unsafe {
-            match prev_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-            match prev_userprofile {
-                Some(v) => std::env::set_var("USERPROFILE", v),
-                None => std::env::remove_var("USERPROFILE"),
-            }
-        }
-    }
-
-    fn with_empty_path<F: FnOnce()>(f: F) {
-        let temp_dir = TempDir::new().unwrap();
-        let prev_path = std::env::var_os("PATH");
-
-        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
-        unsafe {
-            std::env::set_var("PATH", temp_dir.path());
-        }
-
-        f();
-
-        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
-        unsafe {
-            match prev_path {
-                Some(v) => std::env::set_var("PATH", v),
-                None => std::env::remove_var("PATH"),
-            }
-        }
-    }
 
     #[test]
     #[serial]

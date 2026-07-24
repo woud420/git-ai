@@ -322,10 +322,7 @@ fn test_stash_with_existing_initial_attributions() {
         .expect("commit should succeed");
 
     // Create a file and commit it (this will have some attribution)
-    let example_path = repo.path().join("example.txt");
-    fs::write(&example_path, "existing line\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", "existing line\n");
     let mut example = repo.filename("example.txt");
     let _first_commit = repo
         .stage_all_and_commit("add example")
@@ -851,10 +848,7 @@ fn test_stash_pop_across_branches() {
         .expect("commit should succeed");
 
     // Create a file with existing human content
-    let example_path = repo.path().join("example.txt");
-    fs::write(&example_path, "line 1\nline 2\nline 3\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", "line 1\nline 2\nline 3\n");
     let mut example = repo.filename("example.txt");
     repo.stage_all_and_commit("add example file")
         .expect("commit should succeed");
@@ -928,10 +922,7 @@ fn test_stash_pop_across_branches_with_conflict() {
         .expect("commit should succeed");
 
     // Create a file with existing content
-    let example_path = repo.path().join("example.txt");
-    fs::write(&example_path, "line 1\nline 2\nline 3\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", "line 1\nline 2\nline 3\n");
     let mut example = repo.filename("example.txt");
     repo.stage_all_and_commit("add example file")
         .expect("commit should succeed");
@@ -1258,9 +1249,7 @@ fn test_stash_apply_shift_uses_final_commit_tree_after_later_edit() {
     repo.git(&["stash", "push", "-m", "ai stash"])
         .expect("stash should succeed");
 
-    fs::write(&file_path, "root\nanchor\ntarget human\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", "root\nanchor\ntarget human\n");
     repo.stage_all_and_commit("target head change").unwrap();
 
     repo.git(&["stash", "apply"])

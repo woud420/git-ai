@@ -1121,10 +1121,7 @@ fn test_ai_deletion_with_human_checkpoint_in_same_commit() {
     let repo = TestRepo::new();
     let file_path = repo.path().join("data.txt");
 
-    fs::write(&file_path, "Base Line 1\nBase Line 2\nBase Line 3").unwrap();
-
-    repo.git_ai(&["checkpoint", "mock_known_human", "data.txt"])
-        .unwrap();
+    repo.human_edit("data.txt", "Base Line 1\nBase Line 2\nBase Line 3");
 
     fs::write(
         &file_path,
@@ -1776,9 +1773,7 @@ fn test_ai_generated_file_then_human_full_rewrite() {
         .unwrap();
 
     let human_content = "console.log('hello world');\nconsole.log('goodbye');";
-    fs::write(&file_path, human_content).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "jokes-cli.ts"])
-        .unwrap();
+    repo.human_edit("jokes-cli.ts", human_content);
 
     repo.stage_all_and_commit("human rewrite").unwrap();
 
@@ -1796,9 +1791,7 @@ fn test_stale_zero_width_checkpoint_entry_does_not_abort_persisted_working_log()
     let repo = TestRepo::new();
     let feature_path = repo.path().join("feature.rs");
 
-    fs::write(&feature_path, "fn main() {}\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "feature.rs"])
-        .unwrap();
+    repo.human_edit("feature.rs", "fn main() {}\n");
     repo.stage_all_and_commit("base").unwrap();
     let mut file = repo.filename("feature.rs");
     file.assert_committed_lines(crate::lines!["fn main() {}".human(),]);

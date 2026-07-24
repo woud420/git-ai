@@ -4,7 +4,7 @@
 //! The actual transcript processing and metrics emission are tested via
 //! daemon tests and manual verification.
 
-use crate::test_utils::transcript_fixture_path;
+use crate::test_utils::{fixture_path, transcript_fixture_path};
 use git_ai::metrics::{
     EventAttributes, MetricEvent, OtelTraceValues, PosEncoded, SessionEventValues,
 };
@@ -21,13 +21,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
-
-fn test_fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join(name)
-}
 
 #[test]
 fn test_session_database_basic() {
@@ -397,7 +390,7 @@ fn test_full_pipeline_opencode_session_ids_flow_through() {
     let db_path = temp_dir.path().join("transcripts.db");
     let db = Arc::new(StreamsDatabase::open(&db_path).unwrap());
 
-    let fixture = test_fixture_path("opencode-sqlite/opencode.db");
+    let fixture = fixture_path("opencode-sqlite/opencode.db");
     let now = chrono::Utc::now().timestamp();
 
     let session = StreamRecord {
@@ -540,7 +533,7 @@ fn test_copilot_otel_stream_reads_spans_with_event_ids() {
     let db_path = temp_dir.path().join("transcripts.db");
     let db = Arc::new(StreamsDatabase::open(&db_path).unwrap());
 
-    let fixture = test_fixture_path("copilot-otel/traces.db");
+    let fixture = fixture_path("copilot-otel/traces.db");
     let now = chrono::Utc::now().timestamp();
 
     // Create session record for the OTEL stream
@@ -632,7 +625,7 @@ fn test_copilot_otel_stream_reads_spans_with_event_ids() {
 
 #[test]
 fn test_copilot_otel_stream_watermark_resumes_correctly() {
-    let fixture = test_fixture_path("copilot-otel/traces.db");
+    let fixture = fixture_path("copilot-otel/traces.db");
     let agent = CopilotAgent::new();
 
     // First read: get all spans from initial cursor
@@ -684,7 +677,7 @@ fn test_copilot_otel_events_use_otel_trace_event_type() {
     use git_ai::metrics::OtelTraceValues;
     use git_ai::metrics::events::otel_trace_pos;
 
-    let fixture = test_fixture_path("copilot-otel/traces.db");
+    let fixture = fixture_path("copilot-otel/traces.db");
     let agent = CopilotAgent::new();
 
     let watermark: Box<dyn WatermarkStrategy> = Box::new(TimestampCursorWatermark::initial());
@@ -730,7 +723,7 @@ fn test_copilot_otel_events_use_otel_trace_event_type() {
 fn test_copilot_otel_per_event_session_id_derivation() {
     use git_ai::model::authorship_log_serialization::generate_session_id;
 
-    let fixture = test_fixture_path("copilot-otel/traces.db");
+    let fixture = fixture_path("copilot-otel/traces.db");
     let agent = CopilotAgent::new();
 
     let watermark: Box<dyn WatermarkStrategy> = Box::new(TimestampCursorWatermark::initial());

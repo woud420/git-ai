@@ -111,6 +111,9 @@ impl HookInstaller for OpenCodeInstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::mdm::test_env::{
+        with_empty_path, with_fake_binary_on_path, with_temp_home,
+    };
     use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
@@ -128,92 +131,6 @@ mod tests {
 
     fn create_test_binary_path() -> PathBuf {
         PathBuf::from("/usr/local/bin/git-ai")
-    }
-
-    fn with_temp_home<F: FnOnce(&Path)>(f: F) {
-        let temp_dir = TempDir::new().unwrap();
-        let home = temp_dir.path().to_path_buf();
-
-        let prev_home = std::env::var_os("HOME");
-        let prev_userprofile = std::env::var_os("USERPROFILE");
-
-        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("USERPROFILE", &home);
-        }
-
-        f(&home);
-
-        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
-        unsafe {
-            match prev_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-            match prev_userprofile {
-                Some(v) => std::env::set_var("USERPROFILE", v),
-                None => std::env::remove_var("USERPROFILE"),
-            }
-        }
-    }
-
-    fn with_fake_binary_on_path<F: FnOnce(&Path)>(binary_name: &str, f: F) {
-        let temp_dir = TempDir::new().unwrap();
-        let bin_dir = temp_dir.path().join("bin");
-        fs::create_dir_all(&bin_dir).unwrap();
-        let fake_bin = bin_dir.join(binary_name);
-        fs::write(&fake_bin, "#!/bin/sh\nexit 0\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&fake_bin, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-
-        let prev_path = std::env::var_os("PATH");
-        let new_path = match &prev_path {
-            Some(p) => {
-                let mut paths = vec![bin_dir.clone()];
-                paths.extend(std::env::split_paths(p));
-                std::env::join_paths(paths).unwrap()
-            }
-            None => bin_dir.clone().into(),
-        };
-
-        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
-        unsafe {
-            std::env::set_var("PATH", &new_path);
-        }
-
-        f(temp_dir.path());
-
-        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
-        unsafe {
-            match prev_path {
-                Some(v) => std::env::set_var("PATH", v),
-                None => std::env::remove_var("PATH"),
-            }
-        }
-    }
-
-    fn with_empty_path<F: FnOnce()>(f: F) {
-        let temp_dir = TempDir::new().unwrap();
-        let prev_path = std::env::var_os("PATH");
-
-        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
-        unsafe {
-            std::env::set_var("PATH", temp_dir.path());
-        }
-
-        f();
-
-        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
-        unsafe {
-            match prev_path {
-                Some(v) => std::env::set_var("PATH", v),
-                None => std::env::remove_var("PATH"),
-            }
-        }
     }
 
     #[test]

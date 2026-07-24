@@ -2508,6 +2508,48 @@ impl TestRepo {
         fs::write(&abs, contents).expect("file write should succeed");
     }
 
+    /// Scenario builder for the real AI-agent checkpoint flow on a single
+    /// file: write `pre_contents`, fire the file-scoped "human" pre-edit
+    /// checkpoint (the legacy/untracked checkpoint every AI preset fires
+    /// before it edits, so any changes made by something else are excluded),
+    /// then write `post_contents` and fire the file-scoped "mock_ai"
+    /// post-edit checkpoint. This is exactly the pre/post pattern documented
+    /// in CLAUDE.md and used by the real agent presets.
+    ///
+    /// Checkpoint-NUANCE tests — ordering, partial staging, unscoped
+    /// checkpoints, or assertions interleaved between the pre and post
+    /// steps — must keep writing the manual `fs::write` + `git_ai(&["checkpoint", ...])`
+    /// sequence themselves; this helper intentionally hides those steps.
+    pub fn ai_edit(&self, rel: &str, pre_contents: &str, post_contents: &str) {
+        self.write_file(rel, pre_contents);
+        self.git_ai(&["checkpoint", "human", rel])
+            .expect("pre-edit human checkpoint should succeed");
+        self.write_file(rel, post_contents);
+        self.git_ai(&["checkpoint", "mock_ai", rel])
+            .expect("post-edit mock_ai checkpoint should succeed");
+    }
+
+    /// Scenario builder for the real known-human checkpoint flow: write
+    /// `contents`, then fire the file-scoped "mock_known_human" checkpoint.
+    /// Mirrors what our IDE/editor extensions do when they detect an actual
+    /// human keystroke, as opposed to the legacy/untracked "human" checkpoint.
+    ///
+    /// Checkpoint-NUANCE tests must keep writing the manual sequence
+    /// themselves; this helper intentionally hides those steps.
+    pub fn human_edit(&self, rel: &str, contents: &str) {
+        self.write_file(rel, contents);
+        self.git_ai(&["checkpoint", "mock_known_human", rel])
+            .expect("known-human checkpoint should succeed");
+    }
+
+    /// Scenario builder for an untracked edit: write `contents` with no
+    /// checkpoint call at all. Identical to `write_file` — this alias exists
+    /// so call sites read as the matched `ai_edit`/`human_edit`/`untracked_edit`
+    /// trio rather than mixing a differently-named primitive in.
+    pub fn untracked_edit(&self, rel: &str, contents: &str) {
+        self.write_file(rel, contents);
+    }
+
     pub fn test_db_path(&self) -> &PathBuf {
         &self.test_db_path
     }

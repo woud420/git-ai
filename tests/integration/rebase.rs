@@ -2770,10 +2770,7 @@ fn test_rebase_then_ff_merge_preserves_attribution() {
 
     // Advance main with a non-conflicting change (different file)
     repo.git(&["checkout", &default_branch]).unwrap();
-    let main_path = repo.path().join("main.txt");
-    fs::write(&main_path, "main line 1\nmain advance\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "main.txt"])
-        .unwrap();
+    repo.human_edit("main.txt", "main line 1\nmain advance\n");
     repo.git(&["add", "-A"]).unwrap();
     repo.commit("advance main").unwrap();
 
@@ -2835,9 +2832,7 @@ fn test_rebase_same_file_then_ff_merge_preserves_attribution() {
 
     // Advance main - prepend human line (non-conflicting with appends)
     repo.git(&["checkout", &default_branch]).unwrap();
-    fs::write(&file_path, "human prepend\nbase line\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "shared.txt"])
-        .unwrap();
+    repo.human_edit("shared.txt", "human prepend\nbase line\n");
     repo.git(&["add", "-A"]).unwrap();
     repo.commit("advance main").unwrap();
 

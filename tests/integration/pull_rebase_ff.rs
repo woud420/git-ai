@@ -1238,9 +1238,7 @@ fn setup_regular_rebase_conflict_with_trailing_newlines() -> RegularRebaseConfli
     let repo = TestRepo::new();
     let shared_path = repo.path().join("shared.txt");
 
-    fs::write(&shared_path, "line 1\nline 2\n").expect("write initial file");
-    repo.git_ai(&["checkpoint", "mock_known_human", "shared.txt"])
-        .expect("initial known-human checkpoint should succeed");
+    repo.human_edit("shared.txt", "line 1\nline 2\n");
     repo.stage_all_and_commit("initial commit")
         .expect("initial commit should succeed");
 
@@ -1264,9 +1262,7 @@ fn setup_regular_rebase_conflict_with_trailing_newlines() -> RegularRebaseConfli
     repo.git(&["checkout", &default_branch])
         .expect("checkout main should succeed");
 
-    fs::write(&shared_path, "line 1\nmain change line 2\n").expect("write main file");
-    repo.git_ai(&["checkpoint", "mock_known_human", "shared.txt"])
-        .expect("main known-human checkpoint should succeed");
+    repo.human_edit("shared.txt", "line 1\nmain change line 2\n");
     repo.stage_all_and_commit("main conflicting change")
         .expect("main commit should succeed");
     let main_conflict_commit_sha = repo

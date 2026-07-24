@@ -785,9 +785,7 @@ fn test_mixed_working_log_old_and_new_checkpoints_produce_both_prompts_and_sessi
 
     // Step 1: Create a base commit (human only)
     let base = "Base line\n";
-    fs::write(&file_path, base).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "mixed.txt"])
-        .unwrap();
+    repo.human_edit("mixed.txt", base);
     let base_commit = repo.stage_all_and_commit("Base commit").unwrap();
 
     // Step 2: Make an AI edit using current (new-format) checkpoint
@@ -974,9 +972,7 @@ fn test_reset_soft_old_note_then_new_session_checkpoints() {
 
     // Step 1: Create initial commit (needed as parent)
     let base = "Base line\n";
-    fs::write(&file_path, base).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "reset_test.txt"])
-        .unwrap();
+    repo.human_edit("reset_test.txt", base);
     repo.stage_all_and_commit("Base commit").unwrap();
 
     // Step 2: Create second commit with AI content
@@ -1170,9 +1166,7 @@ fn test_stash_pop_mixed_format_working_log() {
 
     // Step 1: Create base commit
     let base = "Base line\n";
-    fs::write(&file_path, base).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "stash_test.txt"])
-        .unwrap();
+    repo.human_edit("stash_test.txt", base);
     repo.stage_all_and_commit("Base commit").unwrap();
 
     // Step 2: Make an AI edit (new format checkpoint)
@@ -2036,9 +2030,7 @@ fn test_initial_from_old_note_plus_human_and_session_edits() {
 
     // Step 1: Base commit
     let base = "Line 1\n";
-    fs::write(&file_path, base).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "triple.txt"])
-        .unwrap();
+    repo.human_edit("triple.txt", base);
     repo.stage_all_and_commit("Base").unwrap();
 
     // Step 2: Commit with AI content
@@ -2082,9 +2074,7 @@ fn test_initial_from_old_note_plus_human_and_session_edits() {
 
     // Step 5: Add a known-human line
     let human_edit = "Line 1\nOld AI line\nHuman typed this\n";
-    fs::write(&file_path, human_edit).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "triple.txt"])
-        .unwrap();
+    repo.human_edit("triple.txt", human_edit);
 
     // Step 6: Add a new AI line (session-format)
     let session_edit = "Line 1\nOld AI line\nHuman typed this\nNew AI session line\n";
@@ -2249,9 +2239,7 @@ fn test_status_counts_ai_lines_from_old_format_initial() {
 
     // Step 1: Base commit
     let base = "Base line\n";
-    fs::write(&file_path, base).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "status_test.txt"])
-        .unwrap();
+    repo.human_edit("status_test.txt", base);
     repo.stage_all_and_commit("Base").unwrap();
 
     // Step 2: Commit with AI content
@@ -2715,9 +2703,7 @@ fn test_amend_preserves_sessions_under_http_notes_backend() {
     };
 
     let file_path = repo.path().join("http_amend.txt");
-    fs::write(&file_path, "Human line\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "http_amend.txt"])
-        .unwrap();
+    repo.human_edit("http_amend.txt", "Human line\n");
     fs::write(&file_path, "Human line\nAI line\n").unwrap();
     repo.git_ai(&["checkpoint", "mock_ai", "http_amend.txt"])
         .unwrap();

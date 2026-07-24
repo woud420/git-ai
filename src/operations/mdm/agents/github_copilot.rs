@@ -395,40 +395,11 @@ impl HookInstaller for GitHubCopilotInstaller {
 mod tests {
     use super::*;
     use crate::operations::mdm::hook_installer::HookInstaller;
+    use crate::operations::mdm::test_env::with_temp_home;
     use serial_test::serial;
-    use std::path::Path;
-    use tempfile::tempdir;
 
     fn test_binary_path() -> PathBuf {
         PathBuf::from("/tmp/git-ai/bin/git-ai")
-    }
-
-    fn with_temp_home<F: FnOnce(&Path)>(f: F) {
-        let temp = tempdir().unwrap();
-        let home = temp.path().to_path_buf();
-
-        let prev_home = std::env::var_os("HOME");
-        let prev_userprofile = std::env::var_os("USERPROFILE");
-
-        // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("USERPROFILE", &home);
-        }
-
-        f(&home);
-
-        // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
-        unsafe {
-            match prev_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-            match prev_userprofile {
-                Some(v) => std::env::set_var("USERPROFILE", v),
-                None => std::env::remove_var("USERPROFILE"),
-            }
-        }
     }
 
     #[test]

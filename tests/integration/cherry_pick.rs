@@ -969,9 +969,7 @@ fn test_cherry_pick_skip_failed_next_conflict_advances_pending_remote_tracking_s
     let main_branch = repo.current_branch();
 
     repo.git(&["checkout", "-b", "feature"]).unwrap();
-    fs::write(&conflict_a_path, "base\nFEATURE_A_HUMAN\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "conflict_a.txt"])
-        .unwrap();
+    repo.human_edit("conflict_a.txt", "base\nFEATURE_A_HUMAN\n");
     let skipped_source_commit = repo.stage_all_and_commit("human conflict A").unwrap();
     conflict_a.assert_committed_lines(crate::lines!["base".human(), "FEATURE_A_HUMAN".human(),]);
 
@@ -994,12 +992,8 @@ fn test_cherry_pick_skip_failed_next_conflict_advances_pending_remote_tracking_s
     ])
     .unwrap();
 
-    fs::write(&conflict_a_path, "base\nMAIN_A_HUMAN\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "conflict_a.txt"])
-        .unwrap();
-    fs::write(&conflict_b_path, "base\nMAIN_B_HUMAN\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "conflict_b.txt"])
-        .unwrap();
+    repo.human_edit("conflict_a.txt", "base\nMAIN_A_HUMAN\n");
+    repo.human_edit("conflict_b.txt", "base\nMAIN_B_HUMAN\n");
     repo.stage_all_and_commit("main conflicts").unwrap();
     conflict_a.assert_committed_lines(crate::lines!["base".human(), "MAIN_A_HUMAN".human(),]);
     conflict_b.assert_committed_lines(crate::lines!["base".human(), "MAIN_B_HUMAN".human(),]);
@@ -1052,9 +1046,7 @@ fn test_cherry_pick_skip_failed_next_conflict_does_not_double_skip_refcursor_sou
     let main_branch = repo.current_branch();
 
     repo.git(&["checkout", "-b", "feature"]).unwrap();
-    fs::write(&conflict_a_path, "base\nFEATURE_A_HUMAN\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "conflict_a.txt"])
-        .unwrap();
+    repo.human_edit("conflict_a.txt", "base\nFEATURE_A_HUMAN\n");
     let skipped_source_commit = repo.stage_all_and_commit("human conflict A").unwrap();
     conflict_a.assert_committed_lines(crate::lines!["base".human(), "FEATURE_A_HUMAN".human(),]);
 
@@ -1078,12 +1070,8 @@ fn test_cherry_pick_skip_failed_next_conflict_does_not_double_skip_refcursor_sou
         .expect("next conflict source authorship note should already be local");
 
     repo.git(&["checkout", &main_branch]).unwrap();
-    fs::write(&conflict_a_path, "base\nMAIN_A_HUMAN\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "conflict_a.txt"])
-        .unwrap();
-    fs::write(&conflict_c_path, "base\nMAIN_C_HUMAN\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "conflict_c.txt"])
-        .unwrap();
+    repo.human_edit("conflict_a.txt", "base\nMAIN_A_HUMAN\n");
+    repo.human_edit("conflict_c.txt", "base\nMAIN_C_HUMAN\n");
     repo.stage_all_and_commit("main conflicts").unwrap();
     conflict_a.assert_committed_lines(crate::lines!["base".human(), "MAIN_A_HUMAN".human(),]);
     clean_b.assert_committed_lines(crate::lines!["base".human(), "shared".human(),]);
@@ -1282,9 +1270,7 @@ fn test_multi_commit_cherry_pick_chain_with_conflict_resolution_working_logs() {
 
     // Main branch: only file_a has a conflicting change; file_b is untouched.
     repo.git(&["checkout", &main_branch]).unwrap();
-    fs::write(&file_a_path, "base_a\nMAIN_A_HUMAN\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "file_a.txt"])
-        .unwrap();
+    repo.human_edit("file_a.txt", "base_a\nMAIN_A_HUMAN\n");
     repo.stage_all_and_commit("Human change to A").unwrap();
     file_a.assert_committed_lines(crate::lines!["base_a".human(), "MAIN_A_HUMAN".human()]);
     file_b.assert_committed_lines(crate::lines!["base_b".human(), "shared_b".human()]);

@@ -1,6 +1,6 @@
 use crate::repos::test_file::ExpectedLineExt;
 
-use crate::test_utils::{fixture_path, raw_git};
+use crate::test_utils::{fixture_path, raw_git, run_git_stdout};
 use git_ai::model::attribution_tracker::LineAttribution;
 use git_ai::model::authorship_log::PromptRecord;
 use git_ai::model::working_log::{AgentId, CheckpointKind};
@@ -13,29 +13,12 @@ use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn stats_from_args(repo: &crate::repos::test_repo::TestRepo, args: &[&str]) -> CommitStats {
     let raw = repo.git_ai(args).expect("git-ai stats should succeed");
     let start = raw.find('{').unwrap_or(0);
     let end = raw.rfind('}').unwrap_or(raw.len().saturating_sub(1));
     serde_json::from_str(&raw[start..=end]).expect("valid stats json")
-}
-
-fn run_git_stdout(cwd: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("git command should run");
-    assert!(
-        output.status.success(),
-        "git {:?} failed:\nstdout: {}\nstderr: {}",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 fn expected_worktree_storage_prefix(main_repo_root: &Path) -> PathBuf {
@@ -207,10 +190,7 @@ crate::worktree_test_wrappers! {
 crate::worktree_test_wrappers! {
     fn stash_pop_preserves_ai_authorship() {
         let repo = TestRepo::new();
-        let file_path = repo.path().join("stash.txt");
-        fs::write(&file_path, "base\n").unwrap();
-        repo.git_ai(&["checkpoint", "mock_known_human", "stash.txt"])
-            .unwrap();
+        repo.human_edit("stash.txt", "base\n");
         let mut file = repo.filename("stash.txt");
         repo.stage_all_and_commit("base").unwrap();
 
@@ -226,10 +206,7 @@ crate::worktree_test_wrappers! {
 crate::worktree_test_wrappers! {
     fn reset_mixed_reconstructs_working_log() {
         let repo = TestRepo::new();
-        let file_path = repo.path().join("reset.txt");
-        fs::write(&file_path, "base\n").unwrap();
-        repo.git_ai(&["checkpoint", "mock_known_human", "reset.txt"])
-            .unwrap();
+        repo.human_edit("reset.txt", "base\n");
         let mut file = repo.filename("reset.txt");
         repo.stage_all_and_commit("base").unwrap();
 
@@ -247,10 +224,7 @@ crate::worktree_test_wrappers! {
 crate::worktree_test_wrappers! {
     fn rebase_preserves_ai_authorship() {
         let repo = TestRepo::new();
-        let file_path = repo.path().join("rebase.txt");
-        fs::write(&file_path, "base\n").unwrap();
-        repo.git_ai(&["checkpoint", "mock_known_human", "rebase.txt"])
-            .unwrap();
+        repo.human_edit("rebase.txt", "base\n");
         let mut file = repo.filename("rebase.txt");
         repo.stage_all_and_commit("base").unwrap();
         repo.git(&["checkout", "-b", "integration"]).unwrap();
@@ -274,10 +248,7 @@ crate::worktree_test_wrappers! {
 crate::worktree_test_wrappers! {
     fn cherry_pick_preserves_ai_authorship() {
         let repo = TestRepo::new();
-        let file_path = repo.path().join("cherry.txt");
-        fs::write(&file_path, "base\n").unwrap();
-        repo.git_ai(&["checkpoint", "mock_known_human", "cherry.txt"])
-            .unwrap();
+        repo.human_edit("cherry.txt", "base\n");
         let mut file = repo.filename("cherry.txt");
         repo.stage_all_and_commit("base").unwrap();
         repo.git(&["checkout", "-b", "integration"]).unwrap();

@@ -1,6 +1,7 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-use crate::operations::mdm::utils::{generate_diff, home_dir, write_atomic};
+use crate::operations::mdm::hooks_merge::{MissingBehavior, edit_settings_json};
+use crate::operations::mdm::utils::home_dir;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
@@ -95,23 +96,6 @@ impl HookInstaller for FirebenderInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let hooks_path = Self::hooks_path();
-        if let Some(dir) = hooks_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-
-        let existing_content = if hooks_path.exists() {
-            fs::read_to_string(&hooks_path)?
-        } else {
-            String::new()
-        };
-
-        let existing: Value = if existing_content.trim().is_empty() {
-            json!({})
-        } else {
-            serde_json::from_str(&existing_content)?
-        };
-
         let pre_tool_use_cmd = format!(
             "{} {}",
             params.binary_path.display(),
@@ -139,78 +123,76 @@ impl HookInstaller for FirebenderInstaller {
             }
         });
 
-        let mut merged = existing.clone();
-        if merged.get("version").is_none()
-            && let Some(obj) = merged.as_object_mut()
-        {
-            obj.insert("version".to_string(), json!(1));
-        }
+        edit_settings_json(
+            &Self::hooks_path(),
+            dry_run,
+            MissingBehavior::TreatAsEmpty,
+            |content| Ok(serde_json::from_str(content)?),
+            |merged| {
+                if merged.get("version").is_none()
+                    && let Some(obj) = merged.as_object_mut()
+                {
+                    obj.insert("version".to_string(), json!(1));
+                }
 
-        let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
+                let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
 
-        for hook_name in &["preToolUse", "postToolUse"] {
-            let desired_hooks = desired
-                .get("hooks")
-                .and_then(|h| h.get(*hook_name))
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
+                for hook_name in &["preToolUse", "postToolUse"] {
+                    let desired_hooks = desired
+                        .get("hooks")
+                        .and_then(|h| h.get(*hook_name))
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
 
-            let mut existing_hooks = hooks_obj
-                .get(*hook_name)
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
+                    let mut existing_hooks = hooks_obj
+                        .get(*hook_name)
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
 
-            for desired_hook in desired_hooks {
-                let Some(desired_cmd) = desired_hook.get("command").and_then(|c| c.as_str()) else {
-                    continue;
-                };
+                    for desired_hook in desired_hooks {
+                        let Some(desired_cmd) =
+                            desired_hook.get("command").and_then(|c| c.as_str())
+                        else {
+                            continue;
+                        };
 
-                let mut found_idx = None;
-                let mut needs_update = false;
+                        let mut found_idx = None;
+                        let mut needs_update = false;
 
-                for (idx, existing_hook) in existing_hooks.iter().enumerate() {
-                    if let Some(existing_cmd) =
-                        existing_hook.get("command").and_then(|c| c.as_str())
-                        && Self::is_firebender_checkpoint_command(existing_cmd)
-                    {
-                        found_idx = Some(idx);
-                        if existing_cmd != desired_cmd || existing_hook.get("matcher").is_some() {
-                            needs_update = true;
+                        for (idx, existing_hook) in existing_hooks.iter().enumerate() {
+                            if let Some(existing_cmd) =
+                                existing_hook.get("command").and_then(|c| c.as_str())
+                                && Self::is_firebender_checkpoint_command(existing_cmd)
+                            {
+                                found_idx = Some(idx);
+                                if existing_cmd != desired_cmd
+                                    || existing_hook.get("matcher").is_some()
+                                {
+                                    needs_update = true;
+                                }
+                                break;
+                            }
                         }
-                        break;
+
+                        match found_idx {
+                            Some(idx) if needs_update => existing_hooks[idx] = desired_hook.clone(),
+                            Some(_) => {}
+                            None => existing_hooks.push(desired_hook.clone()),
+                        }
+                    }
+
+                    if let Some(obj) = hooks_obj.as_object_mut() {
+                        obj.insert(hook_name.to_string(), Value::Array(existing_hooks));
                     }
                 }
 
-                match found_idx {
-                    Some(idx) if needs_update => existing_hooks[idx] = desired_hook.clone(),
-                    Some(_) => {}
-                    None => existing_hooks.push(desired_hook.clone()),
+                if let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
                 }
-            }
-
-            if let Some(obj) = hooks_obj.as_object_mut() {
-                obj.insert(hook_name.to_string(), Value::Array(existing_hooks));
-            }
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        if existing == merged {
-            return Ok(None);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(&hooks_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(&hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+            },
+        )
     }
 
     fn uninstall_hooks(
@@ -218,53 +200,39 @@ impl HookInstaller for FirebenderInstaller {
         _params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let hooks_path = Self::hooks_path();
-        if !hooks_path.exists() {
-            return Ok(None);
-        }
+        edit_settings_json(
+            &Self::hooks_path(),
+            dry_run,
+            MissingBehavior::NoOp,
+            |content| Ok(serde_json::from_str(content)?),
+            |merged| {
+                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
+                    return;
+                };
+                let mut changed = false;
 
-        let existing_content = fs::read_to_string(&hooks_path)?;
-        let existing: Value = serde_json::from_str(&existing_content)?;
-
-        let mut merged = existing.clone();
-        let mut hooks_obj = match merged.get("hooks").cloned() {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-        let mut changed = false;
-
-        for hook_name in &["preToolUse", "postToolUse"] {
-            if let Some(arr) = hooks_obj.get_mut(*hook_name).and_then(|v| v.as_array_mut()) {
-                let original_len = arr.len();
-                arr.retain(|item| {
-                    if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-                        !Self::is_firebender_checkpoint_command(cmd)
-                    } else {
-                        true
+                for hook_name in &["preToolUse", "postToolUse"] {
+                    if let Some(arr) = hooks_obj.get_mut(*hook_name).and_then(|v| v.as_array_mut())
+                    {
+                        let original_len = arr.len();
+                        arr.retain(|item| {
+                            if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
+                                !Self::is_firebender_checkpoint_command(cmd)
+                            } else {
+                                true
+                            }
+                        });
+                        if arr.len() != original_len {
+                            changed = true;
+                        }
                     }
-                });
-                if arr.len() != original_len {
-                    changed = true;
                 }
-            }
-        }
 
-        if !changed {
-            return Ok(None);
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(&hooks_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(&hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+                if changed && let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
+                }
+            },
+        )
     }
 }
 

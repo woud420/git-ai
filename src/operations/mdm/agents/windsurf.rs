@@ -2,14 +2,17 @@ use crate::error::GitAiError;
 use crate::operations::mdm::hook_installer::{
     HookCheckResult, HookInstaller, HookInstallerParams, InstallResult, UninstallResult,
 };
+use crate::operations::mdm::hooks_merge::{
+    MissingBehavior, edit_settings_json, upsert_singleton_command_hook,
+};
 use crate::operations::mdm::utils::{
-    generate_diff, home_dir, install_vsc_editor_extension, is_git_ai_checkpoint_command,
-    is_github_codespaces, is_vsc_editor_extension_installed, resolve_editor_cli, write_atomic,
+    home_dir, install_vsc_editor_extension, is_git_ai_checkpoint_command, is_github_codespaces,
+    is_vsc_editor_extension_installed, resolve_editor_cli,
 };
 
 use serde_json::{Value, json};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const WINDSURF_CHECKPOINT_CMD: &str = "checkpoint windsurf --hook-input stdin";
 
@@ -39,160 +42,82 @@ impl WindsurfInstaller {
 
     /// Install hooks into a single hooks.json file, returning a diff if changes were made.
     fn install_hooks_at(
-        hooks_path: &PathBuf,
+        hooks_path: &Path,
         desired_cmd: &str,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        if let Some(dir) = hooks_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
+        edit_settings_json(
+            hooks_path,
+            dry_run,
+            MissingBehavior::TreatAsEmpty,
+            |content| Ok(serde_json::from_str(content)?),
+            |merged| {
+                let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
 
-        let existing_content = if hooks_path.exists() {
-            fs::read_to_string(hooks_path)?
-        } else {
-            String::new()
-        };
+                for event in HOOK_EVENTS {
+                    let mut event_array = hooks_obj
+                        .get(*event)
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
 
-        let existing: Value = if existing_content.trim().is_empty() {
-            json!({})
-        } else {
-            serde_json::from_str(&existing_content)?
-        };
-
-        let mut merged = existing.clone();
-        let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
-
-        for event in HOOK_EVENTS {
-            let mut event_array = hooks_obj
-                .get(*event)
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-
-            // Find existing git-ai command
-            let mut found_idx: Option<usize> = None;
-            let mut needs_update = false;
-
-            for (idx, item) in event_array.iter().enumerate() {
-                if let Some(cmd) = item.get("command").and_then(|c| c.as_str())
-                    && is_git_ai_checkpoint_command(cmd)
-                    && found_idx.is_none()
-                {
-                    found_idx = Some(idx);
-                    if cmd != desired_cmd {
-                        needs_update = true;
-                    }
-                }
-            }
-
-            match found_idx {
-                Some(idx) => {
-                    if needs_update {
-                        event_array[idx] = json!({
+                    upsert_singleton_command_hook(
+                        &mut event_array,
+                        desired_cmd,
+                        json!({
                             "command": desired_cmd,
                             "show_output": false
-                        });
+                        }),
+                    );
+
+                    if let Some(obj) = hooks_obj.as_object_mut() {
+                        obj.insert(event.to_string(), Value::Array(event_array));
                     }
-                    // Remove duplicates
-                    let keep_idx = idx;
-                    let mut current_idx = 0;
-                    event_array.retain(|item| {
-                        if current_idx == keep_idx {
-                            current_idx += 1;
-                            true
-                        } else if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-                            let is_dup = is_git_ai_checkpoint_command(cmd);
-                            current_idx += 1;
-                            !is_dup
-                        } else {
-                            current_idx += 1;
-                            true
-                        }
-                    });
                 }
-                None => {
-                    event_array.push(json!({
-                        "command": desired_cmd,
-                        "show_output": false
-                    }));
+
+                if let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
                 }
-            }
-
-            if let Some(obj) = hooks_obj.as_object_mut() {
-                obj.insert(event.to_string(), Value::Array(event_array));
-            }
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        if existing == merged {
-            return Ok(None);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(hooks_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+            },
+        )
     }
 
     /// Remove hooks from a single hooks.json file, returning a diff if changes were made.
-    fn uninstall_hooks_at(
-        hooks_path: &PathBuf,
-        dry_run: bool,
-    ) -> Result<Option<String>, GitAiError> {
-        if !hooks_path.exists() {
-            return Ok(None);
-        }
+    fn uninstall_hooks_at(hooks_path: &Path, dry_run: bool) -> Result<Option<String>, GitAiError> {
+        edit_settings_json(
+            hooks_path,
+            dry_run,
+            MissingBehavior::NoOp,
+            |content| Ok(serde_json::from_str(content)?),
+            |merged| {
+                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
+                    return;
+                };
 
-        let existing_content = fs::read_to_string(hooks_path)?;
-        let existing: Value = serde_json::from_str(&existing_content)?;
-
-        let mut merged = existing.clone();
-        let mut hooks_obj = match merged.get("hooks").cloned() {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-
-        let mut changed = false;
-
-        for event in HOOK_EVENTS {
-            if let Some(event_array) = hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut()) {
-                let original_len = event_array.len();
-                event_array.retain(|item| {
-                    if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-                        !is_git_ai_checkpoint_command(cmd)
-                    } else {
-                        true
+                let mut changed = false;
+                for event in HOOK_EVENTS {
+                    if let Some(event_array) =
+                        hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut())
+                    {
+                        let original_len = event_array.len();
+                        event_array.retain(|item| {
+                            if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
+                                !is_git_ai_checkpoint_command(cmd)
+                            } else {
+                                true
+                            }
+                        });
+                        if event_array.len() != original_len {
+                            changed = true;
+                        }
                     }
-                });
-                if event_array.len() != original_len {
-                    changed = true;
                 }
-            }
-        }
 
-        if !changed {
-            return Ok(None);
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(hooks_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+                if changed && let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
+                }
+            },
+        )
     }
 }
 

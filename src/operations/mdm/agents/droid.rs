@@ -1,8 +1,12 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-use crate::operations::mdm::utils::{
-    binary_exists, generate_diff, home_dir, is_git_ai_checkpoint_command, write_atomic,
+use crate::operations::mdm::hooks_merge::{
+    MissingBehavior, catch_all_hook_status, edit_settings_json, install_catch_all_hooks,
+    uninstall_catch_all_hooks,
 };
+#[cfg(test)]
+use crate::operations::mdm::utils::is_git_ai_checkpoint_command;
+use crate::operations::mdm::utils::{binary_exists, home_dir};
 use jsonc_parser::ParseOptions;
 use serde_json::{Value, json};
 use std::fs;
@@ -44,6 +48,7 @@ fn jsonc_to_serde(val: jsonc_parser::JsonValue<'_>) -> Value {
 
 const DROID_PRE_TOOL_CMD: &str = "checkpoint droid --hook-input stdin";
 const DROID_POST_TOOL_CMD: &str = "checkpoint droid --hook-input stdin";
+#[cfg(test)]
 const DROID_CATCH_ALL_MATCHER: &str = "*";
 
 pub struct DroidInstaller;
@@ -57,47 +62,7 @@ impl DroidInstaller {
     /// `hooks_installed` = git-ai checkpoint command exists in ANY matcher block.
     /// `hooks_up_to_date` = git-ai checkpoint command exists in the `"*"` catch-all block.
     fn hook_status(settings: &Value) -> (bool, bool) {
-        let pre_tool_blocks = settings
-            .get("hooks")
-            .and_then(|h| h.get("PreToolUse"))
-            .and_then(|v| v.as_array());
-
-        let Some(blocks) = pre_tool_blocks else {
-            return (false, false);
-        };
-
-        let mut hooks_installed = false;
-        let mut hooks_up_to_date = false;
-
-        for block in blocks {
-            let is_catch_all = block
-                .get("matcher")
-                .and_then(|m| m.as_str())
-                .map(|m| m == DROID_CATCH_ALL_MATCHER)
-                .unwrap_or(false);
-
-            let has_git_ai = block
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .map(|hooks| {
-                    hooks.iter().any(|hook| {
-                        hook.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(is_git_ai_checkpoint_command)
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false);
-
-            if has_git_ai {
-                hooks_installed = true;
-                if is_catch_all {
-                    hooks_up_to_date = true;
-                }
-            }
-        }
-
-        (hooks_installed, hooks_up_to_date)
+        catch_all_hook_status(settings, "PreToolUse")
     }
 
     fn install_hooks_at(
@@ -105,236 +70,58 @@ impl DroidInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        if let Some(dir) = settings_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-
-        let existing_content = if settings_path.exists() {
-            fs::read_to_string(settings_path)?
-        } else {
-            String::new()
-        };
-
-        let existing: Value = if existing_content.trim().is_empty() {
-            json!({})
-        } else {
-            parse_jsonc_settings(&existing_content)?
-        };
-
         let binary_path = params.binary_path.to_string_lossy().to_string();
         let pre_tool_cmd = format!("{} {}", binary_path, DROID_PRE_TOOL_CMD);
         let post_tool_cmd = format!("{} {}", binary_path, DROID_POST_TOOL_CMD);
 
-        let mut merged = existing.clone();
-        let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
+        edit_settings_json(
+            settings_path,
+            dry_run,
+            MissingBehavior::TreatAsEmpty,
+            parse_jsonc_settings,
+            |merged| {
+                let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
+                install_catch_all_hooks(
+                    &mut hooks_obj,
+                    &[
+                        ("PreToolUse", pre_tool_cmd.as_str()),
+                        ("PostToolUse", post_tool_cmd.as_str()),
+                    ],
+                );
+                if let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
+                }
 
-        for (hook_type, desired_cmd) in &[
-            ("PreToolUse", &pre_tool_cmd),
-            ("PostToolUse", &post_tool_cmd),
-        ] {
-            let mut hook_type_array = hooks_obj
-                .get(*hook_type)
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-
-            // Step 1: Strip git-ai from every non-catch-all matcher block (migration).
-            // Track which blocks we emptied so we can remove them below.
-            let mut emptied_by_migration = vec![false; hook_type_array.len()];
-            for (i, block) in hook_type_array.iter_mut().enumerate() {
-                let is_catch_all = block
-                    .get("matcher")
-                    .and_then(|m| m.as_str())
-                    .map(|m| m == DROID_CATCH_ALL_MATCHER)
-                    .unwrap_or(false);
-                if !is_catch_all
-                    && let Some(hooks) = block.get_mut("hooks").and_then(|h| h.as_array_mut())
+                // Add claudeHooksImported flag if it doesn't exist.
+                if let Some(hooks) = merged.get_mut("hooks").and_then(|h| h.as_object_mut())
+                    && !hooks.contains_key("claudeHooksImported")
                 {
-                    let before = hooks.len();
-                    hooks.retain(|hook| {
-                        hook.get("command")
-                            .and_then(|c| c.as_str())
-                            .map(|cmd| !is_git_ai_checkpoint_command(cmd))
-                            .unwrap_or(true)
-                    });
-                    if hooks.is_empty() && before > 0 {
-                        emptied_by_migration[i] = true;
-                    }
+                    hooks.insert("claudeHooksImported".to_string(), json!(true));
                 }
-            }
-            // Remove blocks that we emptied; leave pre-existing empty blocks alone.
-            let mut i = 0;
-            hook_type_array.retain(|_| {
-                let remove = emptied_by_migration[i];
-                i += 1;
-                !remove
-            });
-
-            // Step 2: Find or create the "*" catch-all matcher block.
-            let catch_all_idx = hook_type_array
-                .iter()
-                .position(|b| {
-                    b.get("matcher")
-                        .and_then(|m| m.as_str())
-                        .map(|m| m == DROID_CATCH_ALL_MATCHER)
-                        .unwrap_or(false)
-                })
-                .unwrap_or_else(|| {
-                    hook_type_array.push(json!({
-                        "matcher": DROID_CATCH_ALL_MATCHER,
-                        "hooks": []
-                    }));
-                    hook_type_array.len() - 1
-                });
-
-            // Step 3: Ensure exactly one git-ai command in the catch-all block.
-            let mut hooks_array = hook_type_array[catch_all_idx]
-                .get("hooks")
-                .and_then(|h| h.as_array())
-                .cloned()
-                .unwrap_or_default();
-
-            let mut found_idx: Option<usize> = None;
-            let mut needs_update = false;
-
-            for (idx, hook) in hooks_array.iter().enumerate() {
-                if let Some(cmd) = hook.get("command").and_then(|c| c.as_str())
-                    && is_git_ai_checkpoint_command(cmd)
-                    && found_idx.is_none()
-                {
-                    found_idx = Some(idx);
-                    if cmd != *desired_cmd {
-                        needs_update = true;
-                    }
-                }
-            }
-
-            match found_idx {
-                Some(idx) => {
-                    if needs_update {
-                        hooks_array[idx] = json!({
-                            "type": "command",
-                            "command": desired_cmd
-                        });
-                    }
-                    let keep_idx = idx;
-                    let mut current_idx = 0;
-                    hooks_array.retain(|hook| {
-                        if current_idx == keep_idx {
-                            current_idx += 1;
-                            true
-                        } else if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                            let is_dup = is_git_ai_checkpoint_command(cmd);
-                            current_idx += 1;
-                            !is_dup
-                        } else {
-                            current_idx += 1;
-                            true
-                        }
-                    });
-                }
-                None => {
-                    hooks_array.push(json!({
-                        "type": "command",
-                        "command": desired_cmd
-                    }));
-                }
-            }
-
-            if let Some(matcher_block) = hook_type_array[catch_all_idx].as_object_mut() {
-                matcher_block.insert("hooks".to_string(), Value::Array(hooks_array));
-            }
-
-            if let Some(obj) = hooks_obj.as_object_mut() {
-                obj.insert(hook_type.to_string(), Value::Array(hook_type_array));
-            }
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        // Add claudeHooksImported flag if it doesn't exist.
-        if let Some(hooks) = merged.get_mut("hooks").and_then(|h| h.as_object_mut())
-            && !hooks.contains_key("claudeHooksImported")
-        {
-            hooks.insert("claudeHooksImported".to_string(), json!(true));
-        }
-
-        if existing == merged {
-            return Ok(None);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(settings_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(settings_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+            },
+        )
     }
 
     fn uninstall_hooks_at(
         settings_path: &Path,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        if !settings_path.exists() {
-            return Ok(None);
-        }
-
-        let existing_content = fs::read_to_string(settings_path)?;
-        let existing: Value = parse_jsonc_settings(&existing_content)?;
-
-        let mut merged = existing.clone();
-        let mut hooks_obj = match merged.get("hooks").cloned() {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-
-        let mut changed = false;
-
-        for hook_type in &["PreToolUse", "PostToolUse"] {
-            if let Some(hook_type_array) =
-                hooks_obj.get_mut(*hook_type).and_then(|v| v.as_array_mut())
-            {
-                for matcher_block in hook_type_array.iter_mut() {
-                    if let Some(hooks_array) = matcher_block
-                        .get_mut("hooks")
-                        .and_then(|h| h.as_array_mut())
-                    {
-                        let original_len = hooks_array.len();
-                        hooks_array.retain(|hook| {
-                            if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                                !is_git_ai_checkpoint_command(cmd)
-                            } else {
-                                true
-                            }
-                        });
-                        if hooks_array.len() != original_len {
-                            changed = true;
-                        }
-                    }
+        edit_settings_json(
+            settings_path,
+            dry_run,
+            MissingBehavior::NoOp,
+            parse_jsonc_settings,
+            |merged| {
+                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
+                    return;
+                };
+                if uninstall_catch_all_hooks(&mut hooks_obj, &["PreToolUse", "PostToolUse"])
+                    && let Some(root) = merged.as_object_mut()
+                {
+                    root.insert("hooks".to_string(), hooks_obj);
                 }
-            }
-        }
-
-        if !changed {
-            return Ok(None);
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(settings_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(settings_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+            },
+        )
     }
 }
 

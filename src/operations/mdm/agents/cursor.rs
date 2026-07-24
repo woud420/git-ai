@@ -2,11 +2,11 @@ use crate::error::GitAiError;
 use crate::operations::mdm::hook_installer::{
     HookCheckResult, HookInstaller, HookInstallerParams, InstallResult,
 };
+use crate::operations::mdm::hooks_merge::{MissingBehavior, edit_settings_json};
 use crate::operations::mdm::utils::{
-    MIN_CURSOR_VERSION, generate_diff, get_editor_version, home_dir, install_vsc_editor_extension,
+    MIN_CURSOR_VERSION, get_editor_version, home_dir, install_vsc_editor_extension,
     is_vsc_editor_extension_installed, parse_version, resolve_editor_cli,
     settings_paths_for_products, should_process_settings_target, version_meets_requirement,
-    write_atomic,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -113,27 +113,6 @@ impl HookInstaller for CursorInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let hooks_path = Self::hooks_path();
-
-        // Ensure directory exists
-        if let Some(dir) = hooks_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-
-        // Read existing content as string
-        let existing_content = if hooks_path.exists() {
-            fs::read_to_string(&hooks_path)?
-        } else {
-            String::new()
-        };
-
-        // Parse existing JSON if present, else start with empty object
-        let existing: Value = if existing_content.trim().is_empty() {
-            json!({})
-        } else {
-            serde_json::from_str(&existing_content)?
-        };
-
         // Build commands with absolute path
         let pre_tool_use_cmd = format!(
             "{} {}",
@@ -163,101 +142,88 @@ impl HookInstaller for CursorInstaller {
             }
         });
 
-        // Merge desired into existing
-        let mut merged = existing.clone();
-
-        // Ensure version is set
-        if merged.get("version").is_none()
-            && let Some(obj) = merged.as_object_mut()
-        {
-            obj.insert("version".to_string(), json!(1));
-        }
-
-        // Merge hooks object
-        let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
-
-        // Process both hook types
-        for hook_name in &["preToolUse", "postToolUse"] {
-            let desired_hooks = desired
-                .get("hooks")
-                .and_then(|h| h.get(*hook_name))
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-
-            // Get existing hooks array for this hook type
-            let mut existing_hooks = hooks_obj
-                .get(*hook_name)
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-
-            // Update outdated git-ai checkpoint commands (or add if missing)
-            for desired_hook in desired_hooks {
-                let desired_cmd = desired_hook.get("command").and_then(|c| c.as_str());
-                if desired_cmd.is_none() {
-                    continue;
+        edit_settings_json(
+            &Self::hooks_path(),
+            dry_run,
+            MissingBehavior::TreatAsEmpty,
+            |content| Ok(serde_json::from_str(content)?),
+            |merged| {
+                // Ensure version is set
+                if merged.get("version").is_none()
+                    && let Some(obj) = merged.as_object_mut()
+                {
+                    obj.insert("version".to_string(), json!(1));
                 }
-                let desired_cmd = desired_cmd.unwrap();
 
-                // Look for existing git-ai checkpoint cursor commands
-                let mut found_idx = None;
-                let mut needs_update = false;
+                // Merge hooks object
+                let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
 
-                for (idx, existing_hook) in existing_hooks.iter().enumerate() {
-                    if let Some(existing_cmd) =
-                        existing_hook.get("command").and_then(|c| c.as_str())
-                        && Self::is_cursor_checkpoint_command(existing_cmd)
-                    {
-                        found_idx = Some(idx);
-                        if existing_cmd != desired_cmd {
-                            needs_update = true;
+                // Process both hook types
+                for hook_name in &["preToolUse", "postToolUse"] {
+                    let desired_hooks = desired
+                        .get("hooks")
+                        .and_then(|h| h.get(*hook_name))
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+
+                    // Get existing hooks array for this hook type
+                    let mut existing_hooks = hooks_obj
+                        .get(*hook_name)
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+
+                    // Update outdated git-ai checkpoint commands (or add if missing)
+                    for desired_hook in desired_hooks {
+                        let desired_cmd = desired_hook.get("command").and_then(|c| c.as_str());
+                        if desired_cmd.is_none() {
+                            continue;
                         }
-                        break;
+                        let desired_cmd = desired_cmd.unwrap();
+
+                        // Look for existing git-ai checkpoint cursor commands
+                        let mut found_idx = None;
+                        let mut needs_update = false;
+
+                        for (idx, existing_hook) in existing_hooks.iter().enumerate() {
+                            if let Some(existing_cmd) =
+                                existing_hook.get("command").and_then(|c| c.as_str())
+                                && Self::is_cursor_checkpoint_command(existing_cmd)
+                            {
+                                found_idx = Some(idx);
+                                if existing_cmd != desired_cmd {
+                                    needs_update = true;
+                                }
+                                break;
+                            }
+                        }
+
+                        match found_idx {
+                            Some(idx) if needs_update => {
+                                existing_hooks[idx] = desired_hook.clone();
+                            }
+                            Some(_) => {
+                                // Already up to date, skip
+                            }
+                            None => {
+                                // No existing command, add new one
+                                existing_hooks.push(desired_hook.clone());
+                            }
+                        }
+                    }
+
+                    // Write back merged hooks for this hook type
+                    if let Some(obj) = hooks_obj.as_object_mut() {
+                        obj.insert(hook_name.to_string(), Value::Array(existing_hooks));
                     }
                 }
 
-                match found_idx {
-                    Some(idx) if needs_update => {
-                        existing_hooks[idx] = desired_hook.clone();
-                    }
-                    Some(_) => {
-                        // Already up to date, skip
-                    }
-                    None => {
-                        // No existing command, add new one
-                        existing_hooks.push(desired_hook.clone());
-                    }
+                if let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
                 }
-            }
-
-            // Write back merged hooks for this hook type
-            if let Some(obj) = hooks_obj.as_object_mut() {
-                obj.insert(hook_name.to_string(), Value::Array(existing_hooks));
-            }
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        // Check if there are semantic changes (compare JSON values, not strings)
-        if existing == merged {
-            return Ok(None);
-        }
-
-        // Generate new content
-        let new_content = serde_json::to_string_pretty(&merged)?;
-
-        // Generate diff
-        let diff_output = generate_diff(&hooks_path, &existing_content, &new_content);
-
-        // Write if not dry-run
-        if !dry_run {
-            write_atomic(&hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+            },
+        )
     }
 
     fn uninstall_hooks(
@@ -265,58 +231,42 @@ impl HookInstaller for CursorInstaller {
         _params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let hooks_path = Self::hooks_path();
+        edit_settings_json(
+            &Self::hooks_path(),
+            dry_run,
+            MissingBehavior::NoOp,
+            |content| Ok(serde_json::from_str(content)?),
+            |merged| {
+                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
+                    return;
+                };
 
-        if !hooks_path.exists() {
-            return Ok(None);
-        }
+                let mut changed = false;
 
-        let existing_content = fs::read_to_string(&hooks_path)?;
-        let existing: Value = serde_json::from_str(&existing_content)?;
-
-        let mut merged = existing.clone();
-        let mut hooks_obj = match merged.get("hooks").cloned() {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-
-        let mut changed = false;
-
-        // Remove git-ai checkpoint cursor commands from both hook types
-        for hook_name in &["preToolUse", "postToolUse"] {
-            if let Some(hooks_array) = hooks_obj.get_mut(*hook_name).and_then(|v| v.as_array_mut())
-            {
-                let original_len = hooks_array.len();
-                hooks_array.retain(|hook| {
-                    if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                        !Self::is_cursor_checkpoint_command(cmd)
-                    } else {
-                        true
+                // Remove git-ai checkpoint cursor commands from both hook types
+                for hook_name in &["preToolUse", "postToolUse"] {
+                    if let Some(hooks_array) =
+                        hooks_obj.get_mut(*hook_name).and_then(|v| v.as_array_mut())
+                    {
+                        let original_len = hooks_array.len();
+                        hooks_array.retain(|hook| {
+                            if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
+                                !Self::is_cursor_checkpoint_command(cmd)
+                            } else {
+                                true
+                            }
+                        });
+                        if hooks_array.len() != original_len {
+                            changed = true;
+                        }
                     }
-                });
-                if hooks_array.len() != original_len {
-                    changed = true;
                 }
-            }
-        }
 
-        if !changed {
-            return Ok(None);
-        }
-
-        // Write back hooks to merged
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(&hooks_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(&hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+                if changed && let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
+                }
+            },
+        )
     }
 
     fn install_extras(

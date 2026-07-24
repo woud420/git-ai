@@ -70,6 +70,23 @@ pub fn raw_git(cwd: &Path, args: &[&str]) {
     );
 }
 
+/// Same as [`raw_git`], but returns trimmed stdout instead of discarding it.
+pub fn run_git_stdout(cwd: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("git command should run");
+    assert!(
+        output.status.success(),
+        "git {:?} failed:\nstdout: {}\nstderr: {}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 /// Create a fresh temp dir holding an isolated bash-history sqlite db path.
 /// The returned `TempDir` must be kept alive for the duration of the test.
 pub fn isolated_bash_history_db_path() -> (tempfile::TempDir, String) {

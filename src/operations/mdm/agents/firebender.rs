@@ -239,40 +239,11 @@ impl HookInstaller for FirebenderInstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::mdm::test_env::with_temp_home;
     use serial_test::serial;
-    use std::path::Path;
-    use tempfile::TempDir;
 
     fn create_test_binary_path() -> PathBuf {
         PathBuf::from("/usr/local/bin/git-ai")
-    }
-
-    fn with_temp_home<F: FnOnce(&Path)>(f: F) {
-        let temp_dir = TempDir::new().unwrap();
-        let home = temp_dir.path().to_path_buf();
-
-        let prev_home = std::env::var_os("HOME");
-        let prev_userprofile = std::env::var_os("USERPROFILE");
-
-        // SAFETY: tests using this helper are serialized via #[serial].
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("USERPROFILE", &home);
-        }
-
-        f(&home);
-
-        // SAFETY: tests using this helper are serialized via #[serial].
-        unsafe {
-            match prev_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-            match prev_userprofile {
-                Some(v) => std::env::set_var("USERPROFILE", v),
-                None => std::env::remove_var("USERPROFILE"),
-            }
-        }
     }
 
     #[test]

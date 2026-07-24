@@ -264,40 +264,8 @@ pub fn uninstall_skills(dry_run: bool, _verbose: bool) -> Result<SkillsInstallRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::mdm::test_env::with_temp_home;
     use serial_test::serial;
-
-    /// Temporarily override HOME (and USERPROFILE on Windows) to a temp directory
-    /// for the duration of the closure. Must only be called from `#[serial]` tests
-    /// to avoid racing with other tests that read HOME.
-    fn with_temp_home<F: FnOnce(&std::path::Path)>(f: F) {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().to_path_buf();
-
-        let prev_home = std::env::var_os("HOME");
-        let prev_userprofile = std::env::var_os("USERPROFILE");
-
-        // SAFETY: tests using this helper are serialized via #[serial],
-        // so mutating the process environment is safe.
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("USERPROFILE", &home);
-        }
-
-        f(&home);
-
-        // SAFETY: tests using this helper are serialized via #[serial],
-        // so restoring the process environment is safe.
-        unsafe {
-            match prev_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-            match prev_userprofile {
-                Some(v) => std::env::set_var("USERPROFILE", v),
-                None => std::env::remove_var("USERPROFILE"),
-            }
-        }
-    }
 
     #[test]
     fn test_embedded_skills_are_loaded() {

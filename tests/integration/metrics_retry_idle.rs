@@ -114,9 +114,7 @@ fn daemon_remains_responsive_after_exhausted_metrics_migration() {
     std::thread::sleep(Duration::from_secs(7));
     repo.sync_daemon();
 
-    fs::write(&file_path, "Untracked line\nHuman line\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.md"])
-        .unwrap();
+    repo.human_edit("example.md", "Untracked line\nHuman line\n");
     repo.stage_all_and_commit("Human edit").unwrap();
     file.assert_committed_lines(lines![
         "Untracked line".unattributed_human(),

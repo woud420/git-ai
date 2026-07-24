@@ -48,9 +48,7 @@ fn sqlite_backend_repo() -> (TestRepo, tempfile::TempDir, std::path::PathBuf) {
 
 fn commit_with_ai_line(repo: &TestRepo) -> String {
     let file_path = repo.path().join("example.txt");
-    fs::write(&file_path, "Human line\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", "Human line\n");
     fs::write(&file_path, "Human line\nAI line\n").unwrap();
     repo.git_ai(&["checkpoint", "mock_ai", "example.txt"])
         .unwrap();

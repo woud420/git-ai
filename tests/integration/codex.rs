@@ -279,10 +279,7 @@ fn test_codex_commit_inside_bash_inflight_repeated_append_keeps_file_ai() {
         patch.exclude_prompts_in_repositories = Some(vec![]);
     });
 
-    let readme_path = repo.path().join("README.md");
-    fs::write(&readme_path, "Project README\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "README.md"])
-        .expect("initial README known-human checkpoint should succeed");
+    repo.human_edit("README.md", "Project README\n");
     let mut readme = repo.filename("README.md");
     repo.stage_all_and_commit("Initial README")
         .expect("initial README commit should succeed");
@@ -1134,9 +1131,7 @@ fn test_codex_e2e_apply_patch_preserves_human_lines() {
     let repo_root = repo.canonical_path();
     let file_path = repo_root.join("config.toml");
 
-    fs::write(&file_path, "# human config\nkey = \"value\"\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "config.toml"])
-        .unwrap();
+    repo.human_edit("config.toml", "# human config\nkey = \"value\"\n");
     repo.stage_all_and_commit("Initial commit").unwrap();
 
     let mut config = repo.filename("config.toml");

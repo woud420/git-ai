@@ -593,9 +593,7 @@ H: Human Line 1
 H: Human Line 2
 H: Human Line 3
 ";
-    fs::write(&file_path, human_content).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", human_content);
     repo.git(&["add", "example.txt"]).unwrap();
     repo.commit("Commit 1: Human adds 3 lines").unwrap();
 
@@ -1169,9 +1167,7 @@ Line 3: Initial
 Line 4: Initial
 Line 5: Initial
 ";
-    fs::write(&file_path, human_edit).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", human_edit);
 
     let ai_edit = "\
 Line 1: Initial
@@ -1204,9 +1200,7 @@ AI: AI Line 2
 AI: AI Line 3
 Line 5: Initial
 ";
-    fs::write(&file_path, human_edit2).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "example.txt"])
-        .unwrap();
+    repo.human_edit("example.txt", human_edit2);
 
     let ai_edit2 = "\
 H: Human Line 2

@@ -1,8 +1,5 @@
 use super::parse;
-use super::{
-    AgentPreset, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
-    PresetContext, StreamFormat, StreamSource,
-};
+use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::working_log::AgentId;
@@ -123,6 +120,7 @@ impl AgentPreset for WindsurfPreset {
         );
         let is_pre_bash = matches!(agent_action, Some("pre_run_command"));
         let is_pre_write = matches!(agent_action, Some("pre_write_code"));
+        let is_pre = if is_bash { is_pre_bash } else { is_pre_write };
 
         let execution_id = tool_info
             .and_then(|ti| ti.get("execution_id"))
@@ -137,50 +135,22 @@ impl AgentPreset for WindsurfPreset {
             .filter(|s| !s.is_empty())
             .map(ToString::to_string)
             .or_else(|| parse::bash_command_from_hook_input(&data));
+        let file_paths = tool_info
+            .and_then(|ti| ti.get("file_path"))
+            .and_then(|v| v.as_str())
+            .map(|p| vec![parse::resolve_absolute(p, &cwd_str)])
+            .unwrap_or_default();
 
-        let event = if is_bash {
-            if is_pre_bash {
-                ParsedHookEvent::PreBashCall(PreBashCall {
-                    context,
-                    tool_use_id: execution_id,
-                    command: bash_command,
-                })
-            } else {
-                ParsedHookEvent::PostBashCall(PostBashCall {
-                    context,
-                    tool_use_id: execution_id,
-                    command: bash_command,
-                    stream_source,
-                })
-            }
-        } else if is_pre_write {
-            let file_path = tool_info
-                .and_then(|ti| ti.get("file_path"))
-                .and_then(|v| v.as_str())
-                .map(|p| vec![parse::resolve_absolute(p, &cwd_str)])
-                .unwrap_or_default();
-
-            ParsedHookEvent::PreFileEdit(PreFileEdit {
-                context,
-                file_paths: file_path,
-                dirty_files: None,
-                tool_use_id: Some(execution_id.clone()),
-            })
-        } else {
-            let file_path = tool_info
-                .and_then(|ti| ti.get("file_path"))
-                .and_then(|v| v.as_str())
-                .map(|p| vec![parse::resolve_absolute(p, &cwd_str)])
-                .unwrap_or_default();
-
-            ParsedHookEvent::PostFileEdit(PostFileEdit {
-                context,
-                file_paths: file_path,
-                dirty_files: None,
-                stream_source,
-                tool_use_id: Some(execution_id),
-            })
-        };
+        let event = claude_wire::build_wire_event(
+            is_pre,
+            is_bash,
+            context,
+            execution_id,
+            bash_command,
+            file_paths,
+            None,
+            stream_source,
+        );
 
         Ok(vec![event])
     }

@@ -4,6 +4,7 @@ mod agent_v1;
 mod ai_tab;
 mod amp;
 mod claude;
+mod claude_wire;
 mod cline;
 mod codex;
 mod continue_cli;

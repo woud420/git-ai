@@ -633,31 +633,15 @@ impl<'a> TestFile<'a> {
 
     fn run_checkpoint_for_author_type(&self, author_type: &AuthorType) {
         let relative_path = self.repo_relative_path();
-        let result = match author_type {
-            AuthorType::Ai => self
-                .repo
-                .git_ai(&["checkpoint", "mock_ai", relative_path.as_str()]),
-            AuthorType::Human => {
-                self.repo
-                    .git_ai(&["checkpoint", "mock_known_human", relative_path.as_str()])
-            }
-            AuthorType::UnattributedHuman => {
-                self.repo
-                    .git_ai(&["checkpoint", "--", relative_path.as_str()])
-            }
-        };
-        result.unwrap();
+        self.repo
+            .checkpoint_file(&relative_path, author_type)
+            .unwrap();
     }
 
     fn write_and_checkpoint(&self, author_type: &AuthorType) {
-        // Create parent directories if they don't exist (important for nested paths)
-        if let Some(parent) = self.file_path.parent()
-            && !parent.exists()
-        {
-            fs::create_dir_all(parent).expect("failed to create parent directories");
-        }
         let contents = self.contents();
-        fs::write(&self.file_path, contents).unwrap();
+        let relative_path = self.repo_relative_path();
+        self.repo.write_file(&relative_path, &contents);
         self.run_checkpoint_for_author_type(author_type);
     }
 
@@ -667,13 +651,8 @@ impl<'a> TestFile<'a> {
         author_type: &AuthorType,
         stage: bool,
     ) {
-        // Create parent directories if they don't exist (important for nested paths like src/模块/组件.ts)
-        if let Some(parent) = self.file_path.parent()
-            && !parent.exists()
-        {
-            fs::create_dir_all(parent).expect("failed to create parent directories");
-        }
-        fs::write(&self.file_path, contents).unwrap();
+        let relative_path = self.repo_relative_path();
+        self.repo.write_file(&relative_path, contents);
 
         if stage {
             // Stage the file first

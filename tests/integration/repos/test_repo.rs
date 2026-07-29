@@ -46,7 +46,7 @@ use windows_sys::Win32::System::JobObjects::{
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 
-use super::test_file::TestFile;
+use super::test_file::{AuthorType, TestFile};
 
 const DAEMON_TEST_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 const DAEMON_TEST_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -2513,10 +2513,10 @@ impl TestRepo {
     /// sequence themselves; this helper intentionally hides those steps.
     pub fn ai_edit(&self, rel: &str, pre_contents: &str, post_contents: &str) {
         self.write_file(rel, pre_contents);
-        self.git_ai(&["checkpoint", "human", rel])
+        self.checkpoint_file_with_preset(rel, "human")
             .expect("pre-edit human checkpoint should succeed");
         self.write_file(rel, post_contents);
-        self.git_ai(&["checkpoint", "mock_ai", rel])
+        self.checkpoint_file(rel, &AuthorType::Ai)
             .expect("post-edit mock_ai checkpoint should succeed");
     }
 
@@ -2529,7 +2529,7 @@ impl TestRepo {
     /// themselves; this helper intentionally hides those steps.
     pub fn human_edit(&self, rel: &str, contents: &str) {
         self.write_file(rel, contents);
-        self.git_ai(&["checkpoint", "mock_known_human", rel])
+        self.checkpoint_file(rel, &AuthorType::Human)
             .expect("known-human checkpoint should succeed");
     }
 
@@ -2539,6 +2539,23 @@ impl TestRepo {
     /// trio rather than mixing a differently-named primitive in.
     pub fn untracked_edit(&self, rel: &str, contents: &str) {
         self.write_file(rel, contents);
+    }
+
+    pub(crate) fn checkpoint_file(
+        &self,
+        rel: &str,
+        author_type: &AuthorType,
+    ) -> Result<String, String> {
+        let args = match author_type {
+            AuthorType::Ai => ["checkpoint", "mock_ai", rel],
+            AuthorType::Human => ["checkpoint", "mock_known_human", rel],
+            AuthorType::UnattributedHuman => ["checkpoint", "--", rel],
+        };
+        self.git_ai(&args)
+    }
+
+    fn checkpoint_file_with_preset(&self, rel: &str, preset: &str) -> Result<String, String> {
+        self.git_ai(&["checkpoint", preset, rel])
     }
 
     pub fn test_db_path(&self) -> &PathBuf {

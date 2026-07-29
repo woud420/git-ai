@@ -267,34 +267,34 @@ impl<'a> TestFile<'a> {
     }
 
     pub fn assert_lines_and_blame<T: Into<ExpectedLine>>(&mut self, lines: Vec<T>) {
-        let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
-        let blame_output = self.blame_output();
-        let actual_lines = Self::parse_blame_lines(&blame_output);
-
-        Self::assert_blame_lines(
-            &actual_lines,
-            &expected_lines,
-            &blame_output,
-            "lines in blame output",
-        );
+        self.assert_lines_with_blame(lines, Self::parse_blame_lines, "lines in blame output");
     }
 
     /// Assert only committed lines (filters out uncommitted lines)
     /// Useful for partial staging tests where some lines aren't committed yet
     pub fn assert_committed_lines<T: Into<ExpectedLine>>(&mut self, lines: Vec<T>) {
-        let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
-        let blame_output = self.blame_output();
-        let committed_lines = Self::parse_committed_blame_lines(&blame_output);
-
-        Self::assert_blame_lines(
-            &committed_lines,
-            &expected_lines,
-            &blame_output,
-            "committed lines",
-        );
+        self.assert_lines_with_blame(lines, Self::parse_committed_blame_lines, "committed lines");
     }
 
+    fn assert_lines_with_blame<T: Into<ExpectedLine>>(
+        &mut self,
+        lines: Vec<T>,
+        select_lines: fn(&str) -> Vec<(String, String)>,
+        line_description: &str,
+    ) {
+        let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
+        let blame_output = self.blame_output();
+        let actual_lines = select_lines(&blame_output);
+
+        self.assert_blame_lines(
+            &actual_lines,
+            &expected_lines,
+            &blame_output,
+            line_description,
+        );
+    }
     fn assert_blame_lines(
+        &self,
         actual_lines: &[(String, String)],
         expected_lines: &[ExpectedLine],
         blame_output: &str,

@@ -146,7 +146,10 @@ jobs:
               package_records.append({"path": posix, "sha256": actual, "size": candidate.stat().st_size})
           package_records.sort(key=lambda item: item["path"])
           installed = hashlib.sha256(
-              json.dumps(package_records, sort_keys=True, separators=(",", ":")).encode("utf-8")
+              (
+                  json.dumps(package_records, sort_keys=True, separators=(",", ":"))
+                  + "\n"
+              ).encode("utf-8")
           ).hexdigest()
           expected = "b14eb2ed706b208dd5c9ea5474161ba10a65081b4fdffa042cdbc1f87fe4ca15"
           if installed != expected:

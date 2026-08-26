@@ -49,7 +49,7 @@
     "schema_version": "git-ai-behavior-oracle/1.0.0",
     "execution": "interactive-portable-skill-only",
     "frozen": true,
-    "digest": "6a05059be5021d3d9b5769a3451afdad14dd8741c87f841685935bb515b0c582",
+    "digest": "8d4f6a75fbd890704c3965da3134ab05e3ef0244a405d3b14232a441c27cfd5c",
     "fixture_set_digest": "ff3053ea376be631effb9c13eeaf1a66edb4733895dfca8896fc683929fe70f8",
     "seed": 20260826,
     "corpus": {

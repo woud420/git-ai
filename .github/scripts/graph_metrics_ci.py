@@ -421,10 +421,7 @@ def main():
         "template_suffixes": policy["corpus"]["template_suffixes"],
     }
     repository_root = Path(args.policy).resolve().parent.parent
-    workflow_paths = (
-        ".github/workflows/graph-metrics.yml",
-        ".github/workflows/graph-metrics-publish.yml",
-    )
+    workflow_paths = (".github/workflows/graph-metrics.yml",)
     workflow_files = {}
     for relative in workflow_paths:
         candidate = repository_root / relative

@@ -56,7 +56,7 @@
     "package_identity": "pinned wheel SHA-256 plus exact transitive hash lock",
     "installed_code_identity": "all non-bytecode code_review_graph package files are RECORD-verified and folded into installed_code_sha256",
     "parser_boundary": "attacker-controlled pull-request bytes are parsed only by a secretless read-only job",
-    "publication_boundary": "a trusted workflow_run publisher validates hostile archives and renders Markdown from allowlisted structured fields",
+    "publication_boundary": "structured evidence is retained as a read-only workflow artifact; no automated comment or step-summary publication is enabled",
     "target_execution": "disabled; the evidence job analyzes checkout bytes as data and never imports, builds, or executes the target project"
   },
   "corpus": {
@@ -203,7 +203,7 @@
     "behavior_schema": "behavior-evidence-ci-adapter/1.0.0",
     "delphi_schema": "delphi-rounds-ci-adapter/1.0.0",
     "schema_compatibility": "not interchangeable with portable evaluator artifacts",
-    "evaluator_sha256": "d4e534bcdac366310330349b6bcae7d0ab067a00a1ecfa3f29c5b32f022c2da7",
+    "evaluator_sha256": "02727e8e115d7fbe27e1c2599e6349e6cd38200e063e2b5b0fd836a61de9ef92",
     "behavior": "inconclusive; no frozen black-box observations execute in the parser job",
     "history": "unavailable; the 1000-case study runs interactively through the portable skill",
     "delphi": "unavailable; CI emits no model calls and no synthetic panel responses",
@@ -214,19 +214,12 @@
     ".github/behavior-evidence.yml",
     ".github/graph-metrics-requirements.lock",
     ".github/scripts/graph_metrics_ci.py",
-    ".github/scripts/graph_metrics_publisher.py",
-    ".github/workflows/graph-metrics.yml",
-    ".github/workflows/graph-metrics-publish.yml"
+    ".github/workflows/graph-metrics.yml"
   ],
   "publication": {
     "artifact_schema": "architecture-evidence-artifact/1.0.0",
-    "publisher_sha256": "b85023d7446f7615e28a9e2d3e965c69279ad09193f549766d8c0de2d69a8ac4",
-    "artifact_max_compressed_bytes": 52428800,
-    "artifact_max_uncompressed_bytes": 104857600,
-    "markdown_max_bytes": 60000,
-    "pull_request_comments": true,
-    "sticky_comment_marker": "<!-- git-ai-architecture-evidence-v1 -->",
-    "tracking_issue_comment": false
+    "pull_request_comments": false,
+    "default_branch_summary": false
   },
   "interpretation": {
     "composite_quality_score": false,

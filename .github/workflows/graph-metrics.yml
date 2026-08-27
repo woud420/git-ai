@@ -69,6 +69,11 @@ jobs:
           assert policy["analyzer"]["version"] == "2.3.8"
           assert policy["runtime"]["python"] == "3.12.14"
           assert policy["runtime"]["dependency_lock_sha256"] == "d21852f298badee13c0f716b8352727680d4a76062af57e9238b45caea7ec20c"
+          assert set(policy["publication"]) == {
+              "artifact_schema", "pull_request_comments", "default_branch_summary"
+          }
+          assert policy["publication"]["pull_request_comments"] is False
+          assert policy["publication"]["default_branch_summary"] is False
           assert behavior["schema_version"] == "behavior-policy/1.0.0"
           assert behavior["ci_collection"]["evidence_result"] == "inconclusive"
           PY
@@ -229,9 +234,7 @@ jobs:
             .github/behavior-evidence.yml
             .github/graph-metrics-requirements.lock
             .github/scripts/graph_metrics_ci.py
-            .github/scripts/graph_metrics_publisher.py
             .github/workflows/graph-metrics.yml
-            .github/workflows/graph-metrics-publish.yml
           )
           if git -C "$corpus" diff --quiet "$base_sha" "$head_sha" -- "${guarded[@]}"; then
             configuration_changed=false
@@ -359,25 +362,6 @@ jobs:
           set -euo pipefail
           diff --recursive --brief "$RUNNER_TEMP/architecture-evidence/run-one" "$RUNNER_TEMP/architecture-evidence/run-two"
           find "$RUNNER_TEMP/architecture-evidence/run-one" -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum
-
-      - name: Write trusted default-branch and weekly summary
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          set -euo pipefail
-          report="$RUNNER_TEMP/architecture-evidence/run-one/report.md"
-          test -f "$report"
-          test ! -L "$report"
-          test "$(stat -c '%s' "$report")" -le 60000
-          python -I - "$report" <<'PY'
-          import sys
-          from pathlib import Path
-
-          text = Path(sys.argv[1]).read_text(encoding="utf-8")
-          if "\x00" in text or "<" in text or ">" in text:
-              raise SystemExit("refusing unsafe Markdown summary")
-          PY
-          sed -n '1,1200p' "$report" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload structured evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

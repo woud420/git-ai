@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-fn isolated_metrics_db_path() -> (tempfile::TempDir, String) {
+pub(crate) fn isolated_metrics_db_path() -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir().expect("failed to create isolated metrics db dir");
     let path = dir.path().join("metrics.db");
     (dir, path.to_string_lossy().to_string())

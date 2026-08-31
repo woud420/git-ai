@@ -40,6 +40,24 @@ impl CodexPreset {
         .flatten()
     }
 
+    fn stream_source_for_rollout(path: PathBuf, hook_session_id: &str) -> StreamSource {
+        let external_session_id =
+            crate::operations::streams::agents::CodexAgent::external_session_id_from_rollout_path(
+                &path,
+            )
+            .unwrap_or_else(|| hook_session_id.to_string());
+        let external_parent_session_id =
+            (external_session_id != hook_session_id).then(|| hook_session_id.to_string());
+
+        StreamSource {
+            path,
+            format: StreamFormat::CodexJsonl,
+            session_id: generate_session_id(&external_session_id, "codex"),
+            external_session_id,
+            external_parent_session_id,
+        }
+    }
+
     fn extract_filepaths_from_tool_response(hook_data: &serde_json::Value) -> Vec<PathBuf> {
         let Some(tool_response) = hook_data.get("tool_response") else {
             return vec![];
@@ -124,12 +142,8 @@ impl AgentPreset for CodexPreset {
             metadata,
         };
 
-        let stream_source = transcript_path.map(|tp| StreamSource {
-            path: PathBuf::from(tp),
-            format: StreamFormat::CodexJsonl,
-            session_id: generate_session_id(&context.external_session_id, "codex"),
-            external_session_id: context.external_session_id.clone(),
-            external_parent_session_id: None,
+        let stream_source = transcript_path.map(|path| {
+            Self::stream_source_for_rollout(PathBuf::from(path), &context.external_session_id)
         });
 
         let bash_command = parse::bash_command_from_hook_input(&data);
@@ -213,13 +227,7 @@ impl AgentPreset for CodexPreset {
                         "transcript_path".to_string(),
                         path.to_string_lossy().into_owned(),
                     );
-                    StreamSource {
-                        path,
-                        format: StreamFormat::CodexJsonl,
-                        session_id: generate_session_id(&context.external_session_id, "codex"),
-                        external_session_id: context.external_session_id.clone(),
-                        external_parent_session_id: None,
-                    }
+                    Self::stream_source_for_rollout(path, &context.external_session_id)
                 })
             };
 

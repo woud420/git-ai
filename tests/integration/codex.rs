@@ -68,6 +68,127 @@ fn test_codex_preset_structured_hook_input() {
     }
 }
 
+// Regression coverage for ENG-324 and upstream git-ai-project/git-ai#2204.
+#[test]
+fn test_codex_subagent_stream_identity_comes_from_rollout_filename() {
+    let parent_id = "01a00000-0000-7000-8000-0000000000aa";
+    let child_id = "01a00000-0000-7000-8000-0000000000b1";
+    let temp = tempfile::tempdir().unwrap();
+    let rollout = temp
+        .path()
+        .join(format!("rollout-2026-08-31T15-00-00-{child_id}.jsonl"));
+    fs::write(
+        &rollout,
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{child_id}\",\"forked_from_id\":\"{parent_id}\",\"thread_source\":\"subagent\"}}}}\n"
+        ),
+    )
+    .unwrap();
+
+    let hook_input = json!({
+        "session_id": parent_id,
+        "cwd": "/tmp/test-project",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "apply_patch",
+        "tool_use_id": "patch-subagent",
+        "transcript_path": rollout,
+        "tool_input": {
+            "patch": "*** Update File: /tmp/test-project/src/lib.rs\n+child edit\n"
+        }
+    })
+    .to_string();
+
+    let events = parse_codex(&hook_input).expect("Codex subagent hook should parse");
+    let ParsedHookEvent::PostFileEdit(event) = &events[0] else {
+        panic!("expected PostFileEdit");
+    };
+    let source = event.stream_source.as_ref().expect("stream source");
+
+    assert_eq!(event.context.external_session_id, parent_id);
+    assert_eq!(event.context.agent_id.id, parent_id);
+    assert_eq!(source.external_session_id, child_id);
+    assert_eq!(
+        source.session_id,
+        git_ai::model::authorship_log_serialization::generate_session_id(child_id, "codex")
+    );
+    assert_eq!(
+        source.external_parent_session_id.as_deref(),
+        Some(parent_id)
+    );
+}
+
+#[test]
+fn test_codex_plain_rollout_keeps_existing_session_identity() {
+    let session_id = "01a00000-0000-7000-8000-0000000000cc";
+    let temp = tempfile::tempdir().unwrap();
+    let rollout = temp
+        .path()
+        .join(format!("rollout-2026-08-31T15-00-00-{session_id}.jsonl"));
+    fs::write(
+        &rollout,
+        format!("{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\"}}}}\n"),
+    )
+    .unwrap();
+
+    let hook_input = json!({
+        "session_id": session_id,
+        "cwd": "/tmp/test-project",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "apply_patch",
+        "tool_use_id": "patch-plain",
+        "transcript_path": rollout,
+        "tool_input": {
+            "patch": "*** Update File: /tmp/test-project/src/lib.rs\n+plain edit\n"
+        }
+    })
+    .to_string();
+
+    let events = parse_codex(&hook_input).expect("plain Codex hook should parse");
+    let ParsedHookEvent::PostFileEdit(event) = &events[0] else {
+        panic!("expected PostFileEdit");
+    };
+    let source = event.stream_source.as_ref().expect("stream source");
+
+    assert_eq!(event.context.external_session_id, session_id);
+    assert_eq!(source.external_session_id, session_id);
+    assert_eq!(source.external_parent_session_id, None);
+}
+
+#[test]
+fn test_codex_rollout_identity_is_stable_across_equivalent_path_spellings() {
+    let child_id = "01a00000-0000-7000-8000-0000000000b1";
+    let relative_suffix =
+        format!("sessions/2026/08/31/rollout-2026-08-31T15-00-00-{child_id}.jsonl");
+
+    for path in [
+        std::path::PathBuf::from("/var/folders/example").join(&relative_suffix),
+        std::path::PathBuf::from("/private/var/folders/example").join(&relative_suffix),
+    ] {
+        assert_eq!(
+            CodexAgent::external_session_id_from_rollout_path(&path).as_deref(),
+            Some(child_id)
+        );
+    }
+    assert_eq!(
+        CodexAgent::external_session_id_from_rollout_path(std::path::Path::new("short.jsonl")),
+        None
+    );
+    assert_eq!(
+        CodexAgent::external_session_id_from_rollout_path(std::path::Path::new(
+            "/var/folders/example/transcript-2026-08-31T15-00-00-01a00000-0000-7000-8000-0000000000b1.jsonl",
+        )),
+        None,
+        "non-rollout transcript names must fall back to the hook identity"
+    );
+    assert_eq!(
+        CodexAgent::external_session_id_from_rollout_path(std::path::Path::new(
+            "/var/folders/example/rollout-2026-08-31T15-00-00-01a00000-0000-7000-8000-0000000000bz.jsonl",
+        )),
+        None,
+        "malformed rollout UUIDs must fail closed"
+    );
+}
+
 #[test]
 fn test_codex_preset_bash_pre_tool_use_skips_checkpoint_after_capturing_snapshot() {
     let fixture = fixture_path("codex-session-simple.jsonl");

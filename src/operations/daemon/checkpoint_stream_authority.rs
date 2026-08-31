@@ -86,13 +86,25 @@ fn validate_trusted_stream_source(
 ) -> Result<crate::operations::streams::sweep::DiscoveredSession, GitAiError> {
     let source = request.stream_source.as_ref().ok_or_else(denial)?;
     let agent_id = request.agent_id.as_ref().ok_or_else(denial)?;
-    if agent_id.id != source.external_session_id {
+    if agent_id.tool != "codex" && agent_id.id != source.external_session_id {
         return Err(denial());
     }
     let agent = crate::operations::streams::agent::get_agent(&agent_id.tool).ok_or_else(denial)?;
-    agent
+    let session = agent
         .validate_checkpoint_stream(source)
-        .map_err(|_| denial())
+        .map_err(|_| denial())?;
+
+    // Compare attribution identity only after the agent has canonicalized the
+    // stream and derived its relationship from trusted host evidence. Codex
+    // subagent hooks report the logical parent session while the rollout is
+    // keyed by the child filename; caller-supplied parent metadata is ignored.
+    let matches_codex_parent = agent_id.tool == "codex"
+        && session.external_parent_session_id.as_deref() == Some(agent_id.id.as_str());
+    if agent_id.id != session.external_session_id && !matches_codex_parent {
+        return Err(denial());
+    }
+
+    Ok(session)
 }
 
 fn resolve_file_path(path: &Path, repository_root: &Path) -> PathBuf {

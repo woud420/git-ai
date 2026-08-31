@@ -474,20 +474,47 @@ fn test_bash_tool_orchestration_multiple_tool_uses() {
 // ===========================================================================
 
 #[test]
-fn test_classify_tool_claude() {
-    assert_eq!(classify_tool(Agent::Claude, "Write"), ToolClass::FileEdit);
-    assert_eq!(classify_tool(Agent::Claude, "Edit"), ToolClass::FileEdit);
-    assert_eq!(
-        classify_tool(Agent::Claude, "MultiEdit"),
-        ToolClass::FileEdit
-    );
-    assert_eq!(classify_tool(Agent::Claude, "Bash"), ToolClass::Bash);
-    assert_eq!(classify_tool(Agent::Claude, "Read"), ToolClass::Skip);
-    assert_eq!(classify_tool(Agent::Claude, "Glob"), ToolClass::Skip);
-    assert_eq!(
-        classify_tool(Agent::Claude, "unknown_tool"),
-        ToolClass::Skip
-    );
+fn test_classify_tool_claude_case_insensitive() {
+    for tool_name in [
+        "Write",
+        "write",
+        "WRITE",
+        "wRiTe",
+        "Edit",
+        "edit",
+        "EDIT",
+        "eDiT",
+        "MultiEdit",
+        "multiedit",
+        "MULTIEDIT",
+        "mUlTiEdIt",
+        "NotebookEdit",
+        "notebookedit",
+        "NOTEBOOKEDIT",
+        "nOtEbOoKeDiT",
+    ] {
+        assert_eq!(
+            classify_tool(Agent::Claude, tool_name),
+            ToolClass::FileEdit,
+            "Claude file-edit tool {tool_name:?} should be case-insensitive"
+        );
+    }
+
+    for tool_name in ["Bash", "bash", "BASH", "bAsH"] {
+        assert_eq!(
+            classify_tool(Agent::Claude, tool_name),
+            ToolClass::Bash,
+            "Claude Bash tool {tool_name:?} should be case-insensitive"
+        );
+    }
+
+    for tool_name in ["Read", "rEaD", "Glob", "gLoB", "unknown_tool"] {
+        assert_eq!(
+            classify_tool(Agent::Claude, tool_name),
+            ToolClass::Skip,
+            "Claude non-mutating tool {tool_name:?} should remain skipped"
+        );
+    }
 }
 
 #[test]

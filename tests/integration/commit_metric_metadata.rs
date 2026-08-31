@@ -16,7 +16,7 @@ pub(crate) fn isolated_metrics_db_path() -> (tempfile::TempDir, String) {
     (dir, path.to_string_lossy().to_string())
 }
 
-fn sparse_str(values: &SparseArray, pos: usize) -> Option<&str> {
+pub(crate) fn sparse_str(values: &SparseArray, pos: usize) -> Option<&str> {
     values
         .get(&pos.to_string())
         .and_then(|value| value.as_str())

@@ -9,11 +9,13 @@ use crate::operations::authorship::stats::{
 };
 use crate::operations::authorship::virtual_attribution::VirtualAttributions;
 use crate::operations::git::find_repository;
+use crate::operations::git::path_format::unescape_git_path;
 use crate::operations::git::repository::{Repository, parse_numstat_line};
 use crate::operations::git::status::MAX_PATHSPEC_ARGS;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
+use unicode_normalization::UnicodeNormalization;
 
 #[derive(Serialize)]
 struct CheckpointInfo {
@@ -131,10 +133,11 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
 
     let mut pathspecs: HashSet<String> = checkpoints
         .iter()
-        .flat_map(|cp| cp.entries.iter().map(|e| e.file.clone()))
+        .flat_map(|cp| cp.entries.iter().map(|e| normalize_status_path(&e.file)))
         .filter(|file| !should_ignore_file_with_matcher(file, &ignore_matcher))
         .collect();
     for file_path in working_va.files() {
+        let file_path = normalize_status_path(&file_path);
         if !should_ignore_file_with_matcher(&file_path, &ignore_matcher) {
             pathspecs.insert(file_path);
         }
@@ -244,13 +247,15 @@ fn get_working_dir_diff_stats(
     args.push("--numstat".to_string());
     args.push("HEAD".to_string());
 
-    // Add pathspecs if provided to scope the diff to specific files
-    // Only pass as CLI args when under threshold to avoid E2BIG
+    // Add pathspecs if provided to scope the diff to specific files. Pass them
+    // as CLI args only when they are below the E2BIG threshold and ASCII; Git
+    // may store canonically equivalent non-ASCII paths in a different form, so
+    // those are matched against normalized numstat output after the diff.
     let needs_post_filter = if let Some(paths) = pathspecs {
         if paths.is_empty() {
             return Ok((0, 0));
         }
-        if paths.len() > MAX_PATHSPEC_ARGS {
+        if needs_working_dir_post_filter(paths) {
             // Disable rename detection so git reports renames as separate
             // delete + add entries with clean filenames. Without this,
             // numstat outputs "old => new" arrow notation in the filename
@@ -278,16 +283,17 @@ fn get_working_dir_diff_stats(
         let Some(numstat) = parse_numstat_line(line) else {
             continue;
         };
+        let file_path = normalize_status_path(&unescape_git_path(numstat.path));
 
         // Post-filter by pathspec when we couldn't pass them as CLI args.
         if needs_post_filter
             && let Some(paths) = pathspecs
-            && !paths.contains(numstat.path)
+            && !paths.contains(&file_path)
         {
             continue;
         }
 
-        if should_ignore_file_with_matcher(numstat.path, ignore_matcher) {
+        if should_ignore_file_with_matcher(&file_path, ignore_matcher) {
             continue;
         }
 
@@ -296,6 +302,14 @@ fn get_working_dir_diff_stats(
     }
 
     Ok((added_lines, deleted_lines))
+}
+
+fn needs_working_dir_post_filter(paths: &HashSet<String>) -> bool {
+    paths.len() > MAX_PATHSPEC_ARGS || paths.iter().any(|path| !path.is_ascii())
+}
+
+fn normalize_status_path(path: &str) -> String {
+    path.nfc().collect()
 }
 
 /// Count AI-attributed lines from InitialAttributions (uncommitted changes)

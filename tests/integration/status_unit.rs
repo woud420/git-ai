@@ -1,3 +1,4 @@
+use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::extract_json_object;
 use git_ai::operations::authorship::stats::CommitStats;
@@ -180,6 +181,79 @@ fn test_working_dir_diff_stats_with_rename() {
     );
 }
 
+/// Regression for ENG-326: stored NFC paths must match canonically equivalent
+/// NFD paths emitted by Git without widening the status diff to unrelated files.
+#[test]
+fn test_status_normalizes_canonically_equivalent_non_ascii_pathspecs() {
+    const NFD_PATH: &str = "cafe\u{0301}.txt";
+    const NFC_PATH: &str = "caf\u{00e9}.txt";
+    const DECOY_PATH: &str = "decoy.txt";
+
+    let repo = TestRepo::new();
+    repo.git_og(&["config", "core.precomposeUnicode", "false"])
+        .unwrap();
+    repo.git_og(&["config", "core.quotePath", "true"]).unwrap();
+
+    fs::write(repo.path().join(NFD_PATH), "base\n").unwrap();
+    fs::write(repo.path().join(DECOY_PATH), "base\n").unwrap();
+    repo.stage_all_and_commit("initial").unwrap();
+
+    let mut target_file = repo.filename(NFD_PATH);
+    target_file.assert_committed_lines(crate::lines!["base".unattributed_human()]);
+    let mut decoy_file = repo.filename(DECOY_PATH);
+    decoy_file.assert_committed_lines(crate::lines!["base".unattributed_human()]);
+
+    let indexed_paths = repo
+        .git_og(&["-c", "core.quotePath=false", "ls-files"])
+        .unwrap();
+    assert!(
+        indexed_paths.lines().any(|path| path == NFD_PATH),
+        "fixture must preserve the decomposed path in Git's index: {indexed_paths:?}"
+    );
+    assert!(
+        !indexed_paths.lines().any(|path| path == NFC_PATH),
+        "fixture must not store the precomposed path in Git's index: {indexed_paths:?}"
+    );
+
+    repo.git_ai(&["checkpoint", "human", NFD_PATH]).unwrap();
+    fs::write(repo.path().join(NFD_PATH), "base\nAI line\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", NFD_PATH]).unwrap();
+    fs::write(repo.path().join(DECOY_PATH), "base\ndecoy one\ndecoy two\n").unwrap();
+
+    let checkpoints = repo
+        .current_working_logs()
+        .mutate_all_checkpoints(|checkpoints| {
+            let mut rewritten = 0;
+            for checkpoint in checkpoints {
+                for entry in &mut checkpoint.entries {
+                    if entry.file == NFD_PATH || entry.file == NFC_PATH {
+                        entry.file = NFC_PATH.to_string();
+                        rewritten += 1;
+                    }
+                }
+            }
+            assert_eq!(rewritten, 1, "fixture must rewrite one stored path");
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        checkpoints
+            .iter()
+            .flat_map(|checkpoint| &checkpoint.entries)
+            .filter(|entry| entry.file == NFC_PATH)
+            .count(),
+        1,
+        "fixture must store the checkpoint path in NFC"
+    );
+
+    let status = status_json(&repo);
+    assert_eq!(
+        status.stats.git_diff_added_lines, 1,
+        "status must include only the canonically equivalent checkpointed path"
+    );
+    assert_eq!(status.stats.git_diff_deleted_lines, 0);
+}
+
 /// Migrated from src/commands/status.rs test_get_working_dir_diff_stats_respects_ignore_patterns
 ///
 /// Verifies that default ignore patterns (which include *.lock) cause lock files
@@ -348,6 +422,7 @@ crate::reuse_tests_in_worktree!(
     test_working_dir_diff_stats_all_files_checkpointed,
     test_working_dir_diff_stats_no_changes_returns_zero,
     test_working_dir_diff_stats_with_rename,
+    test_status_normalizes_canonically_equivalent_non_ascii_pathspecs,
     test_working_dir_diff_stats_respects_ignore_patterns,
     test_ai_accepted_respects_ignore_patterns,
     test_status_preserves_lowercase_agent_identifier,

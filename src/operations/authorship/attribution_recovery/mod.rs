@@ -9,7 +9,7 @@ use crate::metrics::{CheckpointValues, EventAttributes, MetricEvent, PosEncoded}
 use crate::model::authorship_log::LineRange;
 use crate::model::authorship_log_serialization::{AuthorshipLog, generate_trace_id};
 use crate::model::stat_snapshot::StatEntry;
-use crate::model::working_log::CheckpointKind;
+use crate::model::working_log::{AgentId, CheckpointKind};
 use crate::operations::authorship::recovery_stores::RecoveryStores;
 use crate::operations::git::repo_state::worktree_root_for_path;
 use crate::operations::git::repository::Repository;
@@ -147,6 +147,16 @@ fn recover_adjacent_edges(
                 .next()
                 .unwrap_or(&recovery.source_author)
                 .to_string();
+            let (tool, model, external_session_id) =
+                recovery_agent_id(authorship_log, &recovery.source_author)
+                    .map(|agent_id| {
+                        (
+                            agent_id.tool.clone(),
+                            agent_id.model.clone(),
+                            agent_id.id.clone(),
+                        )
+                    })
+                    .unwrap_or_default();
             let recovered_author = if source_session.starts_with("s_") {
                 format!("{}::{}", source_session, trace_id)
             } else {
@@ -174,9 +184,9 @@ fn recover_adjacent_edges(
                 author_id: &recovered_author,
                 session_id: &source_session,
                 trace_id: &trace_id,
-                tool: "",
-                model: "",
-                external_session_id: "",
+                tool: &tool,
+                model: &model,
+                external_session_id: &external_session_id,
                 external_tool_use_id: None,
                 edit_kind: "attribution_recovery_edge",
                 checkpoint_type: "recovered_edge_extension",
@@ -383,6 +393,15 @@ pub(super) fn ai_session_key(author: &str) -> &str {
     author.split("::").next().unwrap_or(author)
 }
 
+fn recovery_agent_id<'a>(log: &'a AuthorshipLog, author: &str) -> Option<&'a AgentId> {
+    let metadata = &log.metadata;
+    metadata
+        .sessions
+        .get(ai_session_key(author))
+        .map(|session| &session.agent_id)
+        .or_else(|| metadata.prompts.get(author).map(|prompt| &prompt.agent_id))
+}
+
 pub(super) fn add_attestation(
     authorship_log: &mut AuthorshipLog,
     file_path: &str,
@@ -480,6 +499,7 @@ pub(super) fn record_recovery_metric(input: RecoveryMetricInput<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::authorship_log::SessionRecord;
     use crate::model::authorship_log_serialization::{
         AttestationEntry, AuthorshipLog, FileAttestation,
     };
@@ -501,6 +521,29 @@ mod tests {
 
         let unknown = unknown_lines_by_file(&log, &committed);
         assert_eq!(unknown.get("a.txt").unwrap(), &vec![1, 3, 5]);
+    }
+
+    #[test]
+    fn recovery_agent_id_supports_session_and_legacy_prompt_metadata() {
+        let agent_id = AgentId {
+            tool: "claude".to_string(),
+            model: "claude-sonnet-4".to_string(),
+            id: "external-session".to_string(),
+        };
+        let mut log = AuthorshipLog::new();
+        let session = SessionRecord {
+            agent_id: agent_id.clone(),
+            human_author: None,
+            custom_attributes: None,
+        };
+        log.metadata.sessions.insert("s".into(), session.clone());
+        log.metadata
+            .prompts
+            .insert("p".into(), session.to_prompt_record());
+
+        assert_eq!(recovery_agent_id(&log, "s::t"), Some(&agent_id));
+        assert_eq!(recovery_agent_id(&log, "p"), Some(&agent_id));
+        assert_eq!(recovery_agent_id(&log, "missing"), None);
     }
 
     #[test]

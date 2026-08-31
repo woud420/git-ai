@@ -1,5 +1,6 @@
 use crate::cli::fail::resolve_repo_or_fail;
 use crate::operations::authorship::prompt_utils::find_prompt;
+use crate::operations::commands::revision::normalize_head_rev;
 
 /// Handle the `show-prompt` command
 ///
@@ -65,7 +66,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 return Err("--commit requires a value".to_string());
             }
             i += 1;
-            commit = Some(args[i].clone());
+            commit = Some(normalize_head_rev(&args[i]));
         } else if arg == "--offset" {
             if i + 1 >= args.len() {
                 return Err("--offset requires a value".to_string());

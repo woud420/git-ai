@@ -57,6 +57,54 @@ fn test_claude_preset_extracts_edited_filepath() {
 }
 
 #[test]
+fn test_claude_case_insensitive_file_edit_hook_creates_ai_attribution() {
+    use crate::repos::test_file::ExpectedLineExt;
+    use crate::repos::test_repo::TestRepo;
+
+    let repo = TestRepo::new();
+    let repo_root = repo.canonical_path();
+    let file_path = repo_root.join("case-insensitive-tool.rs");
+    fs::write(&file_path, "human line\n").unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let mut file = repo.filename("case-insensitive-tool.rs");
+    file.assert_committed_lines(crate::lines!["human line".unattributed_human()]);
+
+    let transcript = tempfile::Builder::new()
+        .suffix(".jsonl")
+        .tempfile()
+        .unwrap();
+    fs::write(transcript.path(), "").unwrap();
+    let hook_input = |hook_event_name: &str| {
+        json!({
+            "cwd": repo_root,
+            "hook_event_name": hook_event_name,
+            "session_id": "claude-case-insensitive-session",
+            "tool_name": "eDiT",
+            "tool_use_id": "toolu_case_insensitive",
+            "transcript_path": transcript.path(),
+            "tool_input": {
+                "file_path": file_path,
+            }
+        })
+        .to_string()
+    };
+
+    repo.checkpoint_with_hook_input("claude", &hook_input("PreToolUse"))
+        .unwrap();
+    fs::write(&file_path, "human line\nAI line\n").unwrap();
+    repo.checkpoint_with_hook_input("claude", &hook_input("PostToolUse"))
+        .unwrap();
+    repo.stage_all_and_commit("Add mixed-case Claude edit")
+        .unwrap();
+
+    file.assert_committed_lines(crate::lines![
+        "human line".unattributed_human(),
+        "AI line".ai(),
+    ]);
+}
+
+#[test]
 fn test_claude_preset_no_filepath_when_tool_input_missing() {
     let hook_input = r##"{
         "cwd": "/Users/svarlamov/projects/testing-git",

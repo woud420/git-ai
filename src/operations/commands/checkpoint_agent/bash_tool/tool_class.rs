@@ -42,9 +42,9 @@ pub fn classify_optional_tool(agent: Agent, tool_name: Option<&str>) -> ToolClas
 /// Classify a tool name for a given agent.
 pub fn classify_tool(agent: Agent, tool_name: &str) -> ToolClass {
     match agent {
-        Agent::Claude => match tool_name {
-            "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => ToolClass::FileEdit,
-            "Bash" => ToolClass::Bash,
+        Agent::Claude => match tool_name.to_ascii_lowercase().as_str() {
+            "write" | "edit" | "multiedit" | "notebookedit" => ToolClass::FileEdit,
+            "bash" => ToolClass::Bash,
             _ => ToolClass::Skip,
         },
         Agent::Gemini => match tool_name {

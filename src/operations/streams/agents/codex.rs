@@ -86,6 +86,27 @@ impl CodexAgent {
         Ok(newest)
     }
 
+    /// Derive the durable external session identity from a rollout filename.
+    ///
+    /// Codex hook payloads can report a parent session for subagents, while
+    /// each child writes its own rollout. Checkpoint registration and sweep
+    /// discovery must therefore use the filename's trailing UUID so both paths
+    /// converge on one stream key per file.
+    pub fn external_session_id_from_rollout_path(path: &Path) -> Option<String> {
+        let stem = transcript_file_stem(path)?;
+        stem.strip_prefix("rollout-")?;
+        let suffix_start = stem.len().checked_sub(36)?;
+        let suffix = stem.get(suffix_start..)?;
+        let is_uuid = suffix.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        });
+        is_uuid.then(|| suffix.to_owned())
+    }
+
     fn scan_session_files() -> Vec<PathBuf> {
         collect_files_recursively(Self::session_roots(), |path| {
             path.extension()
@@ -157,12 +178,8 @@ impl Agent for CodexAgent {
                 ) {
                     return None;
                 }
-                let stem = transcript_file_stem(path)?;
-                if !stem.starts_with("rollout-") || stem.len() < 36 {
-                    return None;
-                }
                 Some((
-                    stem[stem.len() - 36..].to_string(),
+                    Self::external_session_id_from_rollout_path(path)?,
                     Self::detect_subagent_parent(path),
                 ))
             },
@@ -182,13 +199,8 @@ impl Agent for CodexAgent {
             "codex",
             Self::scan_session_files(),
             |path| {
-                // The hook payload sends the UUID suffix from the rollout filename.
-                let stem = transcript_file_stem(path)?;
-                if stem.len() < 36 {
-                    return None;
-                }
                 Some((
-                    stem[stem.len() - 36..].to_string(),
+                    Self::external_session_id_from_rollout_path(path)?,
                     Self::detect_subagent_parent(path),
                 ))
             },

@@ -4,6 +4,8 @@
 //! The actual transcript processing and metrics emission are tested via
 //! daemon tests and manual verification.
 
+use crate::repos::test_file::ExpectedLineExt;
+use crate::repos::test_repo::TestRepo;
 use crate::test_utils::{fixture_path, transcript_fixture_path};
 use git_ai::metrics::{
     EventAttributes, MetricEvent, OtelTraceValues, PosEncoded, SessionEventValues,
@@ -772,4 +774,136 @@ fn test_copilot_agent_streams_otel_path_resolution() {
     let otel_stream = &streams[1];
     assert_eq!(otel_stream.stream_kind, "otel_traces");
     assert!(otel_stream.shared);
+}
+
+// Regression coverage for ENG-324 and upstream git-ai-project/git-ai#2204 and
+// git-ai-project/git-ai#2223.
+#[test]
+fn codex_subagent_rollouts_sharing_hook_session_register_distinct_streams() {
+    let repo = TestRepo::new_with_daemon_env_and_patch(&[], |patch| {
+        patch.feature_flags = Some(serde_json::json!({"transcript_sweep": false}));
+    });
+    let parent_id = "01a00000-0000-7000-8000-0000000000aa";
+    let child_ids = [
+        "01a00000-0000-7000-8000-0000000000b1",
+        "01a00000-0000-7000-8000-0000000000b2",
+    ];
+    let file_names = ["child-a.txt", "child-b.txt"];
+
+    for file_name in file_names {
+        fs::write(repo.path().join(file_name), "base\n").unwrap();
+    }
+    repo.stage_all_and_commit("seed Codex subagent files")
+        .unwrap();
+    for file_name in file_names {
+        let mut file = repo.filename(file_name);
+        file.assert_committed_lines(crate::lines!["base".unattributed_human()]);
+    }
+
+    // Sweeping is disabled for this dedicated daemon, so registration below
+    // can only come from the checkpoint path under test.
+    let rollout_dir = repo.daemon_home_path().join(".codex/sessions/2026/08/31");
+    fs::create_dir_all(&rollout_dir).unwrap();
+    let mut rollout_paths = Vec::new();
+
+    for ((child_id, file_name), index) in child_ids.into_iter().zip(file_names).zip(1..) {
+        let rollout = rollout_dir.join(format!(
+            "rollout-2026-08-31T15-00-0{index}-{child_id}.jsonl"
+        ));
+        fs::write(
+            &rollout,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{child_id}\",\"forked_from_id\":\"{parent_id}\",\"thread_source\":\"subagent\",\"model\":\"gpt-5.1-codex\"}}}}\n"
+            ),
+        )
+        .unwrap();
+        rollout_paths.push(rollout.clone());
+
+        let file_path = repo.path().join(file_name);
+        let tool_use_id = format!("tu-child-{index}");
+        for hook_event_name in ["PreToolUse", "PostToolUse"] {
+            let hook_input = serde_json::json!({
+                "cwd": repo.canonical_path().to_string_lossy(),
+                "hook_event_name": hook_event_name,
+                "tool_name": "apply_patch",
+                "tool_use_id": tool_use_id,
+                "session_id": parent_id,
+                "transcript_path": rollout.to_string_lossy(),
+                "tool_input": {
+                    "patch": format!(
+                        "*** Update File: {}\n@@ base\n+child {index} edit\n",
+                        file_path.to_string_lossy()
+                    )
+                }
+            })
+            .to_string();
+            repo.git_ai(&["checkpoint", "codex", "--hook-input", &hook_input])
+                .expect("Codex checkpoint should succeed");
+
+            if hook_event_name == "PreToolUse" {
+                fs::write(&file_path, format!("base\nchild {index} edit\n")).unwrap();
+            }
+        }
+    }
+
+    repo.sync_daemon();
+    repo.git_ai(&["await", "--timeout", "60"])
+        .expect("stream registration should drain");
+
+    let db_path = repo
+        .daemon_home_path()
+        .join(".git-ai")
+        .join("internal")
+        .join("transcripts-db");
+    let db = StreamsDatabase::open(&db_path).unwrap();
+    let canonical_rollouts: Vec<String> = rollout_paths
+        .iter()
+        .map(|path| path.canonicalize().unwrap().display().to_string())
+        .collect();
+    let mut rows: Vec<StreamRecord> = db
+        .all_streams()
+        .unwrap()
+        .into_iter()
+        .filter(|row| canonical_rollouts.contains(&row.stream_path))
+        .collect();
+    rows.sort_by(|left, right| left.external_session_id.cmp(&right.external_session_id));
+
+    assert_eq!(
+        rows.len(),
+        2,
+        "each rollout must have exactly one stream row"
+    );
+    for (row, child_id) in rows.iter().zip(child_ids) {
+        assert_eq!(row.external_session_id, child_id);
+        assert_eq!(
+            row.session_id,
+            git_ai::model::authorship_log_serialization::generate_session_id(child_id, "codex")
+        );
+        assert_eq!(row.external_parent_session_id.as_deref(), Some(parent_id));
+    }
+
+    let commit = repo
+        .stage_all_and_commit("commit distinct Codex subagent edits")
+        .unwrap();
+    for (file_name, index) in file_names.into_iter().zip(1..) {
+        let mut file = repo.filename(file_name);
+        file.assert_committed_lines(crate::lines![
+            "base".unattributed_human(),
+            format!("child {index} edit").ai(),
+        ]);
+    }
+    assert_eq!(
+        commit.authorship_log.metadata.sessions.len(),
+        1,
+        "both child rollouts must retain one logical checkpoint session"
+    );
+    let session = commit
+        .authorship_log
+        .metadata
+        .sessions
+        .values()
+        .next()
+        .expect("logical checkpoint session should exist");
+    assert_eq!(session.agent_id.tool, "codex");
+    assert_eq!(session.agent_id.id, parent_id);
 }

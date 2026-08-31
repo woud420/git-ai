@@ -471,3 +471,63 @@ fn checkpoint_stream_authority_drops_namespace_format_and_session_id_mismatches(
     authorize_checkpoint_stream_source(&mut wrong_extension).unwrap();
     assert!(wrong_extension.stream_source.is_none());
 }
+
+#[test]
+#[serial]
+fn checkpoint_stream_authority_accepts_only_validated_codex_parent_identity() {
+    let fixture = CheckpointStreamFixture::new();
+    let codex_home = fixture._temp.path().join("codex-home");
+    let sessions = codex_home.join("sessions/2026/08/31");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let parent_id = "01a00000-0000-7000-8000-0000000000aa";
+    let child_id = "01a00000-0000-7000-8000-0000000000b1";
+    let transcript = sessions.join(format!("rollout-2026-08-31T15-00-00-{child_id}.jsonl"));
+    std::fs::write(
+        &transcript,
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{child_id}\",\"forked_from_id\":\"{parent_id}\",\"thread_source\":\"subagent\"}}}}\n"
+        ),
+    )
+    .unwrap();
+    let _codex_home = CheckpointStreamEnvGuard::set("CODEX_HOME", codex_home.as_os_str());
+
+    let mut parent_request = checkpoint_stream_request_for(
+        &fixture.repo,
+        transcript.clone(),
+        child_id,
+        true,
+        "codex",
+        crate::model::checkpoint_request::StreamFormat::CodexJsonl,
+    );
+    parent_request
+        .stream_source
+        .as_mut()
+        .unwrap()
+        .external_parent_session_id = Some("caller-supplied-parent".to_string());
+    parent_request.agent_id.as_mut().unwrap().id = parent_id.to_string();
+    authorize_checkpoint_stream_source(&mut parent_request).unwrap();
+    let source = parent_request
+        .stream_source
+        .expect("validated parent relationship should be accepted");
+    assert_eq!(source.external_session_id, child_id);
+    assert_eq!(
+        source.external_parent_session_id.as_deref(),
+        Some(parent_id)
+    );
+
+    let mut unrelated_request = checkpoint_stream_request_for(
+        &fixture.repo,
+        transcript,
+        child_id,
+        true,
+        "codex",
+        crate::model::checkpoint_request::StreamFormat::CodexJsonl,
+    );
+    unrelated_request.agent_id.as_mut().unwrap().id =
+        "01a00000-0000-7000-8000-0000000000ff".to_string();
+    authorize_checkpoint_stream_source(&mut unrelated_request).unwrap();
+    assert!(
+        unrelated_request.stream_source.is_none(),
+        "an unrelated caller identity must remain fail closed"
+    );
+}

@@ -49,6 +49,8 @@ use git_ai::operations::commands::checkpoint_agent::orchestrator::{
 };
 #[cfg(not(windows))]
 use git_ai::operations::daemon::checkpoint::PreparedPathRole;
+#[cfg(windows)]
+use git_ai::operations::daemon::daemon_log_dir;
 #[cfg(not(windows))]
 use git_ai::operations::daemon::send_control_request_with_timeout;
 use git_ai::operations::daemon::{
@@ -652,7 +654,7 @@ struct DaemonGuard {
     control_socket_path: PathBuf,
     trace_socket_path: PathBuf,
     repo_working_dir: String,
-    stderr_log_path: PathBuf,
+    diagnostic_log_path: PathBuf,
 }
 
 impl DaemonGuard {
@@ -702,12 +704,17 @@ impl DaemonGuard {
         let mut attempt = 0;
         loop {
             let child = command.spawn().expect("failed to spawn git-ai subprocess");
+            #[cfg(windows)]
+            let diagnostic_log_path = daemon_log_dir(&DaemonConfig::from_home(&daemon_home))
+                .join(format!("{}.log", child.id()));
+            #[cfg(not(windows))]
+            let diagnostic_log_path = stderr_log_path.clone();
             let mut daemon = Self {
                 child,
                 control_socket_path: control_socket_path.clone(),
                 trace_socket_path: trace_socket_path.clone(),
                 repo_working_dir: repo_workdir_string(repo),
-                stderr_log_path: stderr_log_path.clone(),
+                diagnostic_log_path,
             };
             match daemon.wait_until_ready() {
                 Ok(()) => return daemon,
@@ -797,8 +804,13 @@ impl DaemonGuard {
         let _ = self.child.wait();
     }
 
-    fn stderr_contents(&self) -> String {
-        fs::read_to_string(&self.stderr_log_path).unwrap_or_default()
+    fn diagnostic_contents(&self) -> String {
+        fs::read_to_string(&self.diagnostic_log_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read daemon diagnostics at {}: {error}",
+                self.diagnostic_log_path.display()
+            )
+        })
     }
 }
 

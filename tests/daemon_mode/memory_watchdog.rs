@@ -55,7 +55,7 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
         started.elapsed() < Duration::from_secs(5),
         "memory emergency shutdown waited on in-flight work"
     );
-    let logs = daemon.stderr_contents();
+    let logs = daemon.diagnostic_contents();
     assert!(
         logs.contains("memory emergency threshold reached"),
         "missing emergency memory diagnostic:\n{logs}"
@@ -95,7 +95,7 @@ fn daemon_memory_limit_below_startup_usage_aborts_without_restart_loop() {
         send_control_request(&daemon.control_socket_path, &ControlRequest::Ping).is_err(),
         "startup-over-limit daemon must not respawn"
     );
-    let logs = daemon.stderr_contents();
+    let logs = daemon.diagnostic_contents();
     assert!(
         logs.contains("memory emergency threshold reached"),
         "missing startup-limit diagnostic:\n{logs}"
@@ -125,7 +125,7 @@ fn daemon_memory_hard_limit_aborts_without_restart() {
         send_control_request(&daemon.control_socket_path, &ControlRequest::Ping).is_err(),
         "hard-aborted daemon must not respawn"
     );
-    let logs = daemon.stderr_contents();
+    let logs = daemon.diagnostic_contents();
     assert!(
         logs.contains("memory emergency threshold reached"),
         "missing hard-limit diagnostic:\n{logs}"

@@ -133,7 +133,7 @@ Follow this workflow:
 7. MONITOR CI AND ITERATE
    - Watch Ubuntu-based CI jobs (~15 mins): gh pr checks <pr_number> --watch
    - If checks fail: read the logs, fix issues, push again
-   - Check for Devin (automated reviewer) feedback: gh api repos/{{owner}}/{{repo}}/pulls/<pr_number>/comments
+   - Check inline review comments: gh api repos/{{owner}}/{{repo}}/pulls/<pr_number>/comments
    - Address all review feedback: fix if valid, or reply with reasoning if not
    - Repeat until all Ubuntu CI checks pass and all review feedback is addressed
    - You do NOT need to wait for Mac (~35min) or Windows (~3.5hr) checks unless the issue is OS-specific

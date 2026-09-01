@@ -223,4 +223,4 @@ During implementation:
 5. Run a broader relevant attribution test set before opening the PR.
 
 Before PR completion, open a draft PR, monitor the Ubuntu CI jobs first, and
-address actionable Devin feedback before treating the task as complete.
+address actionable review feedback before treating the task as complete.

@@ -295,8 +295,8 @@ GITOGEOF
         };
 
         # Nix flake checks: run with `nix flake check`
-        # Tests are not included here -- they require network access, Node.js,
-        # and the Graphite CLI, which are not available in the Nix sandbox.
+        # Tests are not included here because integration coverage depends on
+        # external services and tools that are unavailable in the Nix sandbox.
         # Tests run in CI via the existing test.yml workflow instead.
         checks =
           let

@@ -485,7 +485,7 @@ On command completion:
     4. Fire: handle_rewrite_event(repo, NonFastForward { old_tip, new_tip })
 ```
 
-This single rule catches: rebase, amend, reset --hard forward, interactive rebase, `update-ref` (including from tools like Graphite), squash merges, force-push receives.
+This single rule catches: rebase, amend, reset --hard forward, interactive rebase, plumbing-driven `update-ref`, squash merges, and force-push receives.
 
 **Guards against false positives:**
 - Skip if `old_oid` is null (`0000...`) — branch was just created, not rewritten
@@ -508,9 +508,11 @@ Note: The signal is ref movement via reflog delta, not exit code. A cherry-pick 
 
 **Single update-ref** (e.g., `git update-ref refs/heads/main <sha> <old>`): Already supported — the daemon's HistoryAnalyzer parses the command args and emits a RefUpdated event, which triggers non-FF detection via the standard reflog delta path.
 
-**Batch `update-ref --stdin`** (used by Graphite, git-town, git-stack): Currently NOT supported — the daemon's parser returns `None` for `--stdin`/`--batch-updates` and falls back to reflog delta, but only tracks the current branch's reflog. Other branches moved in the batch are missed.
-
-**Deferred improvement**: Full batch support requires expanding `tracked_reflog_refs_for_command()` to monitor all `refs/heads/*` reflogs when the command is `update-ref`. This is an enhancement — single-ref support is sufficient for MVP. A single `update-ref --stdin` command would then produce N independent `NonFastForward` firings — one per `refs/heads/*` ref that moved non-FF.
+**Batch `update-ref --stdin`**: Supported through bounded reflog-delta
+reconstruction. The daemon does not parse the stdin payload after the fact;
+instead, the ref cursor discovers changed common refs, consumes their new
+entries, and emits the deduplicated transitions together. This preserves
+multiple branch moves without per-ref Git spawns or live-state inference.
 
 ---
 
@@ -803,7 +805,6 @@ Handled by `-M` flag on diff-tree. Old filename updated to new filename in attes
 - **AI attribution during conflict resolution**: those lines land in diff hunks → unattributed. By design.
 - **Detached HEAD moves**: not monitored (only `refs/heads/*`).
 - **Cherry-pick note migration after daemon restart**: lost if daemon was down during conflicted cherry-pick.
-- **Batch `update-ref --stdin`**: Multiple branches moved in a single batch command only tracks current branch's reflog. Full batch support deferred as enhancement.
 - **`cherry-pick --quit` note recovery**: Partial commits get notes via normal commit flow; no retroactive rewrite mapping attempted.
 
 ---

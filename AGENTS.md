@@ -250,8 +250,8 @@ never wrap or re-nest it.
 ## Optimize for Human Review
 
 - Always write code optimized for human review. No code can be merged without a greenlight from a human, so make it easy for humans to review your code. This means clear naming, clear refactors as needed, and, most importantly, minimal and simple code. Clean, DRY, simple, maintainable code is your true north star.
-- Use ordinary Git branches and independently reviewable GitHub pull requests for contributor work. Graphite is not required for repository contributions.
-- Treat Graphite as a maintained compatibility surface: preserve the real-CLI integration suite, its test shim and CI coverage, and the generic `commit-tree` / `update-ref` behavior when changing rewrite handling. Technical references to Graphite are intentional and are not cleanup targets.
+- Use ordinary Git branches and independently reviewable GitHub pull requests for contributor work.
+- Preserve vendor-neutral `commit-tree` / `update-ref` behavior when changing rewrite handling. Do not reintroduce fork-only compatibility code, tests, or CI for external stacking tools the fork does not support.
 - Before stopping, ensure every submitted pull request passes all required CI checks and all actionable review feedback has been addressed and resolved.
 
 ## Gotchas

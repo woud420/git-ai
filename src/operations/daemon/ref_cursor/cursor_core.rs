@@ -216,8 +216,8 @@ impl RefCursor {
     /// the command's true start — sits after the untraced entry but before the
     /// traced entry, so we prefer the first match at/after it.
     ///
-    /// But the hint is captured asynchronously and can also race *behind* git,
-    /// landing after the command's own entry (the graphite/gt-create flake). In
+    /// But the hint is captured asynchronously and can also race *behind* Git,
+    /// landing after the command's own entry (the late-ingress commit race). In
     /// that case no match exists at/after the hint, so we fall back to the latest
     /// match before the hint. That still preserves the single-candidate case, and
     /// it avoids consuming an older untraced duplicate-message commit when both

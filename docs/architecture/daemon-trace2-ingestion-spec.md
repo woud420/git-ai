@@ -170,7 +170,7 @@ so no cursor predates the first traced command.
   move from any state); backward-reset detection happens downstream from the
   exact transition.
 - **update-ref**: argv carries ref name and usually both OIDs (immutable);
-  used by graphite-style restacks (`commit-tree` + `update-ref`). Multiple
+  used by plumbing-based restacks (`commit-tree` + `update-ref`). Multiple
   same-command ref updates are correlated by OID first, with the command's
   time window only narrowing candidates.
 - **pull**: decomposes into fetch + merge/rebase; ownership follows the

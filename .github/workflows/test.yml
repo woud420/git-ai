@@ -158,14 +158,9 @@ jobs:
           shard_count=${{ matrix.shard_count }}
           module_infos=()
           module_names=()
-          # Graphite compatibility runs in its own cross-platform workflow.
-          skip_args=(--skip "graphite::")
+          skip_args=()
 
           while IFS= read -r name; do
-            if [ "$name" = "graphite" ]; then
-              continue
-            fi
-
             module_names+=("$name")
             weight=0
             path="tests/integration/$name.rs"
@@ -267,11 +262,6 @@ jobs:
           Get-Content "tests/integration/main.rs" | ForEach-Object {
             if ($_ -match '^mod\s+([A-Za-z0-9_]+);') {
               $name = $Matches[1]
-              # Graphite compatibility runs in its own cross-platform workflow.
-              if ($name -eq "graphite") {
-                return
-              }
-
               $path = Join-Path "tests/integration" "$name.rs"
               $moduleDir = Join-Path "tests/integration" $name
               $weight = 0
@@ -313,7 +303,7 @@ jobs:
           }
 
           $selectedModules = @($shards[$shardIndex].Modules)
-          $skipArgs = @("--skip graphite::") + @(
+          $skipArgs = @(
             $moduleInfos |
               Where-Object { $selectedModules -notcontains $_.Name } |
               ForEach-Object { "--skip $($_.Name)::" }

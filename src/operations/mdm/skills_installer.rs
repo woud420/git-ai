@@ -1,5 +1,6 @@
 use crate::config::skills_dir_path;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::operations::mdm::file_ops::write_atomic;
 use crate::operations::mdm::paths::claude_config_dir;
 use std::collections::HashSet;
@@ -86,6 +87,33 @@ fn cursor_skills_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".cursor").join("skills"))
 }
 
+struct SkillsPaths {
+    source: PathBuf,
+    agents: Option<PathBuf>,
+    claude: Option<PathBuf>,
+    cursor: Option<PathBuf>,
+}
+
+impl SkillsPaths {
+    fn current() -> Result<Self, GitAiError> {
+        Ok(Self {
+            source: skills_dir_path().ok_or_else(missing_skills_dir)?,
+            agents: agents_skills_dir(),
+            claude: claude_skills_dir(),
+            cursor: cursor_skills_dir(),
+        })
+    }
+}
+
+fn missing_skills_dir() -> PersistenceError {
+    PersistenceError::Io {
+        operation: "Generic error",
+        path: String::new(),
+        kind: std::io::ErrorKind::NotFound,
+        message: "Could not determine skills directory path".to_string(),
+    }
+}
+
 /// Link a skill directory to the target location.
 /// On Unix, creates a symlink. On Windows, copies the directory to avoid requiring
 /// Administrator privileges (which symlink creation requires on Windows).
@@ -168,9 +196,15 @@ pub fn install_skills(
     _verbose: bool,
     installed_tools: &HashSet<String>,
 ) -> Result<SkillsInstallResult, GitAiError> {
-    let skills_base = skills_dir_path().ok_or_else(|| {
-        GitAiError::Generic("Could not determine skills directory path".to_string())
-    })?;
+    install(&SkillsPaths::current()?, dry_run, installed_tools)
+}
+
+fn install(
+    paths: &SkillsPaths,
+    dry_run: bool,
+    installed_tools: &HashSet<String>,
+) -> Result<SkillsInstallResult, GitAiError> {
+    let skills_base = &paths.source;
 
     if dry_run {
         return Ok(SkillsInstallResult {
@@ -181,11 +215,23 @@ pub fn install_skills(
 
     // Nuke the skills directory if it exists
     if skills_base.exists() {
-        fs::remove_dir_all(&skills_base)?;
+        fs::remove_dir_all(skills_base)?;
     }
 
     // Create fresh skills directory
-    fs::create_dir_all(&skills_base)?;
+    fs::create_dir_all(skills_base)?;
+
+    let link_roots = [
+        paths.agents.as_ref(),
+        installed_tools
+            .contains("claude-code")
+            .then_some(paths.claude.as_ref())
+            .flatten(),
+        installed_tools
+            .contains("cursor")
+            .then_some(paths.cursor.as_ref())
+            .flatten(),
+    ];
 
     // Install each skill
     for skill in EMBEDDED_SKILLS {
@@ -199,32 +245,10 @@ pub fn install_skills(
             write_atomic(&file_path, file.contents.as_bytes())?;
         }
 
-        // Link this skill to agent directories
-        // ~/.agents/skills/{skill-name} -> ~/.git-ai/skills/{skill-name}
-        if let Some(agents_dir) = agents_skills_dir() {
-            let agents_link = agents_dir.join(skill.name);
-            if let Err(e) = link_skill_dir(&skill_dir, &agents_link) {
-                eprintln!("Warning: Failed to link skill at {:?}: {}", agents_link, e);
-            }
-        }
-
-        // ~/.claude/skills/{skill-name} -> ~/.git-ai/skills/{skill-name}
-        if installed_tools.contains("claude-code")
-            && let Some(claude_dir) = claude_skills_dir()
-        {
-            let claude_link = claude_dir.join(skill.name);
-            if let Err(e) = link_skill_dir(&skill_dir, &claude_link) {
-                eprintln!("Warning: Failed to link skill at {:?}: {}", claude_link, e);
-            }
-        }
-
-        // ~/.cursor/skills/{skill-name} -> ~/.git-ai/skills/{skill-name}
-        if installed_tools.contains("cursor")
-            && let Some(cursor_dir) = cursor_skills_dir()
-        {
-            let cursor_link = cursor_dir.join(skill.name);
-            if let Err(e) = link_skill_dir(&skill_dir, &cursor_link) {
-                eprintln!("Warning: Failed to link skill at {:?}: {}", cursor_link, e);
+        for link_root in link_roots.iter().copied().flatten() {
+            let link = link_root.join(skill.name);
+            if let Err(e) = link_skill_dir(&skill_dir, &link) {
+                eprintln!("Warning: Failed to link skill at {:?}: {}", link, e);
             }
         }
     }
@@ -237,9 +261,11 @@ pub fn install_skills(
 
 /// Uninstall all skills by removing ~/.git-ai/skills/ and linked skill directories
 pub fn uninstall_skills(dry_run: bool, _verbose: bool) -> Result<SkillsInstallResult, GitAiError> {
-    let skills_base = skills_dir_path().ok_or_else(|| {
-        GitAiError::Generic("Could not determine skills directory path".to_string())
-    })?;
+    uninstall(&SkillsPaths::current()?, dry_run)
+}
+
+fn uninstall(paths: &SkillsPaths, dry_run: bool) -> Result<SkillsInstallResult, GitAiError> {
+    let skills_base = &paths.source;
 
     if !skills_base.exists() {
         return Ok(SkillsInstallResult {
@@ -257,42 +283,19 @@ pub fn uninstall_skills(dry_run: bool, _verbose: bool) -> Result<SkillsInstallRe
 
     // Remove linked skill directories first
     for skill in EMBEDDED_SKILLS {
-        // ~/.agents/skills/{skill-name}
-        if let Some(agents_dir) = agents_skills_dir() {
-            let agents_link = agents_dir.join(skill.name);
-            if let Err(e) = remove_skill_link(&agents_link) {
-                eprintln!(
-                    "Warning: Failed to remove skill link at {:?}: {}",
-                    agents_link, e
-                );
-            }
-        }
-
-        // ~/.claude/skills/{skill-name}
-        if let Some(claude_dir) = claude_skills_dir() {
-            let claude_link = claude_dir.join(skill.name);
-            if let Err(e) = remove_skill_link(&claude_link) {
-                eprintln!(
-                    "Warning: Failed to remove skill link at {:?}: {}",
-                    claude_link, e
-                );
-            }
-        }
-
-        // ~/.cursor/skills/{skill-name}
-        if let Some(cursor_dir) = cursor_skills_dir() {
-            let cursor_link = cursor_dir.join(skill.name);
-            if let Err(e) = remove_skill_link(&cursor_link) {
-                eprintln!(
-                    "Warning: Failed to remove skill link at {:?}: {}",
-                    cursor_link, e
-                );
+        for link_root in [&paths.agents, &paths.claude, &paths.cursor]
+            .into_iter()
+            .flatten()
+        {
+            let link = link_root.join(skill.name);
+            if let Err(e) = remove_skill_link(&link) {
+                eprintln!("Warning: Failed to remove skill link at {:?}: {}", link, e);
             }
         }
     }
 
     // Nuke the entire skills directory
-    fs::remove_dir_all(&skills_base)?;
+    fs::remove_dir_all(skills_base)?;
 
     Ok(SkillsInstallResult {
         changed: true,
@@ -303,8 +306,6 @@ pub fn uninstall_skills(dry_run: bool, _verbose: bool) -> Result<SkillsInstallRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operations::mdm::test_env::with_temp_home;
-    use serial_test::serial;
 
     #[test]
     fn test_embedded_skills_are_loaded() {
@@ -347,6 +348,16 @@ mod tests {
             let parent = path.parent().unwrap();
             assert!(parent.ends_with(".git-ai"));
         }
+    }
+
+    #[test]
+    fn test_missing_skills_dir_preserves_error_contract() {
+        let error: GitAiError = missing_skills_dir().into();
+        assert!(matches!(&error, GitAiError::Persistence(_)));
+        assert_eq!(
+            error.to_string(),
+            "Generic error: Could not determine skills directory path"
+        );
     }
 
     #[test]
@@ -465,77 +476,97 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_install_and_uninstall_skills_lifecycle() {
-        // Use an isolated temp HOME so we don't pollute the real home directory
-        // and don't race with other tests that mutate HOME (e.g. codex tests).
-        with_temp_home(|home| {
-            let skills_base = skills_dir_path().unwrap();
-            let agents_skills_base = home.join(".agents").join("skills");
-            let all_tools: HashSet<String> = ["claude-code", "cursor"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
+        // Regression coverage for ENG-339.
+        let temp = tempfile::tempdir().unwrap();
+        let paths = SkillsPaths {
+            source: temp.path().join(".git-ai/skills"),
+            agents: Some(temp.path().join(".agents/skills")),
+            claude: Some(temp.path().join(".claude/skills")),
+            cursor: Some(temp.path().join(".cursor/skills")),
+        };
+        let all_tools = HashSet::from(["claude-code".to_string(), "cursor".to_string()]);
 
-            // Dry run should not create anything
-            let dry_result = install_skills(true, false, &all_tools).unwrap();
-            assert!(dry_result.changed);
-            assert_eq!(dry_result.installed_count, EMBEDDED_SKILLS.len());
-
-            // Install creates skill files with correct content
-            let result = install_skills(false, false, &all_tools).unwrap();
-            assert!(result.changed);
-            assert_eq!(result.installed_count, EMBEDDED_SKILLS.len());
-            assert!(skills_base.exists());
+        let assert_installed = || {
+            let roots = [
+                &paths.source,
+                paths.agents.as_ref().unwrap(),
+                paths.claude.as_ref().unwrap(),
+                paths.cursor.as_ref().unwrap(),
+            ];
             for skill in EMBEDDED_SKILLS {
                 for file in skill.files {
-                    let installed_file = skills_base.join(skill.name).join(file.relative_path);
-                    assert!(
-                        installed_file.exists(),
-                        "{} missing for {}",
-                        file.relative_path,
-                        skill.name
-                    );
-                    let content = fs::read_to_string(installed_file).unwrap();
-                    assert_eq!(content, file.contents);
-
-                    let linked_file = agents_skills_base.join(skill.name).join(file.relative_path);
-                    assert!(
-                        linked_file.exists(),
-                        "{} missing from the agent link for {}",
-                        file.relative_path,
-                        skill.name
-                    );
-                    assert_eq!(fs::read_to_string(linked_file).unwrap(), file.contents);
+                    for root in roots {
+                        let installed_file = root.join(skill.name).join(file.relative_path);
+                        assert!(
+                            installed_file.exists(),
+                            "{} missing for {} under {}",
+                            file.relative_path,
+                            skill.name,
+                            root.display()
+                        );
+                        assert_eq!(fs::read_to_string(installed_file).unwrap(), file.contents);
+                    }
                 }
             }
+        };
 
-            // Install again is idempotent
-            let result2 = install_skills(false, false, &all_tools).unwrap();
-            assert!(result2.changed);
+        let dry_result = install(&paths, true, &all_tools).unwrap();
+        assert!(dry_result.changed);
+        assert_eq!(dry_result.installed_count, EMBEDDED_SKILLS.len());
+        for root in [
+            &paths.source,
+            paths.agents.as_ref().unwrap(),
+            paths.claude.as_ref().unwrap(),
+            paths.cursor.as_ref().unwrap(),
+        ] {
+            assert!(
+                root.symlink_metadata().is_err(),
+                "dry run wrote {}",
+                root.display()
+            );
+        }
+
+        let result = install(&paths, false, &all_tools).unwrap();
+        assert!(result.changed);
+        assert_eq!(result.installed_count, EMBEDDED_SKILLS.len());
+        assert_installed();
+
+        let first_skill = &EMBEDDED_SKILLS[0];
+        let first_file = &first_skill.files[0];
+        let stale_link_file = paths
+            .agents
+            .as_ref()
+            .unwrap()
+            .join(first_skill.name)
+            .join(first_file.relative_path);
+        fs::write(stale_link_file, "stale content").unwrap();
+
+        let repeated_result = install(&paths, false, &all_tools).unwrap();
+        assert!(repeated_result.changed);
+        assert_eq!(repeated_result.installed_count, EMBEDDED_SKILLS.len());
+        assert_installed();
+
+        let uninstall_result = uninstall(&paths, false).unwrap();
+        assert!(uninstall_result.changed);
+        assert!(paths.source.symlink_metadata().is_err());
+        for root in [
+            paths.agents.as_ref().unwrap(),
+            paths.claude.as_ref().unwrap(),
+            paths.cursor.as_ref().unwrap(),
+        ] {
             for skill in EMBEDDED_SKILLS {
-                for file in skill.files {
-                    assert!(
-                        skills_base
-                            .join(skill.name)
-                            .join(file.relative_path)
-                            .exists(),
-                        "{} missing after re-install for {}",
-                        file.relative_path,
-                        skill.name
-                    );
-                }
+                let link = root.join(skill.name);
+                assert!(
+                    link.symlink_metadata().is_err(),
+                    "link remains after uninstall: {}",
+                    link.display()
+                );
             }
+        }
 
-            // Uninstall removes skills directory
-            let uninstall_result = uninstall_skills(false, false).unwrap();
-            assert!(uninstall_result.changed);
-            assert!(!skills_base.exists());
-
-            // Uninstall again is a no-op
-            let noop_result = uninstall_skills(false, false).unwrap();
-            assert!(!noop_result.changed);
-            assert_eq!(noop_result.installed_count, 0);
-        });
+        let noop_result = uninstall(&paths, false).unwrap();
+        assert!(!noop_result.changed);
+        assert_eq!(noop_result.installed_count, 0);
     }
 }

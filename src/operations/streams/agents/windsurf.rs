@@ -14,7 +14,7 @@ use std::time::Duration;
 pub struct WindsurfAgent {
     batch_size: usize,
     #[cfg(test)]
-    trusted_stream_roots: Option<Vec<PathBuf>>,
+    home: Option<PathBuf>,
 }
 
 impl WindsurfAgent {
@@ -22,7 +22,7 @@ impl WindsurfAgent {
         Self {
             batch_size: 1000,
             #[cfg(test)]
-            trusted_stream_roots: None,
+            home: None,
         }
     }
 
@@ -30,22 +30,22 @@ impl WindsurfAgent {
     pub fn with_batch_size(batch_size: usize) -> Self {
         Self {
             batch_size,
-            trusted_stream_roots: None,
+            home: None,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn with_trusted_stream_roots(trusted_stream_roots: Vec<PathBuf>) -> Self {
+    pub(crate) fn with_home(home: PathBuf) -> Self {
         Self {
             batch_size: 1000,
-            trusted_stream_roots: Some(trusted_stream_roots),
+            home: Some(home),
         }
     }
 
     fn transcript_roots(&self) -> Vec<PathBuf> {
         #[cfg(test)]
-        if let Some(roots) = &self.trusted_stream_roots {
-            return roots.clone();
+        if let Some(home) = &self.home {
+            return vec![home.join(".windsurf/transcripts")];
         }
 
         dirs::home_dir()

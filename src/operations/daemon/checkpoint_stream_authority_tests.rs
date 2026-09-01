@@ -2,7 +2,7 @@ use super::*;
 use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
 use crate::model::working_log::{AgentId, CheckpointKind};
 use crate::operations::daemon::checkpoint_stream_authority::{
-    authorize_checkpoint_stream_source, authorize_checkpoint_stream_source_with_agent,
+    authorize_checkpoint_stream_source, authorize_with_agent,
 };
 use crate::operations::streams::agents::WindsurfAgent;
 use serial_test::serial;
@@ -416,7 +416,7 @@ fn checkpoint_stream_authority_binds_pi_header_id_under_host_session_root() {
 #[serial]
 fn checkpoint_stream_authority_binds_windsurf_id_to_host_transcript_name() {
     let fixture = CheckpointStreamFixture::new();
-    // ENG-338: inject the trusted root directly because Windows known-home
+    // ENG-338: inject the home directory directly because Windows known-home
     // discovery does not honor HOME or USERPROFILE overrides.
     let home = fixture._temp.path().join("windsurf-home");
     let transcripts = home.join(".windsurf/transcripts");
@@ -432,13 +432,8 @@ fn checkpoint_stream_authority_binds_windsurf_id_to_host_transcript_name() {
         "windsurf",
         crate::model::checkpoint_request::StreamFormat::WindsurfJsonl,
     );
-    authorize_checkpoint_stream_source_with_agent(
-        &mut request,
-        Box::new(WindsurfAgent::with_trusted_stream_roots(vec![
-            transcripts.clone(),
-        ])),
-    )
-    .unwrap();
+    let agent = WindsurfAgent::with_home(home.clone());
+    authorize_with_agent(&mut request, Box::new(agent)).unwrap();
 
     let source = request.stream_source.unwrap();
     assert_eq!(source.path, transcript.canonicalize().unwrap());
@@ -456,11 +451,8 @@ fn checkpoint_stream_authority_binds_windsurf_id_to_host_transcript_name() {
         "windsurf",
         crate::model::checkpoint_request::StreamFormat::WindsurfJsonl,
     );
-    authorize_checkpoint_stream_source_with_agent(
-        &mut outside_request,
-        Box::new(WindsurfAgent::with_trusted_stream_roots(vec![transcripts])),
-    )
-    .unwrap();
+    let agent = WindsurfAgent::with_home(home);
+    authorize_with_agent(&mut outside_request, Box::new(agent)).unwrap();
     assert!(outside_request.stream_source.is_none());
 }
 

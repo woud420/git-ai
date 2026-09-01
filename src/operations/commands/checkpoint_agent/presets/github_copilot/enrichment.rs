@@ -7,21 +7,14 @@ use std::path::{Path, PathBuf};
 pub(super) fn enrich_authorized_events(
     hook_input: &str,
     events: &mut [ParsedHookEvent],
-) -> Result<(), GitAiError> {
-    enrich_authorized_events_with_cli_home(hook_input, events, dirs::home_dir)
-}
-
-fn enrich_authorized_events_with_cli_home(
-    hook_input: &str,
-    events: &mut [ParsedHookEvent],
-    cli_home: impl FnOnce() -> Option<PathBuf>,
+    resolve_cli_home: impl FnOnce() -> Option<PathBuf>,
 ) -> Result<(), GitAiError> {
     let data = parse::hook_json(hook_input)?;
     let hook_event_name = parse::optional_str_multi(&data, &["hook_event_name", "hookEventName"])
         .unwrap_or("after_edit");
 
     if events.iter_mut().any(is_cli_event) {
-        if let Some(home) = cli_home() {
+        if let Some(home) = resolve_cli_home() {
             enrich_cli_events_from_home(events, &home);
         }
     } else if hook_event_name == "after_edit" {
@@ -267,8 +260,7 @@ mod tests {
             event => panic!("expected post-file event, got {event:?}"),
         }
 
-        enrich_authorized_events_with_cli_home(&input, &mut events, || Some(home.to_path_buf()))
-            .unwrap();
+        enrich_authorized_events(&input, &mut events, || Some(home.to_path_buf())).unwrap();
         assert_eq!(context_model(&events), "gpt-4.1");
         match &events[0] {
             ParsedHookEvent::PostFileEdit(event) => {

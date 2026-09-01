@@ -529,6 +529,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
+    // Regression coverage for ENG-336.
     fn parse_does_not_scan_codex_home_before_authorized_enrichment() {
         let temp = tempfile::tempdir().unwrap();
         let sessions = temp.path().join("sessions/2026/07/25");
@@ -563,11 +564,9 @@ mod tests {
         let ParsedHookEvent::PostBashCall(event) = &events[0] else {
             panic!("Expected PostBashCall");
         };
+        let discovered_path = event.stream_source.as_ref().map(|source| &source.path);
         assert_eq!(
-            event
-                .stream_source
-                .as_ref()
-                .map(|source| source.path.as_path()),
+            discovered_path.map(PathBuf::as_path),
             Some(rollout.as_path())
         );
         assert_eq!(
@@ -576,7 +575,7 @@ mod tests {
                 .metadata
                 .get("transcript_path")
                 .map(String::as_str),
-            rollout.to_str()
+            discovered_path.and_then(|path| path.to_str())
         );
     }
 }

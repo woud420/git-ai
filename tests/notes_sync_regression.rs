@@ -528,14 +528,7 @@ fn notes_sync_http_backend_clone_warms_notes_cache() {
         seed_sha
     );
 
-    let daemon_log_path = source
-        .test_home_path()
-        .join(".git-ai")
-        .join("internal")
-        .join("daemon")
-        .join("daemon.test.stderr.log");
-    let daemon_log =
-        fs::read_to_string(&daemon_log_path).expect("read test daemon stderr log after clone");
+    let (daemon_log_path, daemon_log) = source.daemon_diagnostics();
     assert!(
         daemon_log.contains("handling clone notes sync"),
         "daemon log should record the clone notes side effect\npath: {}\ncontents:\n{}",
@@ -1275,14 +1268,7 @@ fn notes_sync_http_backend_plain_pull_warms_notes_cache() {
         remote_sha
     );
 
-    let daemon_log_path = local
-        .test_home_path()
-        .join(".git-ai")
-        .join("internal")
-        .join("daemon")
-        .join("daemon.test.stderr.log");
-    let daemon_log =
-        fs::read_to_string(&daemon_log_path).expect("read test daemon stderr log after pull");
+    let (daemon_log_path, daemon_log) = local.daemon_diagnostics();
     assert!(
         daemon_log.contains("handling pull notes sync"),
         "daemon log should record the pull notes side effect\npath: {}\ncontents:\n{}",

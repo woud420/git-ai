@@ -10,6 +10,8 @@ pub(super) struct DaemonProcess {
     pub(super) control_socket_path: PathBuf,
     pub(super) trace_socket_path: PathBuf,
     pub(super) stderr_log_path: PathBuf,
+    #[cfg(windows)]
+    pub(super) daemon_log_path: PathBuf,
 }
 
 #[cfg(windows)]
@@ -171,6 +173,10 @@ impl DaemonProcess {
             let pid = child.id();
             assign_daemon_to_test_job(pid);
 
+            #[cfg(windows)]
+            let daemon_log_path =
+                daemon_log_dir(&DaemonConfig::from_home(test_home)).join(format!("{pid}.log"));
+
             let daemon = Self {
                 pid,
                 daemon_home: test_home.to_path_buf(),
@@ -178,6 +184,8 @@ impl DaemonProcess {
                 control_socket_path: control_socket_path.clone(),
                 trace_socket_path: trace_socket_path.clone(),
                 stderr_log_path: stderr_log_path.clone(),
+                #[cfg(windows)]
+                daemon_log_path,
             };
             match daemon.wait_until_ready(repo_path, &mut child) {
                 Ok(()) => {
@@ -217,14 +225,14 @@ impl DaemonProcess {
             if let Some(status) = child.try_wait().map_err(|e| {
                 DaemonReadyError::Fatal(format!("failed polling daemon child status: {}", e))
             })? {
-                let stderr_tail = self.read_stderr_tail();
+                let diagnostics_tail = self.read_diagnostics_tail();
                 let message = format!(
                     "daemon exited before becoming ready (pid {}, status {}): sockets {} {}{}",
                     self.pid,
                     status,
                     self.control_socket_path.display(),
                     self.trace_socket_path.display(),
-                    stderr_tail
+                    diagnostics_tail
                 );
                 if is_windows_loader_init_failure(&status) {
                     return Err(DaemonReadyError::LoaderInitFailure(message));
@@ -235,14 +243,14 @@ impl DaemonProcess {
             #[cfg(unix)]
             {
                 if !is_process_alive(self.pid) {
-                    let stderr_tail = self.read_stderr_tail();
+                    let diagnostics_tail = self.read_diagnostics_tail();
                     return Err(DaemonReadyError::Fatal(
                         format!(
                             "daemon exited before becoming ready (pid {}): sockets {} {}",
                             self.pid,
                             self.control_socket_path.display(),
                             self.trace_socket_path.display()
-                        ) + &stderr_tail,
+                        ) + &diagnostics_tail,
                     ));
                 }
             }
@@ -284,7 +292,7 @@ impl DaemonProcess {
             thread::sleep(Duration::from_millis(25));
         }
 
-        let stderr_tail = self.read_stderr_tail();
+        let diagnostics_tail = self.read_diagnostics_tail();
         Err(DaemonReadyError::Fatal(
             format!(
                 "daemon did not become ready within {:?} at {} (trace socket: {}, last_status_error={})",
@@ -292,7 +300,7 @@ impl DaemonProcess {
                 self.control_socket_path.display(),
                 self.trace_socket_path.display(),
                 last_status_error.as_deref().unwrap_or("none")
-            ) + &stderr_tail,
+            ) + &diagnostics_tail,
         ))
     }
 
@@ -361,15 +369,28 @@ impl DaemonProcess {
         ))
     }
 
-    pub(super) fn read_stderr_tail(&self) -> String {
-        let mut file = match fs::File::open(&self.stderr_log_path) {
-            Ok(file) => file,
-            Err(_) => return String::new(),
-        };
-        let mut content = String::new();
-        if file.read_to_string(&mut content).is_err() {
-            return String::new();
+    pub(super) fn diagnostics(&self) -> Result<(&Path, String), String> {
+        #[cfg(windows)]
+        if let Ok(content) = fs::read_to_string(&self.daemon_log_path)
+            && !content.trim().is_empty()
+        {
+            return Ok((&self.daemon_log_path, content));
         }
+
+        fs::read_to_string(&self.stderr_log_path)
+            .map(|content| (self.stderr_log_path.as_path(), content))
+            .map_err(|error| {
+                format!(
+                    "failed to read daemon diagnostics at {}: {error}",
+                    self.stderr_log_path.display()
+                )
+            })
+    }
+
+    pub(super) fn read_diagnostics_tail(&self) -> String {
+        let Ok((path, content)) = self.diagnostics() else {
+            return String::new();
+        };
         if content.trim().is_empty() {
             return String::new();
         }
@@ -378,8 +399,8 @@ impl DaemonProcess {
             lines = lines.split_off(lines.len() - 20);
         }
         format!(
-            "\nDaemon stderr tail ({})\n{}",
-            self.stderr_log_path.display(),
+            "\nDaemon diagnostics tail ({})\n{}",
+            path.display(),
             lines.join("\n")
         )
     }

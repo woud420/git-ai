@@ -65,6 +65,14 @@ impl TestRepo {
             .unwrap_or_else(|| DaemonProcess::trace_socket_path_for_home(&self.test_home))
     }
 
+    pub(crate) fn daemon_diagnostics(&self) -> (&Path, String) {
+        self.daemon_process
+            .as_ref()
+            .expect("daemon diagnostics require an active daemon")
+            .diagnostics()
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
     pub(crate) fn set_daemon_env_for_in_process(&self) {
         unsafe {
             std::env::set_var("GIT_AI_DAEMON_HOME", self.daemon_home_path());

@@ -39,6 +39,8 @@ use git_ai::model::authorship_log_serialization::AuthorshipLog;
 #[cfg(windows)]
 use git_ai::model::repository::lock_file::LockFile;
 use git_ai::operations::authorship::stats::CommitStats;
+#[cfg(windows)]
+use git_ai::operations::daemon::daemon_log_dir;
 use git_ai::operations::daemon::{
     ControlRequest, DaemonConfig, local_socket_connects_with_timeout, send_control_request,
     send_control_request_with_timeout,

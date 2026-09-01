@@ -13,12 +13,30 @@ pub(crate) const STREAM_AUTHORITY_DENIAL: &str =
 pub(crate) fn authorize_checkpoint_stream_source(
     request: &mut CheckpointRequest,
 ) -> Result<(), GitAiError> {
+    authorize_checkpoint_stream_source_with_agent_resolver(
+        request,
+        crate::operations::streams::agent::get_agent,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn authorize_checkpoint_stream_source_with_agent(
+    request: &mut CheckpointRequest,
+    agent: Box<dyn crate::operations::streams::agent::Agent>,
+) -> Result<(), GitAiError> {
+    authorize_checkpoint_stream_source_with_agent_resolver(request, |_| Some(agent))
+}
+
+fn authorize_checkpoint_stream_source_with_agent_resolver(
+    request: &mut CheckpointRequest,
+    resolve_agent: impl FnOnce(&str) -> Option<Box<dyn crate::operations::streams::agent::Agent>>,
+) -> Result<(), GitAiError> {
     if request.stream_source.is_none() {
         return Ok(());
     }
 
     authorize_request_repository(request, &Config::fresh())?;
-    match validate_trusted_stream_source(request) {
+    match validate_trusted_stream_source(request, resolve_agent) {
         Ok(session) => {
             let source = request
                 .stream_source
@@ -83,13 +101,14 @@ fn authorize_request_repository(
 
 fn validate_trusted_stream_source(
     request: &CheckpointRequest,
+    resolve_agent: impl FnOnce(&str) -> Option<Box<dyn crate::operations::streams::agent::Agent>>,
 ) -> Result<crate::operations::streams::sweep::DiscoveredSession, GitAiError> {
     let source = request.stream_source.as_ref().ok_or_else(denial)?;
     let agent_id = request.agent_id.as_ref().ok_or_else(denial)?;
     if agent_id.tool != "codex" && agent_id.id != source.external_session_id {
         return Err(denial());
     }
-    let agent = crate::operations::streams::agent::get_agent(&agent_id.tool).ok_or_else(denial)?;
+    let agent = resolve_agent(&agent_id.tool).ok_or_else(denial)?;
     let session = agent
         .validate_checkpoint_stream(source)
         .map_err(|_| denial())?;

@@ -4,6 +4,7 @@ use crate::model::checkpoint_request::CheckpointRequest;
 use crate::operations::git::repository::{
     discover_repository_policy_location_no_git_exec, load_repository_policy_context_no_git_exec,
 };
+use crate::operations::streams::agent::Agent;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -13,12 +14,36 @@ pub(crate) const STREAM_AUTHORITY_DENIAL: &str =
 pub(crate) fn authorize_checkpoint_stream_source(
     request: &mut CheckpointRequest,
 ) -> Result<(), GitAiError> {
+    authorize(request, crate::operations::streams::agent::get_agent)
+}
+
+#[cfg(test)]
+pub(crate) fn authorize_with_agent(
+    request: &mut CheckpointRequest,
+    agent: Box<dyn Agent>,
+) -> Result<(), GitAiError> {
+    authorize(request, |_| Some(agent))
+}
+
+fn authorize(
+    request: &mut CheckpointRequest,
+    resolve_agent: impl FnOnce(&str) -> Option<Box<dyn Agent>>,
+) -> Result<(), GitAiError> {
     if request.stream_source.is_none() {
         return Ok(());
     }
 
     authorize_request_repository(request, &Config::fresh())?;
-    match validate_trusted_stream_source(request) {
+    let validation = (|| {
+        let source = request.stream_source.as_ref().ok_or_else(denial)?;
+        let agent_id = request.agent_id.as_ref().ok_or_else(denial)?;
+        if agent_id.tool != "codex" && agent_id.id != source.external_session_id {
+            return Err(denial());
+        }
+        let agent = resolve_agent(&agent_id.tool).ok_or_else(denial)?;
+        validate_trusted_stream_source(request, agent.as_ref())
+    })();
+    match validation {
         Ok(session) => {
             let source = request
                 .stream_source
@@ -83,13 +108,10 @@ fn authorize_request_repository(
 
 fn validate_trusted_stream_source(
     request: &CheckpointRequest,
+    agent: &dyn Agent,
 ) -> Result<crate::operations::streams::sweep::DiscoveredSession, GitAiError> {
     let source = request.stream_source.as_ref().ok_or_else(denial)?;
     let agent_id = request.agent_id.as_ref().ok_or_else(denial)?;
-    if agent_id.tool != "codex" && agent_id.id != source.external_session_id {
-        return Err(denial());
-    }
-    let agent = crate::operations::streams::agent::get_agent(&agent_id.tool).ok_or_else(denial)?;
     let session = agent
         .validate_checkpoint_stream(source)
         .map_err(|_| denial())?;

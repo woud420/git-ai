@@ -1,7 +1,10 @@
 use super::*;
 use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
 use crate::model::working_log::{AgentId, CheckpointKind};
-use crate::operations::daemon::checkpoint_stream_authority::authorize_checkpoint_stream_source;
+use crate::operations::daemon::checkpoint_stream_authority::{
+    authorize_checkpoint_stream_source, authorize_with_agent,
+};
+use crate::operations::streams::agents::WindsurfAgent;
 use serial_test::serial;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -413,9 +416,9 @@ fn checkpoint_stream_authority_binds_pi_header_id_under_host_session_root() {
 #[serial]
 fn checkpoint_stream_authority_binds_windsurf_id_to_host_transcript_name() {
     let fixture = CheckpointStreamFixture::new();
+    // ENG-338: inject the home directory directly because Windows known-home
+    // discovery does not honor HOME or USERPROFILE overrides.
     let home = fixture._temp.path().join("windsurf-home");
-    let _home = CheckpointStreamEnvGuard::set("HOME", home.as_os_str());
-    let _profile = CheckpointStreamEnvGuard::set("USERPROFILE", home.as_os_str());
     let transcripts = home.join(".windsurf/transcripts");
     std::fs::create_dir_all(&transcripts).unwrap();
     let transcript = transcripts.join("trajectory-1.jsonl");
@@ -429,12 +432,28 @@ fn checkpoint_stream_authority_binds_windsurf_id_to_host_transcript_name() {
         "windsurf",
         crate::model::checkpoint_request::StreamFormat::WindsurfJsonl,
     );
-    authorize_checkpoint_stream_source(&mut request).unwrap();
+    let agent = WindsurfAgent::with_home(home.clone());
+    authorize_with_agent(&mut request, Box::new(agent)).unwrap();
 
-    assert_eq!(
-        request.stream_source.unwrap().path,
-        transcript.canonicalize().unwrap()
+    let source = request.stream_source.unwrap();
+    assert_eq!(source.path, transcript.canonicalize().unwrap());
+    assert_eq!(source.external_session_id, "trajectory-1");
+
+    let outside_root = fixture._temp.path().join("outside-windsurf");
+    std::fs::create_dir_all(&outside_root).unwrap();
+    let outside_transcript = outside_root.join("trajectory-1.jsonl");
+    std::fs::write(&outside_transcript, "{\"type\":\"user_input\"}\n").unwrap();
+    let mut outside_request = checkpoint_stream_request_for(
+        &fixture.repo,
+        outside_transcript,
+        "trajectory-1",
+        true,
+        "windsurf",
+        crate::model::checkpoint_request::StreamFormat::WindsurfJsonl,
     );
+    let agent = WindsurfAgent::with_home(home);
+    authorize_with_agent(&mut outside_request, Box::new(agent)).unwrap();
+    assert!(outside_request.stream_source.is_none());
 }
 
 #[test]

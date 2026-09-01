@@ -51,7 +51,7 @@ impl AgentPreset for GithubCopilotPreset {
         hook_input: &str,
         events: &mut [ParsedHookEvent],
     ) -> Result<(), GitAiError> {
-        enrichment::enrich_authorized_events(hook_input, events)
+        enrichment::enrich_authorized_events(hook_input, events, dirs::home_dir)
     }
 }
 

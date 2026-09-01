@@ -13,19 +13,41 @@ use std::time::Duration;
 /// Windsurf agent that reads Windsurf JSONL transcript files.
 pub struct WindsurfAgent {
     batch_size: usize,
+    #[cfg(test)]
+    home: Option<PathBuf>,
 }
 
 impl WindsurfAgent {
     pub fn new() -> Self {
-        Self { batch_size: 1000 }
+        Self {
+            batch_size: 1000,
+            #[cfg(test)]
+            home: None,
+        }
     }
 
     #[cfg(test)]
     pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
+        Self {
+            batch_size,
+            home: None,
+        }
     }
 
-    fn transcript_roots() -> Vec<PathBuf> {
+    #[cfg(test)]
+    pub(crate) fn with_home(home: PathBuf) -> Self {
+        Self {
+            batch_size: 1000,
+            home: Some(home),
+        }
+    }
+
+    fn transcript_roots(&self) -> Vec<PathBuf> {
+        #[cfg(test)]
+        if let Some(home) = &self.home {
+            return vec![home.join(".windsurf/transcripts")];
+        }
+
         dirs::home_dir()
             .into_iter()
             .map(|home| home.join(".windsurf/transcripts"))
@@ -48,7 +70,7 @@ impl Agent for WindsurfAgent {
             source,
             "windsurf",
             crate::model::checkpoint_request::StreamFormat::WindsurfJsonl,
-            Self::transcript_roots(),
+            self.transcript_roots(),
             |path| {
                 if !crate::operations::streams::agent::checkpoint_stream_has_extension(
                     path, "jsonl",

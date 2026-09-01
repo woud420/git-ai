@@ -7,13 +7,16 @@ use std::path::{Path, PathBuf};
 pub(super) fn enrich_authorized_events(
     hook_input: &str,
     events: &mut [ParsedHookEvent],
+    resolve_cli_home: impl FnOnce() -> Option<PathBuf>,
 ) -> Result<(), GitAiError> {
     let data = parse::hook_json(hook_input)?;
     let hook_event_name = parse::optional_str_multi(&data, &["hook_event_name", "hookEventName"])
         .unwrap_or("after_edit");
 
     if events.iter_mut().any(is_cli_event) {
-        enrich_cli_events(events);
+        if let Some(home) = resolve_cli_home() {
+            enrich_cli_events_from_home(events, &home);
+        }
     } else if hook_event_name == "after_edit" {
         enrich_legacy_events(&data, events);
     } else if matches!(hook_event_name, "PreToolUse" | "PostToolUse") {
@@ -44,11 +47,7 @@ fn is_cli_event(event: &mut ParsedHookEvent) -> bool {
         .unwrap_or(false)
 }
 
-fn enrich_cli_events(events: &mut [ParsedHookEvent]) {
-    let Some(home) = dirs::home_dir() else {
-        return;
-    };
-
+fn enrich_cli_events_from_home(events: &mut [ParsedHookEvent], home: &Path) {
     for event in events {
         let Some(session_id) = event
             .preset_context_mut()
@@ -56,7 +55,7 @@ fn enrich_cli_events(events: &mut [ParsedHookEvent]) {
         else {
             continue;
         };
-        let path = copilot_cli_session_path(&home, &session_id);
+        let path = copilot_cli_session_path(home, &session_id);
         if !path.exists() {
             continue;
         }
@@ -145,7 +144,6 @@ mod tests {
     use super::super::GithubCopilotPreset;
     use super::*;
     use crate::model::checkpoint_request::StreamFormat;
-    use crate::operations::mdm::test_env::with_temp_home;
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -227,51 +225,50 @@ mod tests {
     }
 
     #[test]
-    #[serial_test::serial]
     fn cli_parse_has_no_discovered_source_and_authorized_enrichment_restores_it() {
-        with_temp_home(|home| {
-            let session_path = home
-                .join(".copilot/session-state")
-                .join("cli-session")
-                .join("events.jsonl");
-            std::fs::create_dir_all(session_path.parent().unwrap()).unwrap();
-            std::fs::write(
-                &session_path,
-                r#"{"type":"session.model_change","data":{"newModel":"gpt-4.1"}}"#,
-            )
+        // ENG-338: inject the fixture root directly because Windows known-home
+        // discovery does not honor HOME or USERPROFILE overrides.
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let session_path = home
+            .join(".copilot/session-state")
+            .join("cli-session")
+            .join("events.jsonl");
+        std::fs::create_dir_all(session_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &session_path,
+            r#"{"type":"session.model_change","data":{"newModel":"gpt-4.1"}}"#,
+        )
+        .unwrap();
+        let input = json!({
+            "hook_event_name": "PostToolUse",
+            "cwd": home.join("project"),
+            "tool_name": "create",
+            "session_id": "cli-session",
+            "tool_input": {"path": home.join("project/main.rs")}
+        })
+        .to_string();
+
+        let mut events = GithubCopilotPreset
+            .parse(&input, "t_test123456789a")
             .unwrap();
-            let input = json!({
-                "hook_event_name": "PostToolUse",
-                "cwd": home.join("project"),
-                "tool_name": "create",
-                "session_id": "cli-session",
-                "tool_input": {"path": home.join("project/main.rs")}
-            })
-            .to_string();
-
-            let mut events = GithubCopilotPreset
-                .parse(&input, "t_test123456789a")
-                .unwrap();
-            assert_eq!(context_model(&events), "unknown");
-            match &events[0] {
-                ParsedHookEvent::PostFileEdit(event) => {
-                    assert!(event.stream_source.is_none());
-                }
-                event => panic!("expected post-file event, got {event:?}"),
+        assert_eq!(context_model(&events), "unknown");
+        match &events[0] {
+            ParsedHookEvent::PostFileEdit(event) => {
+                assert!(event.stream_source.is_none());
             }
+            event => panic!("expected post-file event, got {event:?}"),
+        }
 
-            GithubCopilotPreset
-                .enrich_authorized_events(&input, &mut events)
-                .unwrap();
-            assert_eq!(context_model(&events), "gpt-4.1");
-            match &events[0] {
-                ParsedHookEvent::PostFileEdit(event) => {
-                    let source = event.stream_source.as_ref().unwrap();
-                    assert_eq!(source.path, PathBuf::from(&session_path));
-                    assert_eq!(source.format, StreamFormat::CopilotEventStreamJsonl);
-                }
-                event => panic!("expected post-file event, got {event:?}"),
+        enrich_authorized_events(&input, &mut events, || Some(home.to_path_buf())).unwrap();
+        assert_eq!(context_model(&events), "gpt-4.1");
+        match &events[0] {
+            ParsedHookEvent::PostFileEdit(event) => {
+                let source = event.stream_source.as_ref().unwrap();
+                assert_eq!(source.path, PathBuf::from(&session_path));
+                assert_eq!(source.format, StreamFormat::CopilotEventStreamJsonl);
             }
-        });
+            event => panic!("expected post-file event, got {event:?}"),
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -33,6 +33,12 @@ struct OutputState {
     stdout_done: bool,
     stderr_done: bool,
     diagnostics: Vec<String>,
+}
+
+struct PipedChild {
+    child: Child,
+    rx: Receiver<OutputEvent>,
+    output: OutputState,
 }
 
 impl OutputState {
@@ -92,6 +98,11 @@ pub(crate) fn run_command_with_timeout_and_env(
         command.current_dir(cwd);
     }
 
+    let running = spawn_piped(command)?;
+    wait_with_timeout(running, timeout, poll_interval)
+}
+
+fn spawn_piped(mut command: Command) -> Result<PipedChild, String> {
     let mut child = command
         .spawn()
         .map_err(|e| format!("failed to execute: {}", e))?;
@@ -108,6 +119,19 @@ pub(crate) fn run_command_with_timeout_and_env(
     }
     drop(tx);
 
+    Ok(PipedChild { child, rx, output })
+}
+
+fn wait_with_timeout(
+    running: PipedChild,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<TimedCommandOutput, String> {
+    let PipedChild {
+        mut child,
+        rx,
+        mut output,
+    } = running;
     let start = Instant::now();
     loop {
         drain_output_events(&rx, &mut output);
@@ -186,6 +210,107 @@ pub(crate) fn run_command_with_timeout_and_env(
             }
         }
     }
+}
+
+#[cfg(test)]
+const FIXTURE_READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[cfg(test)]
+pub(crate) fn partial_output_fixture(timeout: Duration) -> Result<TimedCommandOutput, String> {
+    let (program, args) = partial_output_command();
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut running = spawn_piped(command)?;
+    let deadline = Instant::now() + FIXTURE_READY_TIMEOUT;
+    loop {
+        drain_output_events(&running.rx, &mut running.output);
+        if running.output.stdout == b"out" && running.output.stderr == b"err" {
+            return wait_with_timeout(running, timeout, OUTPUT_DRAIN_POLL);
+        }
+
+        match running.child.try_wait() {
+            Ok(Some(status)) => {
+                collect_output_until(
+                    &running.rx,
+                    &mut running.output,
+                    Instant::now() + OUTPUT_DRAIN_GRACE,
+                    OUTPUT_DRAIN_POLL,
+                );
+                return Err(format!(
+                    "partial-output fixture exited before ready (status={:?}, stdout={:?}, stderr={:?})",
+                    status.code(),
+                    String::from_utf8_lossy(&running.output.stdout),
+                    String::from_utf8_lossy(&running.output.stderr)
+                ));
+            }
+            Err(error) => {
+                let cleanup = stop_fixture(&mut running)
+                    .err()
+                    .map(|error| format!("; {}", error))
+                    .unwrap_or_default();
+                return Err(format!(
+                    "failed while waiting for partial-output fixture: {}{}",
+                    error, cleanup
+                ));
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let cleanup = stop_fixture(&mut running)
+                    .err()
+                    .map(|error| format!("; {}", error))
+                    .unwrap_or_default();
+                return Err(format!(
+                    "partial-output fixture was not ready (stdout={:?}, stderr={:?}){}",
+                    String::from_utf8_lossy(&running.output.stdout),
+                    String::from_utf8_lossy(&running.output.stderr),
+                    cleanup
+                ));
+            }
+            Ok(None) => std::thread::sleep(OUTPUT_DRAIN_POLL),
+        }
+    }
+}
+
+#[cfg(test)]
+fn stop_fixture(running: &mut PipedChild) -> Result<(), String> {
+    match running.child.kill() {
+        Ok(()) => running
+            .child
+            .wait()
+            .map(|_| ())
+            .map_err(|error| format!("failed to reap partial-output fixture: {}", error)),
+        Err(kill_error) => match running.child.try_wait() {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(format!(
+                "failed to stop partial-output fixture: {}",
+                kill_error
+            )),
+            Err(wait_error) => Err(format!(
+                "failed to stop partial-output fixture: {}; status check also failed: {}",
+                kill_error, wait_error
+            )),
+        },
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+fn partial_output_command() -> (&'static str, [&'static str; 2]) {
+    ("sh", ["-c", "printf out; printf err >&2; exec sleep 60"])
+}
+
+#[cfg(all(test, windows))]
+fn partial_output_command() -> (&'static str, [&'static str; 3]) {
+    (
+        "powershell.exe",
+        [
+            "-NoProfile",
+            "-Command",
+            "[Console]::Out.Write('out'); [Console]::Out.Flush(); [Console]::Error.Write('err'); [Console]::Error.Flush(); Start-Sleep -Seconds 60",
+        ],
+    )
 }
 
 fn spawn_output_reader<R>(mut reader: R, tx: Sender<OutputEvent>, stdout: bool)

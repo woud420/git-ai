@@ -934,11 +934,19 @@ fn run_command_capture_with_timeout_and_env(
         )
     })?;
 
+    capture_result(&command, timeout, output)
+}
+
+fn capture_result(
+    command: &str,
+    timeout: Duration,
+    output: TimedCommandOutput,
+) -> Result<String, String> {
     if output.timed_out {
-        return Err(format_timeout_capture_error(&command, timeout, output));
+        return Err(format_timeout_capture_error(command, timeout, output));
     }
     if output.wait_error.is_some() {
-        return Err(format_wait_capture_error(&command, output));
+        return Err(format_wait_capture_error(command, output));
     }
 
     command_output_to_result(output)
@@ -1419,26 +1427,6 @@ fn redact_env_value(key: &str, value: &str) -> String {
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
-    fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
-        (
-            "sh",
-            vec!["-c", "printf out; printf err >&2; exec sleep 60"],
-        )
-    }
-
-    #[cfg(windows)]
-    fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
-        (
-            "powershell.exe",
-            vec![
-                "-NoProfile",
-                "-Command",
-                "[Console]::Out.Write('out'); [Console]::Error.Write('err'); Start-Sleep -Seconds 60",
-            ],
-        )
-    }
-
     #[test]
     fn format_command_for_error_preserves_posix_shell_words() {
         assert_eq!(format_command_for_error("g", &["a b"]), "g 'a b'");
@@ -1572,19 +1560,20 @@ mod tests {
     }
 
     #[test]
-    fn test_run_command_capture_with_timeout_reports_partial_output() {
-        let (program, args) = stdout_stderr_sleep_command();
-        let err = run_command_capture_with_timeout(program, &args, Duration::from_millis(300))
-            .unwrap_err();
+    fn test_capture_result_preserves_partial_timeout_output() {
+        // Regression coverage for ENG-340.
+        let timeout = Duration::from_millis(300);
+        let output = crate::process_timeout::partial_output_fixture(timeout).unwrap();
+        let err = capture_result("partial-output fixture", timeout, output).unwrap_err();
 
-        assert!(err.contains("timed out after"), "{err}");
+        assert!(err.contains("timed out after 0.3s"), "{err}");
         assert!(
             err.contains("sent kill to child process")
                 || err.contains("failed to kill child process"),
             "{err}"
         );
-        assert!(err.contains("stdout before timeout: out"), "{err}");
-        assert!(err.contains("stderr before timeout: err"), "{err}");
+        assert!(err.contains("; stdout before timeout: out"), "{err}");
+        assert!(err.contains("; stderr before timeout: err"), "{err}");
     }
 
     #[test]

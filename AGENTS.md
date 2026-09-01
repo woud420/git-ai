@@ -52,7 +52,7 @@ cargo insta accept                       # accept all pending snapshots
 
 Before opening a PR, make sure to run `task lint` and `task fmt` and resolve any formatting/lint issues as they will fail in CI.
 
-When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are the fastest (roughly 15mins) and if they fail, you should quickly iterate based on those failures and update the PR -- iterating there until those jobs are all green. Additionally, while you're checking on the ubuntu-based jobs, our automated PR review bot, Devin, should have had time to leave feedback. Make sure to read all of Devin's PR review feedback commits and address them. Address them means review, understand, evaluate, and fix if necessary or comment with your thoughts if you don't the feedback is a real issue. Once the lint, fmt, and Ubuntu-based tests have passed and you have addressed all Devin PR review feedback, you can stop monitoring CI for the Mac (~35mins) and Windows (up to 3.5 hours) checks unless the user has explicitly asked for you to wait for those or you're working on a specific OS-based bug.
+When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are the fastest (roughly 15mins) and if they fail, you should quickly iterate based on those failures and update the PR -- iterating there until those jobs are all green. Review all automated and human feedback that is actually present and address it: fix valid issues or reply with reasoning when feedback does not identify a real issue. Once the lint, fmt, and Ubuntu-based tests have passed and all actionable review feedback is addressed, you can stop monitoring CI for the Mac (~35mins) and Windows (up to 3.5 hours) checks unless the user has explicitly asked for you to wait for those or you're working on a specific OS-based bug.
 
 ## Architecture
 
@@ -252,7 +252,7 @@ never wrap or re-nest it.
 - Always write code optimized for human review. No code can be merged without a greenlight from a human, so make it easy for humans to review your code. This means clear naming, clear refactors as needed, and, most importantly, minimal and simple code. Clean, DRY, simple, maintainable code is your true north star.
 - Use ordinary Git branches and independently reviewable GitHub pull requests for contributor work. Graphite is not required for repository contributions.
 - Treat Graphite as a maintained compatibility surface: preserve the real-CLI integration suite, its test shim and CI coverage, and the generic `commit-tree` / `update-ref` behavior when changing rewrite handling. Technical references to Graphite are intentional and are not cleanup targets.
-- Before stopping, ensure every submitted pull request passes all CI checks and all Devin review feedback has been addressed and resolved.
+- Before stopping, ensure every submitted pull request passes all required CI checks and all actionable review feedback has been addressed and resolved.
 
 ## Gotchas
 

@@ -1237,7 +1237,7 @@ fn test_checkpoint_crlf_blob_vs_lf_working_tree_no_changes_skipped() {
 
 #[test]
 fn test_checkpoint_stale_crlf_blob_causes_ai_reattribution() {
-    // Regression test for Devin review finding: when a CRLF-only change is
+    // Regression coverage: when a CRLF-only change is
     // skipped (preserving a stale CRLF blob), the NEXT AI checkpoint compares
     // the stale CRLF blob against the LF working tree. Because
     // capture_diff_slices sees "line\r\n" ≠ "line\n", ALL lines appear changed.

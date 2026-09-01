@@ -734,15 +734,11 @@ fn daemon_windows_control_pipe_worker_exhaustion_does_not_block_later_control_re
 #[test]
 #[cfg(windows)]
 fn daemon_windows_trace_pipe_worker_exhaustion_does_not_block_later_trace_connections() {
-    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
-    let mut daemon = DaemonGuard::start_with_env(
-        &repo,
-        &[
-            ("GIT_AI_TEST_WINDOWS_TRACE_PIPE_WORKERS", "2"),
-            ("GIT_AI_DAEMON_UPDATE_CHECK_INTERVAL", "86400"),
-            ("GIT_AI_DAEMON_MAX_UPTIME_SECS", "86400"),
-        ],
-    );
+    let repo = TestRepo::new_with_daemon_env(&[
+        ("GIT_AI_TEST_WINDOWS_TRACE_PIPE_WORKERS", "2"),
+        ("GIT_AI_DAEMON_UPDATE_CHECK_INTERVAL", "86400"),
+        ("GIT_AI_DAEMON_MAX_UPTIME_SECS", "86400"),
+    ]);
     let trace_socket = daemon_trace_socket_path(&repo);
     let worktree = repo_workdir_string(&repo);
     let git_dir = repo.path().join(".git").to_string_lossy().to_string();
@@ -783,23 +779,7 @@ fn daemon_windows_trace_pipe_worker_exhaustion_does_not_block_later_trace_connec
         ],
     );
 
-    let start = std::time::Instant::now();
-    while start.elapsed() < Duration::from_secs(2) {
-        if repo
-            .daemon_completion_entries()
-            .iter()
-            .any(|entry| entry.test_sync_session.as_deref() == Some(session.as_str()))
-        {
-            daemon.shutdown();
-            return;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-
-    daemon.shutdown();
-    panic!(
-        "daemon did not process a later trace connection after every original pipe worker was stalled"
-    );
+    repo.sync_daemon_external_completion_sessions(&[session]);
 }
 
 #[test]

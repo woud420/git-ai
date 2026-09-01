@@ -588,7 +588,8 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_cline_partial_managed_install_is_detected_and_uninstalled() {
+    // Regression coverage for ENG-337.
+    fn test_cline_partial_managed_install_honors_platform_contract() {
         with_temp_home(|home| {
             let storage = home.join("cline-storage");
             fs::create_dir_all(&storage).unwrap();
@@ -598,28 +599,37 @@ mod tests {
             let params = HookInstallerParams {
                 binary_path: create_test_binary_path(),
             };
-            fs::write(
-                ClineInstaller::hook_path(PRE_HOOK_NAME),
-                ClineInstaller::generate_hook_script(&params.binary_path),
-            )
-            .unwrap();
-            fs::write(
-                ClineInstaller::hook_path(POST_HOOK_NAME),
-                "#!/bin/sh\necho 'user hook'\n",
-            )
-            .unwrap();
+            let pre_path = ClineInstaller::hook_path(PRE_HOOK_NAME);
+            let post_path = ClineInstaller::hook_path(POST_HOOK_NAME);
+            let managed_pre = ClineInstaller::generate_hook_script(&params.binary_path);
+            let unmanaged_post = "#!/bin/sh\necho 'user hook'\n";
+            fs::write(&pre_path, &managed_pre).unwrap();
+            fs::write(&post_path, unmanaged_post).unwrap();
 
             let check = ClineInstaller.check_hooks(&params).unwrap();
             assert!(check.tool_installed);
-            assert!(check.hooks_installed);
-            assert!(!check.hooks_up_to_date);
-
-            ClineInstaller.uninstall_hooks(&params, false).unwrap();
-            assert!(!ClineInstaller::hook_path(PRE_HOOK_NAME).exists());
-            assert_eq!(
-                fs::read_to_string(ClineInstaller::hook_path(POST_HOOK_NAME)).unwrap(),
-                "#!/bin/sh\necho 'user hook'\n"
-            );
+            #[cfg(not(windows))]
+            {
+                assert!(check.hooks_installed);
+                assert!(!check.hooks_up_to_date);
+                ClineInstaller.uninstall_hooks(&params, false).unwrap();
+                assert!(!pre_path.exists());
+                assert_eq!(fs::read_to_string(&post_path).unwrap(), unmanaged_post);
+            }
+            #[cfg(windows)]
+            {
+                assert!(!check.hooks_installed);
+                assert!(!check.hooks_up_to_date);
+                assert_eq!(ClineInstaller.install_hooks(&params, false).unwrap(), None);
+                assert_eq!(fs::read_to_string(&pre_path).unwrap(), managed_pre);
+                assert_eq!(fs::read_to_string(&post_path).unwrap(), unmanaged_post);
+                assert_eq!(
+                    ClineInstaller.uninstall_hooks(&params, false).unwrap(),
+                    None
+                );
+                assert_eq!(fs::read_to_string(&pre_path).unwrap(), managed_pre);
+                assert_eq!(fs::read_to_string(&post_path).unwrap(), unmanaged_post);
+            }
         });
     }
 }

@@ -383,23 +383,7 @@ fn run_logged_command_with_timeout(
         POLL_INTERVAL,
         SELF_CHECK_TRACE_ENV_REMOVE,
     ) {
-        Ok(output) => {
-            let stderr = format_logged_stderr(
-                output.timed_out,
-                timeout,
-                output.stderr,
-                output.diagnostics,
-                output.wait_error,
-            );
-            CommandRecord {
-                command,
-                cwd: cwd_display,
-                status: output.status,
-                stdout: output.stdout,
-                stderr,
-                timed_out: output.timed_out,
-            }
-        }
+        Ok(output) => record_from_output(command, cwd_display, timeout, output),
         Err(e) => CommandRecord {
             command,
             cwd: cwd_display,
@@ -408,6 +392,29 @@ fn run_logged_command_with_timeout(
             stderr: e,
             timed_out: false,
         },
+    }
+}
+
+fn record_from_output(
+    command: String,
+    cwd: Option<String>,
+    timeout: Duration,
+    output: crate::process_timeout::TimedCommandOutput,
+) -> CommandRecord {
+    let stderr = format_logged_stderr(
+        output.timed_out,
+        timeout,
+        output.stderr,
+        output.diagnostics,
+        output.wait_error,
+    );
+    CommandRecord {
+        command,
+        cwd,
+        status: output.status,
+        stdout: output.stdout,
+        stderr,
+        timed_out: output.timed_out,
     }
 }
 
@@ -532,49 +539,30 @@ pub(crate) fn format_status(status: Option<i32>) -> String {
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
-    fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
-        (
-            "sh",
-            vec!["-c", "printf out; printf err >&2; exec sleep 60"],
-        )
-    }
-
-    #[cfg(windows)]
-    fn stdout_stderr_sleep_command() -> (&'static str, Vec<&'static str>) {
-        (
-            "powershell.exe",
-            vec![
-                "-NoProfile",
-                "-Command",
-                "[Console]::Out.Write('out'); [Console]::Error.Write('err'); Start-Sleep -Seconds 60",
-            ],
-        )
-    }
-
     #[test]
     fn format_command_preserves_posix_shell_words() {
         assert_eq!(format_command("g", &["a b", "x'y"]), "g 'a b' 'x'\\''y'");
     }
 
     #[test]
-    fn test_run_logged_command_with_timeout_reports_partial_output() {
-        let (program, args) = stdout_stderr_sleep_command();
+    fn test_record_from_output_preserves_partial_timeout_output() {
+        // Regression coverage for ENG-340.
+        let timeout = Duration::from_millis(300);
+        let output = crate::process_timeout::partial_output_fixture(timeout).unwrap();
         let record =
-            run_logged_command_with_timeout(program, &args, None, Duration::from_millis(300));
+            record_from_output("partial-output fixture".to_string(), None, timeout, output);
 
         assert!(record.timed_out, "{record:?}");
         assert_eq!(record.stdout, "out");
-        assert!(record.stderr.contains("timed out after"), "{record:?}");
+        assert!(record.stderr.contains("timed out after 0.3s"), "{record:?}");
         assert!(
             record.stderr.contains("sent kill to child process")
                 || record.stderr.contains("failed to kill child process"),
             "{record:?}"
         );
         assert!(
-            record.stderr.contains("stderr before timeout"),
+            record.stderr.contains("stderr before timeout:\nerr"),
             "{record:?}"
         );
-        assert!(record.stderr.contains("err"), "{record:?}");
     }
 }

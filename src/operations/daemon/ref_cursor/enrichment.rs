@@ -98,8 +98,8 @@ impl RefCursor {
                 // prior command processing or a checkpoint boundary). The ingress
                 // offset is captured asynchronously and can race ahead of the
                 // command's own reflog entry; letting it advance the cursor would
-                // skip that entry and lose attribution (the graphite/gt-create
-                // flake). Keep the in-order cursor as the floor and remember the
+                // skip that entry and lose attribution (the late-ingress commit
+                // race). Keep the in-order cursor as the floor and remember the
                 // ingress offset only as a soft selection hint for disambiguating
                 // colliding entries (e.g. an untraced commit sharing a message).
                 self.command_start_hints.insert(key, offset);

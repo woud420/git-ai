@@ -111,8 +111,8 @@ Input: exact `old_tip`, `new_tip`, optional `onto`.
    - `base == new_tip` → backward reset; go to the reset path below.
    - otherwise → genuine rewrite.
 2. `git range-diff` over `base..old_tip` vs `base..new_tip` yields
-   old→new commit mappings, representing reorders, edits, drops, splits, and
-   squashes (multiple old → one new).
+   old→new commit mappings, representing reorders, edits, drops, and squashes
+   (multiple old → one new).
 3. Merge commits are mapped by parent-list correspondence.
 4. Run the core note-shift over the mappings.
 
@@ -220,14 +220,19 @@ mapped directly (range-diff degenerates to one pair). The amended commit's
 note merges migrated attribution with the working log's new checkpoint
 evidence via the normal post-commit path.
 
-### commit-tree / update-ref restacks (graphite-style)
+### commit-tree / update-ref restacks
 
-Tools like Graphite rewrite stacks with plumbing: `git commit-tree` +
-`git update-ref refs/heads/X <new>`. There are no porcelain hooks to observe;
-the ingestion layer recognizes the update-ref transition (old tip → new tip on
-a branch ref) and emits `NonFastForward`. `git merge-tree` is read-only tree
-arithmetic and never triggers migration by itself; only the subsequent
-`update-ref`/`commit` does.
+Stacking tools and manual automation can rewrite history with plumbing:
+`git commit-tree` + `git update-ref refs/heads/X <new>`. There are no porcelain
+hooks to observe; the ingestion layer recognizes the update-ref transition
+(old tip → new tip on a branch ref) and emits `NonFastForward`. `git merge-tree`
+is read-only tree arithmetic and never triggers migration by itself; only the
+subsequent `update-ref`/`commit` does.
+
+The fork intentionally does not infer one-old-to-many-new mappings from tree
+topology. If automation decomposes one source commit into an extracted parent
+and a rewritten child, range-diff's matched destination may retain the migrated
+note but additional sibling commits are not completed heuristically.
 
 ## What was removed (and must stay removed)
 

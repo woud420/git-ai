@@ -897,8 +897,8 @@ fn test_forward_mixed_reset_preserves_uncommitted_ai_attribution() {
     assert_forward_reset_preserves_uncommitted_ai_attribution("--mixed");
 }
 
-/// `reset --keep` is Graphite's forward-restack path. It must carry a
-/// non-conflicting uncommitted AI edit to the newer base commit.
+/// A forward `reset --keep` must carry a non-conflicting uncommitted AI edit
+/// to the newer base commit.
 #[test]
 fn test_forward_keep_reset_preserves_uncommitted_ai_attribution() {
     assert_forward_reset_preserves_uncommitted_ai_attribution("--keep");

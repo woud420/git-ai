@@ -136,7 +136,7 @@ fn cold_start_late_ingress_offset_does_not_skip_commit_on_uninitialized_common_r
 
 #[test]
 fn late_ingress_offset_does_not_advance_in_order_cursor_past_own_commit() {
-    // Regression for the graphite/gt-create flake. The family actor keeps one
+    // Regression for the late-ingress commit race. The family actor keeps one
     // RefCursor across commands. A prior command (e.g. a `switch`) advanced the
     // in-order HEAD cursor to exactly before this command's commit entry. The
     // async daemon-ingress offset capture then races and reads the reflog AFTER
@@ -154,11 +154,12 @@ fn late_ingress_offset_does_not_advance_in_order_cursor_past_own_commit() {
     crate::operations::git::test_utils::seed_valid_git_dir(&git_dir);
 
     // A→B: prior switch onto the new branch (already consumed; cursor sits at
-    // end of this line). B→C: this command's commit. C→D: the switch-back gt
-    // issues right after committing.
+    // end of this line). B→C: this command's commit. C→D: a follow-up switch
+    // issued right after committing.
     let switch_line =
         format!("{A} {B} Test User <test@example.com> 0 +0000\tcheckout: moving to branch\n");
-    let commit_line = format!("{B} {C} Test User <test@example.com> 0 +0000\tcommit: gt create\n");
+    let commit_line =
+        format!("{B} {C} Test User <test@example.com> 0 +0000\tcommit: stack create\n");
     let switch_back_line =
         format!("{C} {D} Test User <test@example.com> 0 +0000\tcheckout: moving back\n");
     let in_order_offset = switch_line.len() as u64;
@@ -180,7 +181,7 @@ fn late_ingress_offset_does_not_advance_in_order_cursor_past_own_commit() {
         .initialize_reflog_cursor(&head_key(&git_dir), in_order_offset)
         .unwrap();
 
-    let mut cmd = command_with_worktree(&family, Some(worktree), &["commit", "-m", "gt create"]);
+    let mut cmd = command_with_worktree(&family, Some(worktree), &["commit", "-m", "stack create"]);
     cmd.reflog_start_offsets
         .insert(head_key(&git_dir), late_offset);
 
@@ -195,7 +196,7 @@ fn late_ingress_offset_does_not_advance_in_order_cursor_past_own_commit() {
 
 #[test]
 fn ingress_offset_hint_skips_untraced_duplicate_message_commit() {
-    // The dual of the graphite case: an UNTRACED commit sharing a message sits
+    // The dual case: an UNTRACED commit sharing a message sits
     // between the in-order cursor and this command's own commit. Here the
     // ingress offset was captured at the command's true start — after the
     // untraced commit — so it correctly biases selection to the later (traced)

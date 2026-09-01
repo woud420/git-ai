@@ -2,8 +2,8 @@
 #[path = "integration/repos/mod.rs"]
 mod repos;
 
-// Graphite-style restacks rewrite commits with `git commit-tree` + `git update-ref`.
-// These tests model that plumbing path directly so they do not depend on `gt`.
+// Plumbing-based restacks rewrite commits with `git commit-tree` + `git update-ref`.
+// These tests model that generic Git path directly without an external tool.
 
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use git_ai::operations::daemon::open_local_socket_stream_with_timeout;
@@ -404,7 +404,7 @@ fn commit_tree_from_existing_tree(
         .to_string()
 }
 
-fn graphite_style_restack_child_branch(
+fn plumbing_restack_child_branch(
     repo: &TestRepo,
     branch: &str,
     old_head: &str,
@@ -1529,7 +1529,7 @@ fn test_update_ref_restack_after_parent_amend_preserves_child_attribution() {
         "expected parent amend to rewrite the parent branch"
     );
 
-    let new_child_head = graphite_style_restack_child_branch(
+    let new_child_head = plumbing_restack_child_branch(
         &repo,
         "child",
         &child_commit.commit_sha,
@@ -1553,14 +1553,11 @@ fn test_update_ref_restack_after_parent_amend_preserves_child_attribution() {
     rewritten_child_file.assert_lines_and_blame(lines!["child ai".ai(), "child human".human()]);
 }
 
-/// Test Graphite-style rebase: replay multiple feature commits via commit-tree,
-/// then move the branch with ONE update-ref from old tip to new tip.
-///
-/// This matches actual `gt sync` behavior where Graphite replays all commits
-/// using plumbing commands and issues a single atomic update-ref at the end.
-/// git-ai must detect the N-commit rewrite and remap all N authorship notes.
+/// Replay multiple feature commits via commit-tree, then move the branch with
+/// one update-ref from old tip to new tip. Git AI must detect the N-commit
+/// rewrite and remap every authorship note.
 #[test]
-fn test_graphite_style_multi_commit_single_update_ref() {
+fn test_multi_commit_plumbing_rewrite_single_update_ref() {
     let repo = TestRepo::new();
     setup_initial_commit(&repo);
     let default_branch = repo.current_branch();
@@ -1671,7 +1668,7 @@ fn test_graphite_style_multi_commit_single_update_ref() {
         new_parent = new_commit;
     }
 
-    // ONE atomic update-ref (matches Graphite's actual behavior)
+    // Move the branch once after creating every replacement commit.
     let new_tip = new_parent;
     repo.git(&["update-ref", "refs/heads/feature", &new_tip, &old_tip])
         .expect("update-ref");
@@ -1702,82 +1699,6 @@ fn test_graphite_style_multi_commit_single_update_ref() {
 
     // Verify attribution on file_b (single-commit, straightforward)
     file_b.assert_lines_and_blame(lines!["b1 ai".ai(), "b2 ai".ai()]);
-}
-
-/// Test the split-by-file shape Graphite creates: one old commit becomes a
-/// parent commit containing the selected file and a child commit containing
-/// the remaining files. Both new branches must retain the old attribution.
-#[test]
-fn test_graphite_style_split_by_file_preserves_attribution() {
-    let repo = TestRepo::new();
-    setup_initial_commit(&repo);
-
-    repo.git(&["checkout", "-b", "split-branch"])
-        .expect("checkout split branch");
-    let mut ai_file = repo.filename("split_ai.txt");
-    ai_file.set_contents(lines!["ai content 1".ai(), "ai content 2".ai()]);
-    let mut human_file = repo.filename("split_human.txt");
-    human_file.set_contents(lines!["human content 1".human(), "human content 2".human(),]);
-    repo.stage_all_and_commit("branch with two files")
-        .expect("split source commit");
-    let old_head = head_sha(&repo);
-    let base = repo
-        .git(&["rev-parse", &format!("{}^", old_head)])
-        .expect("source parent")
-        .trim()
-        .to_string();
-
-    // Model Graphite's extracted parent: the selected file is replayed on the
-    // original parent, while the remaining files stay in the child commit.
-    repo.git(&["read-tree", &base])
-        .expect("read source parent tree");
-    repo.git(&["add", "--", "split_ai.txt"])
-        .expect("stage extracted file");
-    let extracted_tree = repo.git(&["write-tree"]).expect("write extracted tree");
-    let extracted_parent = repo
-        .git(&[
-            "commit-tree",
-            extracted_tree.trim(),
-            "-p",
-            &base,
-            "-m",
-            "extract split_ai.txt",
-        ])
-        .expect("commit extracted parent")
-        .trim()
-        .to_string();
-    let rewritten_child = commit_tree_from_existing_tree(
-        &repo,
-        &old_head,
-        &extracted_parent,
-        "branch with remaining files",
-    );
-
-    repo.git(&["update-ref", "refs/heads/split-parent", &extracted_parent])
-        .expect("create extracted parent ref");
-    repo.git(&[
-        "update-ref",
-        "refs/heads/split-branch",
-        &rewritten_child,
-        &old_head,
-    ])
-    .expect("rewrite split branch ref");
-    repo.git(&["reset", "--hard", &rewritten_child])
-        .expect("reset to rewritten child");
-    repo.sync_daemon();
-
-    repo.git(&["checkout", "split-parent"])
-        .expect("checkout extracted parent");
-    assert_note_has_ai_for_file(&repo, &extracted_parent, "split_ai.txt");
-    ai_file.assert_lines_and_blame(lines!["ai content 1".ai(), "ai content 2".ai()]);
-    assert!(!repo.path().join("split_human.txt").exists());
-
-    repo.git(&["checkout", "split-branch"])
-        .expect("checkout rewritten child");
-    assert_note_has_ai_for_file(&repo, &rewritten_child, "split_ai.txt");
-    ai_file.assert_lines_and_blame(lines!["ai content 1".ai(), "ai content 2".ai()]);
-    human_file
-        .assert_lines_and_blame(lines!["human content 1".human(), "human content 2".human(),]);
 }
 
 #[test]

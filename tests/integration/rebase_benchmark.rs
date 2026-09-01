@@ -1903,21 +1903,21 @@ fn benchmark_monorepo_rebase() {
     println!("================================\n");
 }
 
-/// Same monorepo scenario as `benchmark_monorepo_rebase`, but uses Graphite-style
-/// plumbing commands (`git commit-tree` + `git update-ref`) instead of `git rebase`.
+/// Same monorepo scenario as `benchmark_monorepo_rebase`, but uses plumbing
+/// commands (`git commit-tree` + `git update-ref`) instead of `git rebase`.
 ///
 /// Each feature commit is replayed one at a time via:
 ///   1. `git merge-tree` to compute the rebased tree
 ///   2. `git commit-tree` to create the new commit object
-///   3. `git update-ref` to advance the branch (triggers git-ai wrapper detection)
+///   3. `git update-ref` to advance the branch (triggers trace2 rewrite detection)
 ///
-/// This models the actual Graphite CLI restack flow and tests whether git-ai's
-/// wrapper-based plumbing detection is as fast as the standard post-rewrite hook path.
+/// This models a generic plumbing-based restack and tests whether Git AI's
+/// trace2-driven detection is as fast as the standard porcelain rebase path.
 ///
-/// Run with: cargo test --test integration benchmark_monorepo_graphite_rebase -- --ignored --nocapture
+/// Run with: cargo test --test integration benchmark_monorepo_plumbing_rebase -- --ignored --nocapture
 #[test]
 #[ignore]
-fn benchmark_monorepo_graphite_rebase() {
+fn benchmark_monorepo_plumbing_rebase() {
     let num_background_files: usize = std::env::var("MONO_BENCH_BG_FILES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -1941,9 +1941,9 @@ fn benchmark_monorepo_graphite_rebase() {
     // Use a separate cache dir so it doesn't conflict with the standard rebase cache
     let cache_dir = std::env::var("MONO_BENCH_CACHE_DIR")
         .ok()
-        .map(|d| format!("{}-graphite", d));
+        .map(|d| format!("{}-plumbing", d));
 
-    println!("\n=== Monorepo GRAPHITE-STYLE Rebase Benchmark ===");
+    println!("\n=== Monorepo Plumbing Rebase Benchmark ===");
     println!(
         "Background files:  {} (repo tree size)",
         num_background_files
@@ -2177,7 +2177,7 @@ fn benchmark_monorepo_graphite_rebase() {
 
     let default_branch = repo.current_branch();
 
-    // --- Step 4: Graphite-style rebase using plumbing commands ---
+    // --- Step 4: Rebase using plumbing commands ---
     // Collect feature branch commits (oldest to newest)
     repo.git(&["checkout", "feature/payments-refactor"])
         .unwrap();
@@ -2212,21 +2212,19 @@ fn benchmark_monorepo_graphite_rebase() {
     let pre_count = pre_notes.lines().filter(|l| !l.is_empty()).count();
     println!("AI notes before rebase: {}", pre_count);
 
-    let timing_file = std::path::PathBuf::from("/tmp/monorepo_graphite_timing.txt");
+    let timing_file = std::path::PathBuf::from("/tmp/monorepo_plumbing_timing.txt");
     let timing_path = timing_file.to_str().unwrap().to_string();
 
     println!(
-        "\n--- Starting GRAPHITE-STYLE rebase ({} commits via commit-tree + update-ref) ---",
+        "\n--- Starting plumbing rebase ({} commits via commit-tree + update-ref) ---",
         feature_commits.len()
     );
     let rebase_start = Instant::now();
 
     // Replay each feature commit onto the new base using plumbing commands.
     //
-    // This matches actual Graphite CLI behavior: all commits are replayed via
-    // commit-tree first, then ONE update-ref moves the branch from old tip to
-    // new tip. git-ai's post_update_ref_hook sees the same N-commit rewrite
-    // shape as a standard git rebase.
+    // Create every replacement commit first, then move the branch once. The
+    // daemon sees the same N-commit rewrite shape as a porcelain rebase.
     let old_tip = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
     let mut new_parent = main_tip.clone();
     for (idx, &feature_sha) in feature_commits.iter().enumerate() {
@@ -2266,7 +2264,7 @@ fn benchmark_monorepo_graphite_rebase() {
             .trim()
             .to_string();
 
-        // Create the new commit with commit-tree (no update-ref yet — just like Graphite)
+        // Create the new commit with commit-tree while leaving the ref unchanged.
         let new_commit = repo
             .git(&[
                 "commit-tree",
@@ -2293,8 +2291,8 @@ fn benchmark_monorepo_graphite_rebase() {
         }
     }
 
-    // ONE atomic update-ref moves the branch from old tip to new tip.
-    // This is the single point where git-ai's wrapper detects a rewrite.
+    // One atomic update-ref moves the branch from old tip to new tip. This is
+    // the single point where the daemon observes the rewrite.
     let new_tip = new_parent;
     println!(
         "\nRunning single update-ref: {} -> {}",
@@ -2316,7 +2314,7 @@ fn benchmark_monorepo_graphite_rebase() {
     )
     .unwrap();
 
-    // Update working tree to match (like Graphite's `reset --keep`)
+    // Update the working tree to match the rewritten branch.
     repo.git(&["reset", "--hard", &new_tip]).unwrap();
     let rebase_dur = rebase_start.elapsed();
 
@@ -2335,7 +2333,7 @@ fn benchmark_monorepo_graphite_rebase() {
         println!("(No timing file — possibly fast-path or no notes to rewrite)");
     }
 
-    println!("\n=== MONOREPO GRAPHITE REBASE RESULTS ===");
+    println!("\n=== MONOREPO PLUMBING REBASE RESULTS ===");
     println!(
         "Repo: {} files, {} AI-tracked",
         num_background_files + num_ai_files,

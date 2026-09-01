@@ -759,7 +759,7 @@ fn daemon_windows_trace_pipe_worker_exhaustion_does_not_block_later_trace_connec
             json!({
                 "event": "start",
                 "sid": "windows-exhaustion-followup",
-                "argv": ["git", "-c", session_arg, "commit", "-m", "synthetic"],
+                "argv": ["git", "-c", session_arg, "commit", "--dry-run", "-m", "synthetic"],
                 "time_ns": 15_000u64,
             }),
             json!({

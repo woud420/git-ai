@@ -15,8 +15,10 @@ use crate::operations::authorship::stats::{
     stats_from_authorship_log,
 };
 use crate::operations::git::notes_api::{CommitAuthorship, filter_commits_with_notes};
+use crate::operations::git::path_format::unescape_git_path;
 use crate::operations::git::repository::{CommitRange, Repository, parse_numstat_line};
 use std::io::IsTerminal;
+use unicode_normalization::UnicodeNormalization;
 
 /// The git empty tree hash - represents an empty repository state
 /// This is the hash of the empty tree object that git uses internally
@@ -369,8 +371,10 @@ fn get_git_diff_stats_for_range(
             continue;
         };
 
-        // Check if this file should be ignored and skip it.
-        if should_ignore_file_with_matcher(numstat.path, &ignore_matcher) {
+        // The C locale C-quotes non-ASCII paths. Match ignores against the
+        // decoded, canonically normalized path used throughout attribution.
+        let path: String = unescape_git_path(numstat.path).nfc().collect();
+        if should_ignore_file_with_matcher(&path, &ignore_matcher) {
             continue;
         }
 

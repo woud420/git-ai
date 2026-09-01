@@ -82,7 +82,7 @@ fn exec_git_allow_nonzero_with_profile_and_env(
     spawn_probe_log(&effective_args);
     let mut cmd = Command::new(config::Config::get().git_cmd());
     cmd.args(&effective_args);
-    apply_internal_git_env(&mut cmd);
+    apply_internal_git_machine_env(&mut cmd);
     for (key, value) in envs {
         cmd.env(key, value);
     }
@@ -111,7 +111,7 @@ pub fn spawn_git_stdout(args: &[String]) -> Result<Child, GitAiError> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit());
-    apply_internal_git_env(&mut cmd);
+    apply_internal_git_machine_env(&mut cmd);
 
     #[cfg(windows)]
     {
@@ -176,6 +176,15 @@ pub(crate) fn apply_internal_git_env(cmd: &mut Command) {
     }
 }
 
+/// Normalize the environment for Git output that git-ai consumes internally.
+///
+/// Keep this separate from [`apply_internal_git_env`]: passthrough commands
+/// render directly for the user and must retain the caller's locale.
+pub(crate) fn apply_internal_git_machine_env(cmd: &mut Command) {
+    apply_internal_git_env(cmd);
+    cmd.env("LC_ALL", "C");
+}
+
 /// Build a `GitCliError` from an exit status code, stderr bytes, and the
 /// effective argument list.  Consolidates the three call sites that previously
 /// duplicated this construction inline.
@@ -226,7 +235,7 @@ fn spawn_git_piped(effective_args: &[String]) -> Result<Child, GitAiError> {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    apply_internal_git_env(&mut cmd);
+    apply_internal_git_machine_env(&mut cmd);
 
     #[cfg(windows)]
     {
@@ -426,5 +435,26 @@ mod tests {
                 Some(Some((*value).to_string()))
             );
         }
+    }
+
+    #[test]
+    fn internal_git_machine_env_forces_c_locale() {
+        let mut cmd = Command::new("git");
+
+        apply_internal_git_machine_env(&mut cmd);
+
+        assert_eq!(
+            explicit_command_env(&cmd, "LC_ALL"),
+            Some(Some("C".to_string()))
+        );
+    }
+
+    #[test]
+    fn internal_git_passthrough_env_does_not_override_locale() {
+        let mut cmd = Command::new("git");
+
+        apply_internal_git_env(&mut cmd);
+
+        assert_eq!(explicit_command_env(&cmd, "LC_ALL"), None);
     }
 }

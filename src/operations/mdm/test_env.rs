@@ -83,26 +83,3 @@ pub(crate) fn with_fake_binary_on_path<F: FnOnce(&Path)>(binary_name: &str, f: F
         }
     }
 }
-
-/// Temporarily point `PATH` at an empty temp directory (i.e. no binaries are
-/// resolvable) for the duration of the closure. Must only be called from
-/// `#[serial]` tests to avoid racing with other tests that read `PATH`.
-pub(crate) fn with_empty_path<F: FnOnce()>(f: F) {
-    let temp_dir = TempDir::new().unwrap();
-    let prev_path = std::env::var_os("PATH");
-
-    // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
-    unsafe {
-        std::env::set_var("PATH", temp_dir.path());
-    }
-
-    f();
-
-    // SAFETY: tests are serialized via #[serial], so restoring process env is safe.
-    unsafe {
-        match prev_path {
-            Some(v) => std::env::set_var("PATH", v),
-            None => std::env::remove_var("PATH"),
-        }
-    }
-}

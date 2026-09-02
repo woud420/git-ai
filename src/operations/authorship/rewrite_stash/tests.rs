@@ -107,7 +107,7 @@ fn path_filtered_copy_rejects_a_tampered_journal_record() {
             Vec::new(),
         )],
     );
-    let mut checkpoints = Vec::new();
+    let mut checkpoints = source.load_checkpoint_journal().unwrap();
     source
         .append_checkpoint_record_to(&mut checkpoints, checkpoint)
         .unwrap();

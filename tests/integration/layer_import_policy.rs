@@ -452,6 +452,29 @@ fn stream_adapters_do_not_depend_on_daemon_orchestration() {
     );
 }
 
+#[test]
+fn checkpoint_journal_owns_its_storage_boundary() {
+    let root = repo_root();
+    let journal =
+        std::fs::read_to_string(root.join("src/operations/git/repo_storage/checkpoint_journal.rs"))
+            .expect("checkpoint journal source should be readable");
+    assert!(
+        !journal.contains("crate::operations::git::repo_storage"),
+        "checkpoint_journal must not import from its parent repo_storage module"
+    );
+}
+
+#[test]
+fn checkpoint_domain_does_not_store_journal_provenance() {
+    let root = repo_root();
+    let working_log = std::fs::read_to_string(root.join("src/model/working_log.rs"))
+        .expect("working-log domain source should be readable");
+    assert!(
+        !working_log.contains("journal_record_version"),
+        "Checkpoint journal provenance belongs to the persistence boundary, not the domain model"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

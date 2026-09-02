@@ -378,9 +378,69 @@ fn test_ai_checkpoint_without_agent_id_is_rejected() {
     )
     .expect_err("AI checkpoints must carry an agent_id");
 
-    assert!(
-        error.to_string().contains("missing agent_id"),
-        "unexpected error: {error}"
+    assert!(matches!(error, git_ai::error::GitAiError::Persistence(_)));
+    assert_eq!(
+        error.to_string(),
+        "Generic error: AI checkpoint is missing agent_id"
+    );
+}
+
+#[test]
+fn test_checkpoint_without_captured_file_content_uses_structured_error() {
+    let (repo, lines_file, _) = setup_repo_with_base_commit();
+    let base_commit = repo
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    let checkpoint_request = CheckpointRequest {
+        trace_id: "missing-captured-content-regression".to_string(),
+        checkpoint_kind: CheckpointKind::AiAgent,
+        agent_id: Some(AgentId {
+            tool: "mock_ai".to_string(),
+            id: "missing-captured-content-regression".to_string(),
+            model: "test".to_string(),
+        }),
+        files: vec![CheckpointFile {
+            path: PathBuf::from(&lines_file),
+            content: None,
+            repo_work_dir: repo.path().to_path_buf(),
+            base_commit: BaseCommit::Sha(base_commit.clone()),
+        }],
+        path_role: PreparedPathRole::Edited,
+        stream_source: None,
+        metadata: HashMap::new(),
+        delivery_id: None,
+    };
+
+    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+    let resolved = ResolvedCheckpointExecution {
+        base_commit,
+        ts: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+        files: vec![lines_file.clone()],
+        dirty_files: HashMap::new(),
+    };
+
+    let error = execute_resolved_checkpoint_from_daemon(
+        &gitai_repo,
+        "mock-ai",
+        CheckpointKind::AiAgent,
+        checkpoint_request,
+        resolved,
+    )
+    .expect_err("checkpoint processing must not fall back to the live filesystem");
+
+    assert!(matches!(error, git_ai::error::GitAiError::Persistence(_)));
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Generic error: save_current_file_states: file '{}' not found in dirty_files snapshot (filesystem fallback is not allowed in checkpoint flow)",
+            lines_file
+        )
     );
 }
 

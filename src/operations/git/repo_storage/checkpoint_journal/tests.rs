@@ -342,7 +342,9 @@ fn signed_v1_record_with_short_version_field_fails_closed() {
 #[test]
 fn reader_accepts_legacy_v1_and_v2_records_in_one_journal() {
     let directory = tempfile::tempdir().unwrap();
-    let working_log = working_log(&directory.path().join("log"));
+    let log_directory = directory.path().join("log");
+    fs::create_dir_all(&log_directory).unwrap();
+    let location = JournalLocation::new(&log_directory, "base");
     let mut legacy = checkpoint_for_blob("legacy\n");
     legacy.author = "legacy".to_string();
     let mut v1 = checkpoint_for_blob("v1\n");
@@ -355,10 +357,11 @@ fn reader_accepts_legacy_v1_and_v2_records_in_one_journal() {
     bytes.push(b'\n');
     bytes.extend(wire_v2::encode(&v2).unwrap());
     bytes.push(b'\n');
-    fs::write(working_log.checkpoints_file(), bytes).unwrap();
+    fs::write(location.checkpoints_file(), bytes).unwrap();
 
-    let checkpoints = read(&working_log, u64::MAX).unwrap();
+    let checkpoints = read(&location, u64::MAX).unwrap();
 
+    assert!(checkpoints.contains_legacy_records());
     assert_eq!(
         checkpoints
             .iter()
@@ -366,17 +369,6 @@ fn reader_accepts_legacy_v1_and_v2_records_in_one_journal() {
             .collect::<Vec<_>>(),
         ["legacy", "v1", "v2"]
     );
-}
-
-fn working_log(directory: &Path) -> PersistedWorkingLog {
-    fs::create_dir_all(directory).unwrap();
-    PersistedWorkingLog::new(
-        directory.to_path_buf(),
-        "base",
-        directory.to_path_buf(),
-        directory.to_path_buf(),
-        None,
-    )
 }
 
 #[test]
@@ -488,30 +480,38 @@ fn durable_replace_publishes_the_complete_new_file() {
 }
 
 #[test]
-fn duplicate_replay_does_not_certify_unrelated_legacy_blob_references() {
+fn loaded_legacy_provenance_keeps_the_full_blob_fence() {
     let directory = tempfile::tempdir().unwrap();
-    let working_log = working_log(&directory.path().join("log"));
+    let log_directory = directory.path().join("log");
+    let blobs_directory = log_directory.join("blobs");
+    fs::create_dir_all(&blobs_directory).unwrap();
+    let location = JournalLocation::new(&log_directory, "base");
     let missing_legacy = checkpoint_for_blob("missing legacy blob\n");
     let durable_legacy = checkpoint_for_blob("durable legacy blob\n");
-    working_log
-        .persist_file_version("durable legacy blob\n")
-        .unwrap();
+    fs::write(
+        blobs_directory.join(&durable_legacy.entries[0].blob_sha),
+        b"durable legacy blob\n",
+    )
+    .unwrap();
     let mut legacy_bytes = serde_json::to_vec(&missing_legacy).unwrap();
     legacy_bytes.push(b'\n');
     legacy_bytes.extend(serde_json::to_vec(&durable_legacy).unwrap());
     legacy_bytes.push(b'\n');
-    fs::write(working_log.checkpoints_file(), legacy_bytes).unwrap();
-    let mut checkpoints = read(&working_log, u64::MAX).unwrap();
+    fs::write(location.checkpoints_file(), legacy_bytes).unwrap();
+    let mut checkpoints = read(&location, u64::MAX).unwrap();
 
-    ensure_durable(&working_log, &checkpoints[1]).unwrap();
+    ensure_durable(&location, &checkpoints[1]).unwrap();
     let next = checkpoint_for_blob("next checkpoint\n");
-    working_log
-        .persist_file_version("next checkpoint\n")
-        .unwrap();
+    fs::write(
+        blobs_directory.join(&next.entries[0].blob_sha),
+        b"next checkpoint\n",
+    )
+    .unwrap();
     checkpoints.push(next);
 
-    let error = append(&working_log, &checkpoints)
-        .expect_err("the next append must still fence every legacy blob");
+    assert!(checkpoints.contains_legacy_records());
+    let error = rewrite(&location, &checkpoints)
+        .expect_err("rewriting legacy records must still fence every referenced blob");
     assert!(
         matches!(error, GitAiError::IoError(ref error) if error.kind() == ErrorKind::NotFound),
         "unexpected error: {error}"

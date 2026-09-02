@@ -79,9 +79,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Checkpoint, CheckpointJournalError>
             "unsupported checkpoint record version {record_version}"
         )));
     }
-    let mut checkpoint: Checkpoint = serde_json::from_value(value)?;
-    checkpoint.mark_journal_record_version(record_version);
-    Ok(checkpoint)
+    Ok(serde_json::from_value(value)?)
 }
 
 pub(super) fn has_terminal_checksum(bytes: &[u8]) -> Result<bool, CheckpointJournalError> {

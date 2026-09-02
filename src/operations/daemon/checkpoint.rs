@@ -10,6 +10,7 @@ pub use crate::model::checkpoint_request::PreparedPathRole;
 use crate::model::imara_diff_utils::{
     LineChangeTag, compute_line_changes, content_eq_ignoring_line_endings,
 };
+use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::CheckpointKind;
 use crate::model::working_log::{Checkpoint, WorkingLogEntry};
 use crate::operations::git::repo_storage::{PersistedWorkingLog, persist_file_version_to_blob_dir};
@@ -35,6 +36,16 @@ pub struct FileLineStats {
 struct PreviousFileState {
     blob_sha: String,
     attributions: Vec<Attribution>,
+}
+
+fn checkpoint_error(kind: std::io::ErrorKind, message: String) -> GitAiError {
+    PersistenceError::Io {
+        operation: "Generic error",
+        path: String::new(),
+        kind,
+        message,
+    }
+    .into()
 }
 
 use crate::model::working_log::AgentId;
@@ -166,7 +177,8 @@ fn execute_resolved_checkpoint(
     checkpoint_start: Instant,
 ) -> Result<(usize, usize, usize), GitAiError> {
     if kind.is_ai() && checkpoint_request.agent_id.is_none() {
-        return Err(GitAiError::Generic(
+        return Err(checkpoint_error(
+            std::io::ErrorKind::InvalidData,
             "AI checkpoint is missing agent_id".to_string(),
         ));
     }
@@ -180,7 +192,7 @@ fn execute_resolved_checkpoint(
     }
 
     let read_checkpoints_start = Instant::now();
-    let mut checkpoints = working_log.read_all_checkpoints()?;
+    let mut checkpoints = working_log.load_checkpoint_journal()?;
     tracing::debug!(
         "[BENCHMARK] Reading {} checkpoints took {:?}",
         checkpoints.len(),
@@ -453,10 +465,13 @@ fn save_current_file_states(
                     None
                 }
                 .ok_or_else(|| {
-                    GitAiError::Generic(format!(
-                        "save_current_file_states: file '{}' not found in dirty_files snapshot (filesystem fallback is not allowed in checkpoint flow)",
-                        file_path
-                    ))
+                    checkpoint_error(
+                        std::io::ErrorKind::NotFound,
+                        format!(
+                            "save_current_file_states: file '{}' not found in dirty_files snapshot (filesystem fallback is not allowed in checkpoint flow)",
+                            file_path
+                        ),
+                    )
                 })?;
 
                 crate::tokio_runtime::spawn_blocking_result(move || {

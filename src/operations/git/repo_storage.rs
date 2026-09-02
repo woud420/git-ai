@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 mod checkpoint_journal;
 
+pub(crate) use checkpoint_journal::LoadedJournal;
+
 pub use crate::model::working_log::InitialAttributions;
 
 pub const MAX_CHECKPOINTS_JSONL_BYTES: u64 = 1024 * 1024 * 1024;
@@ -363,6 +365,10 @@ impl PersistedWorkingLog {
         self.dir.join("checkpoints.jsonl")
     }
 
+    fn checkpoint_journal_location(&self) -> checkpoint_journal::JournalLocation<'_> {
+        checkpoint_journal::JournalLocation::new(&self.dir, &self.base_commit)
+    }
+
     /* blob storage */
     pub fn get_file_version(&self, sha: &str) -> Result<String, GitAiError> {
         let blob_path = self.dir.join("blobs").join(sha);
@@ -468,7 +474,7 @@ impl PersistedWorkingLog {
 
         // Prune char-level attributions from older checkpoints for the same files
         // Only the most recent checkpoint per file needs char-level precision
-        self.prune_old_char_attributions(checkpoints);
+        checkpoint_journal::prune_old_char_attributions(checkpoints);
 
         self.write_all_checkpoints(checkpoints)
     }
@@ -478,11 +484,11 @@ impl PersistedWorkingLog {
     /// rewrite the entire journal.
     pub(crate) fn append_checkpoint_record_to(
         &self,
-        checkpoints: &mut Vec<Checkpoint>,
+        journal: &mut LoadedJournal,
         checkpoint: Checkpoint,
     ) -> Result<(), GitAiError> {
         self.append_checkpoint_record_with_compaction_interval(
-            checkpoints,
+            journal,
             checkpoint,
             checkpoint_journal::COMPACTION_INTERVAL,
         )
@@ -495,44 +501,58 @@ impl PersistedWorkingLog {
         checkpoint: Checkpoint,
         compaction_interval: usize,
     ) -> Result<(), GitAiError> {
-        self.append_checkpoint_record_with_compaction_interval(
-            checkpoints,
+        let contains_legacy_records = self
+            .load_checkpoint_journal_with_size_limit(Self::checkpoints_file_size_limit_bytes())?
+            .contains_legacy_records();
+        let mut journal =
+            LoadedJournal::from_checkpoints(std::mem::take(checkpoints), contains_legacy_records);
+        let result = self.append_checkpoint_record_with_compaction_interval(
+            &mut journal,
             checkpoint,
             compaction_interval,
-        )
+        );
+        *checkpoints = journal.into_checkpoints();
+        result
     }
 
     fn append_checkpoint_record_with_compaction_interval(
         &self,
-        checkpoints: &mut Vec<Checkpoint>,
-        mut checkpoint: Checkpoint,
+        journal: &mut LoadedJournal,
+        checkpoint: Checkpoint,
         compaction_interval: usize,
     ) -> Result<(), GitAiError> {
-        let contains_legacy_records = checkpoints
-            .iter()
-            .any(|checkpoint| !checkpoint.has_journal_record_version());
-        checkpoint.mark_journal_record_version(checkpoint_journal::JOURNAL_RECORD_VERSION);
-        checkpoints.push(checkpoint);
-        self.prune_old_char_attributions(checkpoints);
+        let contains_legacy_records = journal.contains_legacy_records();
+        journal.push(checkpoint);
+        checkpoint_journal::prune_old_char_attributions(journal.as_mut_slice());
 
         if contains_legacy_records
-            || (compaction_interval > 0 && checkpoints.len().is_multiple_of(compaction_interval))
+            || (compaction_interval > 0 && journal.len().is_multiple_of(compaction_interval))
         {
-            return self.write_all_checkpoints(checkpoints);
+            checkpoint_journal::rewrite(&self.checkpoint_journal_location(), journal)?;
+            journal.mark_rewritten();
+            return Ok(());
         }
 
-        checkpoint_journal::append(self, checkpoints)
+        let checkpoint = journal
+            .last()
+            .expect("checkpoint collection must contain the record being appended");
+        checkpoint_journal::append(&self.checkpoint_journal_location(), checkpoint)
     }
 
     pub(crate) fn ensure_checkpoint_record_durable(
         &self,
         checkpoint: &Checkpoint,
     ) -> Result<(), GitAiError> {
-        checkpoint_journal::ensure_durable(self, checkpoint)
+        checkpoint_journal::ensure_durable(&self.checkpoint_journal_location(), checkpoint)
     }
 
     pub fn read_all_checkpoints(&self) -> Result<Vec<Checkpoint>, GitAiError> {
-        self.read_all_checkpoints_with_size_limit(Self::checkpoints_file_size_limit_bytes())
+        self.load_checkpoint_journal_with_size_limit(Self::checkpoints_file_size_limit_bytes())
+            .map(LoadedJournal::into_checkpoints)
+    }
+
+    pub(crate) fn load_checkpoint_journal(&self) -> Result<LoadedJournal, GitAiError> {
+        self.load_checkpoint_journal_with_size_limit(Self::checkpoints_file_size_limit_bytes())
     }
 
     #[cfg(feature = "test-support")]
@@ -552,7 +572,15 @@ impl PersistedWorkingLog {
         &self,
         max_bytes: u64,
     ) -> Result<Vec<Checkpoint>, GitAiError> {
-        checkpoint_journal::read(self, max_bytes)
+        self.load_checkpoint_journal_with_size_limit(max_bytes)
+            .map(LoadedJournal::into_checkpoints)
+    }
+
+    fn load_checkpoint_journal_with_size_limit(
+        &self,
+        max_bytes: u64,
+    ) -> Result<LoadedJournal, GitAiError> {
+        checkpoint_journal::read(&self.checkpoint_journal_location(), max_bytes)
     }
 
     fn checkpoints_file_size_limit_bytes() -> u64 {
@@ -567,75 +595,6 @@ impl PersistedWorkingLog {
         MAX_CHECKPOINTS_JSONL_BYTES
     }
 
-    fn truncate_oversized_checkpoints_file(&self, max_bytes: u64) -> Result<bool, GitAiError> {
-        let checkpoints_file = self.checkpoints_file();
-        let metadata = match fs::metadata(&checkpoints_file) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error.into()),
-        };
-        let size_bytes = metadata.len();
-        if size_bytes <= max_bytes {
-            return Ok(false);
-        }
-
-        let message = format!(
-            "checkpoints.jsonl exceeded maximum size: {} bytes > {} bytes; resetting {}",
-            size_bytes,
-            max_bytes,
-            checkpoints_file.display()
-        );
-        tracing::error!(
-            base_commit = %self.base_commit,
-            path = %checkpoints_file.display(),
-            size_bytes,
-            max_bytes,
-            "checkpoints.jsonl exceeded maximum size; atomically publishing empty file"
-        );
-        let error: GitAiError = persistence_error(std::io::ErrorKind::InvalidData, message).into();
-        crate::observability::log_error(
-            &error,
-            Some(serde_json::json!({
-                "event": "checkpoints_jsonl_oversized_reset",
-                "base_commit": self.base_commit,
-                "path": checkpoints_file.to_string_lossy(),
-                "size_bytes": size_bytes,
-                "max_bytes": max_bytes,
-            })),
-        );
-
-        checkpoint_journal::reset_file_durably(&checkpoints_file)?;
-        Ok(true)
-    }
-
-    /// Remove char-level attributions from all but the most recent checkpoint per file.
-    /// This reduces storage size while preserving precision for the entries that matter.
-    /// Only the most recent checkpoint entry for each file is used when computing new entries.
-    fn prune_old_char_attributions(&self, checkpoints: &mut [Checkpoint]) {
-        // Track which checkpoint index has the most recent entry for each file
-        // Iterate from newest to oldest
-        let mut newest_for_file: HashMap<String, usize> = HashMap::new();
-
-        for (checkpoint_idx, checkpoint) in checkpoints.iter().enumerate().rev() {
-            for entry in &checkpoint.entries {
-                newest_for_file
-                    .entry(entry.file.clone())
-                    .or_insert(checkpoint_idx);
-            }
-        }
-
-        // Clear attributions from entries that aren't the most recent for their file
-        for (checkpoint_idx, checkpoint) in checkpoints.iter_mut().enumerate() {
-            for entry in &mut checkpoint.entries {
-                if let Some(&newest_idx) = newest_for_file.get(&entry.file)
-                    && checkpoint_idx != newest_idx
-                {
-                    entry.attributions.clear();
-                }
-            }
-        }
-    }
-
     /// Write all checkpoints to the JSONL file, replacing any existing content
     /// Note: Unlike append_checkpoint(), this preserves transcripts because it's used
     /// by post-commit after transcripts have been refetched and need to be preserved
@@ -647,7 +606,7 @@ impl PersistedWorkingLog {
     /// list, so a torn write could otherwise both lose the recorded id and
     /// let the replay apply the delivery twice.
     pub fn write_all_checkpoints(&self, checkpoints: &[Checkpoint]) -> Result<(), GitAiError> {
-        checkpoint_journal::rewrite(self, checkpoints)
+        checkpoint_journal::rewrite(&self.checkpoint_journal_location(), checkpoints)
     }
 
     pub fn mutate_all_checkpoints<F>(&self, mutator: F) -> Result<Vec<Checkpoint>, GitAiError>

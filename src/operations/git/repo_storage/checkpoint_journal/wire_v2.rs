@@ -219,7 +219,6 @@ fn decode_terminal(
     checkpoint.known_human_metadata = record.known_human_metadata.map(KnownHumanMetadata::from);
     checkpoint.trace_id = record.trace_id;
     checkpoint.delivery_id = record.delivery_id;
-    checkpoint.mark_journal_record_version(VERSION);
     Ok(checkpoint)
 }
 

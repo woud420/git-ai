@@ -1,36 +1,102 @@
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_short_hash;
+use crate::model::repository::error::PersistenceError;
 use crate::model::repository::lock_file::LockFile;
 use crate::model::working_log::{CHECKPOINT_API_VERSION, Checkpoint};
-use crate::operations::git::repo_storage::PersistedWorkingLog;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 mod wire_v1;
 mod wire_v2;
 
-pub(crate) const JOURNAL_RECORD_VERSION: u64 = wire_v2::VERSION;
 /// Bounds stale records while keeping full rewrites off ordinary checkpoints.
 pub(super) const COMPACTION_INTERVAL: usize = 256;
-const VERIFIED_JOURNAL_CAPACITY: usize = 1024;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct FileStamp {
-    len: u64,
-    modified: SystemTime,
+pub(super) struct JournalLocation<'a> {
+    directory: &'a Path,
+    base_commit: &'a str,
 }
 
-// This stamp binds legacy blob validation to exact journal bytes. Checksums are
-// always verified; restart or external mutation forces the legacy fence.
-static VERIFIED_JOURNALS: OnceLock<Mutex<HashMap<PathBuf, FileStamp>>> = OnceLock::new();
+impl<'a> JournalLocation<'a> {
+    pub(super) fn new(directory: &'a Path, base_commit: &'a str) -> Self {
+        Self {
+            directory,
+            base_commit,
+        }
+    }
+
+    fn checkpoints_file(&self) -> PathBuf {
+        self.directory.join("checkpoints.jsonl")
+    }
+
+    fn blobs_directory(&self) -> PathBuf {
+        self.directory.join("blobs")
+    }
+
+    fn lock_file(&self) -> PathBuf {
+        self.directory.join(".checkpoint-journal.lock")
+    }
+}
+
+pub(crate) struct LoadedJournal {
+    checkpoints: Vec<Checkpoint>,
+    contains_legacy_records: bool,
+}
+
+impl LoadedJournal {
+    fn empty() -> Self {
+        Self {
+            checkpoints: Vec::new(),
+            contains_legacy_records: false,
+        }
+    }
+
+    pub(super) fn from_checkpoints(
+        checkpoints: Vec<Checkpoint>,
+        contains_legacy_records: bool,
+    ) -> Self {
+        Self {
+            checkpoints,
+            contains_legacy_records,
+        }
+    }
+
+    pub(super) fn as_mut_slice(&mut self) -> &mut [Checkpoint] {
+        &mut self.checkpoints
+    }
+
+    pub(super) fn contains_legacy_records(&self) -> bool {
+        self.contains_legacy_records
+    }
+
+    pub(super) fn push(&mut self, checkpoint: Checkpoint) {
+        self.checkpoints.push(checkpoint);
+    }
+
+    pub(super) fn mark_rewritten(&mut self) {
+        self.contains_legacy_records = false;
+    }
+
+    pub(super) fn into_checkpoints(self) -> Vec<Checkpoint> {
+        self.checkpoints
+    }
+}
+
+impl Deref for LoadedJournal {
+    type Target = [Checkpoint];
+
+    fn deref(&self) -> &Self::Target {
+        &self.checkpoints
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum CheckpointJournalError {
@@ -122,25 +188,13 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 pub(super) fn append(
-    working_log: &PersistedWorkingLog,
-    checkpoints: &[Checkpoint],
+    location: &JournalLocation<'_>,
+    checkpoint: &Checkpoint,
 ) -> Result<(), GitAiError> {
-    let checkpoint = checkpoints
-        .last()
-        .expect("checkpoint collection must contain the record being appended");
-    let _lock = acquire_lock(working_log)?;
-    let path = working_log.checkpoints_file();
+    let _lock = acquire_lock(location)?;
+    let path = location.checkpoints_file();
     let created = !path.exists();
-    if !is_verified(&path) {
-        sync_checkpoint_blobs(
-            working_log,
-            checkpoints
-                .iter()
-                .filter(|checkpoint| !checkpoint.has_journal_record_version()),
-            true,
-        )?;
-    }
-    sync_checkpoint_blobs(working_log, std::iter::once(checkpoint), false)?;
+    sync_checkpoint_blobs(location, std::iter::once(checkpoint), false)?;
     let mut record = wire_v2::encode(checkpoint)?;
     record.push(b'\n');
 
@@ -150,20 +204,19 @@ pub(super) fn append(
     if created {
         sync_parent_directory(&path)?;
     }
-    mark_verified(&path);
     Ok(())
 }
 
 pub(super) fn rewrite(
-    working_log: &PersistedWorkingLog,
+    location: &JournalLocation<'_>,
     checkpoints: &[Checkpoint],
 ) -> Result<(), GitAiError> {
-    let _lock = acquire_lock(working_log)?;
-    let path = working_log.checkpoints_file();
+    let _lock = acquire_lock(location)?;
+    let path = location.checkpoints_file();
     let temp_path = path.with_extension("jsonl.tmp");
     let mut output = BufWriter::new(fs::File::create(&temp_path)?);
 
-    sync_checkpoint_blobs(working_log, checkpoints.iter(), true)?;
+    sync_checkpoint_blobs(location, checkpoints.iter(), true)?;
     for checkpoint in checkpoints {
         output.write_all(&wire_v2::encode(checkpoint)?)?;
         output.write_all(b"\n")?;
@@ -175,35 +228,33 @@ pub(super) fn rewrite(
         .map_err(|error| error.into_error())?
         .sync_all()?;
     replace_file_durably(&temp_path, &path)?;
-    mark_verified(&path);
     Ok(())
 }
 
 pub(super) fn ensure_durable(
-    working_log: &PersistedWorkingLog,
+    location: &JournalLocation<'_>,
     checkpoint: &Checkpoint,
 ) -> Result<(), GitAiError> {
-    let path = working_log.checkpoints_file();
-    let _lock = acquire_lock(working_log)?;
-    sync_checkpoint_blobs(working_log, std::iter::once(checkpoint), true)?;
+    let path = location.checkpoints_file();
+    let _lock = acquire_lock(location)?;
+    sync_checkpoint_blobs(location, std::iter::once(checkpoint), true)?;
     OpenOptions::new().write(true).open(&path)?.sync_all()?;
     sync_parent_directory(&path)?;
     Ok(())
 }
 
 pub(super) fn read(
-    working_log: &PersistedWorkingLog,
+    location: &JournalLocation<'_>,
     max_bytes: u64,
-) -> Result<Vec<Checkpoint>, GitAiError> {
-    let path = working_log.checkpoints_file();
+) -> Result<LoadedJournal, GitAiError> {
+    let path = location.checkpoints_file();
     if !path.exists() {
-        return Ok(Vec::new());
+        return Ok(LoadedJournal::empty());
     }
 
-    let _lock = acquire_lock(working_log)?;
-    if working_log.truncate_oversized_checkpoints_file(max_bytes)? {
-        forget_verified(&path);
-        return Ok(Vec::new());
+    let _lock = acquire_lock(location)?;
+    if reset_if_oversized(location, max_bytes)? {
+        return Ok(LoadedJournal::empty());
     }
 
     let file = fs::File::open(&path)?;
@@ -212,6 +263,7 @@ pub(super) fn read(
     let mut offset = 0_u64;
     let mut truncate_to = None;
     let mut terminate_legacy_tail = false;
+    let mut contains_legacy_records = false;
 
     loop {
         let record_start = offset;
@@ -240,8 +292,8 @@ pub(super) fn read(
             break;
         }
 
-        let checkpoint = match decode_record(&bytes) {
-            Ok((checkpoint, _)) => checkpoint,
+        let (checkpoint, is_versioned) = match decode_record(&bytes) {
+            Ok(decoded) => decoded,
             Err(CheckpointJournalError::Json(_)) if !terminated => {
                 truncate_to = Some(record_start);
                 break;
@@ -258,6 +310,7 @@ pub(super) fn read(
             );
             continue;
         }
+        contains_legacy_records |= !is_versioned;
         checkpoints.push(checkpoint);
     }
 
@@ -266,72 +319,77 @@ pub(super) fn read(
         let repair = OpenOptions::new().write(true).open(&path)?;
         repair.set_len(length)?;
         repair.sync_all()?;
-        forget_verified(&path);
     } else if terminate_legacy_tail {
         let mut repair = OpenOptions::new().append(true).open(&path)?;
         repair.write_all(b"\n")?;
         repair.sync_all()?;
-        forget_verified(&path);
     }
 
     migrate_prompt_hashes(&mut checkpoints);
-    working_log.prune_old_char_attributions(&mut checkpoints);
-    Ok(checkpoints)
+    prune_old_char_attributions(&mut checkpoints);
+    Ok(LoadedJournal::from_checkpoints(
+        checkpoints,
+        contains_legacy_records,
+    ))
 }
 
 fn is_versioned_record(bytes: &[u8]) -> bool {
     wire_v1::is_record(bytes) || wire_v2::is_record(bytes)
 }
 
-fn verified_journals() -> &'static Mutex<HashMap<PathBuf, FileStamp>> {
-    VERIFIED_JOURNALS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn file_stamp(path: &Path) -> Option<FileStamp> {
-    let metadata = fs::metadata(path).ok()?;
-    Some(FileStamp {
-        len: metadata.len(),
-        modified: metadata.modified().ok()?,
-    })
-}
-
-fn is_verified(path: &Path) -> bool {
-    let Some(stamp) = file_stamp(path) else {
-        return false;
+fn reset_if_oversized(location: &JournalLocation<'_>, max_bytes: u64) -> Result<bool, GitAiError> {
+    let checkpoints_file = location.checkpoints_file();
+    let metadata = match fs::metadata(&checkpoints_file) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
     };
-    verified_journals()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(path)
-        .is_some_and(|verified| *verified == stamp)
-}
-
-fn mark_verified(path: &Path) {
-    let Some(stamp) = file_stamp(path) else {
-        return;
-    };
-    let mut journals = verified_journals()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if journals.len() >= VERIFIED_JOURNAL_CAPACITY && !journals.contains_key(path) {
-        journals.clear();
+    let size_bytes = metadata.len();
+    if size_bytes <= max_bytes {
+        return Ok(false);
     }
-    journals.insert(path.to_path_buf(), stamp);
-}
 
-fn forget_verified(path: &Path) {
-    verified_journals()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(path);
+    let message = format!(
+        "checkpoints.jsonl exceeded maximum size: {} bytes > {} bytes; resetting {}",
+        size_bytes,
+        max_bytes,
+        checkpoints_file.display()
+    );
+    tracing::error!(
+        base_commit = %location.base_commit,
+        path = %checkpoints_file.display(),
+        size_bytes,
+        max_bytes,
+        "checkpoints.jsonl exceeded maximum size; atomically publishing empty file"
+    );
+    let error: GitAiError = PersistenceError::Io {
+        operation: "Generic error",
+        path: String::new(),
+        kind: std::io::ErrorKind::InvalidData,
+        message,
+    }
+    .into();
+    crate::observability::log_error(
+        &error,
+        Some(serde_json::json!({
+            "event": "checkpoints_jsonl_oversized_reset",
+            "base_commit": location.base_commit,
+            "path": checkpoints_file.to_string_lossy(),
+            "size_bytes": size_bytes,
+            "max_bytes": max_bytes,
+        })),
+    );
+
+    reset_file_durably(&checkpoints_file)?;
+    Ok(true)
 }
 
 fn sync_checkpoint_blobs<'a>(
-    working_log: &PersistedWorkingLog,
+    location: &JournalLocation<'_>,
     checkpoints: impl IntoIterator<Item = &'a Checkpoint>,
     verify_contents: bool,
 ) -> Result<(), GitAiError> {
-    let blobs_dir = working_log.dir.join("blobs");
+    let blobs_dir = location.blobs_directory();
     let mut synced = HashSet::new();
     for checkpoint in checkpoints {
         for entry in &checkpoint.entries {
@@ -396,8 +454,29 @@ fn migrate_prompt_hashes(checkpoints: &mut [Checkpoint]) {
     }
 }
 
-fn acquire_lock(working_log: &PersistedWorkingLog) -> Result<LockFile, GitAiError> {
-    let path = working_log.dir.join(".checkpoint-journal.lock");
+pub(super) fn prune_old_char_attributions(checkpoints: &mut [Checkpoint]) {
+    let mut newest_for_file: HashMap<String, usize> = HashMap::new();
+    for (checkpoint_idx, checkpoint) in checkpoints.iter().enumerate().rev() {
+        for entry in &checkpoint.entries {
+            newest_for_file
+                .entry(entry.file.clone())
+                .or_insert(checkpoint_idx);
+        }
+    }
+
+    for (checkpoint_idx, checkpoint) in checkpoints.iter_mut().enumerate() {
+        for entry in &mut checkpoint.entries {
+            if let Some(&newest_idx) = newest_for_file.get(&entry.file)
+                && checkpoint_idx != newest_idx
+            {
+                entry.attributions.clear();
+            }
+        }
+    }
+}
+
+fn acquire_lock(location: &JournalLocation<'_>) -> Result<LockFile, GitAiError> {
+    let path = location.lock_file();
     let started = Instant::now();
     loop {
         if let Some(lock) = LockFile::try_acquire(&path) {
@@ -427,7 +506,7 @@ fn sync_parent_directory(path: &Path) -> Result<(), GitAiError> {
     Ok(())
 }
 
-pub(super) fn reset_file_durably(path: &Path) -> Result<(), GitAiError> {
+fn reset_file_durably(path: &Path) -> Result<(), GitAiError> {
     let temp_path = path.with_extension("jsonl.reset.tmp");
     fs::File::create(&temp_path)?.sync_all()?;
     replace_file_durably(&temp_path, path)

@@ -23,7 +23,7 @@ pub(super) fn publish_encoded(
     bytes: &[u8],
     limits: OutboxLimits,
 ) -> Result<PublishedRecord, CheckpointOutboxError> {
-    let secure_root = SecureRoot::open(root)?;
+    let mut secure_root = SecureRoot::open(root)?;
     secure_root.try_lock()?;
     let ready_name = c_filename(ready_name)?;
     collision::reject_existing_delivery(root, &secure_root, ready_name.as_c_str(), bytes)?;
@@ -85,6 +85,7 @@ pub(super) fn write_private_marker(
 pub(super) struct SecureRoot {
     directory: File,
     identity: FileIdentity,
+    locked: bool,
 }
 
 impl SecureRoot {
@@ -96,12 +97,14 @@ impl SecureRoot {
         Ok(Self {
             identity: FileIdentity::of(&metadata),
             directory,
+            locked: false,
         })
     }
 
-    pub(super) fn try_lock(&self) -> Result<(), CheckpointOutboxError> {
+    pub(super) fn try_lock(&mut self) -> Result<(), CheckpointOutboxError> {
         let result = unsafe { libc::flock(self.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if result == 0 {
+            self.locked = true;
             Ok(())
         } else {
             let error = io::Error::last_os_error();
@@ -125,6 +128,16 @@ impl SecureRoot {
 
     pub(super) fn as_raw_fd(&self) -> RawFd {
         self.directory.as_raw_fd()
+    }
+}
+
+impl Drop for SecureRoot {
+    fn drop(&mut self) {
+        if self.locked {
+            unsafe {
+                libc::flock(self.as_raw_fd(), libc::LOCK_UN);
+            }
+        }
     }
 }
 
@@ -538,5 +551,26 @@ fn syscall_result(result: libc::c_int) -> io::Result<()> {
         Ok(())
     } else {
         Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drop_unlocks_before_next_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("outbox");
+        let mut secure_root = SecureRoot::open(&root).unwrap();
+        secure_root.try_lock().unwrap();
+        let duplicate = secure_root.directory().try_clone().unwrap();
+
+        drop(secure_root);
+
+        let published =
+            publish_encoded(&root, "next.ready", b"next", OutboxLimits::default()).unwrap();
+        assert_eq!(published.path, root.join("next.ready"));
+        drop(duplicate);
     }
 }

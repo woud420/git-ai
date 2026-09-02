@@ -33,7 +33,7 @@ pub fn scan_ready_records(root: &Path, limit: usize) -> Result<ReadyScan, Checkp
     if !root.exists() {
         return Ok(ReadyScan::default());
     }
-    let secure_root = SecureRoot::open(root)?;
+    let mut secure_root = SecureRoot::open(root)?;
     secure_root.try_lock()?;
 
     let mut scan = ReadyScan::default();
@@ -87,7 +87,7 @@ pub fn read_ready_record(
 /// delivery id and lands back here.
 pub fn remove_ready_record(root: &Path, name: &str) -> Result<(), CheckpointOutboxError> {
     require_record_name(name)?;
-    let secure_root = SecureRoot::open(root)?;
+    let mut secure_root = SecureRoot::open(root)?;
     secure_root.try_lock()?;
     unlink_at(&secure_root, name)?;
     secure_root.sync_all()
@@ -102,7 +102,7 @@ pub fn quarantine_ready_record(root: &Path, name: &str) -> Result<(), Checkpoint
         name.trim_end_matches(READY_SUFFIX),
         QUARANTINE_SUFFIX
     );
-    let secure_root = SecureRoot::open(root)?;
+    let mut secure_root = SecureRoot::open(root)?;
     secure_root.try_lock()?;
     rename_replace(
         secure_root.as_raw_fd(),
@@ -123,7 +123,7 @@ pub fn prune_quarantined_records(
     if !root.exists() {
         return Ok(0);
     }
-    let secure_root = SecureRoot::open(root)?;
+    let mut secure_root = SecureRoot::open(root)?;
     secure_root.try_lock()?;
 
     let mut stale = Vec::new();

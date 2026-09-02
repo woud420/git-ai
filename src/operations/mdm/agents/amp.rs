@@ -1,4 +1,5 @@
 use crate::error::GitAiError;
+use crate::operations::mdm::editor_cli::binary_exists;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::paths::home_dir;
 use crate::operations::mdm::plugin_drop::{self, FileDropSpec};
@@ -65,7 +66,7 @@ impl HookInstaller for AmpInstaller {
     }
 
     fn check_hooks(&self, params: &HookInstallerParams) -> Result<HookCheckResult, GitAiError> {
-        plugin_drop::file_drop_check_hooks(&AMP_SPEC, params)
+        plugin_drop::file_drop_check_hooks(&AMP_SPEC, params, binary_exists)
     }
 
     fn install_hooks(
@@ -88,7 +89,7 @@ impl HookInstaller for AmpInstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operations::mdm::test_env::{with_empty_path, with_temp_home};
+    use crate::operations::mdm::test_env::with_temp_home;
     use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
@@ -222,15 +223,12 @@ mod tests {
     #[serial]
     fn test_amp_no_binary_no_config_not_detected() {
         with_temp_home(|_home| {
-            with_empty_path(|| {
-                let installer = AmpInstaller;
-                let params = HookInstallerParams {
-                    binary_path: create_test_binary_path(),
-                };
-                let result = installer.check_hooks(&params).unwrap();
-                assert!(!result.tool_installed);
-                assert!(!result.hooks_installed);
-            });
+            let params = HookInstallerParams {
+                binary_path: create_test_binary_path(),
+            };
+            let result = plugin_drop::file_drop_check_hooks(&AMP_SPEC, &params, |_| false).unwrap();
+            assert!(!result.tool_installed);
+            assert!(!result.hooks_installed);
         });
     }
 

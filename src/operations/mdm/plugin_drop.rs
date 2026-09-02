@@ -9,7 +9,6 @@
 //! `agents/opencode.rs` for the legacy-path migration it layers on top).
 
 use crate::error::GitAiError;
-use crate::operations::mdm::editor_cli::binary_exists;
 use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstallerParams};
 use std::fs;
@@ -30,7 +29,7 @@ pub struct FileDropSpec {
     pub global_config_dir: fn() -> PathBuf,
     /// Repo-local config directory (relative to cwd), e.g. `.amp`.
     pub local_config_dir: &'static str,
-    /// Binary names probed via `binary_exists` for tool detection.
+    /// Binary names probed for tool detection.
     pub detect_binary_names: &'static [&'static str],
     /// `HookInstaller::process_names`.
     pub process_names: &'static [&'static str],
@@ -48,11 +47,12 @@ pub fn generate_content(spec: &FileDropSpec, binary_path: &Path) -> String {
 pub fn file_drop_check_hooks(
     spec: &FileDropSpec,
     params: &HookInstallerParams,
+    mut binary_is_available: impl FnMut(&str) -> bool,
 ) -> Result<HookCheckResult, GitAiError> {
     let has_binary = spec
         .detect_binary_names
         .iter()
-        .any(|name| binary_exists(name));
+        .any(|name| binary_is_available(name));
     let has_global_config = (spec.global_config_dir)().exists();
     let has_local_config = Path::new(spec.local_config_dir).exists();
 
@@ -130,4 +130,41 @@ pub fn file_drop_uninstall(
     }
 
     Ok(Some(diff_output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn missing_path() -> PathBuf {
+        std::env::temp_dir().join(format!("git-ai-plugin-drop-missing-{}", std::process::id()))
+    }
+
+    #[test]
+    fn supplied_binary_probe_controls_detection_without_path_fixture() {
+        let spec = FileDropSpec {
+            name: "test",
+            id: "test",
+            template: "",
+            dest_path: missing_path,
+            global_config_dir: missing_path,
+            local_config_dir: ".git-ai-plugin-drop-missing",
+            detect_binary_names: &["first", "second"],
+            process_names: &[],
+        };
+        let params = HookInstallerParams {
+            binary_path: PathBuf::from("git-ai"),
+        };
+        for available in [None, Some("second")] {
+            let mut probes = Vec::new();
+            let result = file_drop_check_hooks(&spec, &params, |name| {
+                probes.push(name.to_owned());
+                Some(name) == available
+            })
+            .unwrap();
+            assert_eq!(result.tool_installed, available.is_some());
+            assert!(!result.hooks_installed);
+            assert_eq!(probes, ["first", "second"]);
+        }
+    }
 }

@@ -508,11 +508,16 @@ impl PersistedWorkingLog {
         mut checkpoint: Checkpoint,
         compaction_interval: usize,
     ) -> Result<(), GitAiError> {
+        let contains_legacy_records = checkpoints
+            .iter()
+            .any(|checkpoint| !checkpoint.has_journal_record_version());
         checkpoint.mark_journal_record_version(checkpoint_journal::JOURNAL_RECORD_VERSION);
         checkpoints.push(checkpoint);
         self.prune_old_char_attributions(checkpoints);
 
-        if compaction_interval > 0 && checkpoints.len().is_multiple_of(compaction_interval) {
+        if contains_legacy_records
+            || (compaction_interval > 0 && checkpoints.len().is_multiple_of(compaction_interval))
+        {
             return self.write_all_checkpoints(checkpoints);
         }
 

@@ -31,8 +31,14 @@ in index records.
 It creates separate homes, repositories, databases, and daemons under the
 platform temporary directory. Unix socket names use a dedicated short `/tmp`
 root to stay below platform pathname limits. Each fixture pins the same validated
-real Git binary (never the git-ai shim), normalized config, and constant-size
-file edits. A second dirty tracked file must remain absent from every checkpoint,
+real Git binary (never the git-ai shim), normalized config, deterministic origin,
+and constant-size file edits. The config uses the legacy `allow_repositories`
+spelling because both the pinned upstream and the fork recognize that key, then
+reads the effective allowlist and Git path back through each binary. Before
+measurement, a disposable repository with a different origin must produce no
+checkpoint storage through a `sync.family` fence. Its daemon is stopped and a
+fresh daemon is started so the denial control does not contaminate latency or
+resource measurements. A second dirty tracked file must remain absent from every checkpoint,
 so the oracle also verifies scoped behavior. After warmups, measured pairs alternate candidate-first and
 baseline-first. Output includes p50/p95, the median paired difference, a
 fixed-seed paired-bootstrap ratio and 95% confidence interval, binary/source/
@@ -108,10 +114,17 @@ exist with exact content. It does not infer crash durability from latency or
 from live materialization; that claim requires separate storage and recovery
 tests for the exact snapshot under test.
 
+The fresh-run materialization oracle accepts unversioned legacy records,
+terminal-checksummed v1 records as emitted by the v1 writer, and compact v2
+records. Rust's compatibility reader also accepts canonical-checksummed v1
+records whose checksum is not terminal; that historical recovery form is
+deliberately outside this benchmark oracle because a fresh measured run cannot
+emit it. The Rust storage recovery tests remain authoritative for that path.
+
 Run the deterministic contract tests with:
 
 ```bash
 python3 -m unittest discover \
   -s scripts/benchmarks/checkpoint \
-  -p 'test_benchmark_scoped_checkpoint_vs_ref.py'
+  -p 'test*.py'
 ```

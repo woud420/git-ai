@@ -3,7 +3,6 @@ use crate::model::authorship_log_serialization::generate_short_hash;
 use crate::model::repository::lock_file::LockFile;
 use crate::model::working_log::{CHECKPOINT_API_VERSION, Checkpoint};
 use crate::operations::git::repo_storage::PersistedWorkingLog;
-use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -15,10 +14,10 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-pub(crate) const JOURNAL_RECORD_VERSION: u64 = 1;
-pub(crate) const RECORD_VERSION_FIELD: &str = "_git_ai_record_version";
-pub(crate) const RECORD_CHECKSUM_FIELD: &str = "_git_ai_record_checksum";
-const RECORD_CHECKSUM_MARKER: &[u8] = b",\"_git_ai_record_checksum\":\"";
+mod wire_v1;
+mod wire_v2;
+
+pub(crate) const JOURNAL_RECORD_VERSION: u64 = wire_v2::VERSION;
 /// Bounds stale records while keeping full rewrites off ordinary checkpoints.
 pub(super) const COMPACTION_INTERVAL: usize = 256;
 const VERIFIED_JOURNAL_CAPACITY: usize = 1024;
@@ -77,147 +76,43 @@ impl From<CheckpointJournalError> for GitAiError {
     }
 }
 
-#[derive(Serialize)]
-struct UnsignedRecord<'a> {
-    #[serde(flatten)]
-    checkpoint: &'a Checkpoint,
-    #[serde(rename = "_git_ai_record_version")]
-    record_version: u64,
-}
-
-pub(crate) fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, GitAiError> {
-    let unsigned = UnsignedRecord {
-        checkpoint,
-        record_version: JOURNAL_RECORD_VERSION,
-    };
-    let unsigned = serde_json_canonicalizer::to_vec(&unsigned)?;
-    sign_record(unsigned).map_err(Into::into)
-}
-
 #[cfg(test)]
 pub(crate) fn decode(bytes: &[u8]) -> Result<Checkpoint, CheckpointJournalError> {
     decode_record(bytes).map(|(checkpoint, _)| checkpoint)
 }
 
 fn decode_record(bytes: &[u8]) -> Result<(Checkpoint, bool), CheckpointJournalError> {
-    if let Some((marker_start, supplied_checksum)) = terminal_checksum(bytes)? {
-        if raw_record_checksum(bytes, marker_start) != supplied_checksum {
-            return Err(CheckpointJournalError::Integrity(
-                "checkpoint record checksum mismatch".to_string(),
-            ));
-        }
-        return decode_versioned_value(serde_json::from_slice(bytes)?, Some(supplied_checksum))
-            .map(|checkpoint| (checkpoint, true));
+    if let Some(checkpoint) = wire_v2::decode_if_terminal(bytes)? {
+        return Ok((checkpoint, true));
     }
 
     let value: Value = serde_json::from_slice(bytes)?;
-    let object = value.as_object().ok_or_else(|| {
-        CheckpointJournalError::Integrity("checkpoint record is not a JSON object".to_string())
-    })?;
-
-    if object.contains_key(RECORD_VERSION_FIELD) {
-        return decode_versioned_value(value, None).map(|checkpoint| (checkpoint, true));
+    if !value.is_object() {
+        return Err(CheckpointJournalError::Integrity(
+            "checkpoint record is not a JSON object".to_string(),
+        ));
     }
-    if object.contains_key(RECORD_CHECKSUM_FIELD) {
+
+    if wire_v2::claims_version(&value) {
+        return wire_v2::decode(bytes).map(|checkpoint| (checkpoint, true));
+    }
+    if wire_v2::claims_checksum(&value) {
+        return Err(CheckpointJournalError::Integrity(
+            "compact journal checksum is missing a record version".to_string(),
+        ));
+    }
+    if wire_v1::has_terminal_checksum(bytes)? {
+        return wire_v1::decode(bytes).map(|checkpoint| (checkpoint, true));
+    }
+    if wire_v1::claims_version(&value) {
+        return wire_v1::decode(bytes).map(|checkpoint| (checkpoint, true));
+    }
+    if wire_v1::claims_checksum(&value) {
         return Err(CheckpointJournalError::Integrity(
             "journal metadata is missing a record version".to_string(),
         ));
     }
     Ok((serde_json::from_value(value)?, false))
-}
-
-fn decode_versioned_value(
-    mut value: Value,
-    raw_checksum: Option<&str>,
-) -> Result<Checkpoint, CheckpointJournalError> {
-    let object = value.as_object_mut().ok_or_else(|| {
-        CheckpointJournalError::Integrity("checkpoint record is not a JSON object".to_string())
-    })?;
-    let supplied_checksum = object
-        .remove(RECORD_CHECKSUM_FIELD)
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .ok_or_else(|| {
-            CheckpointJournalError::Integrity(
-                "checkpoint record checksum is missing or invalid".to_string(),
-            )
-        })?;
-    let expected_checksum = match raw_checksum {
-        Some(checksum) => checksum.to_string(),
-        None => checksum_value(&value)?,
-    };
-    if supplied_checksum != expected_checksum {
-        return Err(CheckpointJournalError::Integrity(
-            "checkpoint record checksum mismatch".to_string(),
-        ));
-    }
-
-    let object = value.as_object_mut().expect("object shape checked above");
-    let record_version = object
-        .remove(RECORD_VERSION_FIELD)
-        .and_then(|value| value.as_u64())
-        .ok_or_else(|| {
-            CheckpointJournalError::Integrity(
-                "checkpoint record version is missing or invalid".to_string(),
-            )
-        })?;
-    if record_version != JOURNAL_RECORD_VERSION {
-        return Err(CheckpointJournalError::Integrity(format!(
-            "unsupported checkpoint record version {record_version}"
-        )));
-    }
-    let mut checkpoint: Checkpoint = serde_json::from_value(value)?;
-    checkpoint.mark_journal_record_version(record_version);
-    Ok(checkpoint)
-}
-
-fn checksum_value(value: &Value) -> Result<String, serde_json::Error> {
-    let canonical = serde_json_canonicalizer::to_vec(value)?;
-    Ok(sha256_hex(&canonical))
-}
-
-fn sign_record(mut unsigned: Vec<u8>) -> Result<Vec<u8>, CheckpointJournalError> {
-    let checksum = sha256_hex(&unsigned);
-    if unsigned.pop() != Some(b'}') {
-        return Err(CheckpointJournalError::Integrity(
-            "checkpoint record is not a JSON object".to_string(),
-        ));
-    }
-    unsigned.extend_from_slice(RECORD_CHECKSUM_MARKER);
-    unsigned.extend_from_slice(checksum.as_bytes());
-    unsigned.extend_from_slice(b"\"}");
-    Ok(unsigned)
-}
-
-fn terminal_checksum(bytes: &[u8]) -> Result<Option<(usize, &str)>, CheckpointJournalError> {
-    let Some(marker_start) = bytes
-        .windows(RECORD_CHECKSUM_MARKER.len())
-        .rposition(|window| window == RECORD_CHECKSUM_MARKER)
-    else {
-        return Ok(None);
-    };
-    let checksum_start = marker_start + RECORD_CHECKSUM_MARKER.len();
-    let checksum_end = checksum_start + 64;
-    if bytes.get(checksum_end..) != Some(b"\"}") {
-        return Ok(None);
-    }
-    let supplied = &bytes[checksum_start..checksum_end];
-    if !supplied.iter().all(u8::is_ascii_hexdigit) {
-        return Err(CheckpointJournalError::Integrity(
-            "checkpoint record checksum is not hexadecimal".to_string(),
-        ));
-    }
-
-    let supplied = std::str::from_utf8(supplied).map_err(|_| {
-        CheckpointJournalError::Integrity("checkpoint record checksum is not UTF-8".to_string())
-    })?;
-    Ok(Some((marker_start, supplied)))
-}
-
-fn raw_record_checksum(bytes: &[u8], marker_start: usize) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes[..marker_start]);
-    hasher.update(b"}");
-    format!("{:x}", hasher.finalize())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -246,7 +141,7 @@ pub(super) fn append(
         )?;
     }
     sync_checkpoint_blobs(working_log, std::iter::once(checkpoint), false)?;
-    let mut record = encode(checkpoint)?;
+    let mut record = wire_v2::encode(checkpoint)?;
     record.push(b'\n');
 
     let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
@@ -270,7 +165,7 @@ pub(super) fn rewrite(
 
     sync_checkpoint_blobs(working_log, checkpoints.iter(), true)?;
     for checkpoint in checkpoints {
-        output.write_all(&encode(checkpoint)?)?;
+        output.write_all(&wire_v2::encode(checkpoint)?)?;
         output.write_all(b"\n")?;
     }
 
@@ -385,14 +280,7 @@ pub(super) fn read(
 }
 
 fn is_versioned_record(bytes: &[u8]) -> bool {
-    terminal_checksum(bytes).is_ok_and(|checksum| checksum.is_some())
-        || serde_json::from_slice::<Value>(bytes)
-            .ok()
-            .is_some_and(|value| {
-                value
-                    .as_object()
-                    .is_some_and(|object| object.contains_key(RECORD_VERSION_FIELD))
-            })
+    wire_v1::is_record(bytes) || wire_v2::is_record(bytes)
 }
 
 fn verified_journals() -> &'static Mutex<HashMap<PathBuf, FileStamp>> {

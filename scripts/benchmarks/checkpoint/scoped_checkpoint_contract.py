@@ -20,6 +20,9 @@ COMMON_IDENTITY_KEYS = (
     "protocol_digest",
 )
 DEFAULT_COMPARISON_PROFILE = "fork-vs-upstream-v1"
+FIXTURE_ALLOWLIST_CONFIG_KEY = "allow_repositories"
+FIXTURE_ALLOWED_REMOTE = "https://example.invalid/git-ai/benchmark-allowed.git"
+FIXTURE_DENIED_REMOTE = "https://example.invalid/git-ai/benchmark-denied.git"
 COMPARISON_PROFILES: dict[str, dict[str, Any]] = {
     DEFAULT_COMPARISON_PROFILE: {
         "candidate_ack_contract_id": "fork-live-application/v1",
@@ -305,47 +308,6 @@ def durability_comparisons(comparison_profile: str) -> dict[str, Any]:
 
 def pair_order(index: int) -> tuple[str, str]:
     return ("candidate", "baseline") if index % 2 == 0 else ("baseline", "candidate")
-
-
-def find_materialized_checkpoint(
-    lines: list[str], *, expected_blob_sha: str, expected_path: str
-) -> dict[str, Any]:
-    matches: list[dict[str, Any]] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError as error:
-            raise RuntimeError(f"malformed checkpoints.jsonl: {error}") from error
-        entries = record.get("entries")
-        if record.get("kind") != "AiAgent" or not isinstance(entries, list):
-            continue
-        if len(entries) == 1 and (
-            isinstance(entries[0], dict)
-            and entries[0].get("file") == expected_path
-            and entries[0].get("blob_sha") == expected_blob_sha
-        ):
-            matches.append(record)
-    if len(matches) != 1:
-        raise RuntimeError(
-            "expected exactly one materialized AI checkpoint for "
-            f"{expected_path} at blob {expected_blob_sha}, found {len(matches)}"
-        )
-    return matches[0]
-
-
-def validate_materialized_blob(
-    working_logs: Path, *, expected_blob_sha: str, expected_content: bytes
-) -> Path:
-    matches = list(working_logs.glob(f"*/blobs/{expected_blob_sha}"))
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"expected exactly one blob {expected_blob_sha}, found {len(matches)}"
-        )
-    if matches[0].read_bytes() != expected_content:
-        raise RuntimeError(f"materialized blob content mismatch for {expected_blob_sha}")
-    return matches[0]
 
 
 def parse_time_metrics(stderr: str) -> dict[str, float | int]:

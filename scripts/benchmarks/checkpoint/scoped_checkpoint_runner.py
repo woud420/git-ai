@@ -16,10 +16,12 @@ from typing import Any
 
 from scoped_checkpoint_contract import (
     DEFAULT_COMPARISON_PROFILE,
+    FIXTURE_ALLOWED_REMOTE,
+    FIXTURE_ALLOWLIST_CONFIG_KEY,
+    FIXTURE_DENIED_REMOTE,
     canonical_digest,
     comparison_status,
     durability_comparisons,
-    find_materialized_checkpoint,
     pair_order,
     parse_daemon_stage_metrics,
     parse_cli_stage_metrics,
@@ -27,6 +29,9 @@ from scoped_checkpoint_contract import (
     sha256_bytes,
     summarize_cross_variant_lane,
     summarize_values,
+)
+from scoped_checkpoint_record import (
+    find_materialized_checkpoint,
     validate_materialized_blob,
 )
 
@@ -38,6 +43,8 @@ FIXTURE_IDENTITY_KEYS = (
     "distractor_content_sha256",
     "repo_config_digest",
     "git_ai_config_digest",
+    "git_ai_config_readback_digest",
+    "allowlist_denial_control_digest",
     "runner_environment_digest",
 )
 
@@ -112,10 +119,40 @@ def checkpoint_storage_state(working_logs: Path) -> dict[str, int]:
     }
 
 
-def fixture_git_ai_config(repo: Path, git_binary: str) -> dict[str, Any]:
+def fixture_git_ai_config(git_binary: str) -> dict[str, Any]:
     return {
-        "allowed_repositories": [str(repo.resolve())],
+        FIXTURE_ALLOWLIST_CONFIG_KEY: [FIXTURE_ALLOWED_REMOTE],
         "git_path": str(Path(git_binary).resolve()),
+    }
+
+
+def verify_fixture_git_ai_config(
+    *, binary: Path, git_binary: str, cwd: Path, env: dict[str, str]
+) -> dict[str, Any]:
+    expected = fixture_git_ai_config(git_binary)
+    observed: dict[str, Any] = {}
+    for key in (FIXTURE_ALLOWLIST_CONFIG_KEY, "git_path"):
+        result = run_checked(
+            [str(binary), "config", key],
+            cwd=cwd,
+            env=env,
+        )
+        try:
+            observed[key] = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(
+                f"native config readback returned invalid JSON for {key}"
+            ) from error
+        if observed[key] != expected[key]:
+            raise RuntimeError(
+                f"effective {key} mismatch: expected {expected[key]!r}, "
+                f"observed {observed[key]!r}"
+            )
+    return {
+        "status": "verified",
+        "method": "native-config-readback/v1",
+        "allowlist_config_key": FIXTURE_ALLOWLIST_CONFIG_KEY,
+        **observed,
     }
 
 
@@ -144,12 +181,15 @@ class VariantRunner:
         self.socket_root = socket_root
         self.control_socket = socket_root / "control.sock"
         self.trace_socket = socket_root / "trace.sock"
+        self.denied_repo = root / "denied-repo"
         self.daemon_stderr_path = root / "daemon-resource.log"
         self.git_binary = git_binary
         self.debug_stages = debug_stages
         self.daemon: subprocess.Popen[str] | None = None
         self.daemon_stderr_file: Any = None
         self.daemon_resources: dict[str, float | int] = {}
+        self.git_ai_config_readback: dict[str, Any] = {}
+        self.allowlist_denial_control: dict[str, Any] = {}
 
         env = isolated_environment(root)
         env.update(
@@ -175,9 +215,15 @@ class VariantRunner:
         self.socket_root.mkdir(parents=True)
         config_dir = self.home / ".git-ai"
         config_dir.mkdir(parents=True)
-        config = fixture_git_ai_config(self.repo, self.git_binary)
+        config = fixture_git_ai_config(self.git_binary)
         (config_dir / "config.json").write_text(
             json.dumps(config, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
+        self.git_ai_config_readback = verify_fixture_git_ai_config(
+            binary=self.binary,
+            git_binary=self.git_binary,
+            cwd=self.root,
+            env=self.env,
         )
 
         run_checked(
@@ -195,6 +241,11 @@ class VariantRunner:
             cwd=self.repo,
             env=self.env,
         )
+        run_checked(
+            [self.git_binary, "remote", "add", "origin", FIXTURE_ALLOWED_REMOTE],
+            cwd=self.repo,
+            env=self.env,
+        )
         (self.repo / "sample.txt").write_bytes(b"seed\n")
         (self.repo / "distractor.txt").write_bytes(b"seed\n")
         run_checked(
@@ -208,9 +259,41 @@ class VariantRunner:
             env=self.env,
         )
         (self.repo / "distractor.txt").write_bytes(b"must-remain-out-of-scope\n")
+
+        self.denied_repo.mkdir(parents=True)
+        for command in (
+            [self.git_binary, "init", "-q", "-b", "main"],
+            [self.git_binary, "config", "user.name", "ENG-364 Benchmark"],
+            [self.git_binary, "config", "user.email", "eng364@example.invalid"],
+            [self.git_binary, "remote", "add", "origin", FIXTURE_DENIED_REMOTE],
+        ):
+            run_checked(command, cwd=self.denied_repo, env=self.env)
+        (self.denied_repo / "sample.txt").write_bytes(b"seed\n")
+        run_checked(
+            [self.git_binary, "add", "sample.txt"],
+            cwd=self.denied_repo,
+            env=self.env,
+        )
+        run_checked(
+            [self.git_binary, "commit", "-q", "-m", "seed"],
+            cwd=self.denied_repo,
+            env=self.env,
+        )
+
+        self._configure_daemon_boundary(
+            self.socket_root / "allowlist-control",
+            self.root / "allowlist-control-daemon-home",
+        )
+        try:
+            self._start_daemon()
+            self.allowlist_denial_control = self.verify_allowlist_denial()
+        finally:
+            self.stop()
+            self.daemon_resources = {}
+            self._configure_daemon_boundary(self.socket_root, self.home)
         self._start_daemon()
 
-    def fixture_identity(self) -> dict[str, str]:
+    def fixture_identity(self) -> dict[str, Any]:
         roots = {
             str(self.root): "$VARIANT_ROOT",
             str(self.root.resolve()): "$VARIANT_ROOT",
@@ -244,6 +327,10 @@ class VariantRunner:
         git_ai_config = normalized(
             (self.home / ".git-ai" / "config.json").read_text(encoding="utf-8")
         )
+        config_readback = {
+            key: normalized(value) if isinstance(value, str) else value
+            for key, value in self.git_ai_config_readback.items()
+        }
         normalized_env = {key: normalized(value) for key, value in sorted(self.env.items())}
         return {
             "head_commit": head,
@@ -254,8 +341,22 @@ class VariantRunner:
             ),
             "repo_config_digest": canonical_digest(repo_config),
             "git_ai_config_digest": canonical_digest(git_ai_config),
+            "git_ai_config_readback": config_readback,
+            "git_ai_config_readback_digest": canonical_digest(config_readback),
+            "allowlist_denial_control": self.allowlist_denial_control,
+            "allowlist_denial_control_digest": canonical_digest(
+                self.allowlist_denial_control
+            ),
             "runner_environment_digest": canonical_digest(normalized_env),
         }
+
+    def _configure_daemon_boundary(self, socket_root: Path, daemon_home: Path) -> None:
+        socket_root.mkdir(parents=True, exist_ok=True)
+        self.control_socket = socket_root / "control.sock"
+        self.trace_socket = socket_root / "trace.sock"
+        self.env["GIT_AI_DAEMON_HOME"] = str(daemon_home)
+        self.env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(self.control_socket)
+        self.env["GIT_AI_DAEMON_TRACE_SOCKET"] = str(self.trace_socket)
 
     def _start_daemon(self) -> None:
         command = [str(self.binary), "daemon", "run"]
@@ -282,14 +383,41 @@ class VariantRunner:
             time.sleep(0.01)
         raise RuntimeError(f"{self.label} daemon did not become ready within 15 seconds")
 
-    def sync_family(self) -> None:
+    def sync_family(self, repo: Path | None = None) -> None:
         send_control(
             self.control_socket,
             {
                 "method": "sync.family",
-                "params": {"repo_working_dir": str(self.repo.resolve())},
+                "params": {"repo_working_dir": str((repo or self.repo).resolve())},
             },
         )
+
+    def verify_allowlist_denial(self) -> dict[str, Any]:
+        (self.denied_repo / "sample.txt").write_bytes(
+            fixed_content("allowlist-denial", 0)
+        )
+        run_checked(
+            [str(self.binary), "checkpoint", "mock_ai", "sample.txt"],
+            cwd=self.denied_repo,
+            env=self.env,
+        )
+        self.sync_family(self.denied_repo)
+        storage = checkpoint_storage_state(
+            self.denied_repo / ".git" / "ai" / "working_logs"
+        )
+        if any(storage.values()):
+            raise RuntimeError(
+                "allowlist denial control materialized checkpoint storage for the "
+                "mismatched-origin repository"
+            )
+        return {
+            "status": "verified_denied",
+            "method": "mismatched-origin-checkpoint/v1",
+            "allowed_remote": FIXTURE_ALLOWED_REMOTE,
+            "denied_remote": FIXTURE_DENIED_REMOTE,
+            "fence": "sync.family",
+            "checkpoint_storage": storage,
+        }
 
     def _checkpoint_lines(self) -> list[str]:
         working_logs = self.repo / ".git" / "ai" / "working_logs"

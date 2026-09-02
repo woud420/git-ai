@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -187,7 +187,7 @@ class ContractTests(unittest.TestCase):
     def test_schema_and_protocol_bind_post_shutdown_storage_measurement(self) -> None:
         protocol = cli.protocol_for_profile("fork-before-after-v1")
 
-        self.assertEqual(cli.SCHEMA, "git-ai-scoped-checkpoint-comparison/1.3.0")
+        self.assertEqual(cli.SCHEMA, "git-ai-scoped-checkpoint-comparison/1.4.0")
         self.assertEqual(
             protocol["checkpoint_storage"]["measurement_phase"],
             "after_daemon_shutdown",
@@ -224,20 +224,123 @@ class ContractTests(unittest.TestCase):
             [
                 "benchmark_scoped_checkpoint_vs_ref.py",
                 "scoped_checkpoint_contract.py",
+                "scoped_checkpoint_record.py",
                 "scoped_checkpoint_runner.py",
                 "benchmark_common.py",
             ],
         )
 
-    def test_fixture_config_pins_real_git_binary(self) -> None:
-        config = runner.fixture_git_ai_config(Path("/fixture/repo"), "/usr/bin/git")
+    def test_fixture_config_uses_the_cross_version_allowlist_key(self) -> None:
+        config = runner.fixture_git_ai_config("/usr/bin/git")
 
         self.assertEqual(
             config,
             {
-                "allowed_repositories": ["/fixture/repo"],
+                "allow_repositories": [benchmark.FIXTURE_ALLOWED_REMOTE],
                 "git_path": "/usr/bin/git",
             },
+        )
+
+    def test_fixture_config_readback_proves_both_effective_values(self) -> None:
+        completed = [
+            subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=f'["{benchmark.FIXTURE_ALLOWED_REMOTE}"]\n',
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                args=[], returncode=0, stdout='"/usr/bin/git"\n', stderr=""
+            ),
+        ]
+
+        with mock.patch.object(runner, "run_checked", side_effect=completed) as run:
+            evidence = runner.verify_fixture_git_ai_config(
+                binary=Path("/fixture/git-ai"),
+                git_binary="/usr/bin/git",
+                cwd=Path("/fixture"),
+                env={"HOME": "/fixture/home"},
+            )
+
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [
+                ["/fixture/git-ai", "config", "allow_repositories"],
+                ["/fixture/git-ai", "config", "git_path"],
+            ],
+        )
+        self.assertEqual(
+            evidence,
+            {
+                "status": "verified",
+                "method": "native-config-readback/v1",
+                "allowlist_config_key": "allow_repositories",
+                "allow_repositories": [benchmark.FIXTURE_ALLOWED_REMOTE],
+                "git_path": "/usr/bin/git",
+            },
+        )
+
+    def test_fixture_config_readback_rejects_a_silently_ignored_allowlist(self) -> None:
+        ignored = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="[]\n", stderr=""
+        )
+
+        with mock.patch.object(runner, "run_checked", return_value=ignored):
+            with self.assertRaisesRegex(RuntimeError, "effective allow_repositories"):
+                runner.verify_fixture_git_ai_config(
+                    binary=Path("/fixture/git-ai"),
+                    git_binary="/usr/bin/git",
+                    cwd=Path("/fixture"),
+                    env={"HOME": "/fixture/home"},
+                )
+
+    def test_denial_control_uses_a_mismatched_remote_and_zero_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            denied_repo = root / "denied-repo"
+            denied_repo.mkdir()
+            variant = runner.VariantRunner(
+                label="baseline",
+                binary=Path("/fixture/git-ai"),
+                root=root,
+                socket_root=root / "sockets",
+                git_binary="/usr/bin/git",
+                debug_stages=False,
+            )
+            variant.denied_repo = denied_repo
+
+            with (
+                mock.patch.object(runner, "run_checked") as run,
+                mock.patch.object(variant, "sync_family") as sync,
+            ):
+                evidence = variant.verify_allowlist_denial()
+
+        run.assert_called_once_with(
+            ["/fixture/git-ai", "checkpoint", "mock_ai", "sample.txt"],
+            cwd=denied_repo,
+            env=variant.env,
+        )
+        sync.assert_called_once_with(denied_repo)
+        self.assertEqual(evidence["status"], "verified_denied")
+        self.assertEqual(evidence["allowed_remote"], benchmark.FIXTURE_ALLOWED_REMOTE)
+        self.assertEqual(evidence["denied_remote"], benchmark.FIXTURE_DENIED_REMOTE)
+        self.assertEqual(evidence["checkpoint_storage"]["total_checkpoint_bytes"], 0)
+
+    def test_protocol_records_the_fresh_daemon_denial_boundary(self) -> None:
+        authorization = cli.protocol_for_profile("fork-vs-upstream-v1")[
+            "repository_authorization"
+        ]
+
+        self.assertEqual(authorization["config_key"], "allow_repositories")
+        self.assertEqual(
+            authorization["allowed_remote"], benchmark.FIXTURE_ALLOWED_REMOTE
+        )
+        self.assertEqual(
+            authorization["denied_remote"], benchmark.FIXTURE_DENIED_REMOTE
+        )
+        self.assertEqual(
+            authorization["measurement_isolation"],
+            "denial daemon stopped before a fresh measurement daemon starts",
         )
 
     def test_file_set_digest_binds_every_harness_module(self) -> None:
@@ -412,78 +515,6 @@ class CliContractTests(unittest.TestCase):
 
 
 class ObservationTests(unittest.TestCase):
-    def test_materialized_checkpoint_requires_one_expected_blob_and_path(self) -> None:
-        expected = {
-            "kind": "AiAgent",
-            "entries": [{"file": "sample.txt", "blob_sha": "abc123"}],
-            "trace_id": "trace-1",
-        }
-        lines = [json.dumps(expected), json.dumps({"kind": "Human", "entries": []})]
-
-        record = benchmark.find_materialized_checkpoint(
-            lines, expected_blob_sha="abc123", expected_path="sample.txt"
-        )
-
-        self.assertEqual(record["trace_id"], "trace-1")
-
-    def test_materialized_checkpoint_rejects_duplicates(self) -> None:
-        record = json.dumps(
-            {
-                "kind": "AiAgent",
-                "entries": [{"file": "sample.txt", "blob_sha": "abc123"}],
-            }
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "exactly one"):
-            benchmark.find_materialized_checkpoint(
-                [record, record], expected_blob_sha="abc123", expected_path="sample.txt"
-            )
-
-    def test_materialized_checkpoint_rejects_extra_entries(self) -> None:
-        record = json.dumps(
-            {
-                "kind": "AiAgent",
-                "entries": [
-                    {"file": "sample.txt", "blob_sha": "abc123"},
-                    {"file": "distractor.txt", "blob_sha": "other"},
-                ],
-            }
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "exactly one"):
-            benchmark.find_materialized_checkpoint(
-                [record], expected_blob_sha="abc123", expected_path="sample.txt"
-            )
-
-    def test_materialized_blob_requires_exact_content(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            working_logs = Path(directory)
-            blob_dir = working_logs / "base" / "blobs"
-            blob_dir.mkdir(parents=True)
-            content = b"expected\n"
-            digest = benchmark.sha256_bytes(content)
-            (blob_dir / digest).write_bytes(content)
-
-            path = benchmark.validate_materialized_blob(
-                working_logs, expected_blob_sha=digest, expected_content=content
-            )
-
-            self.assertEqual(path.name, digest)
-
-    def test_materialized_blob_rejects_wrong_content(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            working_logs = Path(directory)
-            blob_dir = working_logs / "base" / "blobs"
-            blob_dir.mkdir(parents=True)
-            content = b"expected\n"
-            digest = benchmark.sha256_bytes(content)
-            (blob_dir / digest).write_bytes(b"wrong\n")
-
-            with self.assertRaisesRegex(RuntimeError, "content mismatch"):
-                benchmark.validate_materialized_blob(
-                    working_logs, expected_blob_sha=digest, expected_content=content
-                )
-
     def test_time_metrics_parser_handles_macos_long_format(self) -> None:
         stderr = """
 real 0.03

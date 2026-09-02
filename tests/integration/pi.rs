@@ -2,6 +2,7 @@ use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::fixture_path;
 use git_ai::model::working_log::{Checkpoint, CheckpointKind};
+use git_ai::operations::git::repository as GitAiRepository;
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,25 +15,19 @@ fn copy_fixture_to_temp(name: &str) -> (tempfile::TempDir, PathBuf) {
 }
 
 fn read_checkpoints(repo: &TestRepo) -> Vec<Checkpoint> {
-    let working_logs_dir = repo.path().join(".git").join("ai").join("working_logs");
+    let storage = GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap())
+        .expect("find repository")
+        .storage;
     let mut checkpoints = Vec::new();
 
-    let entries = fs::read_dir(&working_logs_dir).expect("working_logs directory should exist");
+    let entries = fs::read_dir(&storage.working_logs).expect("working_logs directory should exist");
     for entry in entries.filter_map(|entry| entry.ok()) {
-        let checkpoints_path = entry.path().join("checkpoints.jsonl");
-        if !checkpoints_path.exists() {
+        if !entry.path().join("checkpoints.jsonl").exists() {
             continue;
         }
-
-        let content = fs::read_to_string(&checkpoints_path).expect("read checkpoints.jsonl");
-        checkpoints.extend(
-            content
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| {
-                    serde_json::from_str::<Checkpoint>(line).expect("parse checkpoint line")
-                }),
-        );
+        let base_commit = entry.file_name().to_string_lossy().into_owned();
+        let working_log = storage.working_log_for_base_commit(&base_commit).unwrap();
+        checkpoints.extend(working_log.read_all_checkpoints().unwrap());
     }
 
     checkpoints

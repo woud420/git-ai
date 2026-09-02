@@ -1,7 +1,10 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::error::GitAiError;
-use git_ai::model::attribution::Attribution;
-use git_ai::model::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry};
+use git_ai::model::attribution::{Attribution, LineAttribution};
+use git_ai::model::working_log::{
+    AgentId, Checkpoint, CheckpointKind, CheckpointLineStats, WorkingLogEntry,
+};
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 
@@ -38,6 +41,50 @@ fn attributed_checkpoint(repo: &TestRepo, author: &str) -> Checkpoint {
     )
 }
 
+fn benchmark_checkpoint(repo: &TestRepo, index: usize) -> Checkpoint {
+    let content = format!("{index:064}\n");
+    assert_eq!(content.len(), 65);
+    let blob_sha = repo
+        .current_working_logs()
+        .persist_file_version(&content)
+        .unwrap();
+    let author_id = "s_6825489e8808db::t_dd4d4964d7d736";
+    let mut checkpoint = Checkpoint::new(
+        CheckpointKind::AiAgent,
+        "acca49ac01ce3faf77458c5e2170e81d533fbb1c2f38e6ee2d2a57600828bd54".to_string(),
+        "ENG-364 Benchmark <eng364@example.invalid>".to_string(),
+        vec![WorkingLogEntry::new(
+            "sample.txt".to_string(),
+            blob_sha,
+            vec![
+                Attribution::new(0, 0, author_id.to_string(), 1_788_375_035_718),
+                Attribution::new(0, 65, author_id.to_string(), 1_788_375_035_718),
+            ],
+            vec![LineAttribution::new(1, 1, author_id.to_string(), None)],
+        )],
+    );
+    checkpoint.timestamp = 1_788_375_035;
+    checkpoint.agent_id = Some(AgentId {
+        tool: "mock_ai".to_string(),
+        id: "ai-thread-1788375035675706000".to_string(),
+        model: "unknown".to_string(),
+    });
+    checkpoint.agent_metadata = Some(HashMap::from([(
+        "edit_kind".to_string(),
+        "file_edit".to_string(),
+    )]));
+    checkpoint.line_stats = CheckpointLineStats {
+        additions: 1,
+        deletions: 1,
+        additions_sloc: 1,
+        deletions_sloc: 1,
+    };
+    checkpoint.git_ai_version = Some("1.6.16".to_string());
+    checkpoint.trace_id = Some("t_dd4d4964d7d736".to_string());
+    checkpoint.delivery_id = Some("a13f0762-1a2a-4a59-bd88-bba7783711db".to_string());
+    checkpoint
+}
+
 #[test]
 fn checkpoint_journal_appends_one_checksummed_record_without_rewriting_prefix() {
     let repo = TestRepo::new();
@@ -63,8 +110,10 @@ fn checkpoint_journal_appends_one_checksummed_record_without_rewriting_prefix() 
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();
     for record in records {
-        assert_eq!(record["_git_ai_record_version"], 1);
-        assert!(record["_git_ai_record_checksum"].as_str().is_some());
+        assert_eq!(record["v"], 2);
+        assert!(record["c"].as_str().is_some());
+        assert!(record["e"].as_array().is_some());
+        assert!(record.get("entries").is_none());
         assert!(record.get("_git_ai_blobs").is_none());
     }
 
@@ -81,6 +130,41 @@ fn checkpoint_journal_appends_one_checksummed_record_without_rewriting_prefix() 
             .get_file_version(&ai_checkpoints[1].entries[0].blob_sha)
             .unwrap(),
         "second AI state\n"
+    );
+}
+
+#[test]
+fn checkpoint_journal_pre_compaction_storage_slope_beats_upstream() {
+    let repo = TestRepo::new();
+    let working_log = repo.current_working_logs();
+    let mut checkpoints = Vec::new();
+
+    for index in 0..3 {
+        working_log
+            .append_checkpoint_record_with_compaction_interval_for_test(
+                &mut checkpoints,
+                benchmark_checkpoint(&repo, index),
+                0,
+            )
+            .unwrap();
+    }
+
+    let journal_bytes = fs::metadata(checkpoint_file(&repo)).unwrap().len();
+    let blob_bytes = fs::read_dir(working_log.dir.join("blobs"))
+        .unwrap()
+        .map(|entry| entry.unwrap().metadata().unwrap().len())
+        .sum::<u64>();
+    let checkpoint_count = checkpoints.len() as u64;
+
+    assert!(
+        journal_bytes <= checkpoint_count * 714,
+        "journal slope was {} bytes/checkpoint",
+        journal_bytes as f64 / checkpoint_count as f64
+    );
+    assert!(
+        journal_bytes + blob_bytes <= checkpoint_count * 779,
+        "journal plus blobs was {} bytes/checkpoint",
+        (journal_bytes + blob_bytes) as f64 / checkpoint_count as f64
     );
 }
 
@@ -125,7 +209,7 @@ fn checkpoint_journal_discards_an_incomplete_final_record() {
         .append(true)
         .open(&path)
         .unwrap()
-        .write_all(br#"{"_git_ai_record_version":1,"kind":"AiAgent"#)
+        .write_all(br#"{"a":"torn","v":2,"k":1"#)
         .unwrap();
 
     repo.restart_dedicated_daemon_for_test();

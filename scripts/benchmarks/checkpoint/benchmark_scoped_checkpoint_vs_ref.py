@@ -30,6 +30,9 @@ from benchmark_common import resolve_real_git_binary  # noqa: E402
 from scoped_checkpoint_contract import (
     COMPARISON_PROFILES,
     DEFAULT_COMPARISON_PROFILE,
+    FIXTURE_ALLOWED_REMOTE,
+    FIXTURE_ALLOWLIST_CONFIG_KEY,
+    FIXTURE_DENIED_REMOTE,
     canonical_digest,
     file_set_digest,
     resolve_comparison_profile,
@@ -38,7 +41,7 @@ from scoped_checkpoint_contract import (
 from scoped_checkpoint_runner import run_scenario
 
 
-SCHEMA = "git-ai-scoped-checkpoint-comparison/1.3.0"
+SCHEMA = "git-ai-scoped-checkpoint-comparison/1.4.0"
 MIN_DECISION_SAMPLES = 20
 QUALIFIED_SAMPLES = 30
 QUALIFIED_WARMUPS = 5
@@ -291,6 +294,16 @@ def protocol_for_profile(comparison_profile: str) -> dict[str, Any]:
             "measurement_phase": "after_daemon_shutdown",
             "timing_effect": "outside latency and process-resource samples",
         },
+        "repository_authorization": {
+            "config_key": FIXTURE_ALLOWLIST_CONFIG_KEY,
+            "allowed_remote": FIXTURE_ALLOWED_REMOTE,
+            "denied_remote": FIXTURE_DENIED_REMOTE,
+            "effective_config_readback": [FIXTURE_ALLOWLIST_CONFIG_KEY, "git_path"],
+            "denial_fence": "mismatched-origin checkpoint then sync.family",
+            "measurement_isolation": (
+                "denial daemon stopped before a fresh measurement daemon starts"
+            ),
+        },
     }
 
 
@@ -326,6 +339,7 @@ def harness_files(script_path: Path) -> list[Path]:
     return [
         script_path,
         script_path.with_name("scoped_checkpoint_contract.py"),
+        script_path.with_name("scoped_checkpoint_record.py"),
         script_path.with_name("scoped_checkpoint_runner.py"),
         GIT_BENCHMARK_DIR / "benchmark_common.py",
     ]
@@ -374,17 +388,23 @@ def build_result(
     )
     protocol = protocol_for_run(args)
     fixture_contract = {
-        "schema": "git-ai-scoped-checkpoint-fixture/1.0.0",
-        "repo": "one commit on main with sample.txt and distractor.txt",
+        "schema": "git-ai-scoped-checkpoint-fixture/1.1.0",
+        "repo": (
+            "one commit on main with sample.txt, distractor.txt, and the fixed "
+            "allowed origin remote"
+        ),
         "path": "sample.txt",
         "dirty_distractor": "distractor.txt must remain absent from every checkpoint",
         "seed": "seed\\n",
         "edits": "sha256(phase:index) hex plus newline",
         "checkpoint": ["checkpoint", "mock_ai", "sample.txt"],
         "material_fence": "sync.family then exact path/blob match in checkpoints.jsonl",
+        "repository_authorization": (
+            "native config readback plus mismatched-origin denial under a separate daemon"
+        ),
     }
     normalized_config = {
-        "allowed_repositories": ["$VARIANT_ROOT/repo"],
+        FIXTURE_ALLOWLIST_CONFIG_KEY: [FIXTURE_ALLOWED_REMOTE],
         "git_path": git_binary,
     }
     run_contract_identity = {

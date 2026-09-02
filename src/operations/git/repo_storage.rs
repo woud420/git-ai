@@ -560,20 +560,13 @@ impl PersistedWorkingLog {
         &self,
         max_bytes: u64,
     ) -> Result<Vec<Checkpoint>, GitAiError> {
-        self.read_all_checkpoints_with_size_limit(max_bytes)
+        self.load_checkpoint_journal_with_size_limit(max_bytes)
+            .map(LoadedJournal::into_checkpoints)
     }
 
     pub fn ensure_checkpoints_file_size_limit(&self) -> Result<(), GitAiError> {
         self.read_all_checkpoints()?;
         Ok(())
-    }
-
-    fn read_all_checkpoints_with_size_limit(
-        &self,
-        max_bytes: u64,
-    ) -> Result<Vec<Checkpoint>, GitAiError> {
-        self.load_checkpoint_journal_with_size_limit(max_bytes)
-            .map(LoadedJournal::into_checkpoints)
     }
 
     fn load_checkpoint_journal_with_size_limit(

@@ -83,13 +83,13 @@ use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROC
 
 use super::test_file::TestFile;
 
-const DAEMON_TEST_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+pub(crate) const DAEMON_TEST_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 const DAEMON_TEST_CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(windows)]
-const DAEMON_TEST_READY_TOTAL_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const DAEMON_TEST_READY_TOTAL_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(not(windows))]
-const DAEMON_TEST_READY_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
-const DAEMON_TEST_READY_CONTROL_TIMEOUT: Duration = Duration::from_millis(500);
+pub(crate) const DAEMON_TEST_READY_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const DAEMON_TEST_READY_CONTROL_TIMEOUT: Duration = Duration::from_millis(500);
 #[cfg(windows)]
 const DAEMON_TEST_SYNC_TOTAL_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(not(windows))]

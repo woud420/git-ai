@@ -342,15 +342,7 @@ impl PersistedWorkingLog {
     }
 
     pub fn reset_working_log(&self) -> Result<(), GitAiError> {
-        // Clear all blobs by removing the blobs directory
-        let blobs_dir = self.dir.join("blobs");
-        if blobs_dir.exists() {
-            fs::remove_dir_all(&blobs_dir)?;
-        }
-
-        // Clear checkpoints by truncating the JSONL file
-        let checkpoints_file = self.checkpoints_file();
-        fs::write(&checkpoints_file, "")?;
+        checkpoint_journal::reset(&self.checkpoint_journal_location())?;
 
         // Clear INITIAL attributions file so stale attributions from a
         // previous working state do not persist across resets
@@ -482,6 +474,7 @@ impl PersistedWorkingLog {
     /// Append one checksummed checkpoint index record. The daemon uses this
     /// after materializing the collection once so ordinary checkpoints do not
     /// rewrite the entire journal.
+    #[cfg(test)]
     pub(crate) fn append_checkpoint_record_to(
         &self,
         journal: &mut LoadedJournal,
@@ -492,6 +485,14 @@ impl PersistedWorkingLog {
             checkpoint,
             checkpoint_journal::COMPACTION_INTERVAL,
         )
+    }
+
+    pub(crate) fn append_cached_checkpoint_record_to(
+        &self,
+        journal: &mut checkpoint_journal::JournalLease<'_>,
+        checkpoint: Checkpoint,
+    ) -> Result<(), GitAiError> {
+        journal.append_checkpoint(checkpoint, checkpoint_journal::COMPACTION_INTERVAL)
     }
 
     #[cfg(feature = "test-support")]
@@ -515,6 +516,7 @@ impl PersistedWorkingLog {
         result
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     fn append_checkpoint_record_with_compaction_interval(
         &self,
         journal: &mut LoadedJournal,
@@ -539,11 +541,12 @@ impl PersistedWorkingLog {
         checkpoint_journal::append(&self.checkpoint_journal_location(), checkpoint)
     }
 
-    pub(crate) fn ensure_checkpoint_record_durable(
+    pub(crate) fn ensure_cached_checkpoint_record_durable(
         &self,
-        checkpoint: &Checkpoint,
+        journal: &mut checkpoint_journal::JournalLease<'_>,
+        checkpoint_index: usize,
     ) -> Result<(), GitAiError> {
-        checkpoint_journal::ensure_durable(&self.checkpoint_journal_location(), checkpoint)
+        journal.ensure_durable(checkpoint_index)
     }
 
     pub fn read_all_checkpoints(&self) -> Result<Vec<Checkpoint>, GitAiError> {
@@ -551,8 +554,18 @@ impl PersistedWorkingLog {
             .map(LoadedJournal::into_checkpoints)
     }
 
+    #[cfg(test)]
     pub(crate) fn load_checkpoint_journal(&self) -> Result<LoadedJournal, GitAiError> {
         self.load_checkpoint_journal_with_size_limit(Self::checkpoints_file_size_limit_bytes())
+    }
+
+    pub(crate) fn load_cached_checkpoint_journal(
+        &self,
+    ) -> Result<checkpoint_journal::JournalLease<'static>, GitAiError> {
+        checkpoint_journal::read_cached(
+            &self.checkpoint_journal_location(),
+            Self::checkpoints_file_size_limit_bytes(),
+        )
     }
 
     #[cfg(feature = "test-support")]

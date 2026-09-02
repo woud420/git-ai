@@ -54,6 +54,7 @@ never-overwrite-local upserts resolve the priority (`notes_db.rs`).
 | `LAST_METRICS_UPLOAD_STARTED_AT` | `clients/api/metrics.rs:15` | OnceLock<Mutex> | 500ms upload rate limit, resets on restart |
 | `DAEMON_PROCESS_ACTIVE` | `operations/daemon/daemon_config.rs:43` | AtomicBool | process-lifetime flag |
 | Git alias cache | `operations/daemon/git_backend.rs:56` | per-family map, 60s stale-while-revalidate | re-resolved on expiry |
+| checkpoint journal cache | `operations/git/repo_storage/checkpoint_journal/cache.rs` | OnceLock<Mutex>, 2 entries / 800 KiB conservative retained-capacity estimate | decoded state is moved into one lease; exact SHA-256 + byte length invalidates external changes |
 
 ## Lock landscape
 
@@ -63,6 +64,14 @@ AsyncMutex for the normalizer + per-family async exec-locks + std Mutex for the
 sequencer map) retain their existing ownership boundaries. File locks use
 `model::repository::lock_file::LockFile` for daemon ownership and
 per-working-log checkpoint-journal publication. The journal owns its storage
-paths and legacy-format provenance; no process-global journal cache or nested
-in-process lock participates in publication. New cross-lock interactions
-require documentation here first.
+paths, legacy-format provenance, and a bounded process-global decoded-state
+cache. Cache checkout always takes the journal file lock before the short-lived
+cache Mutex; publication holds only the file lock, and lease return drops the
+file lock before taking the cache Mutex. Every warm checkout hashes the exact
+file bytes; cold decoding hashes the exact accepted byte stream and compares
+that revision with the final file, while every publication/durable success
+path rechecks the SHA-256 + length revision. The 800 KiB experimental bound is
+a conservative recursive estimate of retained capacities, allocator overhead,
+and alignment rather than a claim about exact resident memory; the independent
+two-entry limit is the second bound. New cross-lock interactions require
+documentation here first.

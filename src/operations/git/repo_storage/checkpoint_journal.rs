@@ -8,18 +8,28 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod cache;
+mod reader;
+mod revision;
 mod wire_v1;
 mod wire_v2;
+
+pub(crate) use cache::JournalLease;
+pub(super) use cache::reset;
+
+#[cfg(test)]
+mod cache_tests;
 
 /// Bounds stale records while keeping full rewrites off ordinary checkpoints.
 pub(super) const COMPACTION_INTERVAL: usize = 256;
 
+#[derive(Clone, Copy)]
 pub(super) struct JournalLocation<'a> {
     directory: &'a Path,
     base_commit: &'a str,
@@ -148,6 +158,9 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Checkpoint, CheckpointJournalError>
 }
 
 fn decode_record(bytes: &[u8]) -> Result<(Checkpoint, bool), CheckpointJournalError> {
+    #[cfg(test)]
+    cache::record_decode();
+
     if let Some(checkpoint) = wire_v2::decode_if_terminal(bytes)? {
         return Ok((checkpoint, true));
     }
@@ -187,6 +200,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+#[cfg(any(test, feature = "test-support"))]
 pub(super) fn append(
     location: &JournalLocation<'_>,
     checkpoint: &Checkpoint,
@@ -231,6 +245,7 @@ pub(super) fn rewrite(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn ensure_durable(
     location: &JournalLocation<'_>,
     checkpoint: &Checkpoint,
@@ -247,94 +262,15 @@ pub(super) fn read(
     location: &JournalLocation<'_>,
     max_bytes: u64,
 ) -> Result<LoadedJournal, GitAiError> {
-    let path = location.checkpoints_file();
-    if !path.exists() {
-        return Ok(LoadedJournal::empty());
-    }
-
     let _lock = acquire_lock(location)?;
-    if reset_if_oversized(location, max_bytes)? {
-        return Ok(LoadedJournal::empty());
-    }
-
-    let file = fs::File::open(&path)?;
-    let mut reader = BufReader::new(&file);
-    let mut checkpoints = Vec::new();
-    let mut offset = 0_u64;
-    let mut truncate_to = None;
-    let mut terminate_legacy_tail = false;
-    let mut contains_legacy_records = false;
-
-    loop {
-        let record_start = offset;
-        let mut bytes = Vec::new();
-        let read = reader.read_until(b'\n', &mut bytes)?;
-        if read == 0 {
-            break;
-        }
-        offset += read as u64;
-        let terminated = bytes.last() == Some(&b'\n');
-        if terminated {
-            bytes.pop();
-            if bytes.last() == Some(&b'\r') {
-                bytes.pop();
-            }
-        }
-        if bytes.iter().all(|byte| byte.is_ascii_whitespace()) {
-            if !terminated {
-                truncate_to = Some(record_start);
-                break;
-            }
-            continue;
-        }
-        if !terminated && is_versioned_record(&bytes) {
-            truncate_to = Some(record_start);
-            break;
-        }
-
-        let (checkpoint, is_versioned) = match decode_record(&bytes) {
-            Ok(decoded) => decoded,
-            Err(CheckpointJournalError::Json(_)) if !terminated => {
-                truncate_to = Some(record_start);
-                break;
-            }
-            Err(error) => return Err(error.into()),
-        };
-        if !terminated {
-            terminate_legacy_tail = true;
-        }
-        if checkpoint.api_version != CHECKPOINT_API_VERSION {
-            tracing::debug!(
-                "unsupported checkpoint api version: {} (silently skipping checkpoint)",
-                checkpoint.api_version
-            );
-            continue;
-        }
-        contains_legacy_records |= !is_versioned;
-        checkpoints.push(checkpoint);
-    }
-
-    drop(reader);
-    if let Some(length) = truncate_to {
-        let repair = OpenOptions::new().write(true).open(&path)?;
-        repair.set_len(length)?;
-        repair.sync_all()?;
-    } else if terminate_legacy_tail {
-        let mut repair = OpenOptions::new().append(true).open(&path)?;
-        repair.write_all(b"\n")?;
-        repair.sync_all()?;
-    }
-
-    migrate_prompt_hashes(&mut checkpoints);
-    prune_old_char_attributions(&mut checkpoints);
-    Ok(LoadedJournal::from_checkpoints(
-        checkpoints,
-        contains_legacy_records,
-    ))
+    reader::read_locked(location, max_bytes).map(|result| result.journal)
 }
 
-fn is_versioned_record(bytes: &[u8]) -> bool {
-    wire_v1::is_record(bytes) || wire_v2::is_record(bytes)
+pub(super) fn read_cached(
+    location: &JournalLocation<'_>,
+    max_bytes: u64,
+) -> Result<JournalLease<'static>, GitAiError> {
+    cache::read_cached(location, max_bytes)
 }
 
 fn reset_if_oversized(location: &JournalLocation<'_>, max_bytes: u64) -> Result<bool, GitAiError> {
@@ -469,7 +405,7 @@ pub(super) fn prune_old_char_attributions(checkpoints: &mut [Checkpoint]) {
             if let Some(&newest_idx) = newest_for_file.get(&entry.file)
                 && checkpoint_idx != newest_idx
             {
-                entry.attributions.clear();
+                entry.attributions = Vec::new();
             }
         }
     }

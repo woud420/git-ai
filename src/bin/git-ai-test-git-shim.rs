@@ -5,7 +5,7 @@ use git_ai::operations::daemon::test_sync::{
 use serde::Serialize;
 use std::env;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -52,6 +52,34 @@ fn argv_with_simulated_legacy_range_diff_abbreviation(argv: &[String]) -> Vec<St
             }
         })
         .collect()
+}
+
+fn exit_once_for_config_denial(argv: &[String]) -> Result<(), String> {
+    let Ok(match_arg) = env::var("GIT_AI_TEST_GIT_SHIM_CONFIG_DENIAL_ARG") else {
+        return Ok(());
+    };
+    if !argv.iter().any(|arg| arg == &match_arg) {
+        return Ok(());
+    }
+
+    let marker_path = env::var("GIT_AI_TEST_GIT_SHIM_CONFIG_DENIAL_MARKER")
+        .map_err(|_| "GIT_AI_TEST_GIT_SHIM_CONFIG_DENIAL_MARKER is required".to_string())?;
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker_path)
+    {
+        Ok(marker) => {
+            drop(marker);
+            eprintln!("error: unable to access '.git/config': Permission denied");
+            eprintln!("fatal: unknown error occurred while reading the configuration files");
+            std::process::exit(128);
+        }
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(format!(
+            "create config denial marker {marker_path}: {error}"
+        )),
+    }
 }
 
 fn select_target(argv: &[String]) -> Result<String, String> {
@@ -149,6 +177,7 @@ fn exec_target(target: &str, argv: &[String]) -> ! {
 fn main() {
     let argv = env::args().skip(1).collect::<Vec<_>>();
     let target = select_target(&argv).unwrap_or_else(|error| panic!("{error}"));
+    exit_once_for_config_denial(&argv).unwrap_or_else(|error| panic!("{error}"));
     let mut effective_argv = argv.clone();
     let mut test_sync_session = None;
     if let Ok(log_path) = env::var("GIT_AI_TEST_SYNC_START_LOG") {
@@ -174,6 +203,7 @@ fn main() {
 fn main() {
     let argv = env::args().skip(1).collect::<Vec<_>>();
     let target = select_target(&argv).unwrap_or_else(|error| panic!("{error}"));
+    exit_once_for_config_denial(&argv).unwrap_or_else(|error| panic!("{error}"));
     let mut effective_argv = argv.clone();
     let mut test_sync_session = None;
     if let Ok(log_path) = env::var("GIT_AI_TEST_SYNC_START_LOG") {

@@ -4,23 +4,11 @@
 //! parser while retaining a single Git process for an arbitrary batch.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use crate::clients::git_cli::exec_git_stdin;
 use crate::error::GitAiError;
+use crate::operations::git::config_access_retry::with_config_access_retry;
 use crate::operations::git::repository::Repository;
-
-// Git for Windows can briefly deny access to a repository's config while a
-// concurrent Git process is finishing an update. Keep this retry bounded: a
-// real config or repository error must still reach the caller promptly.
-const CONFIG_ACCESS_RETRY_DELAYS: &[Duration] = &[
-    Duration::from_millis(25),
-    Duration::from_millis(50),
-    Duration::from_millis(100),
-    Duration::from_millis(200),
-    Duration::from_millis(400),
-    Duration::from_millis(800),
-];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Controls how malformed or missing records from Git's batch protocol are handled.
@@ -53,7 +41,10 @@ pub(crate) fn batch_read_blob_contents_with_policy(
     args.push("--batch".to_string());
 
     let stdin_data = blob_oids.join("\n") + "\n";
-    let output = exec_cat_file(&args, stdin_data.as_bytes())?;
+    let output = with_config_access_retry(
+        || exec_git_stdin(&args, stdin_data.as_bytes()),
+        std::thread::sleep,
+    )?;
     let results = parse_batch_output_with_policy(&output.stdout, policy)?;
     if policy == BatchReadPolicy::Strict {
         for oid in blob_oids {
@@ -66,45 +57,6 @@ pub(crate) fn batch_read_blob_contents_with_policy(
         }
     }
     Ok(results)
-}
-
-fn exec_cat_file(args: &[String], stdin_data: &[u8]) -> Result<std::process::Output, GitAiError> {
-    with_config_access_retry(|| exec_git_stdin(args, stdin_data))
-}
-
-fn with_config_access_retry<T>(
-    mut operation: impl FnMut() -> Result<T, GitAiError>,
-) -> Result<T, GitAiError> {
-    for (attempt, delay) in CONFIG_ACCESS_RETRY_DELAYS.iter().enumerate() {
-        match operation() {
-            Ok(output) => return Ok(output),
-            Err(error) if attempt + 1 < CONFIG_ACCESS_RETRY_DELAYS.len() => {
-                if is_transient_config_access_error(&error) {
-                    std::thread::sleep(*delay);
-                    continue;
-                }
-                return Err(error);
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    // The retry table is non-empty by construction, but keep this branch
-    // explicit so a future change cannot turn an exhausted retry into a
-    // successful empty read.
-    unreachable!("cat-file retry table must contain at least one delay")
-}
-
-fn is_transient_config_access_error(error: &GitAiError) -> bool {
-    matches!(
-        error,
-        GitAiError::GitCliError {
-            code: Some(128),
-            stderr,
-            ..
-        } if stderr.contains("unable to access '.git/config': Permission denied")
-            && stderr.contains("unknown error occurred while reading the configuration files")
-    )
 }
 
 #[cfg(test)]
@@ -212,14 +164,6 @@ fn parse_batch_output_with_policy(
 mod tests {
     use super::*;
     use crate::operations::git::test_utils::TmpRepo;
-
-    fn transient_config_access_error() -> GitAiError {
-        GitAiError::GitCliError {
-            code: Some(128),
-            stderr: "warning: unable to access '.git/config': Permission denied\nfatal: unknown error occurred while reading the configuration files".to_string(),
-            args: vec!["git".to_string(), "cat-file".to_string(), "--batch".to_string()],
-        }
-    }
 
     #[test]
     fn parses_empty_output() {
@@ -427,44 +371,5 @@ mod tests {
 
         assert_eq!(result.get(&oid), Some(&"hello\n".to_string()));
         assert!(!result.contains_key(&missing_oid));
-    }
-
-    #[test]
-    fn identifies_transient_config_access_error() {
-        assert!(is_transient_config_access_error(
-            &transient_config_access_error()
-        ));
-    }
-
-    #[test]
-    fn does_not_retry_unrelated_git_cli_errors() {
-        let error = GitAiError::GitCliError {
-            code: Some(128),
-            stderr: "fatal: not a git repository".to_string(),
-            args: vec![
-                "git".to_string(),
-                "cat-file".to_string(),
-                "--batch".to_string(),
-            ],
-        };
-
-        assert!(!is_transient_config_access_error(&error));
-    }
-
-    #[test]
-    fn retries_transient_config_access_before_success() {
-        let mut attempts = 0;
-
-        let result = with_config_access_retry(|| {
-            attempts += 1;
-            if attempts < 3 {
-                Err(transient_config_access_error())
-            } else {
-                Ok(())
-            }
-        });
-
-        assert!(result.is_ok());
-        assert_eq!(attempts, 3);
     }
 }

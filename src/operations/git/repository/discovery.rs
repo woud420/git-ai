@@ -9,6 +9,7 @@ use super::discovery_no_exec::{
 use crate::clients::git_cli::{exec_git, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::operations::git::cat_file::batch_read_blob_contents;
+use crate::operations::git::config_access_retry::with_config_access_retry;
 use crate::operations::git::repo_storage::RepoStorage;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -29,7 +30,8 @@ pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError>
     rev_parse_args.push("--git-dir".to_string());
     rev_parse_args.push("--git-common-dir".to_string());
 
-    let rev_parse_output = exec_git(&rev_parse_args)?;
+    let rev_parse_output =
+        with_config_access_retry(|| exec_git(&rev_parse_args), std::thread::sleep)?;
     let rev_parse_stdout = String::from_utf8(rev_parse_output.stdout)?;
     let mut lines = rev_parse_stdout
         .lines()
@@ -80,7 +82,7 @@ pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError>
         let mut top_level_args = global_args.to_owned();
         top_level_args.push("rev-parse".to_string());
         top_level_args.push("--show-toplevel".to_string());
-        let output = exec_git(&top_level_args)?;
+        let output = with_config_access_retry(|| exec_git(&top_level_args), std::thread::sleep)?;
         PathBuf::from(String::from_utf8(output.stdout)?.trim())
     };
 

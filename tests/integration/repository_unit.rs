@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo, real_git_executable};
 use crate::test_utils::run_git_stdout;
 use std::sync::OnceLock;
 
@@ -191,6 +191,49 @@ fn resolve_command_base_dir_applies_chained_c_arguments() {
 
     let resolved = resolve_command_base_dir(&args).expect("resolve base dir");
     assert_eq!(resolved, base.join("nested").join("..").join("repo"));
+}
+
+#[rstest::rstest]
+#[case::metadata("--git-common-dir")]
+#[case::top_level("--show-toplevel")]
+fn find_repository_retries_transient_config_denial(#[case] denied_arg: &str) {
+    let mut repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    repo.commit_untracked_file("README.md", "# test", "initial");
+
+    let shim_binary = env!("CARGO_BIN_EXE_git-ai-test-git-shim");
+    let shim_path = repo.test_home_path().join(if cfg!(windows) {
+        "config-denial-git-shim.exe"
+    } else {
+        "config-denial-git-shim"
+    });
+    fs::copy(shim_binary, &shim_path).expect("config denial Git shim should be copied");
+    repo.patch_git_ai_config(|patch| {
+        patch.git_path = Some(shim_path.to_string_lossy().into_owned());
+    });
+
+    let marker_path = repo.test_home_path().join("config-denial.marker");
+    let marker = marker_path.to_string_lossy();
+    let real_git = real_git_executable();
+    let output = repo
+        .git_ai_with_env_without_pre_sync_for_test(
+            &["status", "--json"],
+            &[
+                ("GIT_AI_TEST_GIT_SHIM_TARGET", real_git),
+                ("GIT_AI_TEST_GIT_SHIM_FALLBACK_TARGET", real_git),
+                ("GIT_AI_TEST_GIT_SHIM_CONFIG_DENIAL_ARG", denied_arg),
+                ("GIT_AI_TEST_GIT_SHIM_CONFIG_DENIAL_MARKER", marker.as_ref()),
+            ],
+        )
+        .expect("repository discovery should retry a transient config denial");
+
+    let status: serde_json::Value =
+        serde_json::from_str(&crate::test_utils::extract_json_object(&output))
+            .expect("status should return JSON");
+    assert!(status.get("stats").is_some(), "status should include stats");
+    assert!(
+        marker_path.is_file(),
+        "shim should inject the selected config denial"
+    );
 }
 
 #[test]

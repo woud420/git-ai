@@ -718,6 +718,33 @@ fn test_hashmap_conversion_stability() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn child_writer_blocks_exec() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let binary = repo.path().join("busy-git-ai");
+    fs::copy(get_binary_path(), &binary).unwrap();
+
+    let writer = fs::OpenOptions::new().write(true).open(&binary).unwrap();
+    let mut holder = Command::new("cat")
+        .stdin(std::process::Stdio::piped())
+        .stdout(writer)
+        .spawn()
+        .expect("start child holding executable open for writing");
+
+    let result = Command::new(&binary).arg("--version").output();
+    drop(holder.stdin.take());
+    let holder_status = holder.wait().expect("wait for writer child");
+
+    assert!(holder_status.success());
+    assert_eq!(
+        result
+            .expect_err("Linux should reject an executable held open for writing")
+            .kind(),
+        std::io::ErrorKind::ExecutableFileBusy
+    );
+}
+
+#[test]
 fn plain_install_hooks_preserves_the_invoking_user_home() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let invoking_home = repo.test_home_path();
@@ -729,6 +756,22 @@ fn plain_install_hooks_preserves_the_invoking_user_home() {
     let installed_binary = installed_bin_dir.join("git-ai.exe");
     #[cfg(not(windows))]
     let installed_binary = installed_bin_dir.join("git-ai");
+    #[cfg(target_os = "linux")]
+    {
+        // Keep the destination writer out of this multithreaded process so sibling spawns cannot inherit it.
+        let copy = Command::new("cp")
+            .arg("-p")
+            .arg(get_binary_path())
+            .arg(&installed_binary)
+            .output()
+            .expect("copy git-ai binary");
+        assert!(
+            copy.status.success(),
+            "copy git-ai binary failed: {}",
+            String::from_utf8_lossy(&copy.stderr)
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
     fs::copy(get_binary_path(), &installed_binary).unwrap();
 
     let test_db = repo.path().join("install-hooks.db");

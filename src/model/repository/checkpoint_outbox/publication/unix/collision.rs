@@ -111,7 +111,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn secure_record(root: &Path, name: &str, bytes: &[u8]) -> SecureRoot {
-        let secure_root = SecureRoot::open(root).unwrap();
+        let mut secure_root = SecureRoot::open(root).unwrap();
         secure_root.try_lock().unwrap();
         let path = root.join(name);
         fs::write(&path, bytes).unwrap();

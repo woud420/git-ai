@@ -340,12 +340,15 @@ Add an optional `delivery_id` to the persisted checkpoint format. Before
 appending a checkpoint, application checks the already-read working log for the
 same ID.
 
-That check is not crash-safe with the current truncate/write/flush working-log
-rewrite. Before enabling replay, checkpoint-list publication must use a
-same-directory temporary file, file `fsync`, atomic rename, and directory
-`fsync`. Then the crash cases are deterministic: either the old list remains
-and the ready record retries, or the new list durably contains the delivery ID
-and replay deduplicates it.
+The checkpoint journal makes that check crash-safe without rewriting the full
+list for every delivery. It first syncs each referenced content-addressed blob,
+then appends and syncs a checksummed record containing the delivery ID. An
+incomplete trailing record is discarded during recovery, while a complete
+record with a bad checksum fails closed. Compaction and other full-list
+mutations still publish a synced same-directory temporary file with a durable
+atomic replacement. The crash cases are deterministic: either no valid record
+exists and the ready record retries, or the journal contains the delivery ID
+and replay deduplicates it after its referenced blobs are durable.
 
 The processing contract is therefore:
 
@@ -533,7 +536,8 @@ supported shared-identity/shared-path recovery contract exists.
 - Add the daemon worker, host-side allowlist validation, completion receipts,
   capture-time replay, and delivery-ID checkpoint deduplication.
 - Route imports through the family sequencer.
-- Harden working-log publication with atomic rename and durability syncs.
+- Harden working-log publication with blob-first durability, checksummed
+  append records, and durable atomic replacement for full-list rewrites.
 - Add bounded startup scanning and the worker's in-memory pending-family index.
 
 ### P3: late-commit reconciliation

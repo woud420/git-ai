@@ -191,10 +191,14 @@ fn execute_resolved_checkpoint(
     // the working log was fully applied before — drop the duplicate before
     // doing any file-state work.
     if let Some(delivery_id) = checkpoint_request.delivery_id.as_deref()
-        && checkpoints
+        && let Some(applied_checkpoint) = checkpoints
             .iter()
-            .any(|cp| cp.delivery_id.as_deref() == Some(delivery_id))
+            .find(|cp| cp.delivery_id.as_deref() == Some(delivery_id))
     {
+        // A prior append may have reached the page cache before returning an
+        // fsync error. Make that complete, checksummed record durable before
+        // an outbox replay treats the delivery as safely applied.
+        working_log.ensure_checkpoint_record_durable(applied_checkpoint)?;
         tracing::debug!(delivery_id, "skipping already-applied checkpoint delivery");
         return Ok((0, resolved.files.len(), checkpoints.len()));
     }
@@ -315,7 +319,7 @@ fn execute_resolved_checkpoint(
         let append_start = Instant::now();
         // Reuses the checkpoint collection materialized above instead of
         // re-reading the working log, and moves the checkpoint in.
-        working_log.append_checkpoint_to(&mut checkpoints, checkpoint)?;
+        working_log.append_checkpoint_record_to(&mut checkpoints, checkpoint)?;
         tracing::debug!(
             "[BENCHMARK] Appending checkpoint to working log took {:?}",
             append_start.elapsed()

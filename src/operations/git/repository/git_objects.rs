@@ -7,6 +7,8 @@ use super::commits::Commit;
 use super::core::Repository;
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
+use crate::operations::git::oid::is_full_oid;
+use std::fs;
 use std::path::Path;
 
 pub struct TreeEntry<'a> {
@@ -149,12 +151,44 @@ pub struct Reference<'a> {
     pub(super) ref_name: String,
 }
 
+fn shorthand_ref_name(ref_name: &str) -> Option<&str> {
+    if ref_name == "HEAD" {
+        Some("HEAD")
+    } else if let Some(name) = ref_name.strip_prefix("refs/heads/") {
+        Some(name)
+    } else {
+        ref_name.strip_prefix("refs/remotes/")
+    }
+}
+
+fn has_resolved_loose_ref(git_common_dir: &Path, git_dir: &Path, ref_name: &str) -> bool {
+    [git_common_dir, git_dir].into_iter().any(|base| {
+        fs::read_to_string(base.join(ref_name))
+            .ok()
+            .is_some_and(|contents| is_full_oid(contents.trim()))
+    })
+}
+
 impl<'a> Reference<'a> {
     pub fn name(&self) -> Option<&str> {
         Some(&self.ref_name)
     }
 
     pub fn shorthand(&self) -> Result<String, GitAiError> {
+        if let Some(name) = shorthand_ref_name(&self.ref_name) {
+            if self.ref_name == "HEAD" {
+                return Ok(name.to_string());
+            }
+
+            if has_resolved_loose_ref(
+                &self.repo.git_common_dir,
+                &self.repo.git_dir,
+                &self.ref_name,
+            ) {
+                return Ok(name.to_string());
+            }
+        }
+
         let mut args = self.repo.global_args_for_exec();
         args.push("rev-parse".to_string());
         args.push("--abbrev-ref".to_string());
@@ -222,5 +256,49 @@ impl<'a> Iterator for References<'a> {
             repo: self.repo,
             ref_name,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_resolved_loose_ref, shorthand_ref_name};
+    use std::fs;
+
+    #[test]
+    fn shorthand_ref_name_handles_head_and_standard_symbolic_refs() {
+        assert_eq!(shorthand_ref_name("HEAD"), Some("HEAD"));
+        assert_eq!(shorthand_ref_name("refs/heads/feature"), Some("feature"));
+        assert_eq!(
+            shorthand_ref_name("refs/remotes/origin/main"),
+            Some("origin/main")
+        );
+        assert_eq!(shorthand_ref_name("refs/tags/v1.0.0"), None);
+    }
+
+    #[test]
+    fn loose_ref_check_does_not_accept_a_packed_only_ref() {
+        let git_dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(git_dir.path().join("refs/heads")).unwrap();
+        fs::write(
+            git_dir.path().join("packed-refs"),
+            "0123456789abcdef0123456789abcdef01234567 refs/heads/main\n",
+        )
+        .unwrap();
+
+        assert!(!has_resolved_loose_ref(
+            git_dir.path(),
+            git_dir.path(),
+            "refs/heads/main"
+        ));
+        fs::write(
+            git_dir.path().join("refs/heads/main"),
+            "0123456789abcdef0123456789abcdef01234567\n",
+        )
+        .unwrap();
+        assert!(has_resolved_loose_ref(
+            git_dir.path(),
+            git_dir.path(),
+            "refs/heads/main"
+        ));
     }
 }

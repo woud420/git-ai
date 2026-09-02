@@ -1,15 +1,16 @@
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
-use crate::model::authorship_log_serialization::generate_short_hash;
-use crate::model::working_log::{CHECKPOINT_API_VERSION, Checkpoint, CheckpointKind};
+use crate::model::repository::error::PersistenceError;
+use crate::model::working_log::{Checkpoint, CheckpointKind};
 use crate::operations::git::path_format::normalize_to_posix;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+mod checkpoint_journal;
 
 pub use crate::model::working_log::InitialAttributions;
 
@@ -17,6 +18,16 @@ pub const MAX_CHECKPOINTS_JSONL_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[cfg(feature = "test-support")]
 const TEST_CHECKPOINTS_JSONL_MAX_BYTES_ENV: &str = "GIT_AI_TEST_CHECKPOINTS_JSONL_MAX_BYTES";
+
+fn persistence_error(kind: std::io::ErrorKind, message: String) -> PersistenceError {
+    PersistenceError::Io {
+        // Preserve the externally observed text while moving to the layered error type.
+        operation: "Generic error",
+        path: String::new(),
+        kind,
+        message,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RepoStorage {
@@ -55,13 +66,9 @@ impl RepoStorage {
 
     #[doc(hidden)]
     pub fn ensure_config_directory(&self) -> Result<(), GitAiError> {
-        fs::create_dir_all(&self.ai_dir)?;
-
-        // Create working_logs directory
-        fs::create_dir_all(&self.working_logs)?;
-
-        // Create logs directory for Sentry events
-        fs::create_dir_all(&self.logs)?;
+        create_directory_durably(&self.ai_dir)?;
+        create_directory_durably(&self.working_logs)?;
+        create_directory_durably(&self.logs)?;
 
         Ok(())
     }
@@ -77,7 +84,7 @@ impl RepoStorage {
         sha: &str,
     ) -> Result<PersistedWorkingLog, GitAiError> {
         let working_log_dir = self.working_logs.join(sha);
-        fs::create_dir_all(&working_log_dir)?;
+        create_directory_durably(&working_log_dir)?;
         let canonical_workdir =
             crate::operations::git::canonicalize::canonicalize_or_self(&self.repo_workdir);
         Ok(PersistedWorkingLog::new(
@@ -253,6 +260,17 @@ fn copy_dir_contents(src: &Path, dst: &Path) -> Result<(), GitAiError> {
     Ok(())
 }
 
+fn create_directory_durably(path: &Path) -> Result<(), GitAiError> {
+    #[cfg(unix)]
+    let created = !path.exists();
+    fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    if created && let Some(parent) = path.parent() {
+        fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
 pub(crate) fn persist_file_version_to_blob_dir(
     blobs_dir: &Path,
     content: &str,
@@ -261,8 +279,15 @@ pub(crate) fn persist_file_version_to_blob_dir(
     hasher.update(content.as_bytes());
     let sha = format!("{:x}", hasher.finalize());
 
-    fs::create_dir_all(blobs_dir)?;
-    fs::write(blobs_dir.join(&sha), content.as_bytes())?;
+    create_directory_durably(blobs_dir)?;
+    let blob_path = blobs_dir.join(&sha);
+    match fs::read(&blob_path) {
+        Ok(existing) if existing == content.as_bytes() => return Ok(sha),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    fs::write(blob_path, content.as_bytes())?;
 
     Ok(sha)
 }
@@ -414,15 +439,19 @@ impl PersistedWorkingLog {
             return Ok(content.clone());
         }
 
-        Err(GitAiError::Generic(format!(
-            "read_current_file_content: file '{}' not found in dirty_files snapshot (filesystem fallback is not allowed in checkpoint flow)",
-            file_path
-        )))
+        Err(persistence_error(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "read_current_file_content: file '{}' not found in dirty_files snapshot (filesystem fallback is not allowed in checkpoint flow)",
+                file_path
+            ),
+        )
+        .into())
     }
 
     /* append checkpoint */
     pub fn append_checkpoint(&self, checkpoint: &Checkpoint) -> Result<(), GitAiError> {
-        let mut checkpoints = self.read_all_checkpoints().unwrap_or_default();
+        let mut checkpoints = self.read_all_checkpoints()?;
         self.append_checkpoint_to(&mut checkpoints, checkpoint.clone())
     }
 
@@ -444,6 +473,59 @@ impl PersistedWorkingLog {
         self.write_all_checkpoints(checkpoints)
     }
 
+    /// Append one checksummed checkpoint index record. The daemon uses this
+    /// after materializing the collection once so ordinary checkpoints do not
+    /// rewrite the entire journal.
+    pub(crate) fn append_checkpoint_record_to(
+        &self,
+        checkpoints: &mut Vec<Checkpoint>,
+        checkpoint: Checkpoint,
+    ) -> Result<(), GitAiError> {
+        self.append_checkpoint_record_with_compaction_interval(
+            checkpoints,
+            checkpoint,
+            checkpoint_journal::COMPACTION_INTERVAL,
+        )
+    }
+
+    #[cfg(feature = "test-support")]
+    pub fn append_checkpoint_record_with_compaction_interval_for_test(
+        &self,
+        checkpoints: &mut Vec<Checkpoint>,
+        checkpoint: Checkpoint,
+        compaction_interval: usize,
+    ) -> Result<(), GitAiError> {
+        self.append_checkpoint_record_with_compaction_interval(
+            checkpoints,
+            checkpoint,
+            compaction_interval,
+        )
+    }
+
+    fn append_checkpoint_record_with_compaction_interval(
+        &self,
+        checkpoints: &mut Vec<Checkpoint>,
+        mut checkpoint: Checkpoint,
+        compaction_interval: usize,
+    ) -> Result<(), GitAiError> {
+        checkpoint.mark_journal_record_version(checkpoint_journal::JOURNAL_RECORD_VERSION);
+        checkpoints.push(checkpoint);
+        self.prune_old_char_attributions(checkpoints);
+
+        if compaction_interval > 0 && checkpoints.len().is_multiple_of(compaction_interval) {
+            return self.write_all_checkpoints(checkpoints);
+        }
+
+        checkpoint_journal::append(self, checkpoints)
+    }
+
+    pub(crate) fn ensure_checkpoint_record_durable(
+        &self,
+        checkpoint: &Checkpoint,
+    ) -> Result<(), GitAiError> {
+        checkpoint_journal::ensure_durable(self, checkpoint)
+    }
+
     pub fn read_all_checkpoints(&self) -> Result<Vec<Checkpoint>, GitAiError> {
         self.read_all_checkpoints_with_size_limit(Self::checkpoints_file_size_limit_bytes())
     }
@@ -457,7 +539,7 @@ impl PersistedWorkingLog {
     }
 
     pub fn ensure_checkpoints_file_size_limit(&self) -> Result<(), GitAiError> {
-        self.truncate_oversized_checkpoints_file(Self::checkpoints_file_size_limit_bytes())?;
+        self.read_all_checkpoints()?;
         Ok(())
     }
 
@@ -465,85 +547,7 @@ impl PersistedWorkingLog {
         &self,
         max_bytes: u64,
     ) -> Result<Vec<Checkpoint>, GitAiError> {
-        let checkpoints_file = self.checkpoints_file();
-
-        if !checkpoints_file.exists() {
-            return Ok(Vec::new());
-        }
-
-        if self.truncate_oversized_checkpoints_file(max_bytes)? {
-            return Ok(Vec::new());
-        }
-
-        let input = fs::File::open(&checkpoints_file)?;
-        let mut checkpoints = Vec::new();
-
-        // Parse JSONL file - each line is a separate JSON object
-        for line in BufReader::new(input).lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let checkpoint: Checkpoint = serde_json::from_str(&line)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-            if checkpoint.api_version != CHECKPOINT_API_VERSION {
-                tracing::debug!(
-                    "unsupported checkpoint api version: {} (silently skipping checkpoint)",
-                    checkpoint.api_version
-                );
-                continue;
-            }
-
-            checkpoints.push(checkpoint);
-        }
-
-        // Migrate 7-char prompt hashes to 16-char hashes
-        // Step 1: Build mapping from old 7-char hash to new 16-char hash
-        let mut old_to_new_hash: HashMap<String, String> = HashMap::new();
-
-        for checkpoint in &checkpoints {
-            if let Some(agent_id) = &checkpoint.agent_id {
-                let new_hash = generate_short_hash(&agent_id.id, &agent_id.tool);
-                let old_hash = new_hash[..7].to_string();
-                old_to_new_hash.insert(old_hash, new_hash);
-            }
-        }
-
-        // Step 2: Replace 7-char author_ids in all checkpoints' attributions and line_attributions
-        let mut migrated_checkpoints = Vec::new();
-        for mut checkpoint in checkpoints {
-            for entry in &mut checkpoint.entries {
-                // Replace author_ids in attributions
-                for attr in &mut entry.attributions {
-                    if attr.author_id.len() == 7
-                        && let Some(new_hash) = old_to_new_hash.get(&attr.author_id)
-                    {
-                        attr.author_id = new_hash.clone();
-                    }
-                }
-
-                // Replace author_ids in line_attributions
-                for line_attr in &mut entry.line_attributions {
-                    if line_attr.author_id.len() == 7
-                        && let Some(new_hash) = old_to_new_hash.get(&line_attr.author_id)
-                    {
-                        line_attr.author_id = new_hash.clone();
-                    }
-                    // Also migrate the overrode field if it contains a 7-char hash
-                    if let Some(ref overrode_id) = line_attr.overrode
-                        && overrode_id.len() == 7
-                        && let Some(new_hash) = old_to_new_hash.get(overrode_id)
-                    {
-                        line_attr.overrode = Some(new_hash.clone());
-                    }
-                }
-            }
-            migrated_checkpoints.push(checkpoint);
-        }
-
-        Ok(migrated_checkpoints)
+        checkpoint_journal::read(self, max_bytes)
     }
 
     fn checkpoints_file_size_limit_bytes() -> u64 {
@@ -571,7 +575,7 @@ impl PersistedWorkingLog {
         }
 
         let message = format!(
-            "checkpoints.jsonl exceeded maximum size: {} bytes > {} bytes; deleting and recreating {}",
+            "checkpoints.jsonl exceeded maximum size: {} bytes > {} bytes; resetting {}",
             size_bytes,
             max_bytes,
             checkpoints_file.display()
@@ -581,10 +585,11 @@ impl PersistedWorkingLog {
             path = %checkpoints_file.display(),
             size_bytes,
             max_bytes,
-            "checkpoints.jsonl exceeded maximum size; deleting and recreating empty file"
+            "checkpoints.jsonl exceeded maximum size; atomically publishing empty file"
         );
+        let error: GitAiError = persistence_error(std::io::ErrorKind::InvalidData, message).into();
         crate::observability::log_error(
-            &GitAiError::Generic(message),
+            &error,
             Some(serde_json::json!({
                 "event": "checkpoints_jsonl_oversized_reset",
                 "base_commit": self.base_commit,
@@ -594,12 +599,7 @@ impl PersistedWorkingLog {
             })),
         );
 
-        match fs::remove_file(&checkpoints_file) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-        fs::File::create(&checkpoints_file)?;
+        checkpoint_journal::reset_file_durably(&checkpoints_file)?;
         Ok(true)
     }
 
@@ -642,28 +642,7 @@ impl PersistedWorkingLog {
     /// list, so a torn write could otherwise both lose the recorded id and
     /// let the replay apply the delivery twice.
     pub fn write_all_checkpoints(&self, checkpoints: &[Checkpoint]) -> Result<(), GitAiError> {
-        let checkpoints_file = self.checkpoints_file();
-        let temp_path = checkpoints_file.with_extension("jsonl.tmp");
-        let mut output = BufWriter::new(fs::File::create(&temp_path)?);
-
-        for checkpoint in checkpoints {
-            serde_json::to_writer(&mut output, checkpoint)?;
-            output.write_all(b"\n")?;
-        }
-
-        output.flush()?;
-        output
-            .into_inner()
-            .map_err(|e| e.into_error())?
-            .sync_all()?;
-        fs::rename(&temp_path, &checkpoints_file)?;
-        // Windows cannot fsync a directory handle opened via File::open, and
-        // MoveFileEx already writes through; the durability gap is unix-only.
-        #[cfg(unix)]
-        if let Some(dir) = checkpoints_file.parent() {
-            fs::File::open(dir)?.sync_all()?;
-        }
-        Ok(())
+        checkpoint_journal::rewrite(self, checkpoints)
     }
 
     pub fn mutate_all_checkpoints<F>(&self, mutator: F) -> Result<Vec<Checkpoint>, GitAiError>
@@ -695,10 +674,10 @@ impl PersistedWorkingLog {
             let content = self
                 .stored_initial_file_content_from(&initial, file_path)
                 .ok_or_else(|| {
-                    GitAiError::Generic(format!(
-                        "INITIAL missing persisted file snapshot for {}",
-                        file_path
-                    ))
+                    persistence_error(
+                        std::io::ErrorKind::NotFound,
+                        format!("INITIAL missing persisted file snapshot for {}", file_path),
+                    )
                 })?;
             snapshot.insert(file_path.clone(), content);
         }
@@ -751,10 +730,10 @@ impl PersistedWorkingLog {
         let mut file_blobs = HashMap::new();
         for file_path in filtered.keys() {
             let content = file_contents.get(file_path).ok_or_else(|| {
-                GitAiError::Generic(format!(
-                    "INITIAL missing file content snapshot for {}",
-                    file_path
-                ))
+                persistence_error(
+                    std::io::ErrorKind::NotFound,
+                    format!("INITIAL missing file content snapshot for {}", file_path),
+                )
             })?;
             let blob_sha = self.persist_file_version(content)?;
             file_blobs.insert(file_path.clone(), blob_sha);
@@ -810,10 +789,11 @@ impl PersistedWorkingLog {
             return Ok(Some(content));
         }
         if initial.files.contains_key(file_path) {
-            return Err(GitAiError::Generic(format!(
-                "INITIAL missing persisted file snapshot for {}",
-                file_path
-            )));
+            return Err(persistence_error(
+                std::io::ErrorKind::NotFound,
+                format!("INITIAL missing persisted file snapshot for {}", file_path),
+            )
+            .into());
         }
         Ok(None)
     }

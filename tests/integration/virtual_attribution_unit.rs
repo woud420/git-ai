@@ -307,19 +307,22 @@ fn working_log_loaders_preserve_missing_initial_snapshot_policy() {
 fn snapshot_loader_swallows_missing_checkpoint_blob_but_persisted_loader_fails() {
     let (_repo, repository, base_commit, working_log) = working_log_fixture();
     let file_path = "missing-checkpoint-blob.rs";
-    working_log
-        .append_checkpoint(&Checkpoint::new(
-            CheckpointKind::AiAgent,
-            String::new(),
-            "fixture-agent".to_string(),
-            vec![WorkingLogEntry::new(
-                file_path.to_string(),
-                "missing-blob".to_string(),
-                Vec::new(),
-                line_attributions("fixture-agent"),
-            )],
-        ))
-        .unwrap();
+    let checkpoint = Checkpoint::new(
+        CheckpointKind::AiAgent,
+        String::new(),
+        "fixture-agent".to_string(),
+        vec![WorkingLogEntry::new(
+            file_path.to_string(),
+            "missing-blob".to_string(),
+            Vec::new(),
+            line_attributions("fixture-agent"),
+        )],
+    );
+    fs::write(
+        working_log.checkpoints_file(),
+        format!("{}\n", serde_json::to_string(&checkpoint).unwrap()),
+    )
+    .unwrap();
 
     let captured = VirtualAttributions::from_working_log_snapshot(
         repository.clone(),
@@ -345,6 +348,7 @@ fn snapshot_loader_swallows_missing_checkpoint_blob_but_persisted_loader_fails()
 fn persisted_loader_skips_empty_entries_before_reading_their_blob() {
     let (_repo, repository, base_commit, working_log) = working_log_fixture();
     let file_path = "empty-entry.rs";
+    let blob_sha = working_log.persist_file_version("unused\n").unwrap();
     working_log
         .append_checkpoint(&Checkpoint::new(
             CheckpointKind::Human,
@@ -352,7 +356,7 @@ fn persisted_loader_skips_empty_entries_before_reading_their_blob() {
             "fixture-human".to_string(),
             vec![WorkingLogEntry::new(
                 file_path.to_string(),
-                "missing-blob".to_string(),
+                blob_sha,
                 Vec::new(),
                 Vec::new(),
             )],

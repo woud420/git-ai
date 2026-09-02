@@ -2,8 +2,9 @@
 """Compare scoped checkpoint latency without conflating acknowledgement contracts.
 
 The candidate and baseline run as release binaries against isolated, matched Git
-fixtures. Each pair is alternated AB/BA. The command-return lane is recorded but
-not compared because the two snapshots acknowledge different durability states.
+fixtures. Each pair is alternated AB/BA. The default profile records but does not
+compare unlike command-return lanes; the fork-before-after profile compares the
+shared live-application acknowledgement boundary.
 """
 
 from __future__ import annotations
@@ -27,15 +28,24 @@ sys.path.insert(0, str(GIT_BENCHMARK_DIR))
 from benchmark_common import resolve_real_git_binary  # noqa: E402
 
 from scoped_checkpoint_contract import (
+    COMPARISON_PROFILES,
+    DEFAULT_COMPARISON_PROFILE,
     canonical_digest,
     file_set_digest,
+    resolve_comparison_profile,
     sha256_file,
 )
 from scoped_checkpoint_runner import run_scenario
 
 
-SCHEMA = "git-ai-scoped-checkpoint-comparison/1.0.0"
+SCHEMA = "git-ai-scoped-checkpoint-comparison/1.3.0"
 MIN_DECISION_SAMPLES = 20
+QUALIFIED_SAMPLES = 30
+QUALIFIED_WARMUPS = 5
+QUALIFIED_RESOURCE_SAMPLES = 20
+QUALIFIED_PREFILL_DEPTHS = {0, 50, 200}
+QUALIFIED_BOOTSTRAP_RESAMPLES = 10_000
+QUALIFIED_BOOTSTRAP_SEED = 364
 DEFAULT_BASELINE_REF = "6fbc1ef0f4d40232315efc1b907e7ff5526dbea7"
 
 
@@ -67,6 +77,17 @@ def source_metadata(
         "dirty_status": status.splitlines(),
         "cargo_lock_sha256": sha256_file(source_dir / "Cargo.lock"),
     }
+
+
+def assert_source_metadata_unchanged(
+    name: str, expected: dict[str, Any], observed: dict[str, Any]
+) -> None:
+    keys = ("commit", "dirty", "dirty_status", "cargo_lock_sha256")
+    mismatches = [key for key in keys if expected.get(key) != observed.get(key)]
+    if mismatches:
+        raise RuntimeError(
+            f"{name} source changed during the run: {', '.join(mismatches)}"
+        )
 
 
 def binary_metadata(binary: Path) -> dict[str, Any]:
@@ -200,9 +221,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-source", required=True, type=Path)
     parser.add_argument("--baseline-source", required=True, type=Path)
     parser.add_argument("--baseline-ref", default=DEFAULT_BASELINE_REF)
+    parser.add_argument(
+        "--comparison-profile",
+        choices=sorted(COMPARISON_PROFILES),
+        default=DEFAULT_COMPARISON_PROFILE,
+        help=(
+            "acknowledgement contract pairing; the default preserves the "
+            "fork-vs-upstream comparison"
+        ),
+    )
     parser.add_argument("--samples", type=int, default=30)
     parser.add_argument("--warmups", type=int, default=5)
-    parser.add_argument("--resource-samples", type=int, default=10)
+    parser.add_argument("--resource-samples", type=int, default=20)
     parser.add_argument("--prefill-depths", type=parse_depths, default=[0])
     parser.add_argument("--bootstrap-resamples", type=int, default=10_000)
     parser.add_argument("--bootstrap-seed", type=int, default=364)
@@ -231,6 +261,54 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def protocol_for_profile(comparison_profile: str) -> dict[str, Any]:
+    profile = resolve_comparison_profile(comparison_profile)
+    return {
+        "comparison_profile": comparison_profile,
+        "command_ack": profile["command_ack"],
+        "command_ack_comparability": (
+            "comparable_same_contract"
+            if profile["command_ack_comparable"]
+            else "not_comparable_different_contracts"
+        ),
+        "family_sync_fence": "process start through sync.family response",
+        "material_observed": (
+            "family sync followed by an exact unique index record and exact blob "
+            "content observation; includes harness read/parse time"
+        ),
+        "candidate_ack_contract_id": profile["candidate_ack_contract_id"],
+        "baseline_ack_contract_id": profile["baseline_ack_contract_id"],
+        "candidate_ack_contract": profile["candidate_ack_contract"],
+        "baseline_ack_contract": profile["baseline_ack_contract"],
+        "pairing": "alternating AB/BA",
+        "clock": "time.perf_counter_ns",
+        "bootstrap": "paired index resampling with fixed seed",
+        "checkpoint_storage": {
+            "scope": (
+                "logical bytes of working_logs/*/checkpoints.jsonl and "
+                "working_logs/*/blobs/*"
+            ),
+            "measurement_phase": "after_daemon_shutdown",
+            "timing_effect": "outside latency and process-resource samples",
+        },
+    }
+
+
+def protocol_for_run(args: argparse.Namespace) -> dict[str, Any]:
+    protocol = protocol_for_profile(args.comparison_profile)
+    protocol["measurement"] = {
+        "samples": args.samples,
+        "warmups": args.warmups,
+        "resource_samples": args.resource_samples,
+        "prefill_depths": args.prefill_depths,
+        "bootstrap_resamples": args.bootstrap_resamples,
+        "bootstrap_seed": args.bootstrap_seed,
+        "debug_stages": args.debug_stages,
+        "per_depth_seed": "bootstrap_seed + prefill_depth",
+    }
+    return protocol
+
+
 def verify_baseline_ref(
     source_dir: Path, expected_ref: str, actual_commit: str, git_binary: str
 ) -> str:
@@ -253,6 +331,33 @@ def harness_files(script_path: Path) -> list[Path]:
     ]
 
 
+def has_qualified_measurement_protocol(args: argparse.Namespace) -> bool:
+    return (
+        args.samples == QUALIFIED_SAMPLES
+        and args.warmups == QUALIFIED_WARMUPS
+        and args.resource_samples == QUALIFIED_RESOURCE_SAMPLES
+        and args.prefill_depths == sorted(QUALIFIED_PREFILL_DEPTHS)
+        and args.bootstrap_resamples == QUALIFIED_BOOTSTRAP_RESAMPLES
+        and args.bootstrap_seed == QUALIFIED_BOOTSTRAP_SEED
+    )
+
+
+def has_qualified_resource_evidence(
+    scenarios: list[dict[str, Any]], expected_samples: int
+) -> bool:
+    client_keys = ("instructions_retired", "max_rss_bytes")
+    daemon_keys = ("user_seconds", "sys_seconds", "max_rss_bytes")
+    for scenario in scenarios:
+        for variant in scenario.get("variants", {}).values():
+            client = variant.get("client_resources", {})
+            daemon = variant.get("daemon_resources", {})
+            if any(client.get(key, {}).get("count") != expected_samples for key in client_keys):
+                return False
+            if any(not isinstance(daemon.get(key), (int, float)) for key in daemon_keys):
+                return False
+    return bool(scenarios)
+
+
 def build_result(
     *,
     args: argparse.Namespace,
@@ -264,6 +369,10 @@ def build_result(
     scenarios: list[dict[str, Any]],
     environment: dict[str, Any],
 ) -> dict[str, Any]:
+    comparison_profile = getattr(
+        args, "comparison_profile", DEFAULT_COMPARISON_PROFILE
+    )
+    protocol = protocol_for_run(args)
     fixture_contract = {
         "schema": "git-ai-scoped-checkpoint-fixture/1.0.0",
         "repo": "one commit on main with sample.txt and distractor.txt",
@@ -283,13 +392,15 @@ def build_result(
         "fixture_digest": canonical_digest(fixture_contract),
         "config_digest": canonical_digest(normalized_config),
         "environment_digest": canonical_digest(environment),
+        "protocol_digest": canonical_digest(protocol),
     }
     return {
         "schema": SCHEMA,
         "created_at": datetime.now(UTC).isoformat(),
         "qualification": (
             "decision_evidence"
-            if args.samples >= MIN_DECISION_SAMPLES
+            if has_qualified_measurement_protocol(args)
+            and has_qualified_resource_evidence(scenarios, args.resource_samples)
             and not args.allow_dirty_sources
             and not args.debug_stages
             and all(
@@ -302,22 +413,7 @@ def build_result(
             )
             else "smoke_or_diagnostic_non_decision"
         ),
-        "protocol": {
-            "command_ack": "process start to CLI return; recorded, not compared",
-            "family_sync_fence": "process start through sync.family response",
-            "material_observed": (
-                "family sync followed by an exact unique index record and exact blob "
-                "content observation; includes harness read/parse time"
-            ),
-            "candidate_ack_contract": (
-                "side effect completion plus atomic fsynced checkpoint-index publication, "
-                "or durable outbox publication; referenced blob fsync is unverified"
-            ),
-            "baseline_ack_contract": "bounded in-memory receipt before processing",
-            "pairing": "alternating AB/BA",
-            "clock": "time.perf_counter_ns",
-            "bootstrap": "paired index resampling with fixed seed",
-        },
+        "protocol": protocol,
         "parameters": {
             "samples": args.samples,
             "warmups": args.warmups,
@@ -327,6 +423,7 @@ def build_result(
             "bootstrap_seed": args.bootstrap_seed,
             "debug_stages": args.debug_stages,
             "baseline_ref": args.baseline_ref,
+            "comparison_profile": comparison_profile,
         },
         "run_contract_identity": run_contract_identity,
         "fixture_contract": fixture_contract,
@@ -415,9 +512,21 @@ def main() -> int:
                 debug_stages=args.debug_stages,
                 bootstrap_resamples=args.bootstrap_resamples,
                 bootstrap_seed=args.bootstrap_seed + depth,
+                comparison_profile=args.comparison_profile,
             )
             for depth in args.prefill_depths
         ]
+        for name, source_dir in (
+            ("candidate", args.candidate_source),
+            ("baseline", args.baseline_source),
+        ):
+            observed = source_metadata(
+                source_dir,
+                allow_dirty=args.allow_dirty_sources,
+                git_binary=git_binary,
+            )
+            assert_source_metadata_unchanged(name, source[name], observed)
+            source[name]["verified_unchanged_after_run"] = True
         result = build_result(
             args=args,
             script_path=script_path,

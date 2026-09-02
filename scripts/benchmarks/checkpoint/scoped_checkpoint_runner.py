@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from scoped_checkpoint_contract import (
+    DEFAULT_COMPARISON_PROFILE,
     canonical_digest,
     comparison_status,
+    durability_comparisons,
     find_materialized_checkpoint,
     pair_order,
     parse_daemon_stage_metrics,
@@ -87,6 +89,27 @@ def isolated_environment(root: Path) -> dict[str, str]:
 
 def fixed_content(phase: str, index: int) -> bytes:
     return hashlib.sha256(f"{phase}:{index}".encode("utf-8")).hexdigest().encode() + b"\n"
+
+
+def checkpoint_storage_state(working_logs: Path) -> dict[str, int]:
+    journals = [
+        path
+        for path in sorted(working_logs.glob("*/checkpoints.jsonl"))
+        if path.is_file()
+    ]
+    blobs = [
+        path
+        for path in sorted(working_logs.glob("*/blobs/*"))
+        if path.is_file()
+    ]
+    journal_bytes = sum(path.stat().st_size for path in journals)
+    blob_bytes = sum(path.stat().st_size for path in blobs)
+    return {
+        "checkpoint_journal_bytes": journal_bytes,
+        "blob_count": len(blobs),
+        "blob_bytes": blob_bytes,
+        "total_checkpoint_bytes": journal_bytes + blob_bytes,
+    }
 
 
 def fixture_git_ai_config(repo: Path, git_binary: str) -> dict[str, Any]:
@@ -404,6 +427,34 @@ def summarize_variant_samples(
     return output
 
 
+def summarize_scenario_lane(
+    candidate: list[float],
+    baseline: list[float],
+    *,
+    lane: str,
+    fixture_identity_check: dict[str, Any],
+    bootstrap_resamples: int,
+    bootstrap_seed: int,
+    comparison_profile: str = DEFAULT_COMPARISON_PROFILE,
+) -> dict[str, Any]:
+    if fixture_identity_check["status"] != "comparable":
+        return {
+            "candidate": summarize_values(candidate),
+            "baseline": summarize_values(baseline),
+            "comparison_status": "not_comparable",
+            "reason": "fixture identity mismatch; rebaseline required",
+            "mismatches": fixture_identity_check["mismatches"],
+        }
+    return summarize_cross_variant_lane(
+        candidate,
+        baseline,
+        lane=lane,
+        bootstrap_resamples=bootstrap_resamples,
+        bootstrap_seed=bootstrap_seed,
+        comparison_profile=comparison_profile,
+    )
+
+
 def run_scenario(
     *,
     scenario_root: Path,
@@ -417,6 +468,7 @@ def run_scenario(
     debug_stages: bool,
     bootstrap_resamples: int,
     bootstrap_seed: int,
+    comparison_profile: str = DEFAULT_COMPARISON_PROFILE,
 ) -> dict[str, Any]:
     socket_root = create_short_socket_root()
     runners = {
@@ -489,6 +541,9 @@ def run_scenario(
         variants[label] = summarize_variant_samples(collected[label], resources[label])
         variants[label]["daemon_resources"] = runner.daemon_resources
         variants[label]["daemon_stages"] = stage_snapshots.get(label, {})
+        variants[label]["checkpoint_storage"] = checkpoint_storage_state(
+            runner.repo / ".git" / "ai" / "working_logs"
+        )
 
     candidate_ack = [sample["ack_ms"] for sample in collected["candidate"]]
     baseline_ack = [sample["ack_ms"] for sample in collected["baseline"]]
@@ -498,22 +553,24 @@ def run_scenario(
     baseline_material = [
         sample["family_sync_fence_ms"] for sample in collected["baseline"]
     ]
-    if fixture_identity_check["status"] == "comparable":
-        material_comparison = summarize_cross_variant_lane(
-            candidate_material,
-            baseline_material,
-            lane="family_sync_fence",
-            bootstrap_resamples=bootstrap_resamples,
-            bootstrap_seed=bootstrap_seed,
-        )
-    else:
-        material_comparison = {
-            "candidate": summarize_values(candidate_material),
-            "baseline": summarize_values(baseline_material),
-            "comparison_status": "not_comparable",
-            "reason": "fixture identity mismatch; rebaseline required",
-            "mismatches": fixture_identity_check["mismatches"],
-        }
+    material_comparison = summarize_scenario_lane(
+        candidate_material,
+        baseline_material,
+        lane="family_sync_fence",
+        fixture_identity_check=fixture_identity_check,
+        bootstrap_resamples=bootstrap_resamples,
+        bootstrap_seed=bootstrap_seed,
+        comparison_profile=comparison_profile,
+    )
+    ack_comparison = summarize_scenario_lane(
+        candidate_ack,
+        baseline_ack,
+        lane="command_ack",
+        fixture_identity_check=fixture_identity_check,
+        bootstrap_resamples=bootstrap_resamples,
+        bootstrap_seed=bootstrap_seed,
+        comparison_profile=comparison_profile,
+    )
     return {
         "prefill_depth": prefill_depth,
         "warmups": warmups,
@@ -533,33 +590,8 @@ def run_scenario(
         "fixture_identity_check": fixture_identity_check,
         "variants": variants,
         "comparisons": {
-            "command_ack_ms": summarize_cross_variant_lane(
-                candidate_ack,
-                baseline_ack,
-                lane="command_ack",
-                bootstrap_resamples=bootstrap_resamples,
-                bootstrap_seed=bootstrap_seed,
-            ),
+            "command_ack_ms": ack_comparison,
             "family_sync_fence_ms": material_comparison,
-            "native_checkpoint_index_durability": {
-                "comparison_status": "not_comparable",
-                "candidate": "command_ack_ms",
-                "baseline": "unavailable",
-                "reason": (
-                    "candidate atomically replaces and fsyncs the checkpoint index and parent "
-                    "directory before acknowledgement; baseline only acknowledges receipt and "
-                    "later flushes a buffered writer"
-                ),
-            },
-            "full_checkpoint_crash_durability": {
-                "comparison_status": "not_comparable",
-                "candidate": "unverified",
-                "baseline": "unavailable",
-                "reason": (
-                    "the candidate writes referenced blobs without an explicit file or blob-"
-                    "directory fsync, so a live ACK is not evidence of whole-checkpoint crash "
-                    "durability"
-                ),
-            },
+            **durability_comparisons(comparison_profile),
         },
     }

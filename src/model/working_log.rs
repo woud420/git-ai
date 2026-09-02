@@ -161,6 +161,8 @@ pub struct Checkpoint {
     /// before appending so a delivery is never applied twice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_id: Option<String>,
+    #[serde(skip)]
+    journal_record_version: Option<u64>,
 }
 
 impl Checkpoint {
@@ -186,7 +188,16 @@ impl Checkpoint {
             known_human_metadata: None,
             trace_id: None,
             delivery_id: None,
+            journal_record_version: None,
         }
+    }
+
+    pub(crate) fn mark_journal_record_version(&mut self, version: u64) {
+        self.journal_record_version = Some(version);
+    }
+
+    pub(crate) fn has_journal_record_version(&self) -> bool {
+        self.journal_record_version.is_some()
     }
 }
 

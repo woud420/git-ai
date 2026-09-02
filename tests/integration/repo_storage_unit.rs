@@ -122,6 +122,26 @@ fn test_persisted_working_log_blob_storage() {
 }
 
 #[test]
+fn test_persisted_working_log_reuses_an_existing_valid_blob_without_rewriting() {
+    let repo = TestRepo::new();
+    let working_log = storage_for(&repo)
+        .working_log_for_base_commit("test-commit-sha")
+        .unwrap();
+    let content = "already durable";
+    let sha = working_log.persist_file_version(content).unwrap();
+    let blob_path = working_log.dir.join("blobs").join(&sha);
+    let original_mtime = filetime::FileTime::from_unix_time(1, 0);
+    filetime::set_file_mtime(&blob_path, original_mtime).unwrap();
+
+    assert_eq!(working_log.persist_file_version(content).unwrap(), sha);
+
+    let observed_mtime =
+        filetime::FileTime::from_last_modification_time(&fs::metadata(&blob_path).unwrap());
+    assert_eq!(observed_mtime, original_mtime);
+    assert_eq!(fs::read(blob_path).unwrap(), content.as_bytes());
+}
+
+#[test]
 fn test_persisted_working_log_blob_storage_preserves_io_error() {
     let repo = TestRepo::new();
     let repo_storage = storage_for(&repo);
@@ -334,6 +354,30 @@ fn test_oversized_checkpoints_file_is_truncated_before_read() {
     );
 }
 
+#[test]
+fn append_checkpoint_preserves_a_corrupt_journal_and_returns_the_error() {
+    let repo = TestRepo::new();
+    let working_log = storage_for(&repo)
+        .working_log_for_base_commit("corrupt-journal")
+        .unwrap();
+    let path = working_log.checkpoints_file();
+    let corrupt = b"{\"_git_ai_record_version\":1,\"_git_ai_record_checksum\":\"bad\"}\n";
+    fs::write(&path, corrupt).unwrap();
+    let checkpoint = Checkpoint::new(
+        CheckpointKind::Human,
+        "diff".to_string(),
+        "author".to_string(),
+        Vec::new(),
+    );
+
+    let error = working_log
+        .append_checkpoint(&checkpoint)
+        .expect_err("an unreadable journal must fail closed");
+
+    assert!(error.to_string().contains("checksum"), "{error}");
+    assert_eq!(fs::read(path).unwrap(), corrupt);
+}
+
 // ---------------------------------------------------------------------------
 // 6. test_persisted_working_log_reset
 // ---------------------------------------------------------------------------
@@ -508,10 +552,12 @@ fn test_write_initial_with_contents_rejects_missing_snapshot() {
         .expect_err("missing content snapshot must be rejected");
 
     assert!(
-        error
-            .to_string()
-            .contains("INITIAL missing file content snapshot for src/test.rs"),
-        "unexpected error: {error}"
+        matches!(error, GitAiError::Persistence(_)),
+        "expected structured persistence error, got {error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Generic error: INITIAL missing file content snapshot for src/test.rs"
     );
 }
 

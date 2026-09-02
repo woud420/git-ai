@@ -1,7 +1,7 @@
 # State Ownership
 
 Every mutable state owner, its serialization model, and the definitive answer
-to "what is ordered through the per-family actor flow". Verified 2026-07-21.
+to "what is ordered through the per-family actor flow". Verified 2026-09-02.
 
 ## The serialization verdict
 
@@ -25,6 +25,9 @@ not attribution decisions):**
   SQLite WAL + the Mutex make each store internally consistent; ordering
   across stores is not guaranteed and not required.
 - Telemetry buffers and upload dispatch (`telemetry_worker.rs` statics).
+- Checkpoint-journal verification stamps (`checkpoint_journal.rs`) — a bounded
+  process-lifetime cache used only to avoid repeating legacy blob durability
+  fences; every versioned journal record is still checksum-validated on read.
 
 **Single-process CLI paths (no daemon ordering, no concurrency within an
 invocation):** config file writes (`git-ai config`), `notes migrate`,
@@ -54,12 +57,17 @@ never-overwrite-local upserts resolve the priority (`notes_db.rs`).
 | `LAST_METRICS_UPLOAD_STARTED_AT` | `clients/api/metrics.rs:15` | OnceLock<Mutex> | 500ms upload rate limit, resets on restart |
 | `DAEMON_PROCESS_ACTIVE` | `operations/daemon/daemon_config.rs:43` | AtomicBool | process-lifetime flag |
 | Git alias cache | `operations/daemon/git_backend.rs:56` | per-family map, 60s stale-while-revalidate | re-resolved on expiry |
+| `VERIFIED_JOURNALS` | `operations/git/repo_storage/checkpoint_journal.rs:34` | OnceLock<Mutex>, bounded to 1,024 paths | process-lifetime hint; restart forces legacy blob verification again |
 
 ## Lock landscape
 
-No site holds multiple lock kinds simultaneously: OAuth refresh (std Mutex),
-config (OnceLock), each DB (std Mutex around its connection; SQLite
-transactions nest inside), daemon coordination (tokio AsyncMutex for the
-normalizer + per-family async exec-locks + std Mutex for the sequencer map).
-File locks: `utils::LockFile` for installer/upgrade exclusivity only. Keep it
-this way — new cross-lock interactions require documentation here first.
+OAuth refresh (std Mutex), config (OnceLock), each DB (std Mutex around its
+connection; SQLite transactions nest inside), and daemon coordination (tokio
+AsyncMutex for the normalizer + per-family async exec-locks + std Mutex for the
+sequencer map) retain their existing ownership boundaries. File locks use
+`model::repository::lock_file::LockFile` for daemon ownership and
+per-working-log checkpoint-journal publication. Journal publication may
+briefly touch the `VERIFIED_JOURNALS` Mutex while holding its file lock; the
+ordering is always file lock then cache Mutex, no reverse acquisition exists,
+and cache loss only causes legacy blob durability to be reverified. New
+cross-lock interactions require documentation here first.

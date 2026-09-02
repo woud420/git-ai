@@ -875,6 +875,15 @@ fn test_mixed_working_log_old_and_new_checkpoints_produce_both_prompts_and_sessi
             }
         }
 
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_version");
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_checksum");
+
         modified_lines
             .push(serde_json::to_string(&checkpoint).expect("serialize modified checkpoint"));
     }
@@ -1242,6 +1251,14 @@ fn test_stash_pop_mixed_format_working_log() {
                 }
             }
         }
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_version");
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_checksum");
         modified_lines.push(serde_json::to_string(&checkpoint).expect("serialize"));
     }
     fs::write(&checkpoints_file, modified_lines.join("\n") + "\n").expect("write");

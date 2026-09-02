@@ -20,18 +20,15 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
   - changing user-visible authorship data model in this first pass.
 
 ## Primary Hotspots (Code)
-- `/Users/svarlamov/projects/git-ai/src/git/repo_storage.rs`
-  - `append_checkpoint` (line ~320): full read + full rewrite pattern.
-  - `read_all_checkpoints` (line ~377): full-file read into memory.
-  - `write_all_checkpoints` (line ~486): complete rewrite of all checkpoints.
-- `/Users/svarlamov/projects/git-ai/src/commands/checkpoint.rs`
-  - `get_all_tracked_files` (line ~577): repeated checkpoint reads.
-  - `get_checkpoint_entry_for_file` (line ~779): per-file scans/clones of checkpoint history.
-  - `get_checkpoint_entries` (line ~987): clones checkpoint vector for async tasks.
-- `/Users/svarlamov/projects/git-ai/src/commands/checkpoint_agent/agent_presets.rs`
-  - `transcript_and_model_from_claude_code_jsonl` (line ~147): full transcript load.
-  - `transcript_and_model_from_codex_rollout_jsonl` (line ~825): full load plus staged `Vec<Value>`.
-  - `transcript_and_model_from_droid_jsonl` (line ~1852): full transcript load.
+- `src/operations/git/repo_storage.rs` and
+  `src/operations/git/repo_storage/checkpoint_journal.rs`
+  - journal reads still materialize checkpoint history;
+  - full-list mutations and periodic compaction still rewrite the collection.
+- `src/operations/daemon/checkpoint.rs`
+  - checkpoint history is indexed once per command and shared across per-file
+    tasks; remaining work scales with the current changed-file set.
+- `src/operations/commands/checkpoint_agent/presets/`
+  - transcript parsers remain the owners of agent-specific JSONL loading.
 
 ## Phase 0: Immediate Safety Rails (1-2 days)
 ### Objectives
@@ -55,6 +52,12 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
 - Commands complete with degraded metadata rather than crash/hang.
 
 ## Phase 1: Low-Risk Memory/Time Wins (2-4 days)
+### Status (2026-09-02)
+Implemented for the checkpoint path. A command reads history once, builds the
+latest per-file state map once, and shares immutable maps with its per-file
+tasks. Transcript-specific clone pressure remains tracked with its parsers; the
+original phase-wide percentage targets have not been requalified here.
+
 ### Objectives
 - Remove duplicate work and large unnecessary clones.
 
@@ -74,6 +77,11 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
 - Wall-clock down by >=25% on checkpoint-heavy scenario.
 
 ## Phase 2: Streaming Parsers (3-5 days)
+### Status (2026-09-02)
+Partially complete. Checkpoint JSONL is read with a buffered line reader, though
+the resulting checkpoint collection is still materialized for attribution.
+Transcript streaming is not claimed complete by this plan update.
+
 ### Objectives
 - Eliminate full-file materialization for JSONL-heavy inputs.
 
@@ -92,6 +100,13 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
 - No correctness regressions in existing transcript-related tests.
 
 ## Phase 3: Storage Write-Path Refactor (4-7 days)
+### Status (2026-09-02)
+Partially complete. The default write path now durably publishes blobs before
+appending a checksummed index record, so ordinary checkpoints no longer rewrite
+the full journal. Synchronous compaction still occurs every 256 records, and
+the read path still materializes history; a compact hot index and background
+compaction remain future work.
+
 ### Objectives
 - Remove full rewrite behavior as history grows.
 
@@ -111,7 +126,7 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
 
 ## Testing And Validation Plan
 ### Repro harness
-- Use `/Users/svarlamov/projects/git-ai/scripts/repro_runaway_memory.py`.
+- Use `scripts/repro_runaway_memory.py`.
 - Keep two scenario suites:
   - `checkpoints`
   - `claude`
@@ -126,7 +141,11 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
 - Add non-blocking perf job first (collect baseline over several runs).
 - Promote to blocking after variance window is understood.
 
-## Rollout Strategy
+## Original Rollout Proposal
+This sequence records the original proposal. The phase status notes above are
+the current implementation record: checkpoint Phase 1 and parts of Phases 2
+and 3 now run by default rather than behind feature flags.
+
 1. Ship Phase 0 with conservative caps and warnings.
 2. Monitor:
    - cap-hit rate
@@ -136,11 +155,12 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
 4. Enable by default after stable canary period.
 5. Ship Phase 3 last, with migration-safe fallback.
 
-## Rollback Plan
-- All major behavior changes behind flags/config toggles.
-- On regression:
-  - disable new parser/storage mode.
-  - keep safety rails enabled.
+## Current Rollback Plan (2026-09-02)
+- Transcript changes may continue to use their own flags where present.
+- The checkpoint journal is not feature-flagged. Roll it back with a code
+  revert and release; its versioned records retain the flat `Checkpoint` JSON
+  shape so the legacy reader can ignore journal metadata.
+- Keep the checkpoint byte cap and other safety rails enabled.
 
 ## Risks And Mitigations
 1. Risk: metadata truncation surprises users.
@@ -156,7 +176,8 @@ Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy
 3. Build per-file latest-entry index and replace repeated scans.
 4. Convert Claude/Codex/Droid JSONL parsing to buffered streaming readers.
 5. Add repro-driven benchmark test script to CI.
-6. Implement append+compact storage mode with migration and fallback.
+6. Complete the append+compact storage work with a bounded read-side index and
+   off-acknowledgement compaction.
 
 ## Exit Criteria
 - Repro harness can no longer produce runaway growth at previously failing inputs.

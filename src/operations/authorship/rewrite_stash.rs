@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 use crate::clients::git_cli::{disable_internal_git_hooks, exec_git_allow_nonzero_with_env};
@@ -8,7 +7,8 @@ use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::imara_diff_utils::{DiffOp, capture_diff_slices};
-use crate::model::working_log::{Checkpoint, CheckpointKind, InitialAttributions};
+use crate::model::repository::error::PersistenceError;
+use crate::model::working_log::{CheckpointKind, InitialAttributions};
 use crate::operations::git::repo_storage::PersistedWorkingLog;
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 
@@ -292,25 +292,10 @@ fn write_path_filtered_checkpoints(
     filtered_log: &PersistedWorkingLog,
     pathspecs: &[String],
 ) -> Result<(), GitAiError> {
-    let source_checkpoints = source_log.dir.join("checkpoints.jsonl");
-    let filtered_checkpoints = filtered_log.dir.join("checkpoints.jsonl");
-    source_log.ensure_checkpoints_file_size_limit()?;
-    if !source_checkpoints.exists() {
-        return filtered_log.write_all_checkpoints(&[]);
-    }
-
-    fs::create_dir_all(&filtered_log.dir)?;
-    let input = fs::File::open(source_checkpoints)?;
-    let mut output = BufWriter::new(fs::File::create(filtered_checkpoints)?);
     let mut copied_blobs = HashSet::new();
+    let mut filtered_checkpoints = Vec::new();
 
-    for line in BufReader::new(input).lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let mut checkpoint: Checkpoint = serde_json::from_str(&line)?;
+    for mut checkpoint in source_log.read_all_checkpoints()? {
         checkpoint
             .entries
             .retain(|entry| path_matches_any(&entry.file, pathspecs));
@@ -322,13 +307,10 @@ fn write_path_filtered_checkpoints(
         for entry in &checkpoint.entries {
             copy_blob_sha(source_log, filtered_log, &entry.blob_sha, &mut copied_blobs)?;
         }
-
-        serde_json::to_writer(&mut output, &checkpoint)?;
-        output.write_all(b"\n")?;
+        filtered_checkpoints.push(checkpoint);
     }
 
-    output.flush()?;
-    Ok(())
+    filtered_log.write_all_checkpoints(&filtered_checkpoints)
 }
 
 fn copy_blob_sha(
@@ -341,10 +323,15 @@ fn copy_blob_sha(
         return Ok(());
     }
 
-    let source = source_log.dir.join("blobs").join(blob_sha);
-    let target_blobs = target_log.dir.join("blobs");
-    fs::create_dir_all(&target_blobs)?;
-    fs::copy(source, target_blobs.join(blob_sha))?;
+    let content = source_log.get_file_version(blob_sha)?;
+    let copied_sha = target_log.persist_file_version(&content)?;
+    if copied_sha != blob_sha {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("checkpoint blob hash mismatch for {blob_sha}"),
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -603,12 +590,14 @@ fn merge_initial_replacing_paths_with_contents(
 
     let mut file_blobs = HashMap::new();
     for file_path in files.keys() {
-        let content = file_contents.get(file_path).ok_or_else(|| {
-            GitAiError::Generic(format!(
-                "stash restore missing file content snapshot for {}",
-                file_path
-            ))
-        })?;
+        let content = file_contents
+            .get(file_path)
+            .ok_or_else(|| PersistenceError::Io {
+                operation: "Generic error",
+                path: String::new(),
+                kind: std::io::ErrorKind::NotFound,
+                message: format!("stash restore missing file content snapshot for {file_path}"),
+            })?;
         let blob_sha = working_log.persist_file_version(content)?;
         file_blobs.insert(file_path.clone(), blob_sha);
     }
@@ -735,79 +724,4 @@ fn run_isolated_git(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_path_matches_any_exact() {
-        let specs = vec!["src/main.rs".to_string()];
-        assert!(path_matches_any("src/main.rs", &specs));
-        assert!(!path_matches_any("src/lib.rs", &specs));
-    }
-
-    #[test]
-    fn test_path_matches_any_directory_prefix() {
-        let specs = vec!["src/".to_string()];
-        assert!(path_matches_any("src/main.rs", &specs));
-        assert!(path_matches_any("src/lib.rs", &specs));
-        assert!(!path_matches_any("tests/main.rs", &specs));
-    }
-
-    #[test]
-    fn test_path_matches_any_directory_without_slash() {
-        let specs = vec!["src".to_string()];
-        assert!(path_matches_any("src/main.rs", &specs));
-        assert!(!path_matches_any("src2/main.rs", &specs));
-    }
-
-    #[test]
-    fn test_path_matches_any_trailing_slash_normalized() {
-        let specs = vec!["dir/".to_string()];
-        assert!(path_matches_any("dir", &specs));
-        assert!(path_matches_any("dir/file.txt", &specs));
-    }
-
-    #[test]
-    fn test_path_matches_any_empty_specs() {
-        let specs: Vec<String> = vec![];
-        assert!(!path_matches_any("anything", &specs));
-    }
-
-    #[test]
-    fn test_path_matches_any_trailing_glob() {
-        // Regression (#5): the pre-rewrite matcher honored a trailing `*`
-        // prefix-glob; path_matches_any dropped it, so `git stash push --
-        // 'src/foo*'` no longer matched src/foobar.txt.
-        let specs = vec!["src/foo*".to_string()];
-        assert!(path_matches_any("src/foobar.txt", &specs));
-        assert!(path_matches_any("src/foo.rs", &specs));
-        assert!(!path_matches_any("src/bar.rs", &specs));
-        // A bare `*` matches anything.
-        assert!(path_matches_any("anything/at/all.txt", &["*".to_string()]));
-    }
-
-    #[test]
-    fn test_stash_metadata_serialization_roundtrip() {
-        let metadata = StashMetadata {
-            base_commit: "abc123def456".to_string(),
-            timestamp: 1700000000,
-            pathspecs: vec!["src/".to_string(), "Cargo.toml".to_string()],
-        };
-
-        let json = serde_json::to_string_pretty(&metadata).unwrap();
-        let deserialized: StashMetadata = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(deserialized.base_commit, "abc123def456");
-        assert_eq!(deserialized.timestamp, 1700000000);
-        assert_eq!(deserialized.pathspecs.len(), 2);
-        assert_eq!(deserialized.pathspecs[0], "src/");
-        assert_eq!(deserialized.pathspecs[1], "Cargo.toml");
-    }
-
-    #[test]
-    fn test_stash_metadata_empty_pathspecs_default() {
-        let json = r#"{"base_commit":"abc123","timestamp":100}"#;
-        let metadata: StashMetadata = serde_json::from_str(json).unwrap();
-        assert!(metadata.pathspecs.is_empty());
-    }
-}
+mod tests;

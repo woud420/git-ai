@@ -533,9 +533,12 @@ fn test_checkpoint_filters_external_paths_from_stored_checkpoints() {
         .working_log_for_base_commit(&base_commit)
         .unwrap();
 
+    let external_blob = working_log
+        .persist_file_version("external fixture\n")
+        .expect("persist external checkpoint fixture");
     let external_entry = WorkingLogEntry::new(
         "/external/path/outside/repo.txt".to_string(),
-        "fake_sha_for_external".to_string(),
+        external_blob,
         vec![],
         vec![],
     );

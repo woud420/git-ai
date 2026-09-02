@@ -1,21 +1,32 @@
 # Checkpoint benchmarks
 
-`benchmark_scoped_checkpoint_vs_ref.py` compares a candidate release binary
-with the pinned upstream reference without treating unlike acknowledgement
-contracts as the same metric.
+`benchmark_scoped_checkpoint_vs_ref.py` compares two release binaries without
+treating unlike acknowledgement contracts as the same metric. Its default
+`fork-vs-upstream-v1` profile compares a candidate with the pinned upstream
+reference.
 
 The harness records two latency lanes:
 
 - `command_ack_ms`: process start through CLI return. This is reported for each
   binary, but the harness suppresses a cross-project ratio because the fork
-  returns after applying the side effect and fsyncing its checkpoint index,
-  while the upstream reference returns after bounded in-memory receipt.
+  returns after applying the side effect, while the upstream reference returns
+  after bounded in-memory receipt. The
+  `fork-before-after-v1` profile compares this lane only when both snapshots use
+  the fork's live-application acknowledgement boundary; crash durability remains
+  a separate correctness guard.
 - `family_sync_fence_ms`: process start through the repository-family
   synchronization response. This is the common product boundary used for the
   paired comparison.
 - `material_observed_ms`: the fence plus exact checkpoint-index and blob-content
   validation. It includes harness parsing time and is reported as an oracle,
   not as the primary product latency.
+
+After both daemons stop, each scenario also records `checkpoint_storage`:
+logical bytes in checkpoint journals, content-addressed blob count and bytes,
+and their total. This snapshot runs outside the latency and process-resource
+samples. The benchmark's fixed 65-byte edits expose depth scaling; the Rust
+journal contract tests separately guard against embedding large source bodies
+in index records.
 
 It creates separate homes, repositories, databases, and daemons under the
 platform temporary directory. Unix socket names use a dedicated short `/tmp`
@@ -40,29 +51,62 @@ python3 scripts/benchmarks/checkpoint/benchmark_scoped_checkpoint_vs_ref.py \
   --baseline-ref 6fbc1ef0f4d40232315efc1b907e7ff5526dbea7 \
   --samples 30 \
   --warmups 5 \
-  --resource-samples 10 \
+  --resource-samples 20 \
   --prefill-depths 0,50,200 \
   --output /private/tmp/scoped-checkpoint-comparison.json
 ```
 
+To measure an ENG-365 checkout against the committed ENG-364 implementation
+under their shared command acknowledgement boundary, select the closed,
+versioned before/after profile and pin the baseline checkout exactly:
+
+```bash
+python3 scripts/benchmarks/checkpoint/benchmark_scoped_checkpoint_vs_ref.py \
+  --comparison-profile fork-before-after-v1 \
+  --candidate-source /path/to/candidate \
+  --baseline-source /path/to/eng-364-baseline \
+  --baseline-ref a864901f9ea088704a8cf1c5d02cebb65c5a28a8 \
+  --samples 30 \
+  --warmups 5 \
+  --resource-samples 20 \
+  --prefill-depths 0,50,200 \
+  --output /path/to/eng-365-before-after.json
+```
+
+The selected profile, both acknowledgement contract IDs, and a digest binding
+the profile plus every measurement parameter are recorded in the result.
+Paired fixtures are checked automatically; consumers comparing separate result
+artifacts must also compare the top-level run-contract digests and rebaseline on
+any mismatch. The before/after profile emits paired ratios, paired
+differences, and bootstrap confidence intervals for both `command_ack_ms` and
+`family_sync_fence_ms`; it does not infer storage or crash durability from those
+latency measurements.
+
 Runs with fewer than 20 samples are rejected unless
 `--allow-small-sample` is supplied; those runs are explicitly marked as
-non-decision evidence. `--debug-stages` enables existing daemon benchmark logs
+non-decision evidence. Decision evidence requires exactly 30 samples, 5
+warmups, 20 successfully parsed resource probes, depths 0/50/200, 10,000
+bootstrap resamples, and bootstrap seed 364. `--debug-stages` enables existing daemon benchmark logs
 and parses materialization/append phases, but also marks the result as
 diagnostic because logging perturbs timing. Source worktrees must be clean
 unless `--allow-dirty-sources` is supplied, which likewise downgrades the run.
 `prefill-depth=0` still measures depths 5-34 with the defaults because warmup
 checkpoints remain in the fixture; the JSON records the exact measured range.
+The depth-200 decision lane ends at checkpoint 255. Run a separate non-decision
+depth-250 diagnostic with five warmups when evaluating an implementation whose
+first measured checkpoint at 256 performs periodic maintenance; report the
+individual boundary sample and maximum rather than folding it into the ordinary
+p50 gate.
 
 For a quick, explicitly non-decision smoke run, supplying both
 `--candidate-bin` and `--baseline-bin` skips the builds. The harness downgrades
 that result because it cannot prove that externally supplied binaries correspond
 to the source and toolchain.
 
-The fork explicitly fsyncs and atomically replaces `checkpoints.jsonl`, but its
-referenced blob write currently has no explicit file or directory fsync. The
-harness validates that the blob exists and has exact content; it does not label
-the full live checkpoint crash-durable.
+The harness validates that each checkpoint index record and referenced blob
+exist with exact content. It does not infer crash durability from latency or
+from live materialization; that claim requires separate storage and recovery
+tests for the exact snapshot under test.
 
 Run the deterministic contract tests with:
 

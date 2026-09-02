@@ -17,7 +17,46 @@ COMMON_IDENTITY_KEYS = (
     "fixture_digest",
     "config_digest",
     "environment_digest",
+    "protocol_digest",
 )
+DEFAULT_COMPARISON_PROFILE = "fork-vs-upstream-v1"
+COMPARISON_PROFILES: dict[str, dict[str, Any]] = {
+    DEFAULT_COMPARISON_PROFILE: {
+        "candidate_ack_contract_id": "fork-live-application/v1",
+        "baseline_ack_contract_id": "upstream-bounded-receipt/v1",
+        "candidate_ack_contract": (
+            "successful live checkpoint application before CLI return; storage and "
+            "crash durability are evaluated by separate correctness evidence"
+        ),
+        "baseline_ack_contract": "bounded in-memory receipt before processing",
+        "command_ack_comparable": False,
+        "command_ack": "process start to CLI return; recorded, not compared",
+        "command_ack_incomparable_reason": (
+            "different acknowledgement contracts: candidate waits for side-effect "
+            "completion; baseline acknowledges bounded in-memory receipt"
+        ),
+    },
+    "fork-before-after-v1": {
+        "candidate_ack_contract_id": "fork-live-application/v1",
+        "baseline_ack_contract_id": "fork-live-application/v1",
+        "candidate_ack_contract": (
+            "successful live checkpoint application before CLI return; crash durability "
+            "is evaluated by separate correctness guards"
+        ),
+        "baseline_ack_contract": (
+            "successful live checkpoint application before CLI return; crash durability "
+            "is evaluated by separate correctness guards"
+        ),
+        "command_ack_comparable": True,
+        "command_ack": (
+            "process start to CLI return; compared under the shared "
+            "fork-live-application/v1 boundary"
+        ),
+        "command_ack_comparability_basis": (
+            "shared fork-live-application/v1 acknowledgement boundary"
+        ),
+    },
+}
 TIME_METRIC_LABELS = {
     "maximum resident set size": "max_rss_bytes",
     "instructions retired": "instructions_retired",
@@ -42,6 +81,16 @@ def canonical_digest(value: Any) -> str:
     return sha256_bytes(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
+
+
+def resolve_comparison_profile(name: str) -> dict[str, Any]:
+    try:
+        return dict(COMPARISON_PROFILES[name])
+    except KeyError as error:
+        choices = ", ".join(sorted(COMPARISON_PROFILES))
+        raise ValueError(
+            f"unknown comparison profile {name!r}; choose from {choices}"
+        ) from error
 
 
 def file_set_digest(paths: list[Path]) -> str:
@@ -160,20 +209,18 @@ def summarize_cross_variant_lane(
     lane: str,
     bootstrap_resamples: int,
     bootstrap_seed: int,
+    comparison_profile: str = DEFAULT_COMPARISON_PROFILE,
 ) -> dict[str, Any]:
+    profile = resolve_comparison_profile(comparison_profile)
     result: dict[str, Any] = {
         "candidate": summarize_values(candidate),
         "baseline": summarize_values(baseline),
     }
-    if lane == "command_ack":
+    if lane == "command_ack" and not profile["command_ack_comparable"]:
         result.update(
             {
                 "comparison_status": "not_comparable",
-                "reason": (
-                    "different acknowledgement contracts: candidate waits for side-effect "
-                    "completion and fsynced checkpoint-index publication; baseline "
-                    "acknowledges bounded in-memory receipt"
-                ),
+                "reason": profile["command_ack_incomparable_reason"],
             }
         )
         return result
@@ -203,7 +250,57 @@ def summarize_cross_variant_lane(
             },
         }
     )
+    if lane == "command_ack":
+        result["comparability_basis"] = profile[
+            "command_ack_comparability_basis"
+        ]
     return result
+
+
+def durability_comparisons(comparison_profile: str) -> dict[str, Any]:
+    if comparison_profile == DEFAULT_COMPARISON_PROFILE:
+        return {
+            "native_checkpoint_index_durability": {
+                "comparison_status": "not_comparable",
+                "candidate": "not_assessed_by_latency_harness",
+                "baseline": "not_assessed_by_latency_harness",
+                "reason": (
+                    "latency does not establish storage-mechanism durability; use each "
+                    "snapshot's correctness evidence"
+                ),
+            },
+            "full_checkpoint_crash_durability": {
+                "comparison_status": "not_comparable",
+                "candidate": "not_assessed_by_latency_harness",
+                "baseline": "not_assessed_by_latency_harness",
+                "reason": (
+                    "the harness validates materialized index and blob content but does "
+                    "not simulate a process or machine crash"
+                ),
+            },
+        }
+
+    resolve_comparison_profile(comparison_profile)
+    return {
+        "native_checkpoint_index_durability": {
+            "comparison_status": "not_comparable",
+            "candidate": "not_assessed_by_latency_harness",
+            "baseline": "not_assessed_by_latency_harness",
+            "reason": (
+                "before/after latency does not establish storage-mechanism durability; "
+                "use the candidate and baseline correctness evidence"
+            ),
+        },
+        "full_checkpoint_crash_durability": {
+            "comparison_status": "not_comparable",
+            "candidate": "not_assessed_by_latency_harness",
+            "baseline": "unverified",
+            "reason": (
+                "the latency harness does not simulate a crash; the ENG-364 baseline's "
+                "referenced blob fsync remains unverified"
+            ),
+        },
+    }
 
 
 def pair_order(index: int) -> tuple[str, str]:

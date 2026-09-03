@@ -69,9 +69,11 @@ cache. Cache checkout always takes the journal file lock before the short-lived
 cache Mutex; publication holds only the file lock, and lease return drops the
 file lock before taking the cache Mutex. Every warm checkout hashes the exact
 file bytes; cold decoding hashes the exact accepted byte stream and compares
-that revision with the final file, while every publication/durable success
-path rechecks the SHA-256 + length revision. The 800 KiB experimental bound is
-a conservative recursive estimate of retained capacities, allocator overhead,
-and alignment rather than a claim about exact resident memory; the independent
-two-entry limit is the second bound. New cross-lock interactions require
-documentation here first.
+that revision with the final file, while every cache-lease publication or
+durable-success path rechecks the SHA-256 + length revision. Legacy uncached
+rewrite helpers retain their file-lock and atomic-replacement contract but are
+not revision-CAS guarded. The 800 KiB experimental bound is a conservative
+recursive estimate of retained capacities, allocator overhead, and alignment
+rather than a claim about exact resident memory; the independent two-entry
+limit is the second bound. New cross-lock interactions require documentation
+here first.

@@ -205,11 +205,7 @@ fn checkpoint_delegate_autostarts_daemon_when_unavailable() {
     .expect("failed to write updated file");
 
     // Shut down any stale daemon, then restart it manually.
-    let _ = send_control_request(
-        &daemon_control_socket_path(&repo),
-        &ControlRequest::Shutdown,
-    );
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    repo.shutdown_dedicated_daemon_for_test();
 
     // Manually restart the daemon (production auto-start is disabled in test builds)
     start_daemon_for_repo(&repo);
@@ -446,11 +442,7 @@ fn checkpoint_fails_hard_when_daemon_startup_is_blocked() {
     )
     .expect("failed to write updated file");
 
-    let _ = send_control_request(
-        &daemon_control_socket_path(&repo),
-        &ControlRequest::Shutdown,
-    );
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    repo.shutdown_dedicated_daemon_for_test();
 
     fs::create_dir_all(
         daemon_lock_path(&repo)

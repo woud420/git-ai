@@ -10,6 +10,7 @@ pub use crate::model::checkpoint_request::PreparedPathRole;
 use crate::model::imara_diff_utils::{
     LineChangeTag, compute_line_changes, content_eq_ignoring_line_endings,
 };
+use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::CheckpointKind;
 use crate::model::working_log::{Checkpoint, WorkingLogEntry};
 use crate::operations::git::repo_storage::{PersistedWorkingLog, persist_file_version_to_blob_dir};
@@ -35,6 +36,16 @@ pub struct FileLineStats {
 struct PreviousFileState {
     blob_sha: String,
     attributions: Vec<Attribution>,
+}
+
+fn checkpoint_error(kind: std::io::ErrorKind, message: String) -> GitAiError {
+    PersistenceError::Io {
+        operation: "Generic error",
+        path: String::new(),
+        kind,
+        message,
+    }
+    .into()
 }
 
 use crate::model::working_log::AgentId;
@@ -166,7 +177,8 @@ fn execute_resolved_checkpoint(
     checkpoint_start: Instant,
 ) -> Result<(usize, usize, usize), GitAiError> {
     if kind.is_ai() && checkpoint_request.agent_id.is_none() {
-        return Err(GitAiError::Generic(
+        return Err(checkpoint_error(
+            std::io::ErrorKind::InvalidData,
             "AI checkpoint is missing agent_id".to_string(),
         ));
     }
@@ -180,7 +192,7 @@ fn execute_resolved_checkpoint(
     }
 
     let read_checkpoints_start = Instant::now();
-    let mut checkpoints = working_log.read_all_checkpoints()?;
+    let mut checkpoints = working_log.load_cached_checkpoint_journal()?;
     tracing::debug!(
         "[BENCHMARK] Reading {} checkpoints took {:?}",
         checkpoints.len(),
@@ -191,10 +203,15 @@ fn execute_resolved_checkpoint(
     // the working log was fully applied before — drop the duplicate before
     // doing any file-state work.
     if let Some(delivery_id) = checkpoint_request.delivery_id.as_deref()
-        && checkpoints
+        && let Some(applied_checkpoint_index) = checkpoints
             .iter()
-            .any(|cp| cp.delivery_id.as_deref() == Some(delivery_id))
+            .position(|cp| cp.delivery_id.as_deref() == Some(delivery_id))
     {
+        // A prior append may have reached the page cache before returning an
+        // fsync error. Make that complete, checksummed record durable before
+        // an outbox replay treats the delivery as safely applied.
+        working_log
+            .ensure_cached_checkpoint_record_durable(&mut checkpoints, applied_checkpoint_index)?;
         tracing::debug!(delivery_id, "skipping already-applied checkpoint delivery");
         return Ok((0, resolved.files.len(), checkpoints.len()));
     }
@@ -315,7 +332,7 @@ fn execute_resolved_checkpoint(
         let append_start = Instant::now();
         // Reuses the checkpoint collection materialized above instead of
         // re-reading the working log, and moves the checkpoint in.
-        working_log.append_checkpoint_to(&mut checkpoints, checkpoint)?;
+        working_log.append_cached_checkpoint_record_to(&mut checkpoints, checkpoint)?;
         tracing::debug!(
             "[BENCHMARK] Appending checkpoint to working log took {:?}",
             append_start.elapsed()
@@ -449,10 +466,13 @@ fn save_current_file_states(
                     None
                 }
                 .ok_or_else(|| {
-                    GitAiError::Generic(format!(
-                        "save_current_file_states: file '{}' not found in dirty_files snapshot (filesystem fallback is not allowed in checkpoint flow)",
-                        file_path
-                    ))
+                    checkpoint_error(
+                        std::io::ErrorKind::NotFound,
+                        format!(
+                            "save_current_file_states: file '{}' not found in dirty_files snapshot (filesystem fallback is not allowed in checkpoint flow)",
+                            file_path
+                        ),
+                    )
                 })?;
 
                 crate::tokio_runtime::spawn_blocking_result(move || {

@@ -75,6 +75,18 @@ pub(super) const MIGRATIONS: &[&str] = &[
 /// Global database singleton
 pub(super) static METRICS_DB: OnceLock<Mutex<MetricsDatabase>> = OnceLock::new();
 
+#[cfg(any(test, feature = "test-support"))]
+pub(super) fn database_path_from_test_overrides(
+    metrics_db_path: Option<PathBuf>,
+    daemon_home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    metrics_db_path.or_else(|| daemon_home.map(default_database_path))
+}
+
+pub(super) fn default_database_path(home: PathBuf) -> PathBuf {
+    home.join(".git-ai").join("internal").join("metrics-db")
+}
+
 impl MetricsDatabase {
     /// How long metric rows are retained for local history/offline retry (365 days).
     pub(super) const METRICS_RETENTION_SECS: u64 = 365 * 24 * 3600;
@@ -143,14 +155,20 @@ impl MetricsDatabase {
 
     /// Get database path: ~/.git-ai/internal/metrics-db
     pub(super) fn database_path() -> Result<PathBuf, GitAiError> {
-        // Allow test override via environment variable
         #[cfg(any(test, feature = "test-support"))]
-        if let Ok(test_path) = std::env::var("GIT_AI_TEST_METRICS_DB_PATH") {
-            return Ok(PathBuf::from(test_path));
+        if let Some(test_path) = database_path_from_test_overrides(
+            std::env::var("GIT_AI_TEST_METRICS_DB_PATH")
+                .ok()
+                .map(PathBuf::from),
+            std::env::var("GIT_AI_DAEMON_HOME").ok().map(PathBuf::from),
+        ) {
+            // Keep the metrics-specific override as the event-recording opt-in;
+            // the daemon-home fallback only isolates otherwise-disabled test storage.
+            return Ok(test_path);
         }
 
         let home = dirs::home_dir().ok_or_else(PersistenceError::home_dir_not_found)?;
-        Ok(home.join(".git-ai").join("internal").join("metrics-db"))
+        Ok(default_database_path(home))
     }
 
     /// Initialize schema and handle migrations

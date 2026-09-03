@@ -294,6 +294,24 @@ fn test_head_on_feature_branch() {
 }
 
 #[test]
+fn test_head_shorthand_on_unborn_branch_preserves_git_error() {
+    let test_repo = TestRepo::new();
+    let repo = find_repository(&[
+        "-C".to_string(),
+        test_repo.path().to_str().unwrap().to_string(),
+    ])
+    .unwrap();
+
+    let error = repo
+        .head()
+        .unwrap()
+        .shorthand()
+        .expect_err("an unborn branch has no resolvable abbreviated ref");
+
+    assert!(error.to_string().contains("rev-parse"), "{error}");
+}
+
+#[test]
 fn test_head_target() {
     let test_repo = TestRepo::new();
 

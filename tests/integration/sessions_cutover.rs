@@ -11,8 +11,21 @@ use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use git_ai::operations::git::notes_api::write_note;
+use git_ai::operations::git::repo_storage::PersistedWorkingLog;
 use serde_json::Value;
 use std::fs;
+
+fn rewrite_checkpoint_journal_as_legacy(working_log: &PersistedWorkingLog) {
+    let content = working_log
+        .read_all_checkpoints()
+        .unwrap()
+        .into_iter()
+        .map(|checkpoint| serde_json::to_string(&checkpoint).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(working_log.checkpoints_file(), content).unwrap();
+}
 
 // Test 1: Old format note can be read and deserializes correctly
 #[test]
@@ -803,6 +816,7 @@ fn test_mixed_working_log_old_and_new_checkpoints_produce_both_prompts_and_sessi
         "checkpoints.jsonl should exist after checkpoint"
     );
 
+    rewrite_checkpoint_journal_as_legacy(&working_log);
     let content = fs::read_to_string(&checkpoints_file).expect("read checkpoints.jsonl");
     let mut modified_lines = Vec::new();
 
@@ -874,6 +888,15 @@ fn test_mixed_working_log_old_and_new_checkpoints_produce_both_prompts_and_sessi
                 }
             }
         }
+
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_version");
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_checksum");
 
         modified_lines
             .push(serde_json::to_string(&checkpoint).expect("serialize modified checkpoint"));
@@ -1180,6 +1203,7 @@ fn test_stash_pop_mixed_format_working_log() {
     let checkpoints_file = working_log.dir.join("checkpoints.jsonl");
     assert!(checkpoints_file.exists(), "checkpoints.jsonl should exist");
 
+    rewrite_checkpoint_journal_as_legacy(&working_log);
     let content = fs::read_to_string(&checkpoints_file).expect("read checkpoints");
     let mut modified_lines = Vec::new();
     for line in content.lines() {
@@ -1242,6 +1266,14 @@ fn test_stash_pop_mixed_format_working_log() {
                 }
             }
         }
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_version");
+        checkpoint
+            .as_object_mut()
+            .expect("checkpoint should be an object")
+            .remove("_git_ai_record_checksum");
         modified_lines.push(serde_json::to_string(&checkpoint).expect("serialize"));
     }
     fs::write(&checkpoints_file, modified_lines.join("\n") + "\n").expect("write");

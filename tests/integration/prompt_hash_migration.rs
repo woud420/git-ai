@@ -1,32 +1,40 @@
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
+use git_ai::model::authorship_log_serialization::generate_short_hash;
+use git_ai::operations::git::repo_storage::PersistedWorkingLog;
+use git_ai::operations::git::repository as GitAiRepository;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
 
-/// Helper function to truncate 16-char prompt hashes to 7 chars in checkpoint files
-fn truncate_checkpoint_hashes(repo: &TestRepo, commit_sha: &str) {
-    let repo_path = repo.path();
-    let checkpoint_file = repo_path
-        .join(".git")
-        .join("ai")
-        .join("working_logs")
-        .join(commit_sha)
-        .join("checkpoints.jsonl");
+fn checkpoint_working_log(repo: &TestRepo, commit_sha: &str) -> PersistedWorkingLog {
+    GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap())
+        .expect("find repository")
+        .storage
+        .working_log_for_base_commit(commit_sha)
+        .unwrap()
+}
+
+fn truncate_checkpoint_hashes(repo: &TestRepo, commit_sha: &str) -> HashSet<String> {
+    let working_log = checkpoint_working_log(repo, commit_sha);
+    let checkpoint_file = working_log.checkpoints_file();
 
     if !checkpoint_file.exists() {
-        return;
+        return HashSet::new();
     }
 
-    let content = fs::read_to_string(&checkpoint_file).expect("Failed to read checkpoint file");
-
+    let mut short_ids = HashSet::new();
     let mut modified_lines = Vec::new();
-    for line in content.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let mut checkpoint: Value =
-            serde_json::from_str(line).expect("Failed to parse checkpoint JSON");
+    for mut checkpoint in working_log
+        .read_all_checkpoints()
+        .expect("Failed to read checkpoints")
+    {
+        let short_id = checkpoint.agent_id.as_ref().map(|agent| {
+            let prompt_id = generate_short_hash(&agent.id, &agent.tool);
+            prompt_id[..7].to_string()
+        });
+        checkpoint.trace_id = None;
+        let mut checkpoint = serde_json::to_value(checkpoint).unwrap();
 
         // Modify entries in the checkpoint
         if let Some(entries) = checkpoint.get_mut("entries").and_then(|e| e.as_array_mut()) {
@@ -38,9 +46,11 @@ fn truncate_checkpoint_hashes(repo: &TestRepo, commit_sha: &str) {
                     for attr in attributions {
                         if let Some(author_id) =
                             attr.get_mut("author_id").and_then(|id| id.as_str())
-                            && author_id.len() == 16
+                            && author_id != "human"
+                            && let Some(short_id) = &short_id
                         {
-                            attr["author_id"] = Value::String(author_id[..7].to_string());
+                            short_ids.insert(short_id.clone());
+                            attr["author_id"] = Value::String(short_id.clone());
                         }
                     }
                 }
@@ -53,16 +63,19 @@ fn truncate_checkpoint_hashes(repo: &TestRepo, commit_sha: &str) {
                     for line_attr in line_attrs {
                         if let Some(author_id) =
                             line_attr.get_mut("author_id").and_then(|id| id.as_str())
-                            && author_id.len() == 16
+                            && author_id != "human"
+                            && let Some(short_id) = &short_id
                         {
-                            line_attr["author_id"] = Value::String(author_id[..7].to_string());
+                            short_ids.insert(short_id.clone());
+                            line_attr["author_id"] = Value::String(short_id.clone());
                         }
-                        // Also truncate overrode field if present
                         if let Some(overrode) =
                             line_attr.get_mut("overrode").and_then(|o| o.as_str())
-                            && overrode.len() == 16
+                            && overrode != "human"
+                            && let Some(short_id) = &short_id
                         {
-                            line_attr["overrode"] = Value::String(overrode[..7].to_string());
+                            short_ids.insert(short_id.clone());
+                            line_attr["overrode"] = Value::String(short_id.clone());
                         }
                     }
                 }
@@ -76,6 +89,28 @@ fn truncate_checkpoint_hashes(repo: &TestRepo, commit_sha: &str) {
     // Write back the modified checkpoints
     let new_content = modified_lines.join("\n") + "\n";
     fs::write(&checkpoint_file, new_content).expect("Failed to write modified checkpoint file");
+    short_ids
+}
+
+fn assert_quoted_short_ids_absent(raw_journal: &str, short_ids: &HashSet<String>) {
+    for short_id in short_ids {
+        assert!(
+            !raw_journal.contains(&format!("\"{short_id}\"")),
+            "raw checkpoint journal still contains short prompt ID {short_id}"
+        );
+    }
+}
+
+#[test]
+fn raw_short_id_assertion_detects_an_injected_id() {
+    let result = std::panic::catch_unwind(|| {
+        assert_quoted_short_ids_absent(
+            r#"{"author_id":"1234567"}"#,
+            &HashSet::from(["1234567".to_string()]),
+        );
+    });
+
+    assert!(result.is_err(), "control must reject a quoted short ID");
 }
 
 /// Verify that all IDs in an authorship log use the correct format.
@@ -123,80 +158,55 @@ fn verify_prompt_ids_are_16_chars(
     }
 }
 
-/// Verify that all AI author_ids in checkpoints are 16 chars long (after migration)
-/// This ensures no 7-char hashes remain after migration
-fn verify_checkpoint_hashes_are_16_chars(repo: &TestRepo, commit_sha: &str) {
-    let repo_path = repo.path();
-    let checkpoint_file = repo_path
-        .join(".git")
-        .join("ai")
-        .join("working_logs")
-        .join(commit_sha)
-        .join("checkpoints.jsonl");
+fn verify_checkpoint_hashes_are_migrated(
+    repo: &TestRepo,
+    commit_sha: &str,
+    injected_short_ids: &HashSet<String>,
+) {
+    let working_log = checkpoint_working_log(repo, commit_sha);
+    let checkpoint_file = working_log.checkpoints_file();
 
     if !checkpoint_file.exists() {
         return;
     }
 
-    let content = fs::read_to_string(&checkpoint_file).expect("Failed to read checkpoint file");
+    let raw_journal = fs::read_to_string(&checkpoint_file).expect("read raw checkpoint journal");
+    assert_quoted_short_ids_absent(&raw_journal, injected_short_ids);
 
-    for line in content.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let checkpoint: Value =
-            serde_json::from_str(line).expect("Failed to parse checkpoint JSON");
-
-        if let Some(entries) = checkpoint.get("entries").and_then(|e| e.as_array()) {
-            for entry in entries {
-                // Check attributions
-                if let Some(attributions) = entry.get("attributions").and_then(|a| a.as_array()) {
-                    for attr in attributions {
-                        if let Some(author_id) = attr.get("author_id").and_then(|id| id.as_str()) {
-                            // Skip "human" - it's not a hash
-                            if author_id != "human" {
-                                assert_eq!(
-                                    author_id.len(),
-                                    16,
-                                    "Author ID '{}' in attributions should be 16 chars long (migration failed), but is {} chars",
-                                    author_id,
-                                    author_id.len()
-                                );
-                            }
-                        }
-                    }
+    for checkpoint in working_log
+        .read_all_checkpoints()
+        .expect("Failed to read checkpoints")
+    {
+        for entry in checkpoint.entries {
+            for attribution in entry.attributions {
+                if attribution.author_id != "human" {
+                    assert!(
+                        matches!(attribution.author_id.len(), 16 | 34),
+                        "Author ID '{}' in attributions should use prompt or session format after migration, but is {} chars",
+                        attribution.author_id,
+                        attribution.author_id.len()
+                    );
                 }
+            }
 
-                // Check line_attributions
-                if let Some(line_attrs) = entry.get("line_attributions").and_then(|a| a.as_array())
+            for attribution in entry.line_attributions {
+                if attribution.author_id != "human" {
+                    assert!(
+                        matches!(attribution.author_id.len(), 16 | 34),
+                        "Author ID '{}' in line_attributions should use prompt or session format after migration, but is {} chars",
+                        attribution.author_id,
+                        attribution.author_id.len()
+                    );
+                }
+                if let Some(overrode) = attribution.overrode
+                    && overrode != "human"
                 {
-                    for line_attr in line_attrs {
-                        if let Some(author_id) =
-                            line_attr.get("author_id").and_then(|id| id.as_str())
-                        {
-                            // Skip "human" - it's not a hash
-                            if author_id != "human" {
-                                assert_eq!(
-                                    author_id.len(),
-                                    16,
-                                    "Author ID '{}' in line_attributions should be 16 chars long (migration failed), but is {} chars",
-                                    author_id,
-                                    author_id.len()
-                                );
-                            }
-                        }
-                        // Check overrode field - after migration, should be 16 chars if present
-                        if let Some(overrode) = line_attr.get("overrode").and_then(|o| o.as_str()) {
-                            assert_eq!(
-                                overrode.len(),
-                                16,
-                                "Overrode ID '{}' should be 16 chars long (migration failed), but is {} chars",
-                                overrode,
-                                overrode.len()
-                            );
-                        }
-                    }
+                    assert!(
+                        matches!(overrode.len(), 16 | 34),
+                        "Overrode ID '{}' should use prompt or session format after migration, but is {} chars",
+                        overrode,
+                        overrode.len()
+                    );
                 }
             }
         }
@@ -221,20 +231,19 @@ fn test_prompt_hash_migration_ai_adds_lines_multiple_commits() {
     let first_commit = repo.stage_all_and_commit("AI adds first batch").unwrap();
     let first_commit_sha = &first_commit.commit_sha;
 
-    // Manually truncate checkpoint hashes to 7 chars
-    truncate_checkpoint_hashes(&repo, first_commit_sha);
+    file.insert_at(4, crate::lines!["ai_line4".ai()]);
 
-    file.insert_at(4, crate::lines!["ai_line4".ai(), "ai_line5".ai(),]);
+    let injected_short_ids = truncate_checkpoint_hashes(&repo, first_commit_sha);
+    assert!(!injected_short_ids.is_empty());
+
+    file.insert_at(5, crate::lines!["ai_line5".ai()]);
+    verify_checkpoint_hashes_are_migrated(&repo, first_commit_sha, &injected_short_ids);
 
     let second_commit = repo.stage_all_and_commit("AI adds second batch").unwrap();
 
     // Verify that all prompt IDs are 16 chars in both commits
     verify_prompt_ids_are_16_chars(&first_commit.authorship_log);
     verify_prompt_ids_are_16_chars(&second_commit.authorship_log);
-
-    // Verify checkpoint files also have 16-char hashes (migration should have happened during second commit)
-    verify_checkpoint_hashes_are_16_chars(&repo, first_commit_sha);
-    verify_checkpoint_hashes_are_16_chars(&repo, &second_commit.commit_sha);
 
     file.assert_lines_and_blame(crate::lines![
         "base_line".human(),
@@ -266,24 +275,19 @@ fn test_prompt_hash_migration_ai_adds_then_commits_in_batches() {
     let first_commit = repo.commit("Add lines 5-7").unwrap();
     let first_commit_sha = &first_commit.commit_sha;
 
-    // Manually truncate checkpoint hashes to 7 chars
-    truncate_checkpoint_hashes(&repo, first_commit_sha);
+    file.insert_at(7, crate::lines!["ai_line8".ai(), "ai_line9".ai()]);
 
-    // AI adds second batch of lines
-    file.insert_at(
-        7,
-        crate::lines!["ai_line8".ai(), "ai_line9".ai(), "ai_line10".ai()],
-    );
+    let injected_short_ids = truncate_checkpoint_hashes(&repo, first_commit_sha);
+    assert!(!injected_short_ids.is_empty());
+
+    file.insert_at(9, crate::lines!["ai_line10".ai()]);
+    verify_checkpoint_hashes_are_migrated(&repo, first_commit_sha, &injected_short_ids);
 
     let second_commit = repo.stage_all_and_commit("Add lines 8-10").unwrap();
 
     // Verify that all prompt IDs are 16 chars in both commits
     verify_prompt_ids_are_16_chars(&first_commit.authorship_log);
     verify_prompt_ids_are_16_chars(&second_commit.authorship_log);
-
-    // Verify checkpoint files also have 16-char hashes (migration should have happened during second commit)
-    verify_checkpoint_hashes_are_16_chars(&repo, first_commit_sha);
-    verify_checkpoint_hashes_are_16_chars(&repo, &second_commit.commit_sha);
 
     file.assert_lines_and_blame(crate::lines![
         "line1".human(),
@@ -320,11 +324,13 @@ fn test_prompt_hash_migration_unstaged_ai_lines_saved_to_working_log() {
     // The commit should only have lines 4-5
     assert_eq!(first_commit.authorship_log.attestations.len(), 1);
 
-    // Manually truncate checkpoint hashes to 7 chars
-    truncate_checkpoint_hashes(&repo, first_commit_sha);
+    file.insert_at(5, crate::lines!["ai_line6".ai()]);
 
-    // AI adds more lines that won't be staged
-    file.insert_at(5, crate::lines!["ai_line6".ai(), "ai_line7".ai()]);
+    let injected_short_ids = truncate_checkpoint_hashes(&repo, first_commit_sha);
+    assert!(!injected_short_ids.is_empty());
+
+    file.insert_at(6, crate::lines!["ai_line7".ai()]);
+    verify_checkpoint_hashes_are_migrated(&repo, first_commit_sha, &injected_short_ids);
 
     // Now stage and commit the remaining lines
     file.stage();
@@ -336,10 +342,6 @@ fn test_prompt_hash_migration_unstaged_ai_lines_saved_to_working_log() {
     // Verify that after migration, all prompt IDs are 16 chars
     verify_prompt_ids_are_16_chars(&first_commit.authorship_log);
     verify_prompt_ids_are_16_chars(&second_commit.authorship_log);
-
-    // Verify checkpoint files also have 16-char hashes (migration should have happened)
-    verify_checkpoint_hashes_are_16_chars(&repo, first_commit_sha);
-    verify_checkpoint_hashes_are_16_chars(&repo, &second_commit.commit_sha);
 
     // Final state should have all AI lines attributed
     file.assert_lines_and_blame(crate::lines![

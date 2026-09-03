@@ -1,8 +1,9 @@
-use super::schema::column_exists;
+use super::schema::{column_exists, database_path_from_test_overrides, default_database_path};
 use super::test_support::*;
 use super::*;
 use crate::model::repository::sqlite::assert_persisted_schema_version;
 use rusqlite::params;
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 #[test]
@@ -295,9 +296,33 @@ fn test_migrates_version_4_to_retryable_only_index() {
 }
 
 #[test]
-fn test_database_path() {
-    let path = MetricsDatabase::database_path().unwrap();
-    assert!(path.to_string_lossy().contains(".git-ai"));
-    assert!(path.to_string_lossy().contains("internal"));
-    assert!(path.to_string_lossy().ends_with("metrics-db"));
+fn test_default_database_path() {
+    let path = default_database_path(PathBuf::from("isolated-home"));
+
+    assert_eq!(
+        path,
+        PathBuf::from("isolated-home")
+            .join(".git-ai")
+            .join("internal")
+            .join("metrics-db")
+    );
+}
+
+#[test]
+fn test_database_path_uses_isolated_daemon_home_fallback() {
+    let daemon_home = PathBuf::from("isolated-test-home");
+
+    let path = database_path_from_test_overrides(None, Some(daemon_home.clone()));
+
+    assert_eq!(path, Some(default_database_path(daemon_home)));
+}
+
+#[test]
+fn test_database_path_prefers_explicit_metrics_database() {
+    let metrics_db_path = PathBuf::from("explicit-metrics-db");
+    let daemon_home = PathBuf::from("isolated-test-home");
+
+    let path = database_path_from_test_overrides(Some(metrics_db_path.clone()), Some(daemon_home));
+
+    assert_eq!(path, Some(metrics_db_path));
 }

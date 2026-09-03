@@ -120,6 +120,21 @@ impl TestRepo {
         self.setup_daemon_mode();
     }
 
+    pub(crate) fn shutdown_dedicated_daemon_for_test(&self) {
+        assert_eq!(
+            self.daemon_scope,
+            DaemonTestScope::Dedicated,
+            "shutdown_dedicated_daemon_for_test requires a dedicated daemon repo"
+        );
+        let daemon = self
+            .daemon_process
+            .as_ref()
+            .expect("test repo should have an active dedicated daemon");
+        daemon.shutdown();
+        #[cfg(windows)]
+        daemon.wait_until_stopped();
+    }
+
     pub(crate) fn restart_dedicated_daemon_for_test(&mut self) {
         self.restart_dedicated_daemon_with_env_for_test(&[]);
     }

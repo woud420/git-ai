@@ -1,6 +1,5 @@
 use crate::error::GitAiError;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 const ALLOWED_PATH_VARIABLES: [&str; 4] = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"];
 
@@ -29,7 +28,7 @@ impl InstallerEnvironment {
                 "{name} must be a non-empty absolute path"
             )));
         }
-        if !is_absolute_user_path(value) {
+        if !is_absolute_user_path(name, value) {
             return Err(GitAiError::Generic(format!(
                 "{name} must be an absolute path"
             )));
@@ -57,8 +56,12 @@ fn invalid_payload() -> GitAiError {
     GitAiError::Generic("invalid --installer-env value; expected NAME=ABSOLUTE_PATH".to_string())
 }
 
-fn is_absolute_user_path(value: &str) -> bool {
-    Path::new(value).is_absolute() || is_windows_absolute_path(value)
+fn is_absolute_user_path(name: &str, value: &str) -> bool {
+    match name {
+        "HOME" => value.starts_with('/'),
+        "USERPROFILE" | "APPDATA" | "LOCALAPPDATA" => is_windows_absolute_path(value),
+        _ => false,
+    }
 }
 
 fn is_windows_absolute_path(value: &str) -> bool {
@@ -104,6 +107,8 @@ mod tests {
         assert!(environment.insert("HOME").is_err());
         assert!(environment.insert("HOME=").is_err());
         assert!(environment.insert("HOME=relative/path").is_err());
+        assert!(environment.insert(r"HOME=C:\Users\alice").is_err());
+        assert!(environment.insert("USERPROFILE=/Users/alice").is_err());
         environment.insert("HOME=/Users/alice").unwrap();
         assert!(environment.insert("HOME=/Users/bob").is_err());
     }

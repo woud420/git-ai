@@ -66,14 +66,14 @@ impl ActorDaemonCoordinator {
                     what: "trace ingress state",
                 })?;
         for root_sid in roots {
-            if let Some(count) = ingress.root_open_connections.get_mut(root_sid) {
-                if *count > 1 {
-                    *count -= 1;
-                    continue;
-                }
-                ingress.root_open_connections.remove(root_sid);
+            if let Some(count) = ingress.root_open_connections.get_mut(root_sid)
+                && *count > 1
+            {
+                *count -= 1;
+                continue;
             }
             if !Self::trace_root_needs_close_marker(&ingress, root_sid) {
+                ingress.root_open_connections.remove(root_sid);
                 Self::clear_trace_ingress_root_locked(&mut ingress, root_sid);
                 continue;
             }

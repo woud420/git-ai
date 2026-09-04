@@ -5,7 +5,8 @@ use crate::operations::commands::daemon_start_policy::{
 use crate::operations::daemon::daemon_log_file_path;
 use crate::operations::daemon::{
     ControlRequest, DaemonConfig, local_socket_connects_with_timeout, read_daemon_pid,
-    remove_stale_daemon_files, send_control_request, send_control_request_with_timeout,
+    remove_stale_daemon_files, send_control_request,
+    send_control_request_fire_and_forget as send_nowait, send_control_request_with_timeout,
 };
 #[cfg(windows)]
 use crate::process_spawn::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
@@ -598,7 +599,7 @@ fn handle_restart(args: &[String]) -> Result<(), String> {
             hard_kill_daemon(&config)?;
         } else {
             // Attempt soft shutdown; escalate to hard kill on timeout.
-            let _ = send_control_request(&config.control_socket_path, &ControlRequest::Shutdown);
+            let _ = send_nowait(&config.control_socket_path, &ControlRequest::Shutdown);
             if !wait_for_daemon_dead(&config, GRACEFUL_SHUTDOWN_TIMEOUT) {
                 eprintln!("graceful shutdown timed out, force-killing daemon");
                 hard_kill_daemon(&config)?;
@@ -727,7 +728,7 @@ pub(crate) fn stop_daemon(config: &DaemonConfig, timeout: Duration) -> Result<()
     if local_socket_connects_with_timeout(&config.control_socket_path, Duration::from_millis(100))
         .is_ok()
     {
-        let _ = send_control_request(&config.control_socket_path, &ControlRequest::Shutdown);
+        let _ = send_nowait(&config.control_socket_path, &ControlRequest::Shutdown);
     }
 
     if wait_for_daemon_dead(config, timeout) {

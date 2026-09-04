@@ -3,7 +3,8 @@ use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
 use crate::operations::daemon::DaemonConfig;
 use crate::operations::daemon::actor_types::{
-    SESSION_EVENT_RECOVERY_PREFLIGHT_POLL, SESSION_EVENT_RECOVERY_PREFLIGHT_WAIT,
+    COMMAND_SIDE_EFFECT_CONCURRENCY, SESSION_EVENT_RECOVERY_PREFLIGHT_POLL,
+    SESSION_EVENT_RECOVERY_PREFLIGHT_WAIT,
 };
 use crate::operations::daemon::log_setup::now_unix_nanos;
 use crate::operations::daemon::side_effect_helpers::capture_commit_file_timestamps;
@@ -11,7 +12,7 @@ use crate::operations::git::repository::Repository;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as AsyncMutex, Notify};
+use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore};
 
 impl ActorDaemonCoordinator {
     /// Store a weak self-reference so family drains can be scheduled on
@@ -48,6 +49,7 @@ impl ActorDaemonCoordinator {
             recent_replay_prerequisites_by_family: Mutex::new(HashMap::new()),
             side_effect_errors_by_family: Mutex::new(HashMap::new()),
             side_effect_exec_locks: Mutex::new(HashMap::new()),
+            command_side_effect_semaphore: Semaphore::new(COMMAND_SIDE_EFFECT_CONCURRENCY),
             self_ref: std::sync::OnceLock::new(),
             scheduled_family_drains: Mutex::new(HashMap::new()),
             bash_sessions: Mutex::new(
@@ -77,6 +79,8 @@ impl ActorDaemonCoordinator {
             processed_trace_ingest_seq: AtomicUsize::new(0),
             trace_ingest_progress_notify: Notify::new(),
             trace_ingress_state: Mutex::new(TraceIngressState::default()),
+            accepting_checkpoints: AtomicBool::new(true),
+            pending_checkpoint_admissions: AtomicUsize::new(0),
             shutting_down: AtomicBool::new(false),
             shutdown_action: AtomicU8::new(DaemonExitAction::Stop.as_u8()),
             shutdown_notify: Notify::new(),
@@ -305,9 +309,20 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn request_shutdown(&self) {
-        // Release ensures that any writes made before this store are visible to
-        // threads that subsequently load with Acquire (is_shutting_down).
-        self.shutting_down.store(true, Ordering::Release);
+        {
+            // Share the sequencer lock with checkpoint admission so a control
+            // handler cannot enter after any fatal or requested shutdown path.
+            let _sequencers =
+                crate::model::repository::sqlite::poisoned_lock(&self.family_sequencers_by_family);
+            self.accepting_checkpoints.store(false, Ordering::Release);
+            // Release ensures that any writes made before this store are visible to
+            // threads that subsequently load with Acquire (is_shutting_down).
+            self.shutting_down.store(true, Ordering::Release);
+        }
+        self.notify_shutdown_requested();
+    }
+
+    pub(crate) fn notify_shutdown_requested(&self) {
         // The ingest worker exits via its select! shutdown arm (watching
         // shutdown_notify); we no longer rely on channel closure to stop it.
         self.shutdown_notify.notify_waiters();
@@ -323,20 +338,6 @@ impl ActorDaemonCoordinator {
     pub(crate) fn request_stop(&self) {
         self.shutdown_action
             .store(DaemonExitAction::Stop.as_u8(), Ordering::SeqCst);
-        self.request_shutdown();
-    }
-
-    pub(crate) fn request_restart(&self) {
-        self.shutdown_action
-            .store(DaemonExitAction::Restart.as_u8(), Ordering::SeqCst);
-        self.request_shutdown();
-    }
-
-    pub(crate) fn request_restart_after_update(&self) {
-        self.shutdown_action.store(
-            DaemonExitAction::RestartAfterUpdate.as_u8(),
-            Ordering::SeqCst,
-        );
         self.request_shutdown();
     }
 

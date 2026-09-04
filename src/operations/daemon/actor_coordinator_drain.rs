@@ -7,6 +7,29 @@ use crate::model::working_log::CheckpointKind;
 use std::path::Path;
 use tokio::sync::oneshot;
 
+struct FamilyEffectGuard<'a> {
+    coordinator: &'a ActorDaemonCoordinator,
+    family: String,
+}
+
+impl<'a> FamilyEffectGuard<'a> {
+    fn new(coordinator: &'a ActorDaemonCoordinator, family: &str) -> Result<Self, GitAiError> {
+        coordinator.begin_family_effect(family)?;
+        Ok(Self {
+            coordinator,
+            family: family.to_string(),
+        })
+    }
+}
+
+impl Drop for FamilyEffectGuard<'_> {
+    fn drop(&mut self) {
+        if let Err(error) = self.coordinator.end_family_effect(&self.family) {
+            tracing::error!(%error, family = %self.family, "failed releasing family effect fence");
+        }
+    }
+}
+
 impl ActorDaemonCoordinator {
     pub(crate) async fn append_checkpoint_to_family_sequencer(
         &self,
@@ -17,9 +40,6 @@ impl ActorDaemonCoordinator {
         // Causal drain fence: ensure already-visible trace2 work has reached
         // the family sequencer before inserting this checkpoint.
         self.wait_for_trace_ingest_processed_through().await;
-
-        let exec_lock = self.side_effect_exec_lock(family)?;
-        let _guard = exec_lock.lock().await;
 
         {
             let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
@@ -38,8 +58,6 @@ impl ActorDaemonCoordinator {
                 },
             );
         }
-
-        drop(_guard);
         self.schedule_family_drain(family).await
     }
 
@@ -54,8 +72,25 @@ impl ActorDaemonCoordinator {
             return self.drain_ready_family_sequencer_entries(family).await;
         };
 
+        Self::spawn_scheduled_family_drain(coordinator, family)
+    }
+
+    /// Schedule from an Arc-backed trace-ingest path. Unlike the bare unit-test
+    /// fallback above, this can never execute a side effect inline on the
+    /// latency-sensitive ingest worker.
+    pub(crate) fn schedule_family_drain_detached(
+        self: &std::sync::Arc<Self>,
+        family: &str,
+    ) -> Result<(), GitAiError> {
+        Self::spawn_scheduled_family_drain(std::sync::Arc::clone(self), family)
+    }
+
+    fn spawn_scheduled_family_drain(
+        coordinator: std::sync::Arc<Self>,
+        family: &str,
+    ) -> Result<(), GitAiError> {
         {
-            let mut scheduled = self.scheduled_family_drains.lock().map_err(|_| {
+            let mut scheduled = coordinator.scheduled_family_drains.lock().map_err(|_| {
                 PersistenceError::LockPoisoned {
                     what: "scheduled family drains",
                 }
@@ -98,8 +133,10 @@ impl ActorDaemonCoordinator {
         &self,
         family: &str,
     ) -> Result<(), GitAiError> {
+        // Register before popping entries so completion fences can observe
+        // either queued work or this in-flight pass, with no visibility gap.
+        let _family_effect = FamilyEffectGuard::new(self, family)?;
         let mut ready: Vec<(u64, FamilySequencerEntry)> = Vec::new();
-        let mut progressed = false;
         {
             let mut map = self.family_sequencers_by_family.lock().map_err(|_| {
                 PersistenceError::LockPoisoned {
@@ -131,7 +168,6 @@ impl ActorDaemonCoordinator {
                     }
                     other => {
                         ready.push((order.ordinal, other));
-                        progressed = true;
                     }
                 }
             }
@@ -141,33 +177,59 @@ impl ActorDaemonCoordinator {
             return Ok(());
         }
 
-        let _ = self.begin_family_effect(family);
         for (order, ready_entry) in ready {
             match ready_entry {
                 FamilySequencerEntry::ReadyCommand(command) => {
-                    // Wrap the entire command + side-effect pipeline in catch_unwind
-                    // so that a panic (e.g. from UTF-8 boundary issues in diff parsing)
-                    // does not kill the daemon process.
-                    let side_effect_result = {
+                    let _side_effect_permit = self
+                        .command_side_effect_semaphore
+                        .acquire()
+                        .await
+                        .expect("command side-effect semaphore is never closed");
+                    // Route the command under the family lock, then retain the
+                    // applied value outside the side-effect panic boundary so
+                    // every post-application outcome gets a completion record.
+                    let application_result = {
                         let future = async {
                             let root_sid = command.root_sid.clone();
-                            let mut commit_file_timestamp_snapshots =
+                            let commit_file_timestamp_snapshots =
                                 self.take_cached_commit_file_timestamp_snapshots(&root_sid)?;
                             let applied = self.coordinator.route_command(*command).await?;
-                            let side_effect = self
-                                .maybe_apply_side_effects_for_applied_command(
-                                    Some(family),
-                                    &applied,
-                                    &mut commit_file_timestamp_snapshots,
-                                )
-                                .await;
-                            Ok::<_, GitAiError>((applied, side_effect))
+                            Ok::<_, GitAiError>((applied, commit_file_timestamp_snapshots))
                         };
                         let caught = std::panic::AssertUnwindSafe(future);
                         futures::FutureExt::catch_unwind(caught).await
                     };
-                    match side_effect_result {
-                        Ok(Ok((applied, side_effect_result))) => {
+                    match application_result {
+                        Ok(Ok((applied, mut commit_file_timestamp_snapshots))) => {
+                            let side_effect_result = {
+                                let future = self.maybe_apply_side_effects_for_applied_command(
+                                    Some(family),
+                                    &applied,
+                                    &mut commit_file_timestamp_snapshots,
+                                );
+                                let caught = std::panic::AssertUnwindSafe(future);
+                                match futures::FutureExt::catch_unwind(caught).await {
+                                    Ok(result) => result,
+                                    Err(panic_payload) => {
+                                        let panic_msg = Self::panic_message(panic_payload);
+                                        // This exact panic text is persisted through FamilyStatus.last_error.
+                                        let error = GitAiError::Generic(format!(
+                                            "daemon command side effect panic: {}",
+                                            panic_msg
+                                        ));
+                                        tracing::error!(
+                                            component = "daemon",
+                                            phase = "command_side_effect",
+                                            reason = "panic_in_side_effect",
+                                            panic_msg = %panic_msg,
+                                            %family,
+                                            order,
+                                            "command side effect panic"
+                                        );
+                                        Err(error)
+                                    }
+                                }
+                            };
                             if let Err(error) = &side_effect_result {
                                 let _ = self.record_side_effect_error(family, order, error);
                                 tracing::error!(
@@ -439,9 +501,6 @@ impl ActorDaemonCoordinator {
                 FamilySequencerEntry::PendingRoot => {}
             }
         }
-        let _ = self.end_family_effect(family);
-
-        let _ = progressed;
         Ok(())
     }
 }

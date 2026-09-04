@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 
 impl ActorDaemonCoordinator {
     pub(crate) async fn apply_trace_payload_to_state(
-        &self,
+        self: &Arc<Self>,
         payload: Value,
     ) -> Result<TracePayloadApplyOutcome, GitAiError> {
         let payload_root_sid = Self::trace_payload_root_sid(&payload);
@@ -26,17 +26,15 @@ impl ActorDaemonCoordinator {
                 let mut normalizer = self.normalizer.lock().await;
                 let _ = normalizer.sweep_orphans_for_roots(&[root_sid.to_string()]);
             }
-            let replaced_family = self
-                .replace_pending_root_entry(root_sid, FamilySequencerEntry::Canceled)
-                .await?;
+            let replaced_family =
+                self.replace_pending_root_entry(root_sid, FamilySequencerEntry::Canceled)?;
             let outcome = if replaced_family.is_some() {
                 TracePayloadApplyOutcome::QueuedFamily
             } else {
                 TracePayloadApplyOutcome::None
             };
             self.clear_trace_root_tracking(root_sid)?;
-            self.drain_ready_family_sequencers_after_root_cleared(replaced_family)
-                .await?;
+            self.drain_ready_family_sequencers_after_root_cleared(replaced_family)?;
             return Ok(outcome);
         }
 
@@ -54,13 +52,11 @@ impl ActorDaemonCoordinator {
                     .unwrap_or_default(),
                 payload_root_sid.as_deref().unwrap_or_default(),
             ) && let Some(root_sid) = payload_root_sid.as_deref()
-                && let Some(family) = self
-                    .replace_pending_root_entry(root_sid, FamilySequencerEntry::Canceled)
-                    .await?
+                && let Some(family) =
+                    self.replace_pending_root_entry(root_sid, FamilySequencerEntry::Canceled)?
             {
                 self.clear_trace_root_tracking(root_sid)?;
-                self.drain_ready_family_sequencers_after_root_cleared(Some(family))
-                    .await?;
+                self.drain_ready_family_sequencers_after_root_cleared(Some(family))?;
                 return Ok(TracePayloadApplyOutcome::QueuedFamily);
             }
             return Ok(TracePayloadApplyOutcome::None);
@@ -68,38 +64,35 @@ impl ActorDaemonCoordinator {
         let root_sid = command.root_sid.clone();
 
         let mut family_to_drain_after_clear = None;
-        let outcome = if let Some(family) = self
-            .replace_pending_root_entry(
-                &root_sid,
-                FamilySequencerEntry::ReadyCommand(Box::new(command.clone())),
-            )
-            .await?
-        {
+        let outcome = if let Some(family) = self.replace_pending_root_entry(
+            &root_sid,
+            FamilySequencerEntry::ReadyCommand(Box::new(command.clone())),
+        )? {
             self.cache_commit_file_timestamp_snapshots_for_command(&command)?;
             family_to_drain_after_clear = Some(family);
             TracePayloadApplyOutcome::QueuedFamily
-        } else if let Some(family) = command.family_key.as_ref().map(|family| family.0.clone())
-            && Self::trace_invocation_participates_in_family_sequencer(
-                command.primary_command.as_deref(),
-                &command.raw_argv,
-            )
-        {
+        } else if let Some(family) = command.family_key.as_ref().map(|family| family.0.clone()) {
+            // Every family command is routed by its ordered drain. Routing a
+            // later non-sequencer command inline could otherwise overtake an
+            // earlier command waiting for side-effect capacity.
             self.cache_commit_file_timestamp_snapshots_for_command(&command)?;
-            self.append_ready_command_entry(&family, command).await?;
+            let started_at_ns = command.started_at_ns;
+            self.append_family_sequencer_entry(
+                &family,
+                started_at_ns,
+                FamilySequencerEntry::ReadyCommand(Box::new(command)),
+            )?;
             family_to_drain_after_clear = Some(family);
             TracePayloadApplyOutcome::QueuedFamily
         } else {
-            match self.coordinator.route_command(command).await {
-                Ok(applied) => TracePayloadApplyOutcome::Applied(Box::new(applied)),
-                Err(error) => {
-                    let _ = self.clear_trace_root_tracking(&root_sid);
-                    return Err(error);
-                }
+            if let Err(error) = self.coordinator.route_command(command).await {
+                let _ = self.clear_trace_root_tracking(&root_sid);
+                return Err(error);
             }
+            TracePayloadApplyOutcome::None
         };
         self.clear_trace_root_tracking(&root_sid)?;
-        self.drain_ready_family_sequencers_after_root_cleared(family_to_drain_after_clear)
-            .await?;
+        self.drain_ready_family_sequencers_after_root_cleared(family_to_drain_after_clear)?;
         Ok(outcome)
     }
 
@@ -110,72 +103,27 @@ impl ActorDaemonCoordinator {
         if !is_trace_payload(&payload) {
             return Ok(());
         }
-        match self.apply_trace_payload_to_state(payload).await? {
-            TracePayloadApplyOutcome::None | TracePayloadApplyOutcome::QueuedFamily => {}
-            TracePayloadApplyOutcome::Applied(applied) => {
-                // Runs without the family exec lock, concurrently with scheduled
-                // drains. Safe because mutating sequencer commands queue above;
-                // what reaches this arm with a family is either classified
-                // non-mutating (no reflog cursor, so enrichment yields no
-                // semantic events and the side-effect pipeline cannot touch
-                // working logs or notes) or clone/init, which establish a fresh
-                // repository context with no competing drain.
-                if let Some(family) = applied.command.family_key.as_ref().map(|key| key.0.clone()) {
-                    self.begin_family_effect(&family)?;
-                    let mut commit_file_timestamp_snapshots =
-                        Self::start_commit_file_timestamp_snapshots_for_command(&applied.command);
-                    let result = self
-                        .maybe_apply_side_effects_for_applied_command(
-                            Some(&family),
-                            &applied,
-                            &mut commit_file_timestamp_snapshots,
-                        )
-                        .await;
-                    let _ = self.end_family_effect(&family);
-                    if let Err(error) = &result {
-                        let _ = self.record_side_effect_error(&family, applied.seq, error);
-                        tracing::error!(
-                            %error,
-                            %family,
-                            seq = applied.seq,
-                            "async side-effect error"
-                        );
-                    }
-                    if let Err(error) =
-                        self.append_command_completion_log(&family, &applied, &result, applied.seq)
-                    {
-                        let _ = self.record_side_effect_error(&family, applied.seq, &error);
-                        tracing::error!(
-                            %error,
-                            %family,
-                            seq = applied.seq,
-                            "async completion log write failed"
-                        );
-                    }
-                }
-            }
-        }
+        let _ = self.apply_trace_payload_to_state(payload).await?;
 
         Ok(())
     }
 
-    pub(crate) async fn ingest_checkpoint_payload(
+    async fn ingest_admitted_checkpoint_payload(
         &self,
         request: CheckpointRequest,
     ) -> Result<ControlResponse, GitAiError> {
-        if request.files.is_empty() {
-            return Ok(ControlResponse::ok(None, None));
-        }
-
         let repo_work_dir = request.files[0].repo_work_dir.clone();
         let family = self.backend.resolve_family(&repo_work_dir)?;
 
         let (respond_to, response) = oneshot::channel();
         self.append_checkpoint_to_family_sequencer(&family.0, request, Some(respond_to))
             .await?;
-        response
-            .await
-            .map_err(|_| GitAiError::Generic("checkpoint response channel closed".to_string()))??;
+        response.await.map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "checkpoint response channel closed",
+            )
+        })??;
         Ok(ControlResponse::ok(None, None))
     }
 
@@ -212,7 +160,13 @@ impl ActorDaemonCoordinator {
         crate::operations::daemon::checkpoint_stream_authority::authorize_checkpoint_stream_source(
             &mut request,
         )?;
-        self.notify_stream_worker_checkpoint(&request);
-        self.ingest_checkpoint_payload(request).await
+        if request.files.is_empty() {
+            return Ok(ControlResponse::ok(None, None));
+        }
+        // Register before notification and the trace-ingest fence. Automatic
+        // and graceful restarts must see every accepted checkpoint side effect.
+        let admission = self.begin_checkpoint_admission()?;
+        self.notify_stream_worker_checkpoint(&admission, &request);
+        self.ingest_admitted_checkpoint_payload(request).await
     }
 }

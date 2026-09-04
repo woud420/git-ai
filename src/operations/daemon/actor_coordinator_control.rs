@@ -47,10 +47,15 @@ impl ActorDaemonCoordinator {
         self.wait_for_trace_ingest_processed_through_family(&family.0)
             .await;
 
-        let exec_lock = self.side_effect_exec_lock(&family.0)?;
-        let _guard = exec_lock.lock().await;
-        self.drain_ready_family_sequencer_entries_locked(&family.0)
-            .await?;
+        loop {
+            // A source-family command can apply notes to a destination family,
+            // so preserve the pre-detachment global completion fence.
+            self.drain_all_ready_family_sequencers().await?;
+            if !self.has_inflight_family_effects() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
 
         self.status_for_family(repo_working_dir).await
     }
@@ -187,7 +192,9 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn has_pending_daemon_work(&self) -> bool {
-        if self.queued_trace_payloads.load(Ordering::Acquire) > 0 {
+        if self.pending_checkpoint_admissions.load(Ordering::Acquire) > 0
+            || self.queued_trace_payloads.load(Ordering::Acquire) > 0
+        {
             return true;
         }
         if self.next_trace_ingest_seq.load(Ordering::Acquire)
@@ -198,11 +205,6 @@ impl ActorDaemonCoordinator {
         if self.has_open_trace_roots_that_may_mutate_refs() {
             return true;
         }
-        if let Ok(map) = self.inflight_effects_by_family.lock()
-            && !map.is_empty()
-        {
-            return true;
-        }
         if let Ok(map) = self.family_sequencers_by_family.lock() {
             for state in map.values() {
                 if !state.entries.is_empty() {
@@ -210,11 +212,12 @@ impl ActorDaemonCoordinator {
                 }
             }
         }
-        false
+        self.has_inflight_family_effects()
     }
 
     pub(crate) fn notify_stream_worker_checkpoint(
         &self,
+        _admission: &CheckpointAdmissionGuard<'_>,
         request: &crate::model::checkpoint_request::CheckpointRequest,
     ) {
         let Some(worker) = &self.stream_worker else {
@@ -551,7 +554,22 @@ impl ActorDaemonCoordinator {
                 };
                 Ok(response)
             }
-            ControlRequest::Shutdown => Ok(ControlResponse::ok(None, None)),
+            ControlRequest::Shutdown => match self.set_checkpoint_acceptance(false) {
+                Err(error) => Err(error),
+                Ok(owns_gate) => match self.drain_accepted_attribution_work().await {
+                    Ok(()) => Ok(ControlResponse::ok(None, None)),
+                    Err(error) => {
+                        if owns_gate && let Err(reopen_error) = self.set_checkpoint_acceptance(true)
+                        {
+                            tracing::error!(
+                                %reopen_error,
+                                "failed reopening checkpoint acceptance after shutdown error"
+                            );
+                        }
+                        Err(error)
+                    }
+                },
+            },
         };
 
         match result {

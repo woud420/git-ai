@@ -58,6 +58,7 @@ pub(crate) fn checkpoint_control_response_timeout(
         ControlRequest::Await { timeout_secs } => {
             Duration::from_secs(timeout_secs.saturating_add(5))
         }
+        ControlRequest::Shutdown => DAEMON_CHECKPOINT_RESPONSE_TIMEOUT,
         _ => DAEMON_CONTROL_RESPONSE_TIMEOUT,
     }
 }
@@ -396,13 +397,18 @@ pub fn handle_control_connection_actor_reader<R: Read + Write>(
             }
             Err(e) => ControlResponse::err(format!("invalid control request: {}", e)),
         };
-        let raw = serde_json::to_string(&response)?;
-        reader.get_mut().write_all(raw.as_bytes())?;
-        reader.get_mut().write_all(b"\n")?;
-        reader.get_mut().flush()?;
-        if shutdown_after_response {
+        let should_stop = shutdown_after_response && response.ok;
+        let write_result = (|| -> Result<(), GitAiError> {
+            let raw = serde_json::to_string(&response)?;
+            reader.get_mut().write_all(raw.as_bytes())?;
+            reader.get_mut().write_all(b"\n")?;
+            reader.get_mut().flush()?;
+            Ok(())
+        })();
+        if should_stop {
             coordinator.request_stop();
         }
+        write_result?;
     }
     Ok(())
 }

@@ -1,0 +1,15 @@
+name: Unsafe template injection fixture
+
+# Static-analysis fixture only. The security workflow audits this file but never runs it.
+
+on:
+  pull_request_target:
+
+permissions: {}
+
+jobs:
+  unsafe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo untrusted pull request title
+        run: echo "${{ github.event.pull_request.title }}"

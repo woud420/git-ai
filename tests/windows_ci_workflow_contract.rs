@@ -12,9 +12,9 @@ const NATIVE_FAILURE_GUARD: &str = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCOD
 const MAKE_INSTALL_COMMAND: &str = "choco install make --version=4.4.1 --no-progress --yes";
 
 const WINDOWS_TEST_COMMANDS: [&str; 3] = [
-    r#"make test CARGO_TEST_ARGS="$($testTargets -join ' ')" TEST_THREADS=${{ matrix.test_threads }}"#,
-    r#"make test CARGO_TEST_ARGS="--doc" TEST_THREADS=${{ matrix.test_threads }}"#,
-    r#"make test CARGO_TEST_ARGS="--test integration" EXTRA_TEST_BINARY_ARGS="$skipArgs" TEST_THREADS=${{ matrix.test_threads }}"#,
+    r#"make test CARGO_TEST_ARGS="$($testTargets -join ' ')" TEST_THREADS="$env:MATRIX_TEST_THREADS""#,
+    r#"make test CARGO_TEST_ARGS="--doc" TEST_THREADS="$env:MATRIX_TEST_THREADS""#,
+    r#"make test CARGO_TEST_ARGS="--test integration" EXTRA_TEST_BINARY_ARGS="$skipArgs" TEST_THREADS="$env:MATRIX_TEST_THREADS""#,
 ];
 
 fn windows_test_script() -> Vec<&'static str> {

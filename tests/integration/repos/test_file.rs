@@ -245,14 +245,18 @@ impl<'a> TestFile<'a> {
     /// Assert only committed lines (filters out uncommitted lines)
     /// Useful for partial staging tests where some lines aren't committed yet
     pub fn assert_committed_lines<T: Into<ExpectedLine>>(&mut self, lines: Vec<T>) {
-        let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
         let blame_output = self.blame_output();
-        let committed_lines = Self::parse_committed_blame_lines(&blame_output);
+        Self::assert_committed_blame_output(&blame_output, lines);
+    }
+
+    pub fn assert_committed_blame_output<T: Into<ExpectedLine>>(blame_output: &str, lines: Vec<T>) {
+        let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
+        let committed_lines = Self::parse_committed_blame_lines(blame_output);
 
         Self::assert_blame_lines(
             &committed_lines,
             &expected_lines,
-            &blame_output,
+            blame_output,
             "committed lines",
         );
     }

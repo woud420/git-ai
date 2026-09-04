@@ -41,7 +41,7 @@
 
     <SetProperty
       Id="ConfigureGitAi"
-      Value="install-hooks --api-base &quot;[API_BASE]&quot; --api-key &quot;[API_KEY]&quot;"
+      Value="install-hooks --api-base &quot;[API_BASE]&quot; --api-key &quot;[API_KEY]&quot; --installer-env &quot;USERPROFILE=[WIX_DIR_PROFILE]&quot;"
       Before="ConfigureGitAi"
       Sequence="execute"
       Condition="NOT Installed" />

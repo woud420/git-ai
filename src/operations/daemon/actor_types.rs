@@ -3,7 +3,7 @@ use crate::model::checkpoint_request::CheckpointRequest;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, oneshot};
 use tokio::time::Duration;
@@ -71,6 +71,25 @@ impl FamilySequencerState {
 pub struct PendingRootSlot {
     pub(crate) family: String,
     pub(crate) order: FamilySequencerOrder,
+}
+
+#[doc(hidden)]
+pub(crate) struct AtomicCounterGuard<'a> {
+    counter: &'a AtomicUsize,
+}
+
+impl<'a> AtomicCounterGuard<'a> {
+    pub(crate) fn new(counter: &'a AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        Self { counter }
+    }
+}
+
+impl Drop for AtomicCounterGuard<'_> {
+    fn drop(&mut self) {
+        let previous = self.counter.fetch_sub(1, Ordering::Relaxed);
+        debug_assert!(previous > 0, "paired daemon counter underflowed");
+    }
 }
 
 #[doc(hidden)]
@@ -165,6 +184,12 @@ pub struct ActorDaemonCoordinator {
     pub(crate) pending_cherry_pick_no_commit_by_worktree:
         Mutex<HashMap<String, PendingCherryPickNoCommit>>,
     pub(crate) pending_squash_merge_by_worktree: Mutex<HashMap<String, PendingSquashMerge>>,
+    pub(crate) started_at: std::time::Instant,
+    pub(crate) checkpoint_requests_outstanding: AtomicUsize,
+    pub(crate) checkpoint_requests_unadmitted: AtomicUsize,
+    pub(crate) checkpoint_requests_rejected: AtomicU64,
+    pub(crate) trace_payloads_dropped_queue_full: AtomicU64,
+    pub(crate) trace_ingest_worker_disconnects: AtomicU64,
     pub(crate) inflight_effects_by_family: Mutex<HashMap<String, usize>>,
     /// Files with an in-flight AI edit (PreFileEdit received, PostFileEdit not yet completed).
     /// Outer key: family. Inner key: absolute file path string. Value: registration timestamp (nanos).

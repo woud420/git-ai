@@ -17,6 +17,8 @@ impl ActorDaemonCoordinator {
         let permit = match tx.try_reserve() {
             Ok(permit) => permit,
             Err(tokio::sync::mpsc::error::TrySendError::Closed(())) => {
+                self.trace_ingest_worker_disconnects
+                    .fetch_add(1, Ordering::Relaxed);
                 tracing::error!(
                     component = "daemon",
                     phase = "enqueue_trace_payload",
@@ -29,6 +31,8 @@ impl ActorDaemonCoordinator {
                 ));
             }
             Err(tokio::sync::mpsc::error::TrySendError::Full(())) => {
+                self.trace_payloads_dropped_queue_full
+                    .fetch_add(1, Ordering::Relaxed);
                 tracing::error!(
                     component = "daemon",
                     phase = "enqueue_trace_payload",

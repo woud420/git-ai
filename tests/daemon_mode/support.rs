@@ -27,6 +27,9 @@ mod load;
 #[path = "memory_watchdog.rs"]
 mod memory_watchdog;
 
+#[path = "health.rs"]
+mod health;
+
 #[path = "family_concurrency.rs"]
 mod family_concurrency;
 

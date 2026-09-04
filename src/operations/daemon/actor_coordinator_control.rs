@@ -267,6 +267,11 @@ impl ActorDaemonCoordinator {
                         .map(|v| ControlResponse::ok(None, Some(v)))
                         .map_err(GitAiError::from)
                 }),
+            ControlRequest::StatusDaemon => serde_json::to_value(
+                crate::operations::daemon::health::DaemonHealthSnapshot::capture(self),
+            )
+            .map(|value| ControlResponse::ok(None, Some(value)))
+            .map_err(GitAiError::from),
             ControlRequest::SnapshotWatermarks { repo_working_dir } => self
                 .watermarks_for_family(repo_working_dir.clone())
                 .await

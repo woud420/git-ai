@@ -273,9 +273,13 @@ pub fn daemon_update_check_loop(coordinator: Arc<ActorDaemonCoordinator>, starte
 
         match check_for_update_available() {
             Ok(DaemonUpdateCheckResult::UpdateReady) => {
-                tracing::info!("update check: newer version available, requesting shutdown");
-                coordinator.request_restart_after_update();
-                return;
+                if !coordinator.try_request_idle_restart(DaemonExitAction::RestartAfterUpdate) {
+                    tracing::info!("update restart deferred while attribution work remains");
+                    continue;
+                } else {
+                    tracing::info!("update check: newer version available, requesting shutdown");
+                    return;
+                }
             }
             Ok(DaemonUpdateCheckResult::NoUpdate) => {
                 tracing::info!("update check: no update needed");
@@ -287,9 +291,12 @@ pub fn daemon_update_check_loop(coordinator: Arc<ActorDaemonCoordinator>, starte
 
         let uptime_ns = now_unix_nanos().saturating_sub(started_at_ns);
         if uptime_ns >= daemon_max_uptime_ns() {
-            tracing::info!("uptime exceeded max, requesting restart");
-            coordinator.request_restart();
-            return;
+            if !coordinator.try_request_idle_restart(DaemonExitAction::Restart) {
+                tracing::info!("uptime restart deferred while attribution work remains");
+            } else {
+                tracing::info!("uptime exceeded max, requesting restart");
+                return;
+            }
         }
     }
 }

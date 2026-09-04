@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore, mpsc, oneshot};
 use tokio::time::Duration;
 
 #[doc(hidden)]
@@ -86,6 +86,24 @@ pub const COMMIT_FILE_TIMESTAMP_SNAPSHOT_WAIT: Duration = Duration::from_millis(
 pub const SESSION_EVENT_RECOVERY_PREFLIGHT_WAIT: Duration = Duration::from_secs(2);
 #[doc(hidden)]
 pub const SESSION_EVENT_RECOVERY_PREFLIGHT_POLL: Duration = Duration::from_millis(100);
+/// Command side-effect passes can perform blocking Git work. Keep two of the
+/// daemon runtime's four worker threads available for checkpoint and control
+/// traffic even when many repository families are active.
+#[doc(hidden)]
+pub const COMMAND_SIDE_EFFECT_CONCURRENCY: usize = 2;
+
+#[doc(hidden)]
+pub struct CheckpointAdmissionGuard<'a> {
+    pub(crate) coordinator: &'a ActorDaemonCoordinator,
+}
+
+impl Drop for CheckpointAdmissionGuard<'_> {
+    fn drop(&mut self) {
+        self.coordinator
+            .pending_checkpoint_admissions
+            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
 
 #[doc(hidden)]
 pub fn run_blocking_side_effect<T>(operation: impl FnOnce() -> T) -> T {
@@ -177,6 +195,7 @@ pub struct ActorDaemonCoordinator {
         Mutex<HashMap<String, VecDeque<RecentReplayPrerequisite>>>,
     pub(crate) side_effect_errors_by_family: Mutex<HashMap<String, BTreeMap<u64, String>>>,
     pub(crate) side_effect_exec_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    pub(crate) command_side_effect_semaphore: Semaphore,
     /// Weak self-reference set by `register_self` after the coordinator is
     /// wrapped in its `Arc` (production daemons and full-daemon tests do
     /// this). Family drains are then scheduled on their own tasks so
@@ -210,6 +229,8 @@ pub struct ActorDaemonCoordinator {
     pub(crate) processed_trace_ingest_seq: AtomicUsize,
     pub(crate) trace_ingest_progress_notify: Notify,
     pub(crate) trace_ingress_state: Mutex<TraceIngressState>,
+    pub(crate) accepting_checkpoints: AtomicBool,
+    pub(crate) pending_checkpoint_admissions: AtomicUsize,
     pub(crate) shutting_down: AtomicBool,
     pub(crate) shutdown_action: AtomicU8,
     pub(crate) shutdown_notify: Notify,
@@ -252,6 +273,5 @@ impl DaemonExitAction {
 #[doc(hidden)]
 pub enum TracePayloadApplyOutcome {
     None,
-    Applied(Box<crate::model::domain::AppliedCommand>),
     QueuedFamily,
 }

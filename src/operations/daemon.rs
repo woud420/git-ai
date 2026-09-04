@@ -27,6 +27,7 @@ pub mod transcript_redaction;
 pub(crate) mod actor_coordinator_base;
 pub(crate) mod actor_coordinator_control;
 pub(crate) mod actor_coordinator_drain;
+pub(crate) mod actor_coordinator_fences;
 pub(crate) mod actor_coordinator_ingest;
 pub(crate) mod actor_coordinator_query;
 pub(crate) mod actor_coordinator_rewrites;
@@ -106,6 +107,8 @@ mod telemetry_worker_tests;
 mod tests_coordinator;
 #[cfg(test)]
 mod tests_coordinator_drain;
+#[cfg(test)]
+mod tests_coordinator_fences;
 #[cfg(test)]
 mod tests_daemon_units;
 #[cfg(test)]

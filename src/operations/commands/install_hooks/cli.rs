@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::error::GitAiError;
+use super::installer_environment::InstallerEnvironment;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct InstallOptions {
@@ -10,6 +11,7 @@ pub(super) struct InstallOptions {
     pub(super) include_visual_studio_extension: bool,
     pub(super) api_base: Option<String>,
     pub(super) api_key: Option<String>,
+    pub(super) installer_environment: InstallerEnvironment,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +89,15 @@ pub(super) fn parse_install_action(args: &[String]) -> Result<InstallAction, Git
             "--verbose" | "-v" => options.verbose = true,
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
+            value if value.starts_with("--installer-env=") => {
+                options.installer_environment.insert(&value[16..])?;
+            }
+            "--installer-env" => {
+                let value = args.next().ok_or_else(|| {
+                    GitAiError::Generic("missing value for --installer-env".to_string())
+                })?;
+                options.installer_environment.insert(value)?;
+            }
             value if value.starts_with("--api-base=") => {
                 options.api_base = Some(required_value("--api-base", &value[11..])?);
             }
@@ -125,6 +136,8 @@ pub(crate) fn print_install_help(command: &str) {
     println!("  --dry-run[=true|false]       Preview changes, or explicitly apply them with false");
     println!("  --verbose, -v                Show configuration diffs");
     println!("  --skills                     Also install agent skill files");
+    println!("  --installer-env NAME=ABSOLUTE_PATH");
+    println!("                               Package-only user path handoff (repeatable)");
     println!(
         "  --visual-studio-extension    Include Visual Studio detection and status checks on Windows"
     );

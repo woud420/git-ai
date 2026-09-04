@@ -59,7 +59,7 @@ impl MetricsDatabase {
 
         loop {
             let (summary, last_id) =
-                self.backfill_event_metadata_batch_after(after_id, METADATA_BACKFILL_BATCH_SIZE)?;
+                self.backfill_event_metadata_batch_once(after_id, METADATA_BACKFILL_BATCH_SIZE)?;
             total.scanned += summary.scanned;
             total.updated += summary.updated;
 

@@ -47,6 +47,13 @@ sessions maps). Hash forms: bare 16-hex = prompt, `h_` + 14 hex = known
 human, `s_…::t_…` = session/trace. Old-format notes remain readable
 (sessions-cutover compatibility paths).
 
+Known-human attribution is an evidence claim, not a fallback category. A
+terminal recovery pass must not turn residual lines into `h_` attestations;
+lines left uncovered after evidence-backed recovery remain unattested and are
+reported as unknown or untracked. The rationale and schema implications are
+recorded in
+[`2026-09-04-preserve-unattributed-lines.md`](../decisions/2026-09-04-preserve-unattributed-lines.md).
+
 ## Stability rules
 
 Preset names, the checkpoint CLI form, hook-input tolerance (encodings,

@@ -44,3 +44,12 @@ accepts only the user-scoped paths it uses during hook discovery and setup:
 
 All other names are rejected. In particular, this handoff cannot carry
 `PATH`, API credentials, superuser controls, or arbitrary process environment.
+
+When `install.sh` runs inside WSL, it installs the Linux binary as usual and
+also hands the matching release MSI to the Windows host. The handoff requires
+working Windows interoperability (`cmd.exe`, `wslpath`, and `msiexec.exe`),
+stages the MSI under the resolved Windows user's temporary directory, and
+skips the host installation when that user's `git-ai.exe` already exists.
+Native Linux and macOS installs never enter this path. Host failures report
+only the failed prerequisite or installer exit code; configuration values are
+not included in diagnostics.

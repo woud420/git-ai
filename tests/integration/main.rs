@@ -161,3 +161,4 @@ mod utf8_filenames;
 mod virtual_attribution_unit;
 mod windsurf;
 mod worktrees;
+mod wsl_packaged_install;

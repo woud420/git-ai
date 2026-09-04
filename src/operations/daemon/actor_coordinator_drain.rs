@@ -16,7 +16,9 @@ impl ActorDaemonCoordinator {
     ) -> Result<(), GitAiError> {
         // Causal drain fence: ensure already-visible trace2 work has reached
         // the family sequencer before inserting this checkpoint.
+        let unadmitted = AtomicCounterGuard::new(&self.checkpoint_requests_unadmitted);
         self.wait_for_trace_ingest_processed_through().await;
+        drop(unadmitted);
 
         let exec_lock = self.side_effect_exec_lock(family)?;
         let _guard = exec_lock.lock().await;

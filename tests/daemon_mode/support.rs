@@ -30,6 +30,9 @@ mod memory_watchdog;
 #[path = "reingestion.rs"]
 mod reingestion;
 
+#[path = "health.rs"]
+mod health;
+
 #[path = "family_concurrency.rs"]
 mod family_concurrency;
 

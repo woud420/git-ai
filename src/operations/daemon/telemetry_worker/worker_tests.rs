@@ -115,16 +115,16 @@ fn submit_daemon_internal_telemetry_waits_without_runtime() {
 
 #[test]
 fn telemetry_buffer_caps_daemon_logs_to_latest_events() {
-    use buffer::MAX_DAEMON_LOG_BUFFER_EVENTS;
+    use buffer::MAX_BUFFERED_EVENTS_PER_KIND;
     let mut buffer = TelemetryBuffer::new();
-    let total = MAX_DAEMON_LOG_BUFFER_EVENTS + 2;
+    let total = MAX_BUFFERED_EVENTS_PER_KIND + 2;
     let events = (0..total)
         .map(|index| sample_daemon_log_event(index.to_string()))
         .collect();
 
     buffer.ingest_daemon_logs(events);
 
-    assert_eq!(buffer.daemon_logs.len(), MAX_DAEMON_LOG_BUFFER_EVENTS);
+    assert_eq!(buffer.daemon_logs.len(), MAX_BUFFERED_EVENTS_PER_KIND);
     assert_eq!(buffer.daemon_logs.first().unwrap().message, "2");
     assert_eq!(
         buffer.daemon_logs.last().unwrap().message,
@@ -134,27 +134,27 @@ fn telemetry_buffer_caps_daemon_logs_to_latest_events() {
 
 #[test]
 fn telemetry_buffer_requeues_failed_daemon_logs_without_dropping_newer_events() {
-    use buffer::MAX_DAEMON_LOG_BUFFER_EVENTS;
+    use buffer::MAX_BUFFERED_EVENTS_PER_KIND;
     let mut buffer = TelemetryBuffer::new();
     buffer.ingest_daemon_logs(vec![
         sample_daemon_log_event("new-1"),
         sample_daemon_log_event("new-2"),
     ]);
 
-    let failed_events = (0..MAX_DAEMON_LOG_BUFFER_EVENTS)
+    let failed_events = (0..MAX_BUFFERED_EVENTS_PER_KIND)
         .map(|index| sample_daemon_log_event(format!("old-{index}")))
         .collect();
 
     buffer.requeue_failed_daemon_logs(failed_events);
 
-    assert_eq!(buffer.daemon_logs.len(), MAX_DAEMON_LOG_BUFFER_EVENTS);
+    assert_eq!(buffer.daemon_logs.len(), MAX_BUFFERED_EVENTS_PER_KIND);
     assert_eq!(buffer.daemon_logs.first().unwrap().message, "old-2");
     assert_eq!(
-        buffer.daemon_logs[MAX_DAEMON_LOG_BUFFER_EVENTS - 2].message,
+        buffer.daemon_logs[MAX_BUFFERED_EVENTS_PER_KIND - 2].message,
         "new-1"
     );
     assert_eq!(
-        buffer.daemon_logs[MAX_DAEMON_LOG_BUFFER_EVENTS - 1].message,
+        buffer.daemon_logs[MAX_BUFFERED_EVENTS_PER_KIND - 1].message,
         "new-2"
     );
 }

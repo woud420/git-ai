@@ -27,6 +27,7 @@ pub const TRACE_ROOT_STARTED_AT_NS_FIELD: &str = "git_ai_root_started_at_ns";
 pub const TRACE_ROOT_WORKTREE_FIELD: &str = "git_ai_root_worktree";
 pub const TRACE_ROOT_REFLOG_START_OFFSETS_FIELD: &str = "git_ai_root_reflog_start_offsets";
 pub const TRACE_CONNECTION_CLOSED_EVENT: &str = "git_ai_connection_closed";
+pub const TRACE_IDLE_ROOT_LAST_ACTIVITY_NS_FIELD: &str = "git_ai_idle_root_last_activity_ns";
 pub const DAEMON_CONTROL_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
 pub const DAEMON_CONTROL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 pub const DAEMON_CHECKPOINT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -41,6 +42,7 @@ pub const DAEMON_SOCKET_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(not(windows))]
 pub const TRACE_SOCKET_RECV_BUFFER_BYTES: usize = 512 * 1024;
 pub const TRACE_INGEST_QUEUE_CAPACITY: usize = 16_384;
+pub const TRACE_ROOT_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 #[cfg(not(windows))]
 pub const TRACE_CONNECTION_BOOTSTRAP_READ_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(windows)]
@@ -48,6 +50,18 @@ pub const WINDOWS_TRACE_PIPE_WORKERS: usize = 16;
 #[cfg(windows)]
 pub const WINDOWS_CONTROL_PIPE_WORKERS: usize = 8;
 static DAEMON_PROCESS_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn trace_root_idle_timeout() -> Duration {
+    #[cfg(feature = "test-support")]
+    if let Ok(raw) = std::env::var("GIT_AI_TEST_TRACE_ROOT_IDLE_TIMEOUT_MS")
+        && let Ok(milliseconds) = raw.parse::<u64>()
+        && milliseconds > 0
+    {
+        return Duration::from_millis(milliseconds);
+    }
+
+    TRACE_ROOT_IDLE_TIMEOUT
+}
 
 #[cfg(not(windows))]
 pub type DaemonClientStream = LocalSocketStream;

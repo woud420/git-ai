@@ -22,6 +22,28 @@ impl ActorDaemonCoordinator {
             let Some(root_sid) = payload_root_sid.as_deref() else {
                 return Ok(TracePayloadApplyOutcome::None);
             };
+            if let Some(reap_last_activity_ns) = payload
+                .get(TRACE_IDLE_ROOT_LAST_ACTIVITY_NS_FIELD)
+                .and_then(Value::as_u64)
+            {
+                let mut ingress = self.trace_ingress_state.lock().map_err(|_| {
+                    crate::model::repository::error::PersistenceError::LockPoisoned {
+                        what: "trace ingress state",
+                    }
+                })?;
+                let activity_was_refreshed = ingress
+                    .root_last_activity_ns
+                    .get(root_sid)
+                    .is_some_and(|activity| *activity != reap_last_activity_ns);
+                let root_is_still_open = ingress
+                    .root_open_connections
+                    .get(root_sid)
+                    .is_some_and(|count| *count > 0);
+                if activity_was_refreshed && root_is_still_open {
+                    ingress.root_close_markers_enqueued.remove(root_sid);
+                    return Ok(TracePayloadApplyOutcome::None);
+                }
+            }
             {
                 let mut normalizer = self.normalizer.lock().await;
                 let _ = normalizer.sweep_orphans_for_roots(&[root_sid.to_string()]);

@@ -212,12 +212,19 @@ pub(super) fn append(
     let mut record = wire_v2::encode(checkpoint)?;
     record.push(b'\n');
 
+    crate::observability::wltrace::record("working_log.append.begin", &path, || {
+        format!("bytes={}", record.len())
+    });
+
     let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
     file.write_all(&record)?;
     file.sync_all()?;
     if created {
         sync_parent_directory(&path)?;
     }
+    crate::observability::wltrace::record("working_log.append.end", &path, || {
+        format!("bytes={}", record.len())
+    });
     Ok(())
 }
 
@@ -228,6 +235,9 @@ pub(super) fn rewrite(
     let _lock = acquire_lock(location)?;
     let path = location.checkpoints_file();
     let temp_path = path.with_extension("jsonl.tmp");
+    crate::observability::wltrace::record("working_log.rewrite.begin", &path, || {
+        format!("checkpoints={}", checkpoints.len())
+    });
     let mut output = BufWriter::new(fs::File::create(&temp_path)?);
 
     sync_checkpoint_blobs(location, checkpoints.iter(), true)?;
@@ -242,6 +252,9 @@ pub(super) fn rewrite(
         .map_err(|error| error.into_error())?
         .sync_all()?;
     replace_file_durably(&temp_path, &path)?;
+    crate::observability::wltrace::record("working_log.rewrite.end", &path, || {
+        format!("checkpoints={}", checkpoints.len())
+    });
     Ok(())
 }
 

@@ -37,6 +37,8 @@ fn is_superuser_exempt_command(args: &[String]) -> bool {
 }
 
 fn main() {
+    git_ai::observability::wltrace::initialize_from_env();
+
     // Get the binary name that was called
     let binary_name = std::env::args_os()
         .next()

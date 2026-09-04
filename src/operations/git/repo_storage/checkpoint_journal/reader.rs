@@ -17,6 +17,9 @@ pub(super) fn read_locked(
     max_bytes: u64,
 ) -> Result<ReadResult, GitAiError> {
     let path = location.checkpoints_file();
+    crate::observability::wltrace::record("working_log.read", &path, || {
+        format!("max_bytes={max_bytes}")
+    });
     if !path.exists() {
         return Ok(ReadResult {
             journal: LoadedJournal::empty(),

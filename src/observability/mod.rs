@@ -4,6 +4,8 @@ use std::time::Duration;
 use crate::metrics::MetricEvent;
 
 pub mod performance_targets;
+#[doc(hidden)]
+pub mod wltrace;
 
 /// Maximum events per metrics envelope
 pub const MAX_METRICS_PER_ENVELOPE: usize = 1000;

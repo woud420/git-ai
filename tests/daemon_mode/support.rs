@@ -33,6 +33,9 @@ mod family_concurrency;
 #[path = "outbox_replay.rs"]
 mod outbox_replay;
 
+#[path = "wltrace.rs"]
+mod wltrace;
+
 use git_ai::config::{NotesBackendConfig, NotesBackendKind};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use git_ai::model::checkpoint_delivery::CHECKPOINT_DELIVERY_SCHEMA_VERSION;

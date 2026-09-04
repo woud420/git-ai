@@ -414,6 +414,7 @@ impl JournalLease<'_> {
 
     fn append_last(&mut self) -> Result<(), GitAiError> {
         let mut snapshot = self.verify_revision()?;
+        crate::observability::wltrace::record("working_log.append.begin", &self.path, String::new);
         let result = (|| {
             let checkpoint = self
                 .journal
@@ -437,11 +438,24 @@ impl JournalLease<'_> {
             self.revision = snapshot.hasher.finish();
             Ok(())
         })();
+        if result.is_ok() {
+            crate::observability::wltrace::record(
+                "working_log.append.end",
+                &self.path,
+                String::new,
+            );
+        }
         self.finish_publication(result)
     }
 
     fn rewrite(&mut self) -> Result<(), GitAiError> {
         self.verify_revision()?;
+        crate::observability::wltrace::record("working_log.rewrite.begin", &self.path, || {
+            format!(
+                "checkpoints={}",
+                self.journal.as_ref().map_or(0, |journal| journal.len())
+            )
+        });
         let result = (|| {
             let journal = self
                 .journal
@@ -467,6 +481,14 @@ impl JournalLease<'_> {
             self.revision = hasher.finish();
             Ok(())
         })();
+        if result.is_ok() {
+            crate::observability::wltrace::record("working_log.rewrite.end", &self.path, || {
+                format!(
+                    "checkpoints={}",
+                    self.journal.as_ref().map_or(0, |journal| journal.len())
+                )
+            });
+        }
         self.finish_publication(result)
     }
 

@@ -108,6 +108,11 @@ impl RepoStorage {
                 fs::remove_dir_all(&old_dir)?;
             }
             fs::rename(&working_log_dir, &old_dir)?;
+            crate::observability::wltrace::record(
+                "working_log.gc.archive",
+                &working_log_dir,
+                || format!("to={:?}", old_dir),
+            );
 
             // Write a timestamp marker so we know when it was archived
             let marker = old_dir.join(".archived_at");
@@ -163,7 +168,13 @@ impl RepoStorage {
 
             if now_secs.saturating_sub(archived_at) >= Self::OLD_WORKING_LOG_RETENTION_SECS {
                 tracing::debug!("Pruning expired old working log: {}", name_str);
-                let _ = fs::remove_dir_all(&dir_path);
+                if fs::remove_dir_all(&dir_path).is_ok() {
+                    crate::observability::wltrace::record(
+                        "working_log.gc.prune",
+                        &dir_path,
+                        String::new,
+                    );
+                }
             }
         }
     }
@@ -179,10 +190,16 @@ impl RepoStorage {
         }
         if !new_dir.exists() {
             fs::rename(&old_dir, &new_dir)?;
+            crate::observability::wltrace::record("working_log.rename", &old_dir, || {
+                format!("to={:?}", new_dir)
+            });
             tracing::debug!("Renamed working log from {} to {}", old_sha, new_sha);
         } else {
             self.merge_working_log_dirs(old_sha, new_sha, &old_dir, &new_dir)?;
             fs::remove_dir_all(&old_dir)?;
+            crate::observability::wltrace::record("working_log.merge", &old_dir, || {
+                format!("to={:?}", new_dir)
+            });
             tracing::debug!("Merged working log from {} into {}", old_sha, new_sha);
         }
         Ok(())
@@ -343,6 +360,7 @@ impl PersistedWorkingLog {
 
     pub fn reset_working_log(&self) -> Result<(), GitAiError> {
         checkpoint_journal::reset(&self.checkpoint_journal_location())?;
+        crate::observability::wltrace::record("working_log.reset", &self.dir, String::new);
 
         // Clear INITIAL attributions file so stale attributions from a
         // previous working state do not persist across resets
@@ -746,6 +764,7 @@ impl PersistedWorkingLog {
 
         let json = serde_json::to_string_pretty(&initial_data)?;
         fs::write(&self.initial_file, json)?;
+        crate::observability::wltrace::record("working_log.write_initial", &self.dir, String::new);
 
         Ok(())
     }

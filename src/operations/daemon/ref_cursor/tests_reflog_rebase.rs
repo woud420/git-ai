@@ -97,6 +97,8 @@ fn rebase_span_stops_at_new_rebase_start_before_finish() {
 #[test]
 fn rebase_span_continuation_skips_stale_abort_before_selected_start() {
     let temp = tempfile::tempdir().unwrap();
+    let trace_path = temp.path().join("rebase-wltrace.log");
+    let _trace_guard = crate::observability::wltrace::enable_for_test(trace_path.clone());
     let worktree = temp.path().join("repo");
     let git_dir = worktree.join(".git");
     let head_log = git_dir.join("logs/HEAD");
@@ -204,6 +206,23 @@ fn rebase_span_continuation_skips_stale_abort_before_selected_start() {
         ],
         "rebase continuation must follow the selected start, not a stale untraced abort row before it"
     );
+
+    let trace = fs::read_to_string(trace_path).expect("read rebase WLTRACE output");
+    for evidence in [
+        "op=ref_cursor.rebase.skipped_before_selection",
+        "actions=abort",
+        "op=ref_cursor.rebase.span_selection",
+        "result=selected action=start",
+        "op=ref_cursor.rebase.continuation",
+        "action=pick",
+        "action=finish",
+        "op=ref_cursor.rebase.entry_consumed",
+    ] {
+        assert!(
+            trace.contains(evidence),
+            "rebase WLTRACE output missing {evidence}:\n{trace}"
+        );
+    }
 }
 
 #[test]

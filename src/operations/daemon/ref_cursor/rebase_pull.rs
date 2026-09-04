@@ -18,12 +18,43 @@ impl RefCursor {
             }
         };
         let Some(first) = first else {
+            crate::observability::wltrace::record(
+                "ref_cursor.rebase.span_selection",
+                cmd.worktree.as_deref().unwrap_or(Path::new("")),
+                || format!("sid={} result=none exit={}", cmd.root_sid, cmd.exit_code),
+            );
             return Ok(());
         };
+
+        crate::observability::wltrace::record(
+            "ref_cursor.rebase.span_selection",
+            cmd.worktree.as_deref().unwrap_or(Path::new("")),
+            || {
+                format!(
+                    "sid={} result=selected action={} offset={} exit={}",
+                    cmd.root_sid,
+                    rebase_reflog_action(&first.message).unwrap_or("unknown"),
+                    first.start_offset,
+                    cmd.exit_code,
+                )
+            },
+        );
 
         let mut changes = vec![entry_to_ref_change(&first)];
         let old = first.old.clone();
         let mut new = first.new.clone();
+        crate::observability::wltrace::record(
+            "ref_cursor.rebase.entry_consumed",
+            &first.path,
+            || {
+                format!(
+                    "sid={} action={} offset={}",
+                    cmd.root_sid,
+                    rebase_reflog_action(&first.message).unwrap_or("unknown"),
+                    first.start_offset,
+                )
+            },
+        );
         self.consume_entry(&first)?;
 
         let failed = cmd.exit_code != 0;
@@ -49,11 +80,45 @@ impl RefCursor {
                 break;
             };
             if rebase_reflog_action_is(&next.message, "start") {
+                crate::observability::wltrace::record(
+                    "ref_cursor.rebase.continuation_stopped",
+                    &next.path,
+                    || {
+                        format!(
+                            "sid={} reason=next_start offset={}",
+                            cmd.root_sid, next.start_offset
+                        )
+                    },
+                );
                 break;
             }
+            crate::observability::wltrace::record(
+                "ref_cursor.rebase.continuation",
+                &next.path,
+                || {
+                    format!(
+                        "sid={} action={} offset={}",
+                        cmd.root_sid,
+                        rebase_reflog_action(&next.message).unwrap_or("unknown"),
+                        next.start_offset,
+                    )
+                },
+            );
             new = next.new.clone();
             consumed_finish = rebase_reflog_action_is(&next.message, "finish");
             next_start = next.end_offset;
+            crate::observability::wltrace::record(
+                "ref_cursor.rebase.entry_consumed",
+                &next.path,
+                || {
+                    format!(
+                        "sid={} action={} offset={}",
+                        cmd.root_sid,
+                        rebase_reflog_action(&next.message).unwrap_or("unknown"),
+                        next.start_offset,
+                    )
+                },
+            );
             self.consume_entry(&next)?;
             changes.push(entry_to_ref_change(&next));
         }
@@ -92,14 +157,32 @@ impl RefCursor {
         let start = self.reflog_start_offset(&key, &path)?;
         let entries = read_reflog_entries(key, &path, "HEAD", start)?;
 
-        Ok(entries.into_iter().find(|entry| {
+        let selected = entries.iter().find(|entry| {
             !self.entry_consumed(entry)
                 && rebase_reflog_action_is(&entry.message, "start")
                 && expected.matches_span_boundary(entry)
                 && target
                     .as_deref()
                     .is_none_or(|target| rebase_start_message_targets(&entry.message, target))
-        }))
+        });
+        crate::observability::wltrace::record(
+            "ref_cursor.rebase.skipped_before_selection",
+            &path,
+            || {
+                let selected_offset = selected.map_or(u64::MAX, |entry| entry.start_offset);
+                let actions = entries
+                    .iter()
+                    .filter(|entry| {
+                        entry.start_offset < selected_offset && !self.entry_consumed(entry)
+                    })
+                    .filter_map(|entry| rebase_reflog_action(&entry.message))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("start={start:?} actions={actions}")
+            },
+        );
+
+        Ok(selected.cloned())
     }
 
     pub(super) fn consume_failed_explicit_branch_rebase_start(
@@ -129,6 +212,17 @@ impl RefCursor {
             return Ok(false);
         };
 
+        crate::observability::wltrace::record(
+            "ref_cursor.rebase.span_selection",
+            &head_path,
+            || {
+                format!(
+                    "sid={} result=failed_explicit_branch action=start offset={}",
+                    cmd.root_sid, start_marker.start_offset
+                )
+            },
+        );
+
         let finish_new = latest_rebase_finish_for_branch(&head_entries, &branch_ref)
             .filter(|finish| finish.end_offset > start_marker.end_offset)
             .map(|finish| finish.new.as_str());
@@ -145,6 +239,16 @@ impl RefCursor {
         }
 
         self.advance_cursor_to_entry(start_marker);
+        crate::observability::wltrace::record(
+            "ref_cursor.rebase.entry_consumed",
+            &head_path,
+            || {
+                format!(
+                    "sid={} action=start offset={}",
+                    cmd.root_sid, start_marker.start_offset
+                )
+            },
+        );
         dedup_ref_changes(&mut changes);
         cmd.ref_changes = changes;
         Ok(true)
@@ -318,6 +422,16 @@ impl RefCursor {
             return Ok(());
         };
 
+        crate::observability::wltrace::record(
+            "ref_cursor.finish.entry_consumed",
+            &finish.path,
+            || {
+                format!(
+                    "action=finish ref={branch_ref} offset={}",
+                    finish.start_offset
+                )
+            },
+        );
         self.advance_cursor_to_entry(&finish);
         let old_oids = state
             .refs

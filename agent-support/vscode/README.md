@@ -26,6 +26,18 @@ You can enable toast messages from the extension when it calls checkpoints to ge
 "gitai.enableCheckpointLogging": true
 ```
 
+### Attribution display
+
+The `gitai.blameMode` setting controls attribution decorations in the editor:
+
+- `line` (default) shows the current line's attribution in the gutter.
+- `all` shows gutter decorations for every AI-attributed line in the file.
+- `off` hides attribution gutter decorations.
+
+Use **Git AI: Toggle Show AI Code** or `Cmd+Shift+A` on macOS
+(`Ctrl+Shift+A` elsewhere) to switch modes. The choice is stored globally and
+extension updates do not overwrite an explicit setting.
+
 ### AI tab tracking (experimental)
 
 Adds support for tracking AI tab-completion insertions

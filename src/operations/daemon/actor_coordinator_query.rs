@@ -5,6 +5,7 @@ use crate::model::checkpoint_request::CheckpointRequest;
 use crate::operations::daemon::git_backend::GitBackend;
 use serde_json::Value;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::sync::oneshot;
 
 impl ActorDaemonCoordinator {
@@ -183,26 +184,44 @@ impl ActorDaemonCoordinator {
         &self,
         delivery: crate::model::checkpoint_delivery::CheckpointDelivery,
     ) -> Result<ControlResponse, GitAiError> {
-        delivery
-            .validate()
-            .map_err(|error| GitAiError::PresetError(error.to_string()))?;
-        // Stamp the envelope identity onto the request so the applied
-        // checkpoint records it; at-least-once outbox replay of the same
-        // delivery then deduplicates instead of applying twice.
-        let mut request = delivery.request;
-        request.delivery_id = Some(delivery.delivery_id);
-        self.ingest_validated_checkpoint_control_payload(request)
-            .await
+        let _outstanding = AtomicCounterGuard::new(&self.checkpoint_requests_outstanding);
+        let result = async {
+            delivery
+                .validate()
+                .map_err(|error| GitAiError::PresetError(error.to_string()))?;
+            // Stamp the envelope identity onto the request so the applied
+            // checkpoint records it; at-least-once outbox replay of the same
+            // delivery then deduplicates instead of applying twice.
+            let mut request = delivery.request;
+            request.delivery_id = Some(delivery.delivery_id);
+            self.ingest_validated_checkpoint_control_payload(request)
+                .await
+        }
+        .await;
+        if result.is_err() {
+            self.checkpoint_requests_rejected
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        result
     }
 
     pub(crate) async fn ingest_checkpoint_control_payload(
         &self,
         request: CheckpointRequest,
     ) -> Result<ControlResponse, GitAiError> {
-        crate::model::checkpoint_delivery::validate_checkpoint_request_bounds(&request)
-            .map_err(|error| GitAiError::PresetError(error.to_string()))?;
-        self.ingest_validated_checkpoint_control_payload(request)
-            .await
+        let _outstanding = AtomicCounterGuard::new(&self.checkpoint_requests_outstanding);
+        let result = async {
+            crate::model::checkpoint_delivery::validate_checkpoint_request_bounds(&request)
+                .map_err(|error| GitAiError::PresetError(error.to_string()))?;
+            self.ingest_validated_checkpoint_control_payload(request)
+                .await
+        }
+        .await;
+        if result.is_err() {
+            self.checkpoint_requests_rejected
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        result
     }
 
     async fn ingest_validated_checkpoint_control_payload(

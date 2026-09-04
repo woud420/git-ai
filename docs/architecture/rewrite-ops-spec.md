@@ -52,6 +52,16 @@ mtime-guarded snapshot and live-worktree stash-restore races.)
 correct output is *no migration* — attribution gaps are acceptable;
 misattribution is not.
 
+## Lite-mode disposition
+
+This fork intentionally does not support a mode that skips authorship-note
+migration for otherwise recoverable rewrites. Rewrite attribution remains
+unconditional when the immutable evidence required by I1–I4 is available;
+performance work must preserve that contract through bounded batching,
+scheduling, or persistence improvements. See
+[`2026-09-04-reject-lite-mode.md`](../decisions/2026-09-04-reject-lite-mode.md)
+for the options, consequences, and reconsideration trigger.
+
 ## Architecture
 
 ```

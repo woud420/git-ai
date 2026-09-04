@@ -90,6 +90,32 @@ fn eng_218_packaging_sources_enforce_per_user_runtime_boundaries() {
 }
 
 #[test]
+fn eng_318_packaged_installers_forward_only_the_resolved_user_home() {
+    let wix = repo_file("packaging/windows/git-ai.wxs");
+    assert!(
+        wix.contains("--installer-env &quot;USERPROFILE=[WIX_DIR_PROFILE]&quot;"),
+        "the MSI must explicitly hand the per-user profile to install-hooks"
+    );
+
+    let postinstall = repo_file("packaging/macos/scripts/postinstall");
+    assert!(
+        postinstall.contains(r#"--installer-env \"HOME=$USER_HOME\""#),
+        "the PKG must explicitly hand the console user's home to install-hooks"
+    );
+
+    for forbidden in ["API_KEY=", "PATH=", "GIT_AI_ALLOW_SUPERUSER="] {
+        assert!(
+            !postinstall.contains(&format!("--installer-env {forbidden}")),
+            "the PKG must not forward {forbidden} through installer environment payloads"
+        );
+        assert!(
+            !wix.contains(&format!("--installer-env {forbidden}")),
+            "the MSI must not forward {forbidden} through installer environment payloads"
+        );
+    }
+}
+
+#[test]
 fn eng_218_release_workflow_signs_tests_and_gates_native_packages() {
     let workflow = repo_file(".github/workflows/release.yml");
 

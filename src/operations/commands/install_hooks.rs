@@ -13,6 +13,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod installer_environment;
+
+use installer_environment::InstallerEnvironment;
+
 pub(crate) const TRACE2_EVENT_TARGET_KEY: &str = "trace2.eventTarget";
 pub(crate) const TRACE2_EVENT_NESTING_KEY: &str = "trace2.eventNesting";
 const TRACE2_EVENT_NESTING_VALUE: &str = "0";
@@ -26,6 +30,7 @@ struct InstallOptions {
     include_visual_studio_extension: bool,
     api_base: Option<String>,
     api_key: Option<String>,
+    installer_environment: InstallerEnvironment,
 }
 
 /// Installation status for a tool
@@ -317,6 +322,7 @@ fn ensure_daemon(dry_run: bool) {
 /// Main entry point for install-hooks command
 pub fn run(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
     let options = parse_install_options(args)?;
+    options.installer_environment.apply();
     let install_config = InstallConfig {
         api_base: options.api_base.clone().or_else(|| {
             std::env::var("API_BASE")
@@ -372,6 +378,15 @@ fn parse_install_options(args: &[String]) -> Result<InstallOptions, GitAiError> 
             "--verbose" | "-v" => options.verbose = true,
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
+            value if value.starts_with("--installer-env=") => {
+                options.installer_environment.insert(&value[16..])?;
+            }
+            "--installer-env" => {
+                let value = args.next().ok_or_else(|| {
+                    GitAiError::Generic("missing value for --installer-env".to_string())
+                })?;
+                options.installer_environment.insert(value)?;
+            }
             value if value.starts_with("--api-base=") => {
                 options.api_base = non_empty_value(&value[11..]);
             }

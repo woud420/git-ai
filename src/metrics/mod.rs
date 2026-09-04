@@ -8,6 +8,7 @@
 //! so all existing `crate::metrics::*` consumer paths remain valid.
 
 pub mod local_stats;
+pub(crate) mod model_pricing;
 
 // Sub-module shims: forward to the model layer so that paths like
 // `crate::metrics::pos_encoded::PosField` (used by #[macro_export] macros)

@@ -5,6 +5,7 @@ use crate::metrics::attrs::attr_pos;
 use crate::metrics::events::session_event_pos;
 use crate::metrics::local_stats::SESSION_RAW_JSON_KEY;
 use crate::metrics::local_stats::types::{TokenModelStat, TokenSummary, WowSpend};
+use crate::metrics::model_pricing::{ModelPricing, pricing_for};
 use crate::metrics::pos_encoded::sparse_get_string;
 use crate::metrics::types::MetricEvent;
 use chrono::NaiveDate;
@@ -54,54 +55,6 @@ impl CodexSessionAccum {
     }
 }
 
-/// Per-million-token pricing for a model (USD).
-struct ModelPricing {
-    input: f64,
-    output: f64,
-    cache_write: f64,
-    cache_read: f64,
-}
-
-/// Built-in pricing estimate, matched by substring of the model id.
-/// Rates are public Anthropic list prices (USD per million tokens) and are
-/// only an estimate — they go stale as pricing changes.
-fn pricing_for(model: &str) -> Option<ModelPricing> {
-    let m = model.to_lowercase();
-    if m.contains("opus") {
-        Some(ModelPricing {
-            input: 15.0,
-            output: 75.0,
-            cache_write: 18.75,
-            cache_read: 1.5,
-        })
-    } else if m.contains("sonnet") {
-        Some(ModelPricing {
-            input: 3.0,
-            output: 15.0,
-            cache_write: 3.75,
-            cache_read: 0.3,
-        })
-    } else if m.contains("haiku") {
-        Some(ModelPricing {
-            input: 0.8,
-            output: 4.0,
-            cache_write: 1.0,
-            cache_read: 0.08,
-        })
-    } else if m.contains("gpt") {
-        // OpenAI GPT-5 family estimate; cache_write unused (codex reports no
-        // cache-creation tokens).
-        Some(ModelPricing {
-            input: 1.25,
-            output: 10.0,
-            cache_write: 1.25,
-            cache_read: 0.125,
-        })
-    } else {
-        None
-    }
-}
-
 fn estimate_cost(acc: &TokenAccum, pricing: &ModelPricing) -> f64 {
     (acc.input as f64 * pricing.input
         + acc.output as f64 * pricing.output
@@ -134,7 +87,7 @@ fn cost_for_message_slice(entries: impl Iterator<Item = (String, TokenAccum)>) -
     }
     model_totals
         .iter()
-        .filter_map(|(model, acc)| pricing_for(model).map(|p| estimate_cost(acc, &p)))
+        .filter_map(|(model, acc)| pricing_for(model).map(|p| estimate_cost(acc, p)))
         .sum()
 }
 
@@ -171,7 +124,7 @@ pub(super) fn build_token_summary(
         if let Some(pricing) = pricing_for(&short) {
             *cost_by_day
                 .entry(ts_to_local(ts).date_naive())
-                .or_insert(0.0) += estimate_cost(&acc, &pricing);
+                .or_insert(0.0) += estimate_cost(&acc, pricing);
         }
 
         let entry = model_tokens.entry(short.clone()).or_default();
@@ -209,7 +162,7 @@ pub(super) fn build_token_summary(
         if let Some(pricing) = pricing_for(&short) {
             *cost_by_day
                 .entry(ts_to_local(acc.last_usage_ts).date_naive())
-                .or_insert(0.0) += estimate_cost(&mapped, &pricing);
+                .or_insert(0.0) += estimate_cost(&mapped, pricing);
         }
 
         let entry = model_tokens.entry(short.clone()).or_default();
@@ -265,7 +218,7 @@ pub(super) fn build_token_summary(
         summary.cache_read += acc.cache_read;
         summary.cache_creation += acc.cache_creation;
 
-        let cost = pricing_for(&model).map(|p| estimate_cost(&acc, &p));
+        let cost = pricing_for(&model).map(|p| estimate_cost(&acc, p));
         if let Some(c) = cost {
             summary.estimated_cost_usd += c;
         }
@@ -397,5 +350,61 @@ pub(super) fn aggregate_codex_tokens(
         entry.input_tokens = entry.input_tokens.max(get("input_tokens"));
         entry.cached_input_tokens = entry.cached_input_tokens.max(get("cached_input_tokens"));
         entry.output_tokens = entry.output_tokens.max(get("output_tokens"));
+    }
+}
+
+#[cfg(test)]
+mod pricing_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn pricing_catalog_preserves_cost_weights_and_json_shape() {
+        let usage = HashMap::from([(
+            "message-1".to_string(),
+            (
+                "claude-fable-5".to_string(),
+                TokenAccum {
+                    input: 1_000_000,
+                    output: 1_000_000,
+                    cache_read: 1_000_000,
+                    cache_creation: 1_000_000,
+                },
+                1_000,
+                "session-1".to_string(),
+            ),
+        )]);
+
+        let (summary, _) = build_token_summary(usage, HashMap::new(), 1_000, 1_000);
+        let json = serde_json::to_value(summary).unwrap();
+
+        assert_eq!(json["estimated_cost_usd"], json!(73.5));
+        assert_eq!(json["by_model"][0]["estimated_cost_usd"], json!(73.5));
+        assert_eq!(
+            json.as_object().unwrap().keys().collect::<Vec<_>>(),
+            vec![
+                "by_model",
+                "cache_creation",
+                "cache_read",
+                "estimated_cost_usd",
+                "input",
+                "output",
+                "wow_spend",
+            ]
+        );
+    }
+
+    #[test]
+    fn pricing_fallbacks_are_bounded_to_model_tokens() {
+        let fable = pricing_for("us.anthropic.claude-fable-5")
+            .expect("provider-prefixed catalog model must have pricing");
+        assert_eq!(fable.input, 10.0);
+        assert_eq!(fable.output, 50.0);
+        assert_eq!(fable.cache_read, 1.0);
+        assert_eq!(fable.cache_write, 12.5);
+
+        assert!(pricing_for("claude-opus-4-9").is_some());
+        assert!(pricing_for("somegpt-5").is_none());
+        assert!(pricing_for("totally-unknown-model").is_none());
     }
 }

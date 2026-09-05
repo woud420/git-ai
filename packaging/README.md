@@ -28,3 +28,12 @@ These values configure only the installing user's Git AI config. They are
 hidden from MSI logs, but command-line arguments can still be visible to local
 process inspection and shell history. Use your endpoint-management secret
 mechanism when available.
+
+When `install.sh` runs inside WSL, it installs the Linux binary as usual and
+also hands the matching release MSI to the Windows host. The handoff requires
+working Windows interoperability (`cmd.exe`, `wslpath`, and `msiexec.exe`),
+stages the MSI under the resolved Windows user's temporary directory, and
+skips the host installation when that user's `git-ai.exe` already exists.
+Native Linux and macOS installs never enter this path. Host failures report
+only the failed prerequisite or installer exit code; configuration values are
+not included in diagnostics.

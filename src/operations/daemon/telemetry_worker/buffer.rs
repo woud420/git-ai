@@ -6,7 +6,7 @@ use crate::model::daemon_control::CasSyncPayload;
 use crate::model::telemetry::TelemetryEnvelope;
 use serde_json::Value;
 
-pub(super) const MAX_DAEMON_LOG_BUFFER_EVENTS: usize = 5000;
+pub(super) const MAX_BUFFERED_EVENTS_PER_KIND: usize = 5000;
 
 pub(super) struct ErrorEvent {
     pub(super) timestamp: String,
@@ -107,10 +107,15 @@ impl TelemetryBuffer {
                 }
             }
         }
+        Self::cap_oldest(&mut self.errors);
+        Self::cap_oldest(&mut self.performances);
+        Self::cap_oldest(&mut self.messages);
+        Self::cap_oldest(&mut self.metrics);
     }
 
     pub(super) fn ingest_cas(&mut self, records: Vec<CasSyncPayload>) {
         self.cas_records.extend(records);
+        Self::cap_oldest(&mut self.cas_records);
     }
 
     pub(super) fn ingest_daemon_logs(&mut self, events: Vec<DaemonLogEvent>) {
@@ -125,12 +130,13 @@ impl TelemetryBuffer {
     }
 
     fn cap_daemon_logs(&mut self) {
-        let overflow = self
-            .daemon_logs
-            .len()
-            .saturating_sub(MAX_DAEMON_LOG_BUFFER_EVENTS);
+        Self::cap_oldest(&mut self.daemon_logs);
+    }
+
+    fn cap_oldest<T>(events: &mut Vec<T>) {
+        let overflow = events.len().saturating_sub(MAX_BUFFERED_EVENTS_PER_KIND);
         if overflow > 0 {
-            self.daemon_logs.drain(0..overflow);
+            events.drain(0..overflow);
         }
     }
 
@@ -143,5 +149,61 @@ impl TelemetryBuffer {
             cas_records: std::mem::take(&mut self.cas_records),
             daemon_logs: std::mem::take(&mut self.daemon_logs),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn best_effort_buffers_drop_oldest_events_at_the_cap() {
+        let mut buffer = TelemetryBuffer::new();
+        let event_count = MAX_BUFFERED_EVENTS_PER_KIND + 1;
+
+        buffer.ingest_envelopes(
+            (0..event_count)
+                .flat_map(|index| {
+                    [
+                        TelemetryEnvelope::Error {
+                            timestamp: index.to_string(),
+                            message: index.to_string(),
+                            context: None,
+                        },
+                        TelemetryEnvelope::Performance {
+                            timestamp: index.to_string(),
+                            operation: index.to_string(),
+                            duration_ms: index as u128,
+                            context: None,
+                            tags: None,
+                        },
+                        TelemetryEnvelope::Message {
+                            timestamp: index.to_string(),
+                            message: index.to_string(),
+                            level: "info".to_string(),
+                            context: None,
+                        },
+                    ]
+                })
+                .collect(),
+        );
+        buffer.ingest_cas(
+            (0..event_count)
+                .map(|index| CasSyncPayload {
+                    hash: index.to_string(),
+                    data: index.to_string(),
+                    metadata: None,
+                })
+                .collect(),
+        );
+
+        assert_eq!(buffer.errors.len(), MAX_BUFFERED_EVENTS_PER_KIND);
+        assert_eq!(buffer.performances.len(), MAX_BUFFERED_EVENTS_PER_KIND);
+        assert_eq!(buffer.messages.len(), MAX_BUFFERED_EVENTS_PER_KIND);
+        assert_eq!(buffer.cas_records.len(), MAX_BUFFERED_EVENTS_PER_KIND);
+        assert_eq!(buffer.errors[0].message, "1");
+        assert_eq!(buffer.performances[0].operation, "1");
+        assert_eq!(buffer.messages[0].message, "1");
+        assert_eq!(buffer.cas_records[0].hash, "1");
     }
 }

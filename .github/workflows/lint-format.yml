@@ -10,7 +10,7 @@ on:
       - 'tests/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'Taskfile.yml'
+      - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
       - '.github/workflows/lint-format.yml'
@@ -21,7 +21,7 @@ on:
       - 'tests/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'Taskfile.yml'
+      - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
       - '.github/workflows/lint-format.yml'
@@ -44,9 +44,7 @@ jobs:
           toolchain: "1.93.0"
           components: rustfmt
 
-      - uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2
-
-      - run: task format:check
+      - run: make format-check
 
   lint:
     name: Lint (${{ matrix.os }})
@@ -63,6 +61,13 @@ jobs:
           toolchain: "1.93.0"
           components: clippy
 
+      - name: Install GNU Make (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install make --no-progress --yes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -73,9 +78,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-lint-
 
-      - uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2
-
-      - run: task lint
+      - run: make lint
 
   doc:
     name: Doc
@@ -99,6 +102,4 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-doc-
 
-      - uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2
-
-      - run: task doc
+      - run: make doc

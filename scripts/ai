@@ -114,13 +114,13 @@ Follow this workflow:
 
 3. FIX USING TDD
    - Write a failing test that captures the issue
-   - Run `task test` to confirm it fails
+   - Run `make test` to confirm it fails
    - Implement the fix
-   - Run `task test` to confirm the test passes
+   - Run `make test` to confirm the test passes
 
 4. LINT AND FORMAT
-   - Run `task lint` and fix any issues
-   - Run `task fmt` and fix any issues
+   - Run `make lint` and fix any issues
+   - Run `make fmt` and fix any issues
 
 5. COMMIT AND PUSH
    - Stage and commit with a descriptive message referencing #{issue_number}

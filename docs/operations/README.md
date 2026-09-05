@@ -4,14 +4,13 @@ Local development, validation, and release notes for git-ai.
 
 ## Local development
 
-- `task dev` — build a debug binary, install it system-wide (same location as
+- `make dev` — build a debug binary, install it system-wide (same location as
   release builds), run `git-ai install`, and restart the daemon. This is the
   only supported way to run local changes.
-- `make check` (bridge for `task lint && task format:check && task test`) —
-  the canonical verification.
-- `task test TEST_FILTER=foo` / `NO_CAPTURE=true` / `EXTRA_TEST_BINARY_ARGS`,
-  `CARGO_TEST_ARGS` — test-suite knobs (see `Taskfile.yml`).
-- Coverage: `task coverage` (see `../COVERAGE.md`).
+- `make check` — run lint, format checking, and tests sequentially.
+- `make test TEST_FILTER=foo` / `NO_CAPTURE=true` / `EXTRA_TEST_BINARY_ARGS`,
+  `CARGO_TEST_ARGS` — test-suite knobs (see the root `Makefile`).
+- Coverage: `make coverage` (see `../COVERAGE.md`).
 
 ## Daemon
 

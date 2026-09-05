@@ -58,6 +58,7 @@ pub(crate) fn checkpoint_control_response_timeout(
         ControlRequest::Await { timeout_secs } => {
             Duration::from_secs(timeout_secs.saturating_add(5))
         }
+        ControlRequest::ReingestMetrics { .. } => DAEMON_CHECKPOINT_RESPONSE_TIMEOUT,
         _ => DAEMON_CONTROL_RESPONSE_TIMEOUT,
     }
 }

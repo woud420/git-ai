@@ -9,6 +9,7 @@ use rusqlite::Connection;
 mod backfill;
 mod event_writes;
 mod recovery_queries;
+mod reingestion;
 mod schema;
 mod status_queries;
 mod throttle;
@@ -16,6 +17,7 @@ mod types;
 mod upload_queue;
 
 pub(crate) use event_writes::METADATA_BACKFILL_BATCH_SIZE;
+pub(crate) use reingestion::MetricsReingestScope;
 pub use types::{MetricHistoryRecord, MetricMetadataBackfillSummary, MetricRecord, MetricsStatus};
 
 // Re-exports used by integration and unit tests within this module tree.

@@ -307,6 +307,17 @@ impl ActorDaemonCoordinator {
                 }
                 Ok(ControlResponse::ok(None, None))
             }
+            ControlRequest::ReingestMetrics { from_ts, to_ts } => {
+                let response = if let Some(worker) = &self.telemetry_worker {
+                    match worker.reingest_metrics(from_ts, to_ts).await {
+                        Ok(reset) => ControlResponse::ok(None, Some(json!({ "reset": reset }))),
+                        Err(error) => ControlResponse::err(error),
+                    }
+                } else {
+                    ControlResponse::err("telemetry worker is not available")
+                };
+                Ok(response)
+            }
             ControlRequest::Await { timeout_secs } => {
                 let result = self.await_completion(timeout_secs).await;
                 serde_json::to_value(result)

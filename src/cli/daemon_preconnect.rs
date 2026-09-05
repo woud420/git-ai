@@ -21,6 +21,7 @@ pub(crate) fn command_requires_daemon_preconnect(command: &str) -> bool {
             | "uninstall-hooks"
             | "usage"
             | "checkpoint"
+            | "reingest"
     )
 }
 
@@ -35,7 +36,7 @@ mod tests {
 
     #[test]
     fn recovery_commands_do_not_require_preconnect() {
-        for command in ["help", "config", "bg", "debug", "upgrade"] {
+        for command in ["help", "config", "bg", "debug", "upgrade", "reingest"] {
             assert!(!command_requires_daemon_preconnect(command));
         }
     }

@@ -34,6 +34,12 @@ pub enum ControlRequest {
     /// Signal the daemon that new notes are pending in notes-db and should be flushed.
     #[serde(rename = "notes.flush")]
     FlushNotes,
+    /// Reset retained metric delivery state for all rows or a half-open range.
+    #[serde(rename = "metrics.reingest")]
+    ReingestMetrics {
+        from_ts: Option<u32>,
+        to_ts: Option<u32>,
+    },
     #[serde(rename = "snapshot.watermarks")]
     SnapshotWatermarks { repo_working_dir: String },
     #[serde(rename = "bash_session.start")]
@@ -200,6 +206,22 @@ mod tests {
         assert_eq!(
             value["params"]["delivery"]["delivery_id"],
             delivery.delivery_id
+        );
+    }
+
+    #[test]
+    fn metrics_reingest_request_uses_stable_wire_shape() {
+        let request = ControlRequest::ReingestMetrics {
+            from_ts: Some(100),
+            to_ts: Some(200),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "method": "metrics.reingest",
+                "params": { "from_ts": 100, "to_ts": 200 }
+            })
         );
     }
 }

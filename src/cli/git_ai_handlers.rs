@@ -178,6 +178,9 @@ pub fn handle_git_ai(args: &[String]) {
         "flush-metrics-db" => {
             commands::flush_metrics_db::handle_flush_metrics_db(&args[1..]);
         }
+        "reingest" => {
+            commands::reingest::handle_reingest(&args[1..]);
+        }
         "await" => {
             commands::r#await::handle_await(&args[1..]);
         }
@@ -366,6 +369,12 @@ fn print_help() {
     eprintln!("  git-path           Print the path to the underlying git executable");
     eprintln!("  await [beta]       Wait for the background service to finish all work");
     eprintln!("    --timeout <seconds>    Maximum time to wait (default: 30)");
+    eprintln!(
+        "  reingest          Redeliver retained metric events through the background service"
+    );
+    eprintln!("    --all                 Select every retained metric event");
+    eprintln!("    --since <duration>    Select a recent duration such as 2h or 7d");
+    eprintln!("    --from <time> --to <time>  Select a half-open RFC3339 time range");
     eprintln!("  upgrade            Check for updates and install if available");
     eprintln!("    --force               Reinstall latest version even if already up to date");
     eprintln!("  fetch-notes [remote] Synchronously fetch AI authorship notes");

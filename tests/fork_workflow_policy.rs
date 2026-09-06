@@ -1909,6 +1909,67 @@ fn eng_399_opencode_docs_match_managed_plugin_contract() {
     }
 }
 
+#[test]
+fn eng_400_pi_docs_match_managed_extension_contract() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("agent-support/pi/README.md"))
+        .expect("Pi README must be readable");
+    let extension = fs::read_to_string(root.join("agent-support/pi/git-ai.ts"))
+        .expect("Pi extension must be readable");
+    let installer = fs::read_to_string(root.join("src/operations/mdm/agents/pi.rs"))
+        .expect("Pi installer must be readable");
+
+    for required in [
+        "## Support status",
+        "`pi`",
+        "~/.pi/agent/extensions/git-ai.ts",
+        "~/.pi/agent/git-ai.override.json",
+        "git-ai uninstall-hooks --dry-run=false",
+        "user-owned",
+        "left in place",
+        "session path",
+        "session ID",
+        "model",
+        "tool input",
+        "tool result",
+        "dirty file contents",
+        "Bash commands",
+        "before and after",
+        "local `git-ai` CLI",
+        "does not make direct network requests",
+        "../../data-privacy.md",
+        "Apache License 2.0",
+    ] {
+        assert!(
+            readme.contains(required),
+            "Pi README is missing integration fact `{required}`"
+        );
+    }
+    for source_fact in [
+        "detect_binary_names: &[\"pi\"]",
+        ".join(\"extensions\")",
+        ".join(\"git-ai.ts\")",
+    ] {
+        assert!(
+            installer.contains(source_fact),
+            "Pi installer is missing documented fact `{source_fact}`"
+        );
+    }
+    for source_fact in [
+        "git-ai.override.json",
+        "hook_event_name: 'before_command'",
+        "hook_event_name: 'after_command'",
+        "dirty_files: await readDirtyFiles(call.filepaths)",
+        "tool_input: call.toolInput",
+        "tool_result: {",
+    ] {
+        assert!(
+            extension.contains(source_fact),
+            "Pi extension is missing documented fact `{source_fact}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

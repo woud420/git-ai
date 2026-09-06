@@ -310,6 +310,17 @@ fn eng_286_requires_and_provisions_gnu_make_4_4_1() {
         );
     }
 
+    let source_directory_index = setup
+        .find("cd \"$source_dir\"")
+        .expect("Linux setup must enter the extracted source directory");
+    let configure_index = setup
+        .find("./configure --prefix=\"$prefix\"")
+        .expect("Linux setup must configure from the extracted source directory");
+    assert!(
+        source_directory_index < configure_index,
+        "Linux setup must enter the extracted source directory before configuring"
+    );
+
     for (relative, expected_uses) in GNU_MAKE_WORKFLOWS {
         let path = root.join(relative);
         let workflow = fs::read_to_string(&path)

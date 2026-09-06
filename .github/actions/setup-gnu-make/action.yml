@@ -24,9 +24,10 @@ runs:
           --output "$archive"
         echo "$GNU_MAKE_SHA256  $archive" | sha256sum --check -
         tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
-        "$source_dir/configure" --prefix="$prefix"
-        make --directory "$source_dir" --jobs 2
-        make --directory "$source_dir" install
+        cd "$source_dir"
+        ./configure --prefix="$prefix"
+        make --jobs 2
+        make install
         echo "$prefix/bin" >> "$GITHUB_PATH"
 
     - name: Install GNU Make (macOS)

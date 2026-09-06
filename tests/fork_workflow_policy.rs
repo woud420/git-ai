@@ -1812,6 +1812,50 @@ fn eng_396_remaining_historical_records_are_classified() {
     }
 }
 
+#[test]
+fn eng_397_cli_output_contract_names_current_json_sources() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let contract = fs::read_to_string(root.join("docs/contracts/cli-output.md"))
+        .expect("CLI output contract must be readable");
+    let source_paths = [
+        "src/model/diff_json.rs",
+        "src/operations/commands/blame/json_output.rs",
+        "src/operations/commands/blame/porcelain.rs",
+        "src/operations/commands/status.rs",
+        "src/operations/commands/usage.rs",
+        "src/operations/commands/fetch_notes.rs",
+    ];
+
+    for source_path in source_paths {
+        assert!(
+            root.join(source_path).is_file(),
+            "contract source path must resolve: {source_path}"
+        );
+        assert!(
+            contract.contains(source_path),
+            "CLI output contract omits source path `{source_path}`"
+        );
+    }
+    for required in [
+        "`git-ai blame --json <file>`",
+        "`lines`",
+        "`prompts`",
+        "`metadata`",
+        "`other_files`",
+        "`commits`",
+        "Blame porcelain",
+    ] {
+        assert!(
+            contract.contains(required),
+            "CLI output contract is missing blame JSON fact `{required}`"
+        );
+    }
+    assert!(
+        !contract.contains(".rs:"),
+        "live CLI contract must not use brittle Rust source line numbers"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

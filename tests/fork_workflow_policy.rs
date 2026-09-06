@@ -521,6 +521,33 @@ fn eng_374_nix_options_match_runtime_configuration() {
     );
 }
 
+#[test]
+fn eng_375_package_metadata_declares_apache_2_0() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cargo = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml must be readable");
+    let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
+    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
+        .expect("IntelliJ README must be readable");
+    let license = fs::read_to_string(root.join("LICENSE")).expect("LICENSE must be readable");
+
+    assert!(
+        cargo.contains("license = \"Apache-2.0\""),
+        "Cargo package metadata must declare Apache-2.0"
+    );
+    assert!(
+        flake.contains("license = licenses.asl20;"),
+        "Nix package metadata must use the Apache-2.0 license value"
+    );
+    assert!(
+        intellij.contains("LICENSE                 License, Apache-2.0"),
+        "IntelliJ project tree must describe its bundled Apache-2.0 license"
+    );
+    assert!(
+        license.contains("Apache License") && license.contains("Version 2.0, January 2004"),
+        "canonical LICENSE must remain Apache License 2.0 text"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

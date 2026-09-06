@@ -190,7 +190,7 @@ A generated IntelliJ Platform Plugin Template repository contains the following 
 ├── gradle.properties       Gradle configuration properties
 ├── gradlew                 *nix Gradle Wrapper script
 ├── gradlew.bat             Windows Gradle Wrapper script
-├── LICENSE                 License, MIT by default
+├── LICENSE                 License, Apache-2.0
 ├── qodana.yml              Qodana configuration file
 ├── README.md               README
 └── settings.gradle.kts     Gradle project settings

@@ -65,6 +65,26 @@ checkpoint metadata. Collection still requires the repository to match
 telemetry endpoint are separate operators; see the fork's
 [data privacy guide](../../data-privacy.md) before enabling egress.
 
+## Telemetry
+
+The checked-in extension sends a `vscode_extension_startup` event to
+`https://us.i.posthog.com` unless `telemetry_oss` is exactly `"off"` in
+`~/.git-ai/config.json`. A missing setting is not an opt-out for this extension,
+and it does not currently read the newer `telemetry` key used by the Rust
+CLI/daemon. Disable it before starting VS Code or Cursor:
+
+```json
+{
+  "telemetry_oss": "off"
+}
+```
+
+The startup event includes the editor host, app name, URI scheme, extension
+version, and the CLI-created pseudonymous distinct ID when available. The
+PostHog service is externally operated; see the
+[data privacy guide](../../data-privacy.md) for the separate CLI, storage, and
+endpoint boundaries.
+
 ## Debug logging
 
 Enable checkpoint toast messages in editor settings when diagnosing the

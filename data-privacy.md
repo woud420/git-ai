@@ -81,11 +81,12 @@ compatible or future code paths.
 
 ## Network-capable features
 
-Telemetry is off by default. The master `telemetry` setting must be `on` (or
-the legacy `telemetry_oss` setting must be `on`) before built-in OSS
-Sentry/PostHog events, metrics uploads, daemon-log uploads, or heartbeats can be
-sent. API metrics and daemon logs also require login or an API key; daemon-log
-upload additionally respects its feature flag.
+CLI and daemon telemetry is off by default. The master `telemetry` setting
+must be `on` (or the legacy `telemetry_oss` setting must be `on`) before the
+Rust CLI/daemon's built-in OSS Sentry/PostHog events, metrics uploads,
+daemon-log uploads, or heartbeats can be sent. API metrics and daemon logs also
+require login or an API key; daemon-log upload additionally respects its
+feature flag.
 
 `telemetry_enterprise_dsn` is an independent explicit opt-in. When configured,
 errors can be sent to that DSN even while the master telemetry setting is off.
@@ -104,6 +105,25 @@ Other actions that can make network requests include:
 Configuration alone does not change what an external server retains. Before
 enabling any network-capable mode, inspect the endpoint, authentication, and
 operator policy that apply to that deployment.
+
+### Bundled editor extension exception
+
+The checked-in VS Code and IntelliJ extensions do not currently use the Rust
+runtime's master telemetry resolver. They use the legacy `telemetry_oss` gate
+directly and initialize their built-in clients unless that value is exactly
+`"off"`; a missing setting is not an opt-out for either extension.
+
+- The VS Code/Cursor extension can send a startup event to
+  `https://us.i.posthog.com`.
+- The IntelliJ extension can send analytics to
+  `https://us.i.posthog.com` and plugin error reports to an
+  `ingest.us.sentry.io` endpoint.
+
+Set `"telemetry_oss": "off"` in `~/.git-ai/config.json` before starting those
+editors to disable their checked-in telemetry clients. These services are
+externally operated; their receipt, retention, and deletion policies are not
+controlled by this fork. The integration-specific READMEs describe the event
+metadata each extension can send.
 
 ## External-service boundary
 

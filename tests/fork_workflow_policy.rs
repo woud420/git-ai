@@ -1622,6 +1622,64 @@ fn eng_391_vscode_cursor_readme_matches_installer_lifecycle() {
     }
 }
 
+#[test]
+fn eng_392_privacy_docs_disclose_editor_telemetry_gate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let privacy =
+        fs::read_to_string(root.join("data-privacy.md")).expect("privacy guide must be readable");
+    let vscode = fs::read_to_string(root.join("agent-support/vscode/README.md"))
+        .expect("VS Code README must be readable");
+    let vscode_source = fs::read_to_string(root.join("agent-support/vscode/src/extension.ts"))
+        .expect("VS Code extension source must be readable");
+    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
+        .expect("IntelliJ README must be readable");
+    let intellij_source = fs::read_to_string(root.join(
+        "agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/TelemetryService.kt",
+    ))
+    .expect("IntelliJ telemetry source must be readable");
+
+    for required in [
+        "CLI and daemon telemetry is off by default",
+        "Bundled editor extension exception",
+        "legacy `telemetry_oss` gate",
+        "missing setting is not an opt-out",
+        "https://us.i.posthog.com",
+        "ingest.us.sentry.io",
+        "externally operated",
+    ] {
+        assert!(
+            privacy.contains(required),
+            "privacy guide is missing editor telemetry boundary `{required}`"
+        );
+    }
+    for required in [
+        "## Telemetry",
+        "vscode_extension_startup",
+        "telemetry_oss",
+        "https://us.i.posthog.com",
+        "missing setting",
+    ] {
+        assert!(
+            vscode.contains(required),
+            "VS Code README is missing telemetry fact `{required}`"
+        );
+    }
+    assert!(
+        intellij.contains("missing setting is not treated as an")
+            && intellij.contains("opt-out by the plugin")
+            && intellij.contains("PostHog analytics and Sentry error reporting"),
+        "IntelliJ README must retain its legacy telemetry gate"
+    );
+    for (source, fact) in [
+        (vscode_source.as_str(), "config.telemetry_oss === \"off\""),
+        (vscode_source.as_str(), "https://us.i.posthog.com"),
+        (intellij_source.as_str(), "telemetry_oss"),
+        (intellij_source.as_str(), "ingest.us.sentry.io"),
+    ] {
+        assert!(source.contains(fact), "editor source is missing fact `{fact}`");
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

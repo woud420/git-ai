@@ -1330,6 +1330,7 @@ fn eng_386_coverage_docs_match_the_manual_workflow_and_make_targets() {
         fs::read_to_string(root.join("docs/COVERAGE.md")).expect("coverage guide must be readable");
     let workflow = fs::read_to_string(root.join(".github/workflows/coverage.yml"))
         .expect("coverage workflow must be readable");
+    let workflow = workflow.replace("\r\n", "\n");
     let makefile = fs::read_to_string(root.join("Makefile")).expect("Makefile must be readable");
     let updater = fs::read_to_string(root.join("scripts/update-coverage-threshold.sh"))
         .expect("coverage threshold updater must be readable");

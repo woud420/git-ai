@@ -1006,6 +1006,79 @@ fn eng_382_current_architecture_source_paths_resolve() {
     }
 }
 
+#[test]
+fn eng_383_checkpoint_preset_registry_drives_help_and_contract() {
+    use git_ai::operations::commands::checkpoint_agent::presets::{
+        checkpoint_preset_help, human_checkpoint_preset_names, resolve_preset,
+        supported_agent_preset_names, test_checkpoint_preset_names,
+    };
+
+    let production = supported_agent_preset_names().collect::<Vec<_>>();
+    assert_eq!(
+        production,
+        [
+            "claude",
+            "cline",
+            "codex",
+            "gemini",
+            "windsurf",
+            "continue-cli",
+            "cursor",
+            "cursor-background",
+            "github-copilot",
+            "amp",
+            "ai_tab",
+            "firebender",
+            "agent-v1",
+            "droid",
+            "opencode",
+            "pi",
+        ]
+    );
+
+    let human = human_checkpoint_preset_names().collect::<Vec<_>>();
+    let test_only = test_checkpoint_preset_names().collect::<Vec<_>>();
+    assert_eq!(human, ["human", "known_human"]);
+    assert_eq!(test_only, ["mock_ai", "mock_known_human"]);
+
+    let help = checkpoint_preset_help();
+    let contract = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/contracts/checkpoint-interface.md"),
+    )
+    .expect("checkpoint contract must be readable");
+
+    for preset in production.iter().chain(&human).chain(&test_only) {
+        assert!(
+            resolve_preset(preset).is_ok(),
+            "registered preset `{preset}` must resolve"
+        );
+        assert!(
+            help.contains(preset),
+            "top-level help omits preset `{preset}`"
+        );
+        assert!(
+            contract.contains(preset),
+            "checkpoint contract omits preset `{preset}`"
+        );
+    }
+    for heading in ["Agent presets:", "Human checkpoints:", "Test presets:"] {
+        assert!(
+            help.contains(heading),
+            "checkpoint help omits category `{heading}`"
+        );
+    }
+    for heading in [
+        "Production agent presets",
+        "Compatibility and human-evidence presets",
+        "Test-only presets",
+    ] {
+        assert!(
+            contract.contains(heading),
+            "checkpoint contract omits category `{heading}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

@@ -309,14 +309,15 @@ fn print_help() {
     eprintln!("Commands:");
     eprintln!("  checkpoint         Checkpoint working changes and attribute author");
     eprintln!(
-        "    Presets: claude, cline, codex, continue-cli, cursor, gemini, github-copilot, amp, windsurf, opencode, pi, ai_tab, firebender, human, mock_ai, mock_known_human, known_human"
+        "{}",
+        crate::operations::commands::checkpoint_agent::presets::checkpoint_preset_help()
     );
     eprintln!(
         "    --hook-input <json|stdin>   JSON payload required by presets, or 'stdin' to read from stdin"
     );
-    eprintln!("    human [pathspecs...]             Untracked/legacy human checkpoint");
-    eprintln!("    mock_ai [pathspecs...]           Test preset accepting optional file pathspecs");
-    eprintln!("    mock_known_human [pathspecs...]  Test preset for KnownHuman checkpoints");
+    eprintln!("    human [pathspecs...]             Compatibility untracked boundary");
+    eprintln!("    known_human [pathspecs...]       Evidence-backed human checkpoint");
+    eprintln!("    mock_* [pathspecs...]            Test-only checkpoint presets");
     eprintln!("  log [args...]      Show commit log with AI authorship stats");
     eprintln!("                        Use --raw or --notes to include raw authorship note data");
     eprintln!("  blame <file>       Git blame with AI authorship overlay");

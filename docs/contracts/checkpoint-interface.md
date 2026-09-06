@@ -10,14 +10,19 @@ everything else (attribution, notes, stats) derives from these calls.
 git-ai checkpoint <preset> [--hook-input <json>] [file …]
 ```
 
-- `<preset>` selects the agent adapter (`operations/commands/checkpoint_agent/
-  presets/`): `claude`, `codex`, `cursor`, `github-copilot`, `gemini`,
-  `cline`, `continue-cli`, `amp`, `windsurf`, `opencode`, `pi`, `ai_tab`,
-  `firebender`, plus `human` (compatibility name for an untracked boundary),
-  `known_human` (evidence-backed human edits, IDE extensions only), and the test
-  presets `mock_ai` / `mock_known_human`.
+- `<preset>` selects a registered adapter under
+  `src/operations/commands/checkpoint_agent/presets/`. The categories are:
+  - **Production agent presets**: `claude`, `cline`, `codex`, `gemini`,
+    `windsurf`, `continue-cli`, `cursor`, `cursor-background`,
+    `github-copilot`, `amp`, `ai_tab`, `firebender`, `agent-v1`, `droid`,
+    `opencode`, and `pi`.
+  - **Compatibility and human-evidence presets**: `human` records an untracked
+    pre-edit boundary; `known_human` records editor-evidenced human input and is
+    not an AI-agent adapter.
+  - **Test-only presets**: `mock_ai` and `mock_known_human` support deterministic
+    integration tests and are not production agent integrations.
 - Hook input arrives via `--hook-input` or stdin; UTF-8 and UTF-16 LE/BE are
-  accepted (BOM/heuristic detection in `cli/git_ai_handlers.rs:618-675`).
+  accepted (BOM/heuristic detection in `src/cli/git_ai_handlers.rs`).
   Each preset parses its agent's native hook JSON.
 - Positional file paths scope the checkpoint; absent paths mean the preset
   decides (typically from the hook payload).
@@ -29,7 +34,7 @@ git-ai checkpoint <preset> [--hook-input <json>] [file …]
   is what gets attributed to the agent/session/model in the hook input.
 - Parsed hook events (preset output): `PreFileEdit`, `PostFileEdit`,
   `PreBashCall`, `PostBashCall`, `KnownHumanEdit`, `UntrackedEdit`
-  (`presets/mod.rs:39-98`).
+  (`src/operations/commands/checkpoint_agent/presets/mod.rs`).
 - The orchestrator builds `CheckpointRequest{trace_id, checkpoint_kind,
   agent_id{tool,id,model}, files, stream_source, metadata}` and delivers via
   the daemon control socket (`ControlRequest::CheckpointRun`); the daemon
@@ -38,15 +43,17 @@ git-ai checkpoint <preset> [--hook-input <json>] [file …]
   `allowed_repositories`) — agents must never fail a user's edit because
   attribution was declined. Skips print a one-line reason to stderr.
 
-## Note format (downstream surface)
+## Authorship format (downstream surface)
 
-Attribution lands as authorship notes, schema `authorship/3.0.0`
+Checkpoint attribution eventually lands in a committed authorship record
+through the configured storage backend. The record uses the
+`authorship/3.0.0` serialization format
 (`specs/git_ai_standard_v3.0.0.md`; serializer
-`model/authorship_log_serialization.rs`): an attestation section (file path,
-then `hash line-ranges` lines) + `---` + JSON metadata (prompts / humans /
-sessions maps). Hash forms: bare 16-hex = prompt, `h_` + 14 hex = known
-human, `s_…::t_…` = session/trace. Old-format notes remain readable
-(sessions-cutover compatibility paths).
+`src/model/authorship_log_serialization.rs`): an attestation section (file
+path, then `hash line-ranges` lines) + `---` + JSON metadata (prompts / humans /
+sessions maps). Hash forms: bare 16-hex = prompt, `h_` + 14 hex = known human,
+`s_…::t_…` = session/trace. Old-format records remain readable through the
+sessions-cutover compatibility paths.
 
 Known-human attribution is an evidence claim, not a fallback category. A
 terminal recovery pass must not turn residual lines into `h_` attestations;

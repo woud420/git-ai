@@ -138,30 +138,92 @@ pub trait AgentPreset {
     }
 }
 
+struct PresetRegistration {
+    name: &'static str,
+    factory: fn() -> Box<dyn AgentPreset>,
+}
+
+macro_rules! preset_registry {
+    ($($name:literal => $preset:path),+ $(,)?) => {
+        &[
+            $(PresetRegistration {
+                name: $name,
+                factory: || Box::new($preset),
+            },)+
+        ]
+    };
+}
+
+const AGENT_PRESETS: &[PresetRegistration] = preset_registry![
+    "claude" => claude::ClaudePreset,
+    "cline" => cline::ClinePreset,
+    "codex" => codex::CodexPreset,
+    "gemini" => gemini::GeminiPreset,
+    "windsurf" => windsurf::WindsurfPreset,
+    "continue-cli" => continue_cli::ContinueCliPreset,
+    "cursor" => cursor::CursorPreset,
+    "cursor-background" => cursor::CursorBackgroundPreset,
+    "github-copilot" => github_copilot::GithubCopilotPreset,
+    "amp" => amp::AmpPreset,
+    "ai_tab" => ai_tab::AiTabPreset,
+    "firebender" => firebender::FirebenderPreset,
+    "agent-v1" => agent_v1::AgentV1Preset,
+    "droid" => droid::DroidPreset,
+    "opencode" => opencode::OpenCodePreset,
+    "pi" => pi::PiPreset,
+];
+
+const HUMAN_CHECKPOINT_PRESETS: &[PresetRegistration] = preset_registry![
+    "human" => human::HumanPreset,
+    "known_human" => known_human::KnownHumanPreset,
+];
+
+const TEST_CHECKPOINT_PRESETS: &[PresetRegistration] = preset_registry![
+    "mock_ai" => mock_ai::MockAiPreset,
+    "mock_known_human" => mock_known_human::MockKnownHumanPreset,
+];
+
+fn preset_names(
+    registrations: &'static [PresetRegistration],
+) -> impl Iterator<Item = &'static str> {
+    registrations.iter().map(|registration| registration.name)
+}
+
+pub fn supported_agent_preset_names() -> impl Iterator<Item = &'static str> {
+    preset_names(AGENT_PRESETS)
+}
+
+pub fn human_checkpoint_preset_names() -> impl Iterator<Item = &'static str> {
+    preset_names(HUMAN_CHECKPOINT_PRESETS)
+}
+
+pub fn test_checkpoint_preset_names() -> impl Iterator<Item = &'static str> {
+    preset_names(TEST_CHECKPOINT_PRESETS)
+}
+
+pub fn checkpoint_preset_help() -> String {
+    format!(
+        "    Agent presets: {}\n    Human checkpoints: {}\n    Test presets: {}",
+        supported_agent_preset_names()
+            .collect::<Vec<_>>()
+            .join(", "),
+        human_checkpoint_preset_names()
+            .collect::<Vec<_>>()
+            .join(", "),
+        test_checkpoint_preset_names()
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
 pub fn resolve_preset(name: &str) -> Result<Box<dyn AgentPreset>, GitAiError> {
-    match name {
-        "claude" => Ok(Box::new(claude::ClaudePreset)),
-        "cline" => Ok(Box::new(cline::ClinePreset)),
-        "codex" => Ok(Box::new(codex::CodexPreset)),
-        "gemini" => Ok(Box::new(gemini::GeminiPreset)),
-        "windsurf" => Ok(Box::new(windsurf::WindsurfPreset)),
-        "continue-cli" => Ok(Box::new(continue_cli::ContinueCliPreset)),
-        "cursor" => Ok(Box::new(cursor::CursorPreset)),
-        "cursor-background" => Ok(Box::new(cursor::CursorBackgroundPreset)),
-        "github-copilot" => Ok(Box::new(github_copilot::GithubCopilotPreset)),
-        "amp" => Ok(Box::new(amp::AmpPreset)),
-        "ai_tab" => Ok(Box::new(ai_tab::AiTabPreset)),
-        "firebender" => Ok(Box::new(firebender::FirebenderPreset)),
-        "agent-v1" => Ok(Box::new(agent_v1::AgentV1Preset)),
-        "droid" => Ok(Box::new(droid::DroidPreset)),
-        "opencode" => Ok(Box::new(opencode::OpenCodePreset)),
-        "pi" => Ok(Box::new(pi::PiPreset)),
-        "human" => Ok(Box::new(human::HumanPreset)),
-        "mock_ai" => Ok(Box::new(mock_ai::MockAiPreset)),
-        "known_human" => Ok(Box::new(known_human::KnownHumanPreset)),
-        "mock_known_human" => Ok(Box::new(mock_known_human::MockKnownHumanPreset)),
-        _ => Err(GitAiError::PresetError(format!("Unknown preset: {}", name))),
-    }
+    AGENT_PRESETS
+        .iter()
+        .chain(HUMAN_CHECKPOINT_PRESETS)
+        .chain(TEST_CHECKPOINT_PRESETS)
+        .find(|registration| registration.name == name)
+        .map(|registration| (registration.factory)())
+        .ok_or_else(|| GitAiError::PresetError(format!("Unknown preset: {}", name)))
 }
 
 #[cfg(test)]

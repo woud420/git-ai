@@ -588,6 +588,108 @@ fn eng_376_privacy_contract_is_fork_local_and_backend_aware() {
     }
 }
 
+#[test]
+fn eng_377_telemetry_contract_matches_current_storage_and_workers() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let summary = fs::read_to_string(root.join("docs/contracts/telemetry-streams-summary.md"))
+        .expect("telemetry summary must be readable");
+    let examples = fs::read_to_string(root.join("docs/contracts/telemetry-examples.md"))
+        .expect("telemetry examples must be readable");
+    let index = fs::read_to_string(root.join("docs/contracts/README.md"))
+        .expect("contracts index must be readable");
+    let persistence = fs::read_to_string(root.join("docs/contracts/persistence-model.md"))
+        .expect("persistence contract must be readable");
+    let changelog =
+        fs::read_to_string(root.join("CHANGELOG.md")).expect("changelog must be readable");
+
+    for stale in [
+        "src/transcripts/",
+        "src/daemon/transcript_worker.rs",
+        "TranscriptsDatabase",
+        "TranscriptWorker",
+        "~/.git-ai/transcripts.db",
+        "~/.git-ai/metrics.db",
+        "processing_stats",
+        "1-second",
+        "Automatic migration from internal_db",
+        "can be deleted safely",
+    ] {
+        assert!(
+            !summary.contains(stale),
+            "telemetry summary still contains obsolete claim `{stale}`"
+        );
+    }
+
+    for required in [
+        "~/.git-ai/internal/transcripts-db",
+        "~/.git-ai/internal/metrics-db",
+        "tracked_streams",
+        "StreamWorker",
+        "src/operations/daemon/stream_worker.rs",
+        "src/operations/daemon/telemetry_worker/",
+        "src/operations/streams/",
+        "src/model/repository/streams_db.rs",
+        "src/model/repository/metrics_db/",
+        "allowed_repositories",
+        "transcript_streaming",
+        "transcript_sweep",
+    ] {
+        assert!(
+            summary.contains(required),
+            "telemetry summary is missing current contract fact `{required}`"
+        );
+    }
+
+    assert!(
+        persistence.contains("~/.git-ai/internal/transcripts-db"),
+        "persistence contract must name the database path opened by the daemon"
+    );
+    assert!(
+        !persistence.contains("~/.git-ai/internal/streams-db"),
+        "persistence contract still names the planned, unopened streams-db path"
+    );
+    assert!(
+        examples.contains("src/operations/daemon/rewrite_metrics.rs"),
+        "telemetry examples must reference the current rewrite metrics module"
+    );
+    assert!(
+        !examples.contains("src/daemon/rewrite_metrics.rs"),
+        "telemetry examples still reference the pre-decomposition daemon path"
+    );
+    assert!(
+        index.contains("current runtime\n  contract for stream cursors"),
+        "contracts index must identify the telemetry summary as a current runtime contract"
+    );
+
+    for stale in [
+        "New `transcripts.db` database",
+        "Long-lived `TranscriptWorker`",
+        "automatically migrate to `transcripts.db`",
+        "1-second polling interval",
+        "`internal_db` module: Now deprecated",
+    ] {
+        assert!(
+            !changelog.contains(stale),
+            "Unreleased changelog still contains abandoned telemetry claim `{stale}`"
+        );
+    }
+
+    for contract in [&summary, &examples] {
+        for source_path in contract.split('`').skip(1).step_by(2) {
+            if !source_path.starts_with("src/") {
+                continue;
+            }
+            let source_path = source_path
+                .split_once(':')
+                .map_or(source_path, |(path, _)| path);
+            assert!(
+                root.join(source_path).exists(),
+                "telemetry contract references missing source path `{source_path}`"
+            );
+        }
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

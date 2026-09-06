@@ -201,7 +201,7 @@ Optional values `1`, `2`, and `3` carry external event, parent event, and tool-u
 
 ## 7. `rewrite_committed`
 
-Source: no local row found with `event_kind = 7` in `~/.git-ai/internal/metrics-db`; example is from the schema in `src/daemon/rewrite_metrics.rs`.
+Source: no local row found with `event_kind = 7` in `~/.git-ai/internal/metrics-db`; example is from the schema in `src/operations/daemon/rewrite_metrics.rs`.
 
 Emitted after rewrite operations create replacement commits and authorship notes are migrated.
 

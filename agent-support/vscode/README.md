@@ -94,6 +94,10 @@ event heuristics:
 "gitai.enableCheckpointLogging": true
 ```
 
+Use the messages to assess the effectiveness of the heuristics on your editor
+version. A toast confirms that the extension emitted a checkpoint; it does not
+turn an ambiguous edit into AI evidence.
+
 ## Attribution display
 
 The `gitai.blameMode` setting controls attribution decorations:

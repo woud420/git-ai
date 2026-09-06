@@ -13,6 +13,7 @@ on:
       - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
+      - '.github/actions/setup-gnu-make/**'
       - '.github/workflows/lint-format.yml'
   push:
     branches: [main]
@@ -24,6 +25,7 @@ on:
       - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
+      - '.github/actions/setup-gnu-make/**'
       - '.github/workflows/lint-format.yml'
   merge_group:
     branches: [main]
@@ -38,6 +40,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up GNU Make
+        uses: ./.github/actions/setup-gnu-make
 
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
@@ -56,17 +61,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up GNU Make
+        uses: ./.github/actions/setup-gnu-make
+
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.93.0"
           components: clippy
-
-      - name: Install GNU Make (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install make --no-progress --yes
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -87,6 +88,9 @@ jobs:
       RUSTDOCFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up GNU Make
+        uses: ./.github/actions/setup-gnu-make
 
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:

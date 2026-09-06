@@ -1,3 +1,17 @@
+MINIMUM_MAKE_VERSION := 4.4.1
+MAKE_VERSION_COMPONENTS := $(subst ., ,$(MAKE_VERSION))
+MAKE_VERSION_MAJOR := $(word 1,$(MAKE_VERSION_COMPONENTS))
+MAKE_VERSION_MINOR := $(or $(word 2,$(MAKE_VERSION_COMPONENTS)),0)
+MAKE_VERSION_PATCH := $(or $(word 3,$(MAKE_VERSION_COMPONENTS)),0)
+MAKE_VERSION_SUPPORTED := $(or \
+	$(intcmp $(MAKE_VERSION_MAJOR),4,,,yes), \
+	$(and $(filter 4,$(MAKE_VERSION_MAJOR)),$(intcmp $(MAKE_VERSION_MINOR),4,,,yes)), \
+	$(and $(filter 4,$(MAKE_VERSION_MAJOR)),$(filter 4,$(MAKE_VERSION_MINOR)),$(intcmp $(MAKE_VERSION_PATCH),1,,yes,yes)))
+
+ifeq ($(MAKE_VERSION_SUPPORTED),)
+$(error GNU Make $(MINIMUM_MAKE_VERSION) or newer is required; found $(MAKE_VERSION))
+endif
+
 TEST_FILTER ?=
 CARGO_TEST_ARGS ?=
 EXTRA_TEST_BINARY_ARGS ?=

@@ -7,7 +7,22 @@ Thank you for your interest in contributing to `git-ai`. This is a cool moment f
 ### Prerequisites
 
 - Rust https://rustup.rs/ (compiler and tooling)
-- GNU Make 3.81 or newer
+- GNU Make 4.4.1 or newer
+
+On macOS, install the current GNU Make with Homebrew and put its unprefixed command first on `PATH`:
+
+```bash
+brew install make
+export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+```
+
+On Windows, install the pinned baseline with Chocolatey:
+
+```powershell
+choco install make --version=4.4.1
+```
+
+On Linux, use your distribution package when it provides GNU Make 4.4.1 or newer; otherwise install the current release from GNU.
 
 On Windows, use a native PowerShell or Windows Terminal session for setup. If you are working in WSL, follow the Mac/Linux shell examples instead.
 

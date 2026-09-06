@@ -16,6 +16,7 @@ on:
       - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
+      - '.github/actions/setup-gnu-make/**'
       - '.github/workflows/test.yml'
   push:
     branches: [main]
@@ -28,6 +29,7 @@ on:
       - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
+      - '.github/actions/setup-gnu-make/**'
       - '.github/workflows/test.yml'
   merge_group:
     branches: [main]
@@ -102,6 +104,9 @@ jobs:
           # submodules: true
           fetch-depth: 0
 
+      - name: Set up GNU Make
+        uses: ./.github/actions/setup-gnu-make
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
@@ -117,13 +122,6 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-
-      - name: Install GNU Make (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install make --no-progress --yes
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install mold linker (Linux)
         if: runner.os == 'Linux'

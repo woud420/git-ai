@@ -16,6 +16,8 @@ These are hard constraints. Violating any of them will get a PR rejected outrigh
 
 ## Build & Test Commands
 
+These commands require GNU Make 4.4.1 or newer. On macOS, Homebrew installs it as `gmake`; add `$(brew --prefix make)/libexec/gnubin` to `PATH` to use the `make` command shown below.
+
 ```bash
 # Install a git-ai debug build for local dev on the system so that all git commands will route through it.
 # Installs to the same location as real release builds, so it overrides system-wide. It also runs `git-ai install`

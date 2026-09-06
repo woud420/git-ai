@@ -1,3 +1,5 @@
+use std::fs;
+
 #[cfg(windows)]
 use std::process::Command;
 
@@ -7,7 +9,7 @@ const WINDOWS_STEP_NAME: &str = "      - name: Run tests (Windows)";
 const RUN_BLOCK: &str = "        run: |";
 const SCRIPT_INDENT: &str = "          ";
 const NATIVE_FAILURE_GUARD: &str = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }";
-const MAKE_INSTALL_COMMAND: &str = "choco install make --no-progress --yes";
+const MAKE_INSTALL_COMMAND: &str = "choco install make --version=4.4.1 --no-progress --yes";
 
 const WINDOWS_TEST_COMMANDS: [&str; 3] = [
     r#"make test CARGO_TEST_ARGS="$($testTargets -join ' ')" TEST_THREADS=${{ matrix.test_threads }}"#,
@@ -64,16 +66,25 @@ fn windows_test_commands_propagate_native_failures_immediately() {
 
 #[test]
 fn windows_ci_provisions_gnu_make_and_checks_the_installer_exit_code() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let setup_path = root.join(".github/actions/setup-gnu-make/action.yml");
+    let setup = fs::read_to_string(&setup_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", setup_path.display()));
+    let lines = setup.lines().map(str::trim).collect::<Vec<_>>();
+    let install_index = lines
+        .iter()
+        .position(|line| *line == MAKE_INSTALL_COMMAND)
+        .expect("setup action must install GNU Make 4.4.1 with Chocolatey");
+    assert_eq!(
+        lines.get(install_index + 1).copied(),
+        Some(NATIVE_FAILURE_GUARD),
+        "setup action must propagate the GNU Make installer exit code"
+    );
+
     for (name, workflow) in [("test", TEST_WORKFLOW), ("lint", LINT_WORKFLOW)] {
-        let lines = workflow.lines().map(str::trim).collect::<Vec<_>>();
-        let install_index = lines
-            .iter()
-            .position(|line| *line == MAKE_INSTALL_COMMAND)
-            .unwrap_or_else(|| panic!("{name} workflow must explicitly install GNU Make"));
-        assert_eq!(
-            lines.get(install_index + 1).copied(),
-            Some(NATIVE_FAILURE_GUARD),
-            "{name} workflow must propagate the GNU Make installer exit code"
+        assert!(
+            workflow.contains("uses: ./.github/actions/setup-gnu-make"),
+            "{name} workflow must use the shared GNU Make setup action"
         );
     }
 }

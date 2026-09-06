@@ -145,8 +145,11 @@ pub fn handle_git_ai(args: &[String]) {
             println!("{}", config.git_cmd());
             std::process::exit(0);
         }
-        "install-hooks" | "install" => match commands::install_hooks::run(&args[1..]) {
-            Ok(statuses) => {
+        "install-hooks" | "install" => match commands::install_hooks::run_cli(&args[1..]) {
+            Ok(commands::install_hooks::InstallCommandOutcome::Help) => {
+                commands::install_hooks::print_install_help(args[0].as_str());
+            }
+            Ok(commands::install_hooks::InstallCommandOutcome::Installed(statuses)) => {
                 if let Ok(statuses_value) = serde_json::to_value(&statuses) {
                     log_message("install-hooks", "info", Some(statuses_value));
                 }

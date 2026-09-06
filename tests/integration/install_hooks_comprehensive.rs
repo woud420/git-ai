@@ -9,6 +9,7 @@ use git_ai::operations::commands::install_hooks::{
 };
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 // ==============================================================================
@@ -221,6 +222,108 @@ fn test_to_hashmap_all_statuses() {
 // Argument Parsing Tests
 // ==============================================================================
 
+fn isolated_install_command(root: &Path) -> Command {
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let mut command = Command::new(get_binary_path());
+    command
+        .current_dir(root)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("XDG_CONFIG_HOME", root.join("xdg-config"))
+        .env("APPDATA", root.join("app-data"))
+        .env("LOCALAPPDATA", root.join("local-app-data"))
+        .env("GIT_CONFIG_GLOBAL", root.join("global.gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AI_DAEMON_HOME", root.join("daemon"))
+        .env("GIT_AI_TEST_DB_PATH", root.join("events.db"))
+        .env("GITAI_TEST_DB_PATH", root.join("legacy-events.db"))
+        .env_remove("API_BASE")
+        .env_remove("API_KEY");
+    command
+}
+
+#[test]
+fn install_help_is_side_effect_free_for_both_aliases() {
+    for subcommand in ["install", "install-hooks"] {
+        for help_flag in ["--help", "-h"] {
+            let temp = tempfile::tempdir().unwrap();
+            let output = isolated_install_command(temp.path())
+                .args([subcommand, help_flag])
+                .output()
+                .unwrap();
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+
+            assert!(
+                output.status.success(),
+                "{subcommand} {help_flag} failed:\n{combined}"
+            );
+            assert!(
+                combined.contains(&format!("Usage: git-ai {subcommand} [options]")),
+                "{subcommand} {help_flag} did not print focused usage:\n{combined}"
+            );
+            for required in [
+                "--dry-run",
+                "--verbose",
+                "--skills",
+                "--visual-studio-extension",
+                "--api-base",
+                "--api-key",
+            ] {
+                assert!(
+                    combined.contains(required),
+                    "{subcommand} {help_flag} is missing supported option {required}"
+                );
+            }
+            assert!(
+                !temp.path().join("global.gitconfig").exists(),
+                "{subcommand} {help_flag} modified global Git configuration"
+            );
+            assert!(
+                !temp.path().join("home/.git-ai").exists(),
+                "{subcommand} {help_flag} created git-ai state"
+            );
+        }
+    }
+}
+
+#[test]
+fn install_rejects_unknown_options_before_side_effects() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = isolated_install_command(temp.path())
+        .args(["install", "--skils", "--dry-run"])
+        .output()
+        .unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(
+        !output.status.success(),
+        "unknown option succeeded:\n{combined}"
+    );
+    assert!(
+        combined.contains("unknown install option '--skils'")
+            && combined.contains("git-ai install --help"),
+        "unknown option error is not actionable:\n{combined}"
+    );
+    assert!(
+        !temp.path().join("global.gitconfig").exists(),
+        "unknown option modified global Git configuration"
+    );
+    assert!(
+        !temp.path().join("home/.git-ai").exists(),
+        "unknown option created git-ai state"
+    );
+}
+
 #[test]
 fn test_run_install_hooks_no_args() {
     // This will try to run against the actual system, but should not crash
@@ -338,23 +441,14 @@ fn test_run_install_hooks_with_dry_run_false() {
 }
 
 #[test]
-fn test_run_install_hooks_ignores_unknown_args() {
-    // Unknown arguments should be ignored
-    let args = vec![
-        "--unknown-flag".to_string(),
-        "random-arg".to_string(),
-        "--dry-run".to_string(),
-    ];
-    let result = run(&args);
-
-    match result {
-        Ok(_statuses) => {
-            // Success is valid
-        }
-        Err(_e) => {
-            // May fail on CI or systems without binary path
-        }
-    }
+fn test_run_install_hooks_rejects_unknown_args() {
+    let args = vec!["--unknown-flag".to_string(), "--dry-run".to_string()];
+    let error = run(&args).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown install option '--unknown-flag'")
+    );
 }
 
 // ==============================================================================

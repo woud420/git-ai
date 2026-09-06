@@ -1564,6 +1564,64 @@ fn eng_388_readme_qualifies_the_no_heuristics_claim() {
     );
 }
 
+#[test]
+fn eng_391_vscode_cursor_readme_matches_installer_lifecycle() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("agent-support/vscode/README.md"))
+        .expect("VS Code README must be readable");
+    let package = fs::read_to_string(root.join("agent-support/vscode/package.json"))
+        .expect("VS Code package metadata must be readable");
+    let constants = fs::read_to_string(root.join("agent-support/vscode/src/consts.ts"))
+        .expect("VS Code constants must be readable");
+    let vscode = fs::read_to_string(root.join("src/operations/mdm/agents/vscode.rs"))
+        .expect("VS Code installer must be readable");
+    let cursor = fs::read_to_string(root.join("src/operations/mdm/agents/cursor.rs"))
+        .expect("Cursor installer must be readable");
+
+    for required in [
+        "## Support status",
+        "VS Code 1.99.3 or newer",
+        "Cursor 1.7 or newer",
+        "git-ai 1.0.23 or newer",
+        "git-ai.git-ai-vscode",
+        "externally operated Marketplace",
+        "~/.cursor/hooks.json",
+        "chat.useHooks",
+        "github.copilot.chat.otel.dbSpanExporter.enabled",
+        "git-ai uninstall-hooks --dry-run=false",
+        "does not remove the extension",
+        "restart Cursor",
+        "../../data-privacy.md",
+    ] {
+        assert!(
+            readme.contains(required),
+            "VS Code/Cursor README is missing lifecycle fact `{required}`"
+        );
+    }
+
+    for stale in ["Restart VS Code", "latest release of the `git-ai` CLI"] {
+        assert!(
+            !readme.contains(stale),
+            "VS Code/Cursor README retains stale instruction `{stale}`"
+        );
+    }
+
+    for source_fact in [
+        (package.as_str(), "\"vscode\": \">=1.99.3\""),
+        (constants.as_str(), "MIN_GIT_AI_VERSION = \"1.0.23\""),
+        (vscode.as_str(), "GIT_AI_VSCODE_EXTENSION_ID"),
+        (vscode.as_str(), "update_vscode_chat_hook_settings"),
+        (cursor.as_str(), "MIN_CURSOR_VERSION"),
+        (cursor.as_str(), "hooks.json"),
+    ] {
+        assert!(
+            source_fact.0.contains(source_fact.1),
+            "installer/package source is missing documented fact `{}`",
+            source_fact.1
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

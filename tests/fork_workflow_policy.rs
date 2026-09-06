@@ -548,6 +548,46 @@ fn eng_375_package_metadata_declares_apache_2_0() {
     );
 }
 
+#[test]
+fn eng_376_privacy_contract_is_fork_local_and_backend_aware() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let privacy =
+        fs::read_to_string(root.join("data-privacy.md")).expect("privacy guide must be readable");
+
+    for inherited_claim in [
+        "writes attribution data into your local git repository",
+        "See our ",
+        "Git AI Cloud (Personal Dashboards)",
+        "Git AI for Teams and Enterprise",
+        "all data is sent only to your team's Git AI instance",
+        "no code, prompts, or agent usage data is ever sent to Git AI",
+        "https://usegitai.com/privacy-policy",
+        "https://trust.usegitai.com",
+        "https://github.com/git-ai-project/self-hosted",
+    ] {
+        assert!(
+            !privacy.contains(inherited_claim),
+            "privacy guide still makes inherited operator claim `{inherited_claim}`"
+        );
+    }
+
+    for required in [
+        "allowed_repositories",
+        "~/.git-ai/internal/notes-db",
+        "refs/notes/ai",
+        "notes_backend.kind = http",
+        "prompt_storage",
+        "telemetry_enterprise_dsn",
+        "This fork does not operate",
+        "Version checks and automatic updates",
+    ] {
+        assert!(
+            privacy.contains(required),
+            "privacy guide is missing current boundary `{required}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

@@ -2,8 +2,9 @@
 
 git-ai is a single binary dispatching on `argv[0]` (`src/main.rs`, `src/cli/`):
 invoked as `git` it is a transparent proxy to the real git binary; invoked as
-`git-ai` it serves direct subcommands. **All git integration is trace2-driven
-and asynchronous** — nothing wraps git, and the ingestion path is
+`git-ai` it serves direct subcommands. **All Git-command attribution processing
+is trace2-driven and asynchronous**: the thin Git process proxy does not infer
+operations through synchronous wrapper hooks, and the ingestion path is
 latency-sensitive (see the non-negotiables in the repo-root `AGENTS.md`).
 
 Layer map (enforced direction; see `inventory.md` for per-module status):
@@ -17,27 +18,34 @@ orchestration, commands, integrations) ← `cli`.
 Raw observation            trace2 JSON frames on the daemon socket; checkpoint
                            control requests; agent transcript files; reflog
                            byte-offsets captured at command start
+                           (src/operations/daemon/socket_listeners.rs;
+                           src/operations/daemon/actor_coordinator_ingest.rs)
         ↓
 Normalized command         TraceNormalizer → NormalizedCommand
-                           (operations/daemon/trace_normalizer.rs; GitBackend
+                           (src/operations/daemon/trace_normalizer/mod.rs;
+                           GitBackend
                            seam resolves aliases/family, cached per family)
         ↓
 Enrichment                 RefCursor::enrich_command fills exact ref_changes
                            from cursor-bounded reflog reads; fail-closed
-                           (operations/daemon/ref_cursor/enrichment.rs)
+                           (src/operations/daemon/ref_cursor/enrichment.rs)
         ↓
 Classification             AnalyzerRegistry → SemanticEvent / AnalysisResult
-                           (operations/daemon/analyzers/{generic,history,
+                           (src/operations/daemon/analyzers/{generic,history,
                            workspace,transport}.rs) — IO-free
         ↓
 Reduction                  reduce_family_command(state, cmd, analyzers)
                            → (AppliedCommand, AnalysisResult); pure in-memory
-                           FamilyState transition (operations/daemon/reducer.rs)
+                           FamilyState transition
+                           (src/operations/daemon/reducer.rs)
         ↓
-Effect execution           actor_coordinator_{side_effects,rewrites}.rs +
-                           {git_op,side_effect}_helpers: post-commit note
-                           generation, rewrite migration, working-log renames,
-                           notes push/fetch sync — after exit_code == 0 only
+Effect execution           src/operations/daemon/
+                           {actor_coordinator_side_effects,
+                           actor_coordinator_rewrites,
+                           git_op_side_effects,side_effect_helpers}.rs:
+                           post-commit record generation, rewrite migration,
+                           working-log renames, backend sync
+                           — after exit_code == 0 only
 ```
 
 Per-repository-family serialization: `coordinator.rs` routes by `CommandScope`
@@ -50,12 +58,13 @@ actor; a per-family async exec-lock orders side-effect application
 1. **Authoritative inputs** — trace2 frames (trace socket), checkpoint
    `ControlRequest::CheckpointRun` (control socket), agent transcript files
    (stream worker), reflog start-offsets captured at command boundary
-   (`ref_cursor/reflog_io.rs`).
-2. **Canonical event representation** — `model/domain.rs`:
+   (`src/operations/daemon/ref_cursor/reflog_io.rs`).
+2. **Canonical event representation** — `src/model/domain.rs`:
    `NormalizedCommand` (observed fact) and `SemanticEvent` (interpretation).
-3. **Where events are classified** — `operations/daemon/analyzers/*` only.
-4. **Where attribution transitions are calculated** — `reducer.rs` for
-   ref/worktree state; attribution content in `operations/authorship`
+3. **Where events are classified** — `src/operations/daemon/analyzers/*` only.
+4. **Where attribution transitions are calculated** —
+   `src/operations/daemon/reducer.rs` for ref/worktree state; attribution
+   content in `src/operations/authorship/`
    (tracker pipeline is pure; virtual_attribution combines with git reads).
 5. **Persistent state** — see `../contracts/persistence-model.md` (notes,
    working logs, five SQLite stores, config, credentials).
@@ -76,15 +85,15 @@ actor; a per-family async exec-lock orders side-effect application
    last-writer-wins upserts in every backend.
 10. **Git edge cases** — concentrated in `ref_cursor/{rebase_pull,
     cherry_pick_revert, stash_update_ref, span_clamping, command_matchers}`
-    and the rewrite modules (`operations/authorship/rewrite*`,
-    daemon `revert_rebase_helpers`, `cherry_pick_helpers`).
+    and the rewrite modules (`src/operations/authorship/rewrite*`, daemon
+    `revert_rebase_helpers`, `cherry_pick_helpers`).
 11. **OS differences** — socket transport (`socket_listeners.rs`: unix
     sockets vs named-pipe worker pool), path/registry handling in installers
-    (`operations/commands/{install_hooks,uninstall}.rs`), `#[cfg]` pairs kept
+    (`src/operations/commands/{install_hooks,uninstall}.rs`), `#[cfg]` pairs kept
     together by convention.
-12. **Public compatibility boundaries** — the authorship note format
+12. **Public compatibility boundaries** — the authorship serialization format
     (`specs/git_ai_standard_v3.0.0.md`, parsing in
-    `model/authorship_log_serialization.rs`), the CLI + machine-readable
+    `src/model/authorship_log_serialization.rs`), the CLI + machine-readable
     output (`../contracts/cli-output.md`), the agent checkpoint interface
     (`../contracts/checkpoint-interface.md`), the notes HTTP backend wire
     contract (`../contracts/notes-backend-spec.md`). Internal Rust module

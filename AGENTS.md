@@ -2,7 +2,7 @@
 
 These are hard constraints. Violating any of them will get a PR rejected outright.
 
-1. **All Git integration/processing is trace2-driven -- we do NOT wrap git.** All git command processing is based on trace2, so EVERYTHING we do must be fully async. As a result, we cannot rely on repo/git state at processing time being reflective of the state whenever the given operation actually occurred. We have a highly latency-sensitive trace2 ingestion flow that gathers/estimates the minimal possible state and orders events for later async processing.
+1. **All Git-command attribution processing is trace2-driven -- the Git proxy is transport, not ownership.** The `argv[0] == "git"` path transparently invokes the real Git binary, but it does not use synchronous pre/post wrapper hooks to infer operations or mutate attribution. Command processing is based on trace2 and must remain fully asynchronous. As a result, repo/Git state at daemon-processing time cannot be assumed to match the earlier command. The latency-sensitive trace2 ingestion flow gathers the minimum state needed and orders events for later processing.
 
 2. **No new work on the critical ingestion path.** You CANNOT add git spawns, git object lookups, ref checks, etc. in the critical ingestion path of the daemon. It is EXTREMELY latency-sensitive -- even additional file reads have meaningful overhead on this path, which is sensitive to sub-millisecond latency increases.
 
@@ -61,13 +61,13 @@ When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are
 ### Binary dispatch (src/main.rs)
 
 A single binary serves two roles based on `argv[0]`:
-- **`argv[0] == "git"`** --> `cli::git_handlers::handle_git()` -- proxies to real git with pre/post hooks per subcommand
+- **`argv[0] == "git"`** --> `cli::git_handlers::handle_git()` -- thin process proxy to the real Git binary; attribution side effects remain daemon-owned
 - **`argv[0] == "git-ai"`** --> `cli::git_ai_handlers::handle_git_ai()` -- direct subcommands (checkpoint, blame, diff, status, search, etc.)
 - **Debug-only shortcut**: When `cfg!(debug_assertions)` and `GIT_AI=git` env var is set, forces git proxy mode regardless of binary name. Most integration tests no longer rely on this: they run the real git binary with trace2 wired to a per-test daemon (production-like), using the proxy env only in a few special cases.
 
-### Core data flow: checkpoint --> working log --> authorship note
+### Core data flow: checkpoint --> working log --> authorship record
 
-1. **Checkpoint**: An AI coding agent calls `git-ai checkpoint <agent>` with hook input (typically JSON via stdin) before AND after it edits a file. The corresponding agent preset (`src/operations/commands/checkpoint_agent/agent_presets.rs`) extracts edited file paths, transcript, and model info. The checkpoint processor diffs the file against HEAD's version or the last-checkpointed value of that file and compute character-level attributions. The combination of pre and post file edit checkpoints is what allows us to know exactly what the AI changed (since we can compare the before and after). There are 3 main types of checkpoints in git-ai:
+1. **Checkpoint**: An AI coding agent calls `git-ai checkpoint <agent>` with hook input (typically JSON via stdin) before AND after it edits a file. The corresponding preset under `src/operations/commands/checkpoint_agent/presets/mod.rs` extracts edited file paths, transcript, and model info. The checkpoint processor diffs the file against HEAD's version or the last-checkpointed value of that file and computes character-level attributions. The combination of pre- and post-edit checkpoints establishes exactly what the AI changed. There are three main checkpoint types:
     * Plain or legacy `human`: the name is retained for compatibility, but this checkpoint represents an untracked boundary and makes no human-authorship claim. AI agent presets invoke it for before-edit snapshots so pre-existing changes are excluded from the subsequent AI delta. Lines captured at this boundary remain unattested in final authorship notes and stats report them as unknown or untracked. For testing, invoke `git-ai checkpoint human` (unscoped) or `git-ai checkpoint human /path/to/file` (scoped).
     * Evidence-backed known human (`known_human`): this checkpoint records edits that an IDE/editor integration identified as human input. AI agent presets never invoke it. For testing, invoke `git-ai checkpoint mock_known_human` (unscoped) or `git-ai checkpoint mock_known_human /path/to/file` (scoped).
     * AI checkpoint (`ai_agent`) checkpoints: this is the AI checkpoint that explicitly associates the captured changes with the particular AI agent and session. This is the checkpoint taht AI agent presets invoke to take the after edit snapshots. For testing, invoke via `git-ai checkpoint mock_ai` (for unscoped) or `git-ai checkpoint mock_ai /path/to/file` (for scoped).
@@ -76,17 +76,17 @@ A single binary serves two roles based on `argv[0]`:
 
 3. **Post-commit authorship**: After `git commit`, the daemon reads working logs, generates an `AuthorshipLog` (schema version `authorship/3.0.0`), and persists it through the configured notes backend. Production defaults to local SQLite; the opt-in `git_notes` backend uses `refs/notes/ai`, and the opt-in `http` backend uses its configured server. The authorship log contains attestation entries (hash --> line ranges) and a metadata section with prompt records.
 
-4. **Rewrite tracking**: The daemon ingests git trace2 event streams to learn which git commands ran, establishes exact ref transitions via a reflog cursor model (`src/operations/daemon/ref_cursor.rs`), and migrates authorship notes/working logs through `src/operations/authorship/rewrite.rs` (`RewriteEvent` + `handle_rewrite_event`) plus the per-operation modules (`rewrite_reset.rs`, `rewrite_stash.rs`, `rewrite_revert.rs`, `rewrite_cherry_pick.rs`). See `docs/architecture/rewrite-ops-spec.md` and `docs/architecture/daemon-trace2-ingestion-spec.md`.
+4. **Rewrite tracking**: The daemon ingests Git trace2 event streams, establishes exact ref transitions through `src/operations/daemon/ref_cursor/enrichment.rs`, and migrates authorship records/working logs through `RewriteEvent` in `src/model/domain.rs`, `handle_rewrite_event` in `src/operations/authorship/rewrite/mod.rs`, and the per-operation modules (`rewrite_reset.rs`, `rewrite_stash.rs`, `rewrite_revert.rs`, `rewrite_cherry_pick.rs`). See `docs/architecture/rewrite-ops-spec.md` and `docs/architecture/daemon-trace2-ingestion-spec.md`.
 
 ### Daemon trace2 ingestion (src/operations/daemon.rs, src/operations/daemon/)
 
 The git proxy is a thin passthrough (`src/cli/git_handlers.rs`); all attribution side effects run in the shared daemon, driven by trace2:
 
-- Socket listener receives trace2 JSON frames; definitely-read-only roots are filtered out
-- `TraceNormalizer` (src/operations/daemon/trace_normalizer.rs) groups frames by root sid into a `NormalizedCommand`
+- The socket listener (`src/operations/daemon/socket_listeners.rs`) receives trace2 JSON frames; `src/operations/daemon/actor_coordinator_ingest.rs` filters definitely-read-only roots
+- `TraceNormalizer` (`src/operations/daemon/trace_normalizer/mod.rs`) groups frames by root sid into a `NormalizedCommand`
 - A per-repo-family actor (src/operations/daemon/family_actor.rs) sequences commands and checkpoints in order
-- `RefCursor::enrich_command` (src/operations/daemon/ref_cursor.rs) consumes cursor-bounded reflog entries to fill exact `ref_changes`; commands without a cursor or immutable argv OIDs fail closed for attribution
-- Analyzers (src/operations/daemon/analyzers/history.rs) classify enriched commands into semantic events that drive post-commit authorship and rewrite-note migration
+- `RefCursor::enrich_command` (`src/operations/daemon/ref_cursor/enrichment.rs`) consumes cursor-bounded reflog entries to fill exact `ref_changes`; commands without a cursor or immutable argv OIDs fail closed for attribution
+- Analyzers (src/operations/daemon/analyzers/history.rs) classify enriched commands into semantic events that drive post-commit authorship and authorship-record migration
 
 Signal forwarding: On Unix, the git proxy installs signal handlers (SIGTERM, SIGINT, SIGHUP, SIGQUIT) that forward to the child git process group.
 
@@ -98,7 +98,7 @@ Feature flags have separate debug/release defaults defined via the `define_featu
 
 ### Error handling
 
-`GitAiError` enum in `src/error.rs` -- not `thiserror`-based, uses manual `Display`/`From` impls. Variants: `GitCliError` (captures exit code + stderr + args), `IoError`, `JsonError`, `SqliteError`, `PresetError`, `Generic`, `GixError`.
+`GitAiError` in `src/error/mod.rs` uses manual `Display`/`From` implementations rather than `thiserror`. Its variants are `GitCliError` (exit code + stderr + args), `IoError`, `JsonError`, `Utf8Error`, `FromUtf8Error`, `SqliteError`, `PresetError`, `Generic`, `GixError`, `Persistence`, and `Api`.
 
 ## Test Infrastructure
 
@@ -106,7 +106,7 @@ Feature flags have separate debug/release defaults defined via the `define_featu
 
 Tests create real git repositories and run against a shared test daemon pool (trace2-driven, like production). The test framework has three key files:
 
-- **`tests/integration/repos/test_repo.rs`** -- `TestRepo` struct: creates temp git repos, runs git/git-ai commands as subprocesses wired to a per-test daemon (control + trace sockets), and provides explicit daemon sync before assertions. Uses `get_binary_path()` which auto-compiles the binary via a `OnceLock`.
+- **`tests/integration/repos/test_repo/mod.rs`** -- `TestRepo` struct: creates temp git repos, runs git/git-ai commands as subprocesses wired to a per-test daemon (control + trace sockets), and provides explicit daemon sync before assertions. Uses `get_binary_path()` which auto-compiles the binary via a `OnceLock`.
 
 - **`tests/integration/repos/test_file.rs`** -- `TestFile` fluent API for setting file contents with attribution expectations. The `lines!` macro + `.ai()` / `.human()` / `.unattributed_human()` trait methods create `ExpectedLine` vectors. `assert_lines_and_blame()` validates both content and AI/human attribution.
 

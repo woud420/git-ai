@@ -67,10 +67,12 @@ for the options, consequences, and reconsideration trigger.
 ```
 daemon (trace2 ingestion, see companion doc)
   └─ exact ref transitions + operation classification
-       └─ RewriteEvent  ──►  handle_rewrite_event()      src/operations/authorship/rewrite.rs
-             ├─ NonFastForward { old_tip, new_tip, onto }   rebase, amend, restack, branch -f
-             ├─ CherryPickComplete { sources, new_commits }
-             └─ SquashMerge { source_head, squash_commit, onto }
+       ├─ RewriteEvent (src/model/domain.rs)
+       │    ├─ entry: handle_rewrite_event()
+       │    │         src/operations/authorship/rewrite/mod.rs
+       │    ├─ NonFastForward { old_tip, new_tip, onto }   rebase, amend, restack, branch -f
+       │    ├─ CherryPickComplete { sources, new_commits }
+       │    └─ SquashMerge { source_head, squash_commit, onto }
        └─ non-event paths (same module family):
              ├─ backward reset  → rewrite_reset.rs   (working-log reconstruction)
              ├─ stash save/apply/pop → rewrite_stash.rs
@@ -282,8 +284,8 @@ completed commands — is a regression against this spec.
   `tests/integration/rewrite_ops_attribution.rs`, `tests/integration/reset.rs`,
   `tests/integration/stash_attribution.rs`, `tests/integration/squash_merge.rs`,
   `tests/integration/pull_rebase_ff.rs`, `tests/integration/rebase*.rs`,
-  `tests/commit_tree_update_ref.rs`, plus unit tests in `rewrite.rs` and
-  `hunk_shift.rs`.
+  `tests/commit_tree_update_ref.rs`, plus unit tests under
+  `src/operations/authorship/rewrite/` and in `src/model/hunk_shift.rs`.
 - Every conflict-resolution mode (keep-ours, keep-theirs, keep-both in both
   orders, AI rewrite, known-human rewrite, uncheckpointed rewrite, delete-both)
   must have a deterministic test asserting all three attribution classes.

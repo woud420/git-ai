@@ -1,9 +1,9 @@
 # Architecture Inventory
 
 Snapshot of every `src/` module classified by layer, with the known violations
-of the intended dependency direction. Produced 2026-07-21 (post-restructure,
-post file-length burn-down); update alongside layer-moving PRs. The intended
-direction and the plan that consumes this inventory live in
+of the intended dependency direction. Produced 2026-07-21 and source-map
+references refreshed 2026-09-06; update alongside layer-moving PRs. The
+intended direction and the plan that consumes this inventory live in
 `../decisions/2026-07-20-layered-architecture-plan.md`.
 
 Layers: **Domain** (pure logic/types) · **Git adapter** · **Persistence
@@ -30,7 +30,8 @@ adapter** · **Network adapter** · **Orchestration** · **Interface**
 | `operations/authorship/*` | Mixed by design | `virtual_attribution/`, `range_authorship`, `rewrite*` entangle computation with git/notes IO; the pure Domain modules (`attribution_tracker/`, `hunk_shift`, `imara_diff_utils`, `move_detection`, `transcript`) moved to `model/` in P9.3 |
 | `operations/{mdm, streams, ci}` | Integration adapter | agent/IDE installers, transcript readers, CI context |
 | `cli/*`, `main.rs` | Interface | argv[0] dispatch is load-bearing |
-| `metrics/{types, events, attrs, pos_encoded, local_stats}` | Domain + Orchestration mix | event structs are model material; emission/local-stats are orchestration |
+| `model/metrics/{types, events, attrs, pos_encoded}` | Domain | canonical metric event DTOs and positional encoding |
+| `metrics/mod.rs`, `metrics/local_stats/*`, `metrics/model_pricing.rs` | Domain + Orchestration mix | compatibility re-exports, event emission, local aggregation, and embedded pricing lookup |
 | `tokio_runtime.rs`, `process_timeout.rs`, `http.rs`(clients) | Infrastructure glue | |
 | `observability/` | Orchestration | telemetry DTO leak resolved in P9.2; still dispatches to daemon submit fns (orchestration→orchestration, allowed) |
 | `notes/reference_server` | Test/reference infra | in-memory HTTP-contract server |

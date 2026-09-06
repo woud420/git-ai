@@ -941,6 +941,71 @@ fn eng_381_docs_distinguish_serialization_from_storage_profile_compliance() {
     );
 }
 
+#[test]
+fn eng_382_current_architecture_source_paths_resolve() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let paths = [
+        "AGENTS.md",
+        "docs/architecture/README.md",
+        "docs/architecture/daemon-trace2-ingestion-spec.md",
+        "docs/architecture/rewrite-ops-spec.md",
+        "docs/architecture/inventory.md",
+        "docs/contracts/telemetry-examples.md",
+    ];
+    let docs = paths
+        .iter()
+        .map(|path| {
+            fs::read_to_string(root.join(path))
+                .unwrap_or_else(|error| panic!("failed to read {path}: {error}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for stale in [
+        "we do NOT wrap git",
+        "nothing wraps git",
+        "with pre/post hooks per subcommand",
+        "src/operations/commands/checkpoint_agent/agent_presets.rs",
+        "src/operations/daemon/trace_normalizer.rs",
+        "src/operations/daemon/ref_cursor.rs",
+        "src/operations/authorship/rewrite.rs",
+        "src/error.rs",
+        "tests/integration/repos/test_repo.rs",
+        "schema in `src/operations/daemon/rewrite_metrics.rs`",
+    ] {
+        assert!(
+            !docs.contains(stale),
+            "active architecture documentation retains stale reference `{stale}`"
+        );
+    }
+
+    for source_path in [
+        "src/cli/git_handlers.rs",
+        "src/operations/commands/checkpoint_agent/presets/mod.rs",
+        "src/operations/daemon/socket_listeners.rs",
+        "src/operations/daemon/actor_coordinator_ingest.rs",
+        "src/operations/daemon/trace_normalizer/mod.rs",
+        "src/operations/daemon/ref_cursor/enrichment.rs",
+        "src/operations/daemon/analyzers/history.rs",
+        "src/model/domain.rs",
+        "src/operations/authorship/rewrite/mod.rs",
+        "src/model/hunk_shift.rs",
+        "src/error/mod.rs",
+        "tests/integration/repos/test_repo/mod.rs",
+        "src/model/metrics/events/rewrite_committed.rs",
+        "src/operations/daemon/rewrite_metrics.rs",
+    ] {
+        assert!(
+            root.join(source_path).is_file(),
+            "documented source path does not resolve: `{source_path}`"
+        );
+        assert!(
+            docs.contains(source_path),
+            "architecture documentation omits canonical source path `{source_path}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

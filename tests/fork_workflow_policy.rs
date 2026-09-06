@@ -741,6 +741,79 @@ fn eng_378_active_docs_distinguish_untracked_and_known_human_evidence() {
     );
 }
 
+#[test]
+fn eng_379_active_docs_use_the_configured_authorship_backend() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let agents = fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md must be readable");
+    let rewrite = fs::read_to_string(root.join("docs/architecture/rewrite-ops-spec.md"))
+        .expect("rewrite spec must be readable");
+    let ingestion =
+        fs::read_to_string(root.join("docs/architecture/daemon-trace2-ingestion-spec.md"))
+            .expect("ingestion spec must be readable");
+    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
+        .expect("IntelliJ README must be readable");
+    let pi = fs::read_to_string(root.join("agent-support/pi/README.md"))
+        .expect("Pi README must be readable");
+    let visual_studio = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
+        .expect("Visual Studio design must be readable");
+    let persistence = fs::read_to_string(root.join("docs/contracts/persistence-model.md"))
+        .expect("persistence contract must be readable");
+
+    for stale in [
+        "stores it as a Git Note under `refs/notes/ai`",
+        "saved to Git Notes",
+        "│ Git Notes   │",
+        "**Authorship notes** (`refs/notes/ai`, one note per commit)",
+    ] {
+        assert!(
+            ![&agents, &rewrite, &intellij, &pi, &visual_studio]
+                .iter()
+                .any(|contents| contents.contains(stale)),
+            "active documentation still assumes the Git Notes backend: `{stale}`"
+        );
+    }
+
+    for required in [
+        "notes_backend.kind",
+        "notes_api::read_notes_batch",
+        "notes_api::write_notes_batch",
+        "`sqlite` (production default)",
+        "`git_notes`",
+        "`http`",
+        "persistence-model.md",
+    ] {
+        assert!(
+            rewrite.contains(required),
+            "rewrite spec is missing backend abstraction fact `{required}`"
+        );
+    }
+
+    assert!(
+        pi.contains("git-ai show HEAD")
+            && pi.contains("Raw `git notes --ref=ai show HEAD` inspection applies only"),
+        "Pi troubleshooting must inspect attribution through the backend-aware CLI"
+    );
+    assert!(
+        visual_studio.contains("Configured authorship backend")
+            && visual_studio.contains("git-ai log"),
+        "Visual Studio docs must show backend-neutral persistence and inspection"
+    );
+    assert!(
+        ingestion.contains("Git Notes sync") && ingestion.contains("`git_notes` backend"),
+        "ingestion spec must scope ref synchronization to its Git Notes role"
+    );
+    for backend in [
+        "sqlite backend, default",
+        "git_notes backend, opt-in",
+        "http backend, opt-in",
+    ] {
+        assert!(
+            persistence.contains(backend),
+            "persistence contract is missing authority row `{backend}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

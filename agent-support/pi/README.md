@@ -102,8 +102,12 @@ Check tracked checkpoints in a repo:
 cat .git/ai/working_logs/*/checkpoints.jsonl
 ```
 
-Check authored note on the latest commit:
+Check the latest commit's authorship record through the configured backend:
 
 ```bash
-git notes --ref=ai show HEAD
+git-ai show HEAD
 ```
+
+Raw `git notes --ref=ai show HEAD` inspection applies only when the opt-in
+`git_notes` backend is authoritative (or when diagnosing its compatibility
+fallback). It will not show SQLite-default records that have not been exported.

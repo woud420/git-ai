@@ -74,7 +74,7 @@ A single binary serves two roles based on `argv[0]`:
 
 2. **Working log**: Checkpoint data is written to `.git/ai/working_logs/<base_commit>/` as JSON files. Each working log entry records per-file line attributions (which ranges are AI vs known human vs untracked (legacy human)) and session metadata.
 
-3. **Post-commit authorship**: After `git commit`, the daemon reads working logs, generates an `AuthorshipLog` (schema version `authorship/3.0.0`), and stores it as a Git Note under `refs/notes/ai`. The authorship log contains attestation entries (hash --> line ranges) and a metadata section with prompt records.
+3. **Post-commit authorship**: After `git commit`, the daemon reads working logs, generates an `AuthorshipLog` (schema version `authorship/3.0.0`), and persists it through the configured notes backend. Production defaults to local SQLite; the opt-in `git_notes` backend uses `refs/notes/ai`, and the opt-in `http` backend uses its configured server. The authorship log contains attestation entries (hash --> line ranges) and a metadata section with prompt records.
 
 4. **Rewrite tracking**: The daemon ingests git trace2 event streams to learn which git commands ran, establishes exact ref transitions via a reflog cursor model (`src/operations/daemon/ref_cursor.rs`), and migrates authorship notes/working logs through `src/operations/authorship/rewrite.rs` (`RewriteEvent` + `handle_rewrite_event`) plus the per-operation modules (`rewrite_reset.rs`, `rewrite_stash.rs`, `rewrite_revert.rs`, `rewrite_cherry_pick.rs`). See `docs/architecture/rewrite-ops-spec.md` and `docs/architecture/daemon-trace2-ingestion-spec.md`.
 

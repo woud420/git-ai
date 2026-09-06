@@ -10,13 +10,13 @@ across history-rewriting git operations. Companion docs:
 
 ## The problem
 
-Authorship attribution lives in two places:
+Authorship attribution lives in two logical stores:
 
-1. **Authorship notes** (`refs/notes/ai`, one note per commit): per-file
-   attestation ranges proven by checkpoints, plus prompt metadata. A note is
-   addressed by the commit it describes, so any operation that *replaces* a
-   commit (rebase, amend, cherry-pick, squash, restack) strands the note on the
-   dead commit.
+1. **Committed authorship records** (one serialized `authorship/3.0.0` record
+   per commit): per-file attestation ranges proven by checkpoints, plus prompt
+   metadata. A record is addressed by the commit it describes, so any operation
+   that *replaces* a commit (rebase, amend, cherry-pick, squash, restack)
+   strands the record on the dead commit.
 2. **Working logs** (`.git/ai/working_logs/<base_commit>/`): uncommitted
    attribution keyed by the HEAD commit at checkpoint time. Any operation that
    *moves HEAD without committing the work* (reset, stash, checkout/switch with
@@ -30,7 +30,7 @@ for content that verifiably survived.
 
 **I1 — Evidence rule.** A line is attributed to an actor only on checkpoint
 evidence (a working-log checkpoint) or on prior committed evidence (an
-authorship note) connected to the new location by immutable git object data.
+authorship record) connected to the new location by immutable git object data.
 No inference from similarity, timestamps, or "probably the same line".
 
 **I2 — Conservation rule.** If a line's content survives a rewrite unchanged
@@ -39,13 +39,13 @@ No inference from similarity, timestamps, or "probably the same line".
 attribution there is dropped — new content needs new evidence (I1).
 
 **I3 — Immutability rule.** Every input to a rewrite decision must be
-immutable at decision time: commit SHAs, tree SHAs, blob contents, notes,
-persisted working-log snapshots, and exact command-owned ref transitions. The
-live worktree is a valid input only inside checkpoint processing, at
-checkpoint time. A daemon side effect that runs after git exits must never
-read `workdir/path` and treat it as the state from the earlier command — the
-user may already have changed it. (This rule killed the historical
-mtime-guarded snapshot and live-worktree stash-restore races.)
+immutable at decision time: commit SHAs, tree SHAs, blob contents, authorship
+records, persisted working-log snapshots, and exact command-owned ref
+transitions. The live worktree is a valid input only inside checkpoint
+processing, at checkpoint time. A daemon side effect that runs after git exits
+must never read `workdir/path` and treat it as the state from the earlier
+command — the user may already have changed it. (This rule killed the
+historical mtime-guarded snapshot and live-worktree stash-restore races.)
 
 **I4 — Fail-closed rule.** When the facts required by I1–I3 are not available
 (e.g. the exact old/new tips of a delayed rewrite cannot be established), the
@@ -54,7 +54,7 @@ misattribution is not.
 
 ## Lite-mode disposition
 
-This fork intentionally does not support a mode that skips authorship-note
+This fork intentionally does not support a mode that skips authorship-record
 migration for otherwise recoverable rewrites. Rewrite attribution remains
 unconditional when the immutable evidence required by I1–I4 is available;
 performance work must preserve that contract through bounded batching,
@@ -82,11 +82,26 @@ history rewrite (rebase, `pull --rebase`, amend, `commit-tree`+`update-ref`
 restacks, squashes) into these events with *exact* commit SHAs. The rewrite
 core never guesses what operation happened; that is the ingestion layer's job.
 
-## Core note-shift algorithm
+## Storage abstraction
+
+Every committed-record read and write in this spec goes through `notes_api`
+using a fresh `notes_backend.kind` selection:
+
+- `sqlite` (production default) stores local-primary records in the notes DB;
+- `git_notes` stores records in `refs/notes/ai` for explicit Git transport;
+- `http` stores records in the configured remote service, with the local notes
+  DB acting as queue and cache.
+
+The rewrite algorithm must not bypass that abstraction with direct `git notes`
+commands or assume that `refs/notes/ai` contains the authoritative record. The
+backend-specific authority and fallback rules are defined in
+[`persistence-model.md`](../contracts/persistence-model.md).
+
+## Core authorship-record shift algorithm
 
 Given a set of `(source_commit, destination_commit)` mappings:
 
-1. Batch-read all source and destination notes (`notes_api::read_notes_batch`).
+1. Batch-read all source and destination records (`notes_api::read_notes_batch`).
 2. Resolve every unique commit SHA to its tree SHA in one `git rev-parse`.
 3. Run one `git diff-tree --stdin -p -U0 -M -r` over all tree pairs.
 4. Parse hunks and renames per pair.
@@ -94,11 +109,11 @@ Given a set of `(source_commit, destination_commit)` mappings:
    line-number offsets (`hunk_shift.rs::build_preserved_segments`).
 6. Shift attestation ranges that fall in preserved segments; renames carry
    attribution to the new path; ranges overlapping any hunk are dropped (I2).
-7. Merge with any existing destination note (conflict-resolution checkpoints
+7. Merge with any existing destination record (conflict-resolution checkpoints
    may have already written attribution there); attestations dedupe by
    `(file_path, hash)` with range union; metadata merges first-wins.
 8. Update `metadata.base_commit_sha` to the destination commit.
-9. Batch-write destination notes (`notes_api::write_notes_batch`).
+9. Batch-write destination records (`notes_api::write_notes_batch`).
 
 Performance contract: the number of spawned git processes per rewrite batch is
 O(1), not O(commits) or O(files). Work proportional to history size happens
@@ -124,7 +139,7 @@ Input: exact `old_tip`, `new_tip`, optional `onto`.
    old→new commit mappings, representing reorders, edits, drops, and squashes
    (multiple old → one new).
 3. Merge commits are mapped by parent-list correspondence.
-4. Run the core note-shift over the mappings.
+4. Run the core authorship-record shift over the mappings.
 
 Conflict resolution during rebase:
 
@@ -132,7 +147,7 @@ Conflict resolution during rebase:
   appropriate source).
 - Rewritten conflict-region lines are attributed only via resolution
   checkpoints: AI checkpoint → AI; known-human checkpoint → known human; no
-  checkpoint → unattributed (I1). The destination-note merge in step 7 above
+  checkpoint → unattributed (I1). The destination-record merge in step 7 above
   is where checkpoint-derived resolution attribution and migrated source
   attribution combine.
 - `rebase --continue` resolution is handled by the same path: the daemon
@@ -141,7 +156,7 @@ Conflict resolution during rebase:
 
 > **Note (intentional, not a regression).** When a conflict region's *content
 > changes* during resolution and no resolution checkpoint covers it, those
-> lines are left **unattributed** — even if a pre-conflict source note had AI
+> lines are left **unattributed** — even if a pre-conflict source record had AI
 > attestation for the old content. This is the fail-closed reading of I1/I4:
 > changed content needs fresh evidence. It is a deliberate tightening over the
 > legacy `#1079` behavior, which remapped the old source attestation onto the
@@ -170,8 +185,8 @@ A backward reset un-commits work. The relevant uncommitted content after
 `reset --soft|--mixed` is the *old tip's tree*, not the live worktree at
 daemon processing time (I3).
 
-1. List undone commits `new_tip..old_tip`; batch-read their notes.
-2. Shift each note's attributions into old-tip coordinate space (core
+1. List undone commits `new_tip..old_tip`; batch-read their authorship records.
+2. Shift each record's attributions into old-tip coordinate space (core
    algorithm), merging chronologically.
 3. Batch-read file contents at `old_tip` and `new_tip` trees; keep files whose
    content differs.
@@ -181,11 +196,11 @@ daemon processing time (I3).
 
 `reset --hard` discards the work; discarded content gets no reconstruction.
 Pathspec reset (`git reset -- path`) only unstages; it does not move HEAD and
-needs no note migration.
+needs no committed-record migration.
 
 ### Stash
 
-Stash is a working-log migration, not a note rewrite.
+Stash is a working-log migration, not a committed-record rewrite.
 
 - **Save**: persist stash metadata keyed by the stash commit SHA (base commit,
   pathspecs); copy the relevant working-log data into `.git/ai/stashes`;
@@ -204,10 +219,10 @@ Stash is a working-log migration, not a note rewrite.
 Input: exact `source_head`, created `squash_commit`, exact `onto`.
 
 1. `merge_base(source_head, onto)` → list source commits.
-2. Batch-read all source notes; shift intermediate notes into source-head
+2. Batch-read all source records; shift intermediate records into source-head
    coordinates; merge into one log (many-to-one).
 3. Shift the merged log from `source_head` to `squash_commit`.
-4. Merge with any existing squash-commit note (conflict-resolution
+4. Merge with any existing squash-commit record (conflict-resolution
    checkpoints), and with the working log on `onto` if one exists (the squash
    commit also commits any locally checkpointed resolution work).
 
@@ -227,8 +242,8 @@ conflicted revert remain unattributed (I1).
 
 Amend is a 1→1 non-fast-forward: `old_tip = HEAD@{1}`, `new_tip = HEAD`,
 mapped directly (range-diff degenerates to one pair). The amended commit's
-note merges migrated attribution with the working log's new checkpoint
-evidence via the normal post-commit path.
+authorship record merges migrated attribution with the working log's new
+checkpoint evidence via the normal post-commit path.
 
 ### commit-tree / update-ref restacks
 
@@ -242,7 +257,7 @@ subsequent `update-ref`/`commit` does.
 The fork intentionally does not infer one-old-to-many-new mappings from tree
 topology. If automation decomposes one source commit into an extracted parent
 and a rewritten child, range-diff's matched destination may retain the migrated
-note but additional sibling commits are not completed heuristically.
+record but additional sibling commits are not completed heuristically.
 
 ## What was removed (and must stay removed)
 

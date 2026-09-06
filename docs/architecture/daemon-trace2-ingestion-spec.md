@@ -177,8 +177,12 @@ so no cursor predates the first traced command.
   underlying HEAD/branch transitions.
 - **merge-tree / commit-tree alone**: create objects, move no refs — no
   transition to own; nothing happens until a ref moves.
-- **push / fetch / clone**: notes-sync side effects keyed off argv remotes;
-  missing `refs/notes/ai` is a no-op, not an error.
+- **push / fetch / clone**: authorship sync side effects are keyed off argv
+  remotes. Git Notes sync serves the `git_notes` backend and SQLite's
+  compatibility fallback; a missing `refs/notes/ai` ref is a no-op, not an
+  error. The `http` backend skips ref pushes and warms its remote-backed cache
+  after pulls and clones. All other authorship reads and writes go through the
+  configured notes backend.
 
 ## Reads must not sync
 

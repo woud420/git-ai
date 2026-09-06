@@ -99,11 +99,10 @@ Because Visual Studio runs Copilot extensions in-process on the UI thread (like 
               │  (Rust)     │
               └──────┬──────┘
                      ▼
-              ┌─────────────┐
-              │ Git Notes   │
-              │ refs/notes/ │
-              │    ai       │
-              └─────────────┘
+              ┌───────────────────────────────┐
+              │ Configured authorship backend │
+              │ SQLite / Git Notes / HTTP     │
+              └───────────────────────────────┘
 ```
 
 ### 3.2 Event flow
@@ -311,8 +310,8 @@ Pure function tests that don't require a VS host (following IntelliJ's `VfsRefre
 - Accept inline suggestions and verify `agent-v1` checkpoints are created
 - Use Copilot chat to edit files and verify checkpoints
 - Type manually and verify `known_human` checkpoints on save
-- Run `git ai status` to confirm attribution is recorded
-- Run `git ai log` after committing to verify notes are attached
+- Run `git-ai status` to confirm attribution is recorded
+- Run `git-ai log` after committing to verify the authorship record through the configured backend
 
 ---
 

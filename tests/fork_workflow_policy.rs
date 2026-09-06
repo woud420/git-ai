@@ -45,6 +45,7 @@ const TASK_MAINTAINED_SURFACES: &[&str] = &[
     "AGENTS.md",
     "CONTRIBUTING.md",
     "Makefile",
+    "docs/COVERAGE.md",
     "docs/operations/README.md",
     "flake.nix",
     "lefthook.yml",

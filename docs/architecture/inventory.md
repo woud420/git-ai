@@ -96,15 +96,15 @@ when `transcript.rs` moved to `model/transcript.rs`.
 
 ## Ambient state access (outside `config/` and `cli/`)
 
-- `feature_flags.rs:60,183-201,217,229` — `GIT_AI_*` env (by design; folds under config).
-- `metrics/mod.rs:69` — `current_dir`.
-- `operations/daemon/self_check.rs:487`, `operations/daemon/attribution_self_check.rs:144` — `current_exe`.
-- `observability/mod.rs:68` — `var_os`.
+- `feature_flags.rs` — `GIT_AI_*` env (by design; folds under config).
+- `metrics/mod.rs` — `current_dir`.
+- `operations/daemon/self_check.rs`, `operations/daemon/attribution_self_check.rs` — `current_exe`.
+- `observability/mod.rs` — `var_os`.
 - Test-support env vars (`GIT_AI_TEST_*`) are cfg-gated and exempt.
 
 ## Duplicated / repeatedly-converted types
 
-- `DiffHunk`: `model/hunk_shift.rs` (moved from operations in P9.3) vs `operations/commands/diff.rs:37`.
+- `DiffHunk`: `model/hunk_shift.rs` (moved from operations in P9.3) vs `operations/commands/diff.rs`.
   The `model/hunk_shift.rs` copy is the attribution algebra type; the `diff.rs` copy is a command-layer DTO.
   Consolidation is deferred — both are in use.
 - `ByteDiff` (`model/imara_diff_utils.rs`, moved P9.3): now has a canonical model-level home; consumers

@@ -1970,6 +1970,59 @@ fn eng_400_pi_docs_match_managed_extension_contract() {
     }
 }
 
+#[test]
+fn eng_401_live_architecture_docs_use_stable_source_references() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory = fs::read_to_string(root.join("docs/architecture/inventory.md"))
+        .expect("architecture inventory must be readable");
+    let ownership = fs::read_to_string(root.join("docs/architecture/state-ownership.md"))
+        .expect("state ownership map must be readable");
+
+    assert!(
+        ownership.contains("Verified 2026-09-06"),
+        "state ownership verification date must reflect this source review"
+    );
+    for (relative, contents) in [
+        ("docs/architecture/inventory.md", &inventory),
+        ("docs/architecture/state-ownership.md", &ownership),
+    ] {
+        assert!(
+            !contents.contains(".rs:"),
+            "{relative} must cite stable Rust modules or symbols, not line offsets"
+        );
+    }
+
+    for source_path in [
+        "src/config/mod.rs",
+        "src/model/repository/notes_db.rs",
+        "src/operations/daemon/self_check.rs",
+        "src/operations/commands/diff.rs",
+    ] {
+        assert!(
+            root.join(source_path).is_file(),
+            "architecture source path must resolve: {source_path}"
+        );
+        let documented_path = source_path.trim_start_matches("src/");
+        assert!(
+            inventory.contains(documented_path) || ownership.contains(documented_path),
+            "live architecture docs omit stable source path `{documented_path}`"
+        );
+    }
+    for symbol in [
+        "`CONFIG`",
+        "`AUTHOR_CONFIG_CACHE`",
+        "`NOTES_DB`",
+        "`DAEMON_PROCESS_ACTIVE`",
+        "`SystemGitBackend.alias_cache`",
+        "`DiffHunk`",
+    ] {
+        assert!(
+            inventory.contains(symbol) || ownership.contains(symbol),
+            "live architecture docs omit stable symbol `{symbol}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

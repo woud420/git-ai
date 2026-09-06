@@ -187,7 +187,6 @@
             cargo-expand    # Show macro expansions
             cargo-llvm-cov  # Code coverage via LLVM instrumentation
             lefthook        # Git hooks manager
-            go-task         # Task runner (Taskfile.yml)
           ] ++ lib.optionals stdenv.hostPlatform.isDarwin [
             libiconv
             apple-sdk_15

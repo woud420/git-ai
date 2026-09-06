@@ -20,7 +20,7 @@ on:
       - 'tests/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'Taskfile.yml'
+      - 'Makefile'
       - 'scripts/benchmarks/**'
       - 'flake.nix'
       - 'flake.lock'

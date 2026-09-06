@@ -13,9 +13,10 @@ on:
       - 'scripts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'Taskfile.yml'
+      - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
+      - '.github/actions/setup-gnu-make/**'
       - '.github/workflows/test.yml'
   push:
     branches: [main]
@@ -25,9 +26,10 @@ on:
       - 'scripts/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'Taskfile.yml'
+      - 'Makefile'
       - 'flake.nix'
       - 'flake.lock'
+      - '.github/actions/setup-gnu-make/**'
       - '.github/workflows/test.yml'
   merge_group:
     branches: [main]
@@ -102,6 +104,9 @@ jobs:
           # submodules: true
           fetch-depth: 0
 
+      - name: Set up GNU Make
+        uses: ./.github/actions/setup-gnu-make
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
@@ -118,9 +123,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Install Task
-        uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2
-
       - name: Install mold linker (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get install -y mold
@@ -134,7 +136,7 @@ jobs:
           mode="${{ matrix.mode }}"
 
           if [ "$mode" = "full" ]; then
-            task test TEST_THREADS=${{ matrix.test_threads }}
+            make test TEST_THREADS=${{ matrix.test_threads }}
             exit 0
           fi
 
@@ -144,8 +146,8 @@ jobs:
               test_targets+=(--test "$(basename "$path" .rs)")
             done < <(find tests -maxdepth 1 -type f -name '*.rs' | sort)
 
-            task test CARGO_TEST_ARGS="${test_targets[*]}" TEST_THREADS=${{ matrix.test_threads }}
-            task test CARGO_TEST_ARGS="--doc" TEST_THREADS=${{ matrix.test_threads }}
+            make test CARGO_TEST_ARGS="${test_targets[*]}" TEST_THREADS=${{ matrix.test_threads }}
+            make test CARGO_TEST_ARGS="--doc" TEST_THREADS=${{ matrix.test_threads }}
             exit 0
           fi
 
@@ -219,7 +221,7 @@ jobs:
             echo "  $name"
           done | sort
 
-          task test CARGO_TEST_ARGS="--test integration" EXTRA_TEST_BINARY_ARGS="${skip_args[*]}" TEST_THREADS=${{ matrix.test_threads }}
+          make test CARGO_TEST_ARGS="--test integration" EXTRA_TEST_BINARY_ARGS="${skip_args[*]}" TEST_THREADS=${{ matrix.test_threads }}
         env:
           CARGO_INCREMENTAL: 0
           GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE: ${{ matrix.daemon_pool }}
@@ -246,9 +248,9 @@ jobs:
                 $testTargets += @("--test", $_.BaseName)
               }
 
-            task test CARGO_TEST_ARGS="$($testTargets -join ' ')" TEST_THREADS=${{ matrix.test_threads }}
+            make test CARGO_TEST_ARGS="$($testTargets -join ' ')" TEST_THREADS=${{ matrix.test_threads }}
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            task test CARGO_TEST_ARGS="--doc" TEST_THREADS=${{ matrix.test_threads }}
+            make test CARGO_TEST_ARGS="--doc" TEST_THREADS=${{ matrix.test_threads }}
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             exit 0
           }
@@ -317,7 +319,7 @@ jobs:
           Write-Host "Selected modules:"
           $selectedModules | Sort-Object | ForEach-Object { Write-Host "  $_" }
 
-          task test CARGO_TEST_ARGS="--test integration" EXTRA_TEST_BINARY_ARGS="$skipArgs" TEST_THREADS=${{ matrix.test_threads }}
+          make test CARGO_TEST_ARGS="--test integration" EXTRA_TEST_BINARY_ARGS="$skipArgs" TEST_THREADS=${{ matrix.test_threads }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         env:
           CARGO_INCREMENTAL: 0

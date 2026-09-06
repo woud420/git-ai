@@ -16,32 +16,34 @@ These are hard constraints. Violating any of them will get a PR rejected outrigh
 
 ## Build & Test Commands
 
+These commands require GNU Make 4.4.1 or newer. On macOS, Homebrew installs it as `gmake`; add `$(brew --prefix make)/libexec/gnubin` to `PATH` to use the `make` command shown below.
+
 ```bash
 # Install a git-ai debug build for local dev on the system so that all git commands will route through it.
 # Installs to the same location as real release builds, so it overrides system-wide. It also runs `git-ai install`
 # and restarts the daemon to ensure all latest code changes are fully installed and propagated system-wide.
 # Use this for trying out changes locally -- do not use any other approaches for runing git-ai locally. They will
 # not work, interfere, and break things.
-task dev
+make dev
 
 # Build (only use this for checking that your changes compile)
-task build
+make build
 
 # Test (use these commands to run the test suite -- these calls are optimized for your system; all flags/args can be combined)
-task test # Run the full test suite
-task test TEST_FILTER=foo # run specific test
-task test NO_CAPTURE=true # Run with Cargo's --no-capture flag
-task test EXTRA_TEST_BINARY_ARGS="--ignored" # ignored / exact / other flags
-task test CARGO_TEST_ARGS="--lib" # cargo-level flags (rare)
+make test # Run the full test suite
+make test TEST_FILTER=foo # run specific test
+make test NO_CAPTURE=true # Run with Cargo's --no-capture flag
+make test EXTRA_TEST_BINARY_ARGS="--ignored" # ignored / exact / other flags
+make test CARGO_TEST_ARGS="--lib" # cargo-level flags (rare)
 
 # Lint & Format
-task lint
-task fmt
+make lint
+make fmt
 
 # Windows cross-check (catches cfg(windows) breakage locally — the daemon's
 # socket/pipe code only compiles on Windows targets; plain builds on macOS
 # silently skip it). Requires: brew install mingw-w64 && rustup target add x86_64-pc-windows-gnu
-task check:windows
+make check-windows
 
 # Snapshot management (insta crate)
 cargo insta review                       # interactively review snapshot changes
@@ -50,7 +52,7 @@ cargo insta accept                       # accept all pending snapshots
 
 ## PR Workflow
 
-Before opening a PR, make sure to run `task lint` and `task fmt` and resolve any formatting/lint issues as they will fail in CI.
+Before opening a PR, make sure to run `make lint` and `make fmt` and resolve any formatting/lint issues as they will fail in CI.
 
 When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are the fastest (roughly 15mins) and if they fail, you should quickly iterate based on those failures and update the PR -- iterating there until those jobs are all green. Review all automated and human feedback that is actually present and address it: fix valid issues or reply with reasoning when feedback does not identify a real issue. Once the lint, fmt, and Ubuntu-based tests have passed and all actionable review feedback is addressed, you can stop monitoring CI for the Mac (~35mins) and Windows (up to 3.5 hours) checks unless the user has explicitly asked for you to wait for those or you're working on a specific OS-based bug.
 

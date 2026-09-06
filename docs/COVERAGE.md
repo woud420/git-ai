@@ -31,22 +31,22 @@ Coverage reports are always generated and uploaded as artifacts, even if the thr
 
 ### Quick Summary
 ```bash
-task coverage
+make coverage
 ```
 
 ### HTML Report (Interactive)
 ```bash
-task coverage:html
+make coverage-html
 ```
 
 ### LCOV Report (for tools/IDEs)
 ```bash
-task coverage:lcov
+make coverage-lcov
 ```
 
 ### Check Against Threshold
 ```bash
-task coverage:check
+make coverage-check
 ```
 
 ## Updating the Threshold

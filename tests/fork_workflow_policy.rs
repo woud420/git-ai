@@ -17,7 +17,6 @@ const GRAPHITE_ACTIVE_ROOTS: &[&str] = &[
     "Makefile",
     "README-nix.md",
     "README.md",
-    "Taskfile.yml",
     "agent-support",
     "benches",
     "data-privacy.md",
@@ -35,6 +34,86 @@ const GRAPHITE_ACTIVE_ROOTS: &[&str] = &[
     "uninstall.sh",
     ".cargo",
     ".github",
+];
+const TASK_RETIRED_PATHS: &[&str] = &["Taskfile.yml"];
+const TASK_MAINTAINED_SURFACES: &[&str] = &[
+    ".github/actions/setup-gnu-make/action.yml",
+    ".github/workflows/e2e-tests.yml",
+    ".github/workflows/git-core-compat.yml",
+    ".github/workflows/lint-format.yml",
+    ".github/workflows/performance-benchmarks.yml",
+    ".github/workflows/test.yml",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "Makefile",
+    "docs/COVERAGE.md",
+    "docs/operations/README.md",
+    "flake.nix",
+    "lefthook.yml",
+    "scripts/ai",
+    "tests/windows_ci_workflow_contract.rs",
+];
+const TASK_RETIRED_FRAGMENTS: &[&str] = &[
+    "Taskfile.yml",
+    "go-task/setup-task",
+    "task build",
+    "task check:windows",
+    "task coverage",
+    "task dev",
+    "task doc",
+    "task fmt",
+    "task format:check",
+    "task lint",
+    "task test",
+];
+const REQUIRED_MAKE_TARGETS: &[&str] = &[
+    "build",
+    "check",
+    "check-windows",
+    "clean",
+    "coverage",
+    "coverage-check",
+    "coverage-html",
+    "coverage-lcov",
+    "dev",
+    "doc",
+    "fmt",
+    "format-check",
+    "lint",
+    "test",
+    "test-bats",
+    "test-fuzz",
+    "test-fuzz-all",
+    "test-fuzz-combined",
+    "test-fuzz-destructive",
+    "test-fuzz-heavy",
+    "test-fuzz-marathon",
+    "test-fuzz-partial",
+    "test-fuzz-squash",
+    "test-fuzz-workflow",
+];
+const REQUIRED_MAKE_INTERFACE: &[&str] = &[
+    "CARGO_TEST_ARGS",
+    "COVERAGE_THRESHOLD",
+    "EXTRA_TEST_BINARY_ARGS",
+    "GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE",
+    "NO_CAPTURE",
+    "MINIMUM_MAKE_VERSION := 4.4.1",
+    "NUMBER_OF_PROCESSORS",
+    "TEST_FILTER",
+    "TEST_THREADS",
+    "getconf _NPROCESSORS_ONLN",
+    "nproc",
+    "scripts/dev.ps1",
+    "scripts/dev.sh",
+    "sysctl -n hw.ncpu",
+];
+const GNU_MAKE_SETUP_ACTION: &str = ".github/actions/setup-gnu-make/action.yml";
+const GNU_MAKE_SETUP_USE: &str = "uses: ./.github/actions/setup-gnu-make";
+const GNU_MAKE_WORKFLOWS: &[(&str, usize)] = &[
+    (".github/workflows/e2e-tests.yml", 1),
+    (".github/workflows/lint-format.yml", 3),
+    (".github/workflows/test.yml", 1),
 ];
 const GRAPHITE_SCAN_EXCEPTIONS: &[&str] = &[
     "docs/pull-rebase-hardening-worklog-2026-06-21.md",
@@ -147,6 +226,121 @@ fn eng_352_active_fork_surfaces_do_not_maintain_graphite_compatibility() {
         violations.is_empty(),
         "active fork surfaces still maintain Graphite compatibility:\n{}",
         violations.join("\n")
+    );
+}
+
+#[test]
+fn eng_286_make_is_the_only_maintained_command_surface() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let makefile_path = root.join("Makefile");
+    let makefile = fs::read_to_string(&makefile_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", makefile_path.display()));
+
+    for relative in TASK_RETIRED_PATHS {
+        assert!(
+            !root.join(relative).exists(),
+            "retired Task path still exists: {relative}"
+        );
+    }
+
+    let declared_targets = makefile
+        .lines()
+        .filter(|line| !line.starts_with('\t') && !line.trim_start().starts_with('#'))
+        .filter_map(|line| line.split_once(':').map(|(targets, _)| targets))
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>();
+    for target in REQUIRED_MAKE_TARGETS {
+        assert!(
+            declared_targets.contains(target),
+            "Makefile is missing required target `{target}`"
+        );
+    }
+    for fragment in REQUIRED_MAKE_INTERFACE {
+        assert!(
+            makefile.contains(fragment),
+            "Makefile is missing required interface fragment `{fragment}`"
+        );
+    }
+
+    let check_steps = ["$(MAKE) lint", "$(MAKE) format-check", "$(MAKE) test"];
+    let mut previous = 0;
+    for step in check_steps {
+        let index = makefile
+            .find(step)
+            .unwrap_or_else(|| panic!("make check is missing sequential step `{step}`"));
+        assert!(index >= previous, "make check steps are out of order");
+        previous = index;
+    }
+
+    let mut violations = Vec::new();
+    for relative in TASK_MAINTAINED_SURFACES {
+        let path = root.join(relative);
+        let contents = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for fragment in TASK_RETIRED_FRAGMENTS {
+            if contents.contains(fragment) {
+                violations.push(format!("{relative}: `{fragment}`"));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "maintained surfaces still depend on Task:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn eng_286_requires_and_provisions_gnu_make_4_4_1() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let setup_path = root.join(GNU_MAKE_SETUP_ACTION);
+    let setup = fs::read_to_string(&setup_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", setup_path.display()));
+
+    for fragment in [
+        "GNU_MAKE_VERSION=4.4.1",
+        "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3",
+        "brew install make",
+        "choco install make --version=4.4.1 --no-progress --yes",
+        "GNU Make 4.4.1",
+    ] {
+        assert!(
+            setup.contains(fragment),
+            "GNU Make setup action is missing `{fragment}`"
+        );
+    }
+
+    let source_directory_index = setup
+        .find("cd \"$source_dir\"")
+        .expect("Linux setup must enter the extracted source directory");
+    let configure_index = setup
+        .find("./configure --prefix=\"$prefix\"")
+        .expect("Linux setup must configure from the extracted source directory");
+    assert!(
+        source_directory_index < configure_index,
+        "Linux setup must enter the extracted source directory before configuring"
+    );
+
+    for (relative, expected_uses) in GNU_MAKE_WORKFLOWS {
+        let path = root.join(relative);
+        let workflow = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        assert_eq!(
+            workflow.matches(GNU_MAKE_SETUP_USE).count(),
+            *expected_uses,
+            "{relative} must set up GNU Make once per Make-running job"
+        );
+    }
+
+    let contributing =
+        fs::read_to_string(root.join("CONTRIBUTING.md")).expect("CONTRIBUTING.md must be readable");
+    assert!(
+        contributing.contains("GNU Make 4.4.1 or newer"),
+        "contributor prerequisites must require GNU Make 4.4.1 or newer"
+    );
+    assert!(
+        contributing.contains("$(brew --prefix make)/libexec/gnubin"),
+        "macOS setup must document Homebrew's gnubin path"
     );
 }
 

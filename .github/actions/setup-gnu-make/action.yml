@@ -1,0 +1,69 @@
+name: Set up GNU Make
+description: Install and select the repository's GNU Make baseline
+
+runs:
+  using: composite
+  steps:
+    - name: Set GNU Make version
+      shell: bash
+      run: |
+        echo "GNU_MAKE_VERSION=4.4.1" >> "$GITHUB_ENV"
+        echo "GNU_MAKE_SHA256=dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3" >> "$GITHUB_ENV"
+
+    - name: Install GNU Make (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive="$RUNNER_TEMP/make-$GNU_MAKE_VERSION.tar.gz"
+        source_dir="$RUNNER_TEMP/make-$GNU_MAKE_VERSION"
+        prefix="$RUNNER_TEMP/gnu-make-$GNU_MAKE_VERSION"
+
+        curl --fail --location --retry 3 \
+          "https://ftp.gnu.org/gnu/make/make-$GNU_MAKE_VERSION.tar.gz" \
+          --output "$archive"
+        echo "$GNU_MAKE_SHA256  $archive" | sha256sum --check -
+        tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+        cd "$source_dir"
+        ./configure --prefix="$prefix"
+        make --jobs 2
+        make install
+        echo "$prefix/bin" >> "$GITHUB_PATH"
+
+    - name: Install GNU Make (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        brew install make
+        echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+    - name: Install GNU Make (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install make --version=4.4.1 --no-progress --yes
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Verify GNU Make (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        actual="$(make --version | head -n 1)"
+        expected="GNU Make 4.4.1"
+        if [ "$actual" != "$expected" ]; then
+          echo "Expected $expected, found $actual" >&2
+          exit 1
+        fi
+
+    - name: Verify GNU Make (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $actual = make --version | Select-Object -First 1
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $expected = "GNU Make 4.4.1"
+        if ($actual -ne $expected) {
+          throw "Expected $expected, found $actual"
+        }

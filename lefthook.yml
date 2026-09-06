@@ -3,10 +3,10 @@ pre-commit:
   commands:
     format-check:
       glob: "**/*.{rs,toml}"
-      run: task format:check
+      run: make format-check
     lint:
       glob: "**/*.{rs,toml}"
-      run: task lint
+      run: make lint
     doc-check:
       glob: "**/*.{rs,toml}"
-      run: task doc
+      run: make doc

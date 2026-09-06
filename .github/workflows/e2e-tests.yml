@@ -28,6 +28,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up GNU Make
+        uses: ./.github/actions/setup-gnu-make
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
@@ -53,9 +56,6 @@ jobs:
         run: |
           sudo apt-get install -y jq
 
-      - name: Install Task
-        uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2
-
       - name: Configure Git
         run: |
           git config --global user.name "GitHub Actions"
@@ -64,4 +64,4 @@ jobs:
 
       - name: Run E2E tests
         run: |
-          task test:bats
+          make test-bats

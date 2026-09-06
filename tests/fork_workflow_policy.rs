@@ -885,6 +885,62 @@ fn eng_380_visual_studio_docs_match_install_and_detection_behavior() {
     }
 }
 
+#[test]
+fn eng_381_docs_distinguish_serialization_from_storage_profile_compliance() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("README.md")).expect("README must be readable");
+    let contracts = fs::read_to_string(root.join("docs/contracts/README.md"))
+        .expect("contracts index must be readable");
+    let standard = fs::read_to_string(root.join("specs/git_ai_standard_v3.0.0.md"))
+        .expect("authorship standard must be readable");
+    let persistence = fs::read_to_string(root.join("docs/contracts/persistence-model.md"))
+        .expect("persistence contract must be readable");
+
+    assert!(
+        readme.matches("serialization format").count() >= 2
+            && readme.matches("storage profile").count() >= 2,
+        "README must qualify both authorship-standard compatibility claims"
+    );
+    assert!(
+        readme.contains("specs/git_ai_standard_v3.0.0.md")
+            && contracts.contains("../../specs/git_ai_standard_v3.0.0.md"),
+        "fork documentation must preserve local links to the upstream standard"
+    );
+    assert!(
+        contracts.contains("serialization format")
+            && contracts.contains("Git Notes storage profile")
+            && contracts.contains("persistence-model.md"),
+        "contracts index must distinguish the record format from storage authority"
+    );
+
+    for stale in [
+        "Authorship records follow the repository's",
+        "authorship metadata using the repository's",
+        "the Git AI note format standard",
+    ] {
+        assert!(
+            !readme.contains(stale) && !contracts.contains(stale),
+            "active fork documentation overstates standard compliance: `{stale}`"
+        );
+    }
+
+    for normative in [
+        "Authorship logs MUST be stored under the `refs/notes/ai` namespace",
+        "considered compliant with this standard if it also attached AI Authorship Logs with Git Notes",
+        "https://github.com/git-ai-project/git-ai",
+    ] {
+        assert!(
+            standard.contains(normative),
+            "the vendored upstream standard lost normative or origin text `{normative}`"
+        );
+    }
+    assert!(
+        persistence.contains("sqlite backend, default")
+            && persistence.contains("`refs/notes/ai` (only if exported/migrated)"),
+        "the compatibility wording must remain grounded in the persistence contract"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

@@ -27,8 +27,10 @@ per-repository daemon; attribution work does not run in Git's critical path.
 - The default local backend stores authorship notes in SQLite. The optional
   `git_notes` backend stores shareable notes in `refs/notes/ai`, with explicit
   migration between backends.
-- Authorship records follow the repository's
-  [`authorship/3.0.0` specification](specs/git_ai_standard_v3.0.0.md).
+- Authorship records use the `authorship/3.0.0` serialization format defined by
+  the [upstream Git AI standard](specs/git_ai_standard_v3.0.0.md). Its Git Notes
+  storage profile applies only to the opt-in `git_notes` backend; the default
+  SQLite backend follows this fork's [persistence contract](docs/contracts/persistence-model.md).
 
 ## Install and quick start
 
@@ -104,7 +106,7 @@ keeping configuration and local attribution databases. `--purge` also removes
   `make test`, `make lint`, and `make format-check`.
 - Architecture: see [docs/architecture/README.md](docs/architecture/README.md).
 - Stable interfaces: see [docs/contracts/README.md](docs/contracts/README.md).
-- Authorship format: read
+- Authorship serialization format: read
   [specs/git_ai_standard_v3.0.0.md](specs/git_ai_standard_v3.0.0.md).
 
 ## Origin, thanks, and license
@@ -113,8 +115,9 @@ This repository began as a fork of the original open-source Git AI codebase.
 Thanks to Aidan Cunniffe, Sasha Varlamov, and the original contributors for
 creating that foundation and publishing the authorship format. This fork is
 maintained independently because its interface, storage choices, rewrite
-behavior, and contributor workflow have diverged. It continues to write
-authorship metadata using the repository's
-[`authorship/3.0.0` specification](specs/git_ai_standard_v3.0.0.md).
+behavior, and contributor workflow have diverged. It continues to use the
+`authorship/3.0.0` serialization format defined by the
+[upstream standard](specs/git_ai_standard_v3.0.0.md), while that standard's Git
+Notes storage profile applies only when this fork uses the `git_notes` backend.
 
 Licensed under [Apache License 2.0](LICENSE).

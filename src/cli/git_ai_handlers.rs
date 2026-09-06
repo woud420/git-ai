@@ -324,6 +324,7 @@ fn print_help() {
     eprintln!("  log [args...]      Show commit log with AI authorship stats");
     eprintln!("                        Use --raw or --notes to include raw authorship note data");
     eprintln!("  blame <file>       Git blame with AI authorship overlay");
+    eprintln!("    --json                 Output blame data as JSON");
     eprintln!("  diff <commit|range>  Show diff with AI authorship annotations");
     eprintln!("    <commit>              Diff from commit's parent to commit");
     eprintln!("    <commit1>..<commit2>  Diff between two commits");
@@ -359,14 +360,16 @@ fn print_help() {
     eprintln!("    unset <key>           Remove config value (reverts to default)");
     eprintln!("  debug              Print support/debug diagnostics");
     eprintln!("  bg                 Run and control git-ai background service");
-    eprintln!("  install-hooks      Install git hooks for AI authorship tracking");
+    eprintln!("  install-hooks      Configure Git Trace2 and supported agent/editor integrations");
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
-    eprintln!("                           Also install the Visual Studio extension on Windows");
+    eprintln!(
+        "                           Include Visual Studio detection and status checks on Windows"
+    );
+    eprintln!("                           This does not install a VSIX package");
     eprintln!(
         "  uninstall          Remove git-ai from this machine (hooks, git config, daemon, binaries; --purge for data)"
     );
-    eprintln!("  uninstall          Remove git-ai from this machine (add --purge to delete data)");
     eprintln!("  uninstall-hooks    Remove git-ai hooks from all detected tools");
     eprintln!("  ci                 Continuous integration utilities");
     eprintln!("    github                 GitHub CI helpers");

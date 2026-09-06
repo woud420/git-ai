@@ -245,6 +245,34 @@ fn isolated_install_command(root: &Path) -> Command {
 }
 
 #[test]
+fn eng_390_root_help_matches_focused_command_contracts() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = isolated_install_command(temp.path())
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--json                 Output blame data as JSON"));
+    assert!(stderr.contains("Configure Git Trace2 and supported agent/editor integrations"));
+    assert!(stderr.contains("Include Visual Studio detection and status checks on Windows"));
+    assert!(stderr.contains("This does not install a VSIX package"));
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|line| line.trim_start().starts_with("uninstall "))
+            .count(),
+        1,
+        "root help must list the uninstall command once"
+    );
+    assert!(
+        !temp.path().join("home").join(".git-ai").exists(),
+        "root help must not create git-ai state"
+    );
+}
+
+#[test]
 fn install_help_is_side_effect_free_for_both_aliases() {
     for subcommand in ["install", "install-hooks"] {
         for help_flag in ["--help", "-h"] {

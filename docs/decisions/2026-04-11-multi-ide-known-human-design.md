@@ -1,5 +1,7 @@
 # Multi-IDE Known-Human Checkpoint — Design Spec
 
+Status: historical — partially implemented design record; current integration docs and checkpoint contracts are authoritative.
+
 **Date:** 2026-04-11  
 **Status:** Approved  
 

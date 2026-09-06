@@ -1,6 +1,6 @@
 # Keep The Line Gutter Default
 
-Status: proposed; accepting this change records the decision
+Status: accepted — records the fork's current default and opt-out policy.
 
 Tracking issue: ENG-325
 

@@ -1,5 +1,7 @@
 # Attribution Fuzzer Implementation Plan
 
+Status: historical — implemented execution plan; the maintained fuzzer specification is authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a randomized end-to-end fuzzer that verifies git-ai line-level attribution correctness through edits, checkpoints, commits, and rewrite operations (amend, cherry-pick, rebase, squash merge).

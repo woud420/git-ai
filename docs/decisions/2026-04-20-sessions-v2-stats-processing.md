@@ -1,5 +1,7 @@
 # Sessions V2 Stats Processing - Remove Legacy Prompt Fields
 
+Status: historical — implemented execution plan; current metrics models and tests are authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove `mixed_additions`, `total_ai_additions`, and `total_ai_deletions` from `CommitStats` and `ToolModelHeadlineStats`, eliminate the legacy prompt-based stats accumulation loop, and update all display/telemetry code to reflect that these fields no longer exist. Sessions don't track these metrics — stats are now derived purely from diff-based attribution.

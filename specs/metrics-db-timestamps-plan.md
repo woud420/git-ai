@@ -1,5 +1,7 @@
 # Metrics DB Event Metadata Columns Plan
 
+Status: historical — implemented execution plan; current metrics database schema and tests are authoritative.
+
 ## Goal
 
 Add nullable event metadata columns to the local metrics SQLite table, populate them for all newly inserted metric rows, and asynchronously backfill existing rows. Keep upload behavior unchanged and keep malformed legacy rows representable by leaving the new columns `NULL`.

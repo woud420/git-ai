@@ -1,5 +1,7 @@
 # Remove messages/messages_url from SessionRecord Implementation Plan
 
+Status: historical — implemented execution plan; current authorship models are authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove `messages` and `messages_url` fields from `SessionRecord` to phase out CAS (Content-Addressable Storage) dependency, while maintaining backward compatibility for deserialization of old notes.

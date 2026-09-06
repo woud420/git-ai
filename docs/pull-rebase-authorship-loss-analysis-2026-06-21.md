@@ -1,5 +1,7 @@
 # Pull Rebase Authorship Loss Analysis - 2026-06-21
 
+Status: historical — incident analysis retained as evidence for the implemented pull-rebase fix.
+
 ## Incident
 
 Repository: `/Users/svarlamov/projects/git-ai`

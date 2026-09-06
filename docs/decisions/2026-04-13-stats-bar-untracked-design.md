@@ -1,5 +1,7 @@
 # Stats Bar: Untracked Segment Design
 
+Status: historical — implemented design record; current CLI behavior and tests are authoritative.
+
 **Date:** 2026-04-13
 **Status:** Approved
 

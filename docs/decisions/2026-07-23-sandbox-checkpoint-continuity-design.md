@@ -1,7 +1,6 @@
 # Sandbox Checkpoint Continuity Design
 
-Status: accepted for Unix-first implementation. Windows startup blocking remains
-disabled until durable outbox parity is implemented and tested.
+Status: accepted — Unix durable-outbox behavior is implemented; Windows startup blocking remains deferred.
 
 Communication diagram and worked scenarios:
 [sandbox checkpoint continuity flows and examples](./2026-07-23-sandbox-checkpoint-continuity-examples.md).
@@ -508,8 +507,8 @@ Use `TestRepo` with isolated daemon homes and config:
 
 ### Regression gates
 
-Every phase runs targeted tests, `task lint`, `task fmt`, and the native
-`task test` suite. Ubuntu CI is the first remote signal, followed by macOS and
+Every phase runs targeted tests, `make lint`, `make fmt`, and the native
+`make test` suite. Ubuntu CI is the first remote signal, followed by macOS and
 Windows for phases that touch platform storage or daemon lifecycle.
 
 ## Delivery plan

@@ -1,5 +1,7 @@
 # Stats Bar: Untracked Segment Implementation Plan
 
+Status: historical — implemented execution plan; commands and unchecked boxes are preserved evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the `mixed` (▒) bar segment with an `untracked` (·) segment driven by `unknown_additions`, show it only when > 1%, and hyperlink the label in interactive shells.

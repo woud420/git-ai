@@ -1,5 +1,7 @@
 # Attribution Fuzzer Design Spec
 
+Status: superseded — `docs/attribution-fuzzer-spec.md` is the maintained fuzzer specification.
+
 ## Overview
 
 A property-based end-to-end fuzzer that verifies git-ai tracks line-level attribution correctly through all phases of the workflow: file edits, checkpoints, commits, amends, cherry-picks, rebases, and squash merges.

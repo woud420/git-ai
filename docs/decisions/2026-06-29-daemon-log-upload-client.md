@@ -1,5 +1,7 @@
 # Daemon Log Upload Client
 
+Status: historical — implemented behavior note; current telemetry contracts and source are authoritative.
+
 This document describes the Git AI client-side daemon diagnostics upload path.
 
 ## Behavior

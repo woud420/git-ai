@@ -1,5 +1,7 @@
 # Pull Rebase Hardening Worklog - 2026-06-21
 
+Status: historical — completed implementation worklog; commands and test output are preserved evidence.
+
 ## Goal
 
 Prove and harden the `pull --rebase` authorship-loss failure without changing

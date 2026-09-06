@@ -1,5 +1,7 @@
 # AI Helper Script Improvements Implementation Plan
 
+Status: historical — implemented execution plan; commands and unchecked boxes are preserved evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `resume` and `pr` commands to the AI helper script for streamlined worktree management and Claude session launching.

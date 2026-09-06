@@ -1,5 +1,7 @@
 # Sessions & Trace IDs Implementation Plan
 
+Status: historical — implemented v2 execution plan, now superseded by authorship/3.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a new `sessions` system to authorship notes with per-checkpoint trace IDs, replacing prompts for new checkpoints while keeping full backwards compatibility.

@@ -1,5 +1,7 @@
 # Bash Checkpoint Persistence And Attribution Recovery Plan
 
+Status: historical — implemented execution plan; current attribution recovery source and tests are authoritative.
+
 ## Problem
 
 Bash/shell tool attribution currently depends on a fast pre/post stat diff. That path is intentionally strict: the checkpoint process must stay cheap, the daemon only keeps pre-snapshots in memory, and the post hook only emits an AI checkpoint when it can identify changed paths immediately. Real usage shows that many shell-created or shell-modified lines still reach commit finalization as unknown/untracked, especially across repository roots, worktrees, daemon restarts, low-resolution mtimes, and command shapes that defeat the stat diff.

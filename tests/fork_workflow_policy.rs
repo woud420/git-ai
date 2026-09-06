@@ -1208,6 +1208,120 @@ fn eng_384_intellij_docs_describe_the_plugin_instead_of_the_template() {
     );
 }
 
+#[test]
+fn eng_385_design_and_execution_records_have_one_lifecycle_status() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let decisions_root = root.join("docs/decisions");
+    let mut documents = Vec::new();
+    collect_markdown_files(&decisions_root, &mut documents);
+    documents.retain(|path| path.file_name().is_none_or(|name| name != "README.md"));
+    documents.extend(
+        [
+            "docs/pull-rebase-hardening-worklog-2026-06-21.md",
+            "docs/pull-rebase-authorship-loss-analysis-2026-06-21.md",
+            "docs/session-event-attribution-recovery-plan.md",
+            "docs/bash-attribution-recovery-plan.md",
+            "specs/metrics-db-timestamps-plan.md",
+            "specs/runaway-memory-plan.md",
+        ]
+        .map(|path| root.join(path)),
+    );
+    documents.sort();
+
+    let mut violations = Vec::new();
+    for path in documents {
+        let contents = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        let statuses = contents
+            .lines()
+            .filter_map(|line| line.strip_prefix("Status: "))
+            .collect::<Vec<_>>();
+        let relative = path.strip_prefix(root).unwrap_or(&path).display();
+        if statuses.len() != 1 {
+            violations.push(format!("{relative}: found {} status lines", statuses.len()));
+            continue;
+        }
+        if !contents
+            .lines()
+            .take(6)
+            .any(|line| line == format!("Status: {}", statuses[0]))
+        {
+            violations.push(format!("{relative}: status is not in the document header"));
+        }
+        if !["accepted", "proposed", "historical", "superseded"]
+            .iter()
+            .any(|lifecycle| statuses[0].starts_with(lifecycle))
+        {
+            violations.push(format!(
+                "{relative}: unknown lifecycle status `{}`",
+                statuses[0]
+            ));
+        }
+        if statuses[0].starts_with("accepted") || statuses[0].starts_with("proposed") {
+            for retired in TASK_RETIRED_FRAGMENTS {
+                if contents.contains(retired) {
+                    violations.push(format!(
+                        "{relative}: current record contains retired command `{retired}`"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "design and execution records need one canonical lifecycle status:\n{}",
+        violations.join("\n")
+    );
+
+    let index = fs::read_to_string(decisions_root.join("README.md"))
+        .expect("decisions index must be readable");
+    for required in [
+        "`accepted`",
+        "`proposed`",
+        "`historical`",
+        "`superseded`",
+        "not current instructions",
+        "`task ...` commands are non-operative",
+        "../../Makefile",
+        "../../CONTRIBUTING.md",
+    ] {
+        assert!(
+            index.contains(required),
+            "decisions index is missing lifecycle guidance `{required}`"
+        );
+    }
+
+    for (relative, lifecycle) in [
+        (
+            "docs/decisions/2026-07-23-sandbox-checkpoint-continuity-design.md",
+            "accepted",
+        ),
+        (
+            "docs/decisions/2026-09-04-keep-line-gutter-default.md",
+            "accepted",
+        ),
+        (
+            "docs/decisions/2026-09-04-preserve-unattributed-lines.md",
+            "accepted",
+        ),
+        ("docs/decisions/2026-09-04-reject-lite-mode.md", "accepted"),
+        (
+            "docs/decisions/2026-09-04-durable-token-usage-design.md",
+            "proposed",
+        ),
+        ("specs/runaway-memory-plan.md", "accepted"),
+    ] {
+        let contents = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"));
+        assert!(
+            contents
+                .lines()
+                .any(|line| line.starts_with(&format!("Status: {lifecycle}"))),
+            "{relative} must remain `{lifecycle}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

@@ -7,7 +7,7 @@
 # 1. Runs coverage analysis
 # 2. Calculates current coverage percentage
 # 3. Rounds down to nearest multiple of 5
-# 4. Updates the threshold in .github/workflows/coverage.yml
+# 4. Updates the threshold in .github/workflows/coverage.yml and Makefile
 
 set -euo pipefail
 
@@ -37,8 +37,11 @@ echo "Threshold (rounded down to nearest 5): ${THRESHOLD}%"
 # Update coverage.yml
 sed -i.bak "s/COVERAGE_THRESHOLD: [0-9]*/COVERAGE_THRESHOLD: ${THRESHOLD}/" .github/workflows/coverage.yml
 
-echo "Updated .github/workflows/coverage.yml with threshold: ${THRESHOLD}%"
+# Keep the local enforcement default aligned with the manually dispatched workflow.
+sed -i.bak "s/^COVERAGE_THRESHOLD ?= [0-9]*/COVERAGE_THRESHOLD ?= ${THRESHOLD}/" Makefile
+
+echo "Updated .github/workflows/coverage.yml and Makefile with threshold: ${THRESHOLD}%"
 echo "Please review the changes and commit if appropriate."
 
 # Clean up
-rm -f /tmp/coverage-temp.lcov .github/workflows/coverage.yml.bak
+rm -f /tmp/coverage-temp.lcov .github/workflows/coverage.yml.bak Makefile.bak

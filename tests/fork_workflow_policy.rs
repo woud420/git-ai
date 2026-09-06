@@ -1322,6 +1322,93 @@ fn eng_385_design_and_execution_records_have_one_lifecycle_status() {
     }
 }
 
+#[test]
+fn eng_386_coverage_docs_match_the_manual_workflow_and_make_targets() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let guide =
+        fs::read_to_string(root.join("docs/COVERAGE.md")).expect("coverage guide must be readable");
+    let workflow = fs::read_to_string(root.join(".github/workflows/coverage.yml"))
+        .expect("coverage workflow must be readable");
+    let makefile = fs::read_to_string(root.join("Makefile")).expect("Makefile must be readable");
+    let updater = fs::read_to_string(root.join("scripts/update-coverage-threshold.sh"))
+        .expect("coverage threshold updater must be readable");
+
+    for stale in [
+        "This threshold is enforced in CI",
+        "Pull requests and pushes to main will fail",
+        "Coverage reports are always generated",
+        "Coverage reports are generated on every CI run",
+    ] {
+        assert!(
+            !guide.contains(stale),
+            "coverage guide retains automatic-enforcement claim `{stale}`"
+        );
+    }
+
+    for required in [
+        "manual-only",
+        "`workflow_dispatch`",
+        "does not run automatically on pull requests or pushes",
+        "50% threshold applies only",
+        "manual workflow or `make coverage-check`",
+        "daemon session timeouts",
+        "`llvm-cov` instrumentation",
+        "re-enable automatic enforcement",
+        "make coverage",
+        "make coverage-html",
+        "make coverage-lcov",
+        "make coverage-check",
+        "COVERAGE_THRESHOLD=",
+        "cargo-llvm-cov",
+    ] {
+        assert!(
+            guide.contains(required),
+            "coverage guide is missing current behavior `{required}`"
+        );
+    }
+
+    assert!(
+        workflow.contains("on:\n  workflow_dispatch:")
+            && !workflow.contains("pull_request:")
+            && !workflow.contains("push:"),
+        "coverage workflow must remain manual-only while the guide says it is"
+    );
+    for required in [
+        "COVERAGE_THRESHOLD: 50",
+        "--fail-under-lines $COVERAGE_THRESHOLD",
+        "if: always()",
+        "retention-days: 30",
+    ] {
+        assert!(
+            workflow.contains(required),
+            "coverage workflow is missing documented behavior `{required}`"
+        );
+    }
+    for required in [
+        "COVERAGE_THRESHOLD ?= 50",
+        "coverage:\n\tcargo llvm-cov test",
+        "coverage-html:\n\tcargo llvm-cov test",
+        "coverage-lcov:\n\tcargo llvm-cov test",
+        "coverage-check:\n\tcargo llvm-cov test",
+        "--fail-under-lines $(COVERAGE_THRESHOLD)",
+    ] {
+        assert!(
+            makefile.contains(required),
+            "Makefile is missing documented coverage behavior `{required}`"
+        );
+    }
+    for required in [
+        ".github/workflows/coverage.yml",
+        "^COVERAGE_THRESHOLD ?=",
+        "Makefile.bak",
+    ] {
+        assert!(
+            updater.contains(required),
+            "coverage updater does not keep both defaults aligned: missing `{required}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

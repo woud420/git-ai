@@ -139,6 +139,12 @@ const GRAPHITE_RETIRED_WIRING: &[(&str, &str)] = &[
     ),
     ("tests/integration/main.rs", "mod graphite;"),
 ];
+const BUNDLED_SKILL_FILES: &[&str] = &[
+    ".agents/skills/ask/SKILL.md",
+    ".agents/skills/git-ai-search/SKILL.md",
+    ".agents/skills/prompt-analysis/SKILL.md",
+];
+const RETIRED_SKILL_COMMANDS: &[&str] = &["git-ai search", "git-ai continue", "git-ai prompts"];
 
 // Regression coverage for ENG-351.
 #[test]
@@ -342,6 +348,41 @@ fn eng_286_requires_and_provisions_gnu_make_4_4_1() {
         contributing.contains("$(brew --prefix make)/libexec/gnubin"),
         "macOS setup must document Homebrew's gnubin path"
     );
+}
+
+#[test]
+fn eng_372_bundled_skills_reference_supported_commands() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut combined = String::new();
+    let mut violations = Vec::new();
+
+    for relative in BUNDLED_SKILL_FILES {
+        let contents = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"));
+        for command in RETIRED_SKILL_COMMANDS {
+            if contents.contains(command) {
+                violations.push(format!("{relative}: `{command}`"));
+            }
+        }
+        combined.push_str(&contents);
+    }
+
+    assert!(
+        violations.is_empty(),
+        "bundled skills still invoke retired commands:\n{}",
+        violations.join("\n")
+    );
+    for command in [
+        "git-ai blame",
+        "git-ai show ",
+        "git-ai show-prompt",
+        "git-ai analyze",
+    ] {
+        assert!(
+            combined.contains(command),
+            "bundled skills do not document supported command `{command}`"
+        );
+    }
 }
 
 fn is_repository_text_file(path: &Path) -> bool {

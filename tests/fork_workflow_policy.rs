@@ -539,8 +539,8 @@ fn eng_375_package_metadata_declares_apache_2_0() {
         "Nix package metadata must use the Apache-2.0 license value"
     );
     assert!(
-        intellij.contains("LICENSE                 License, Apache-2.0"),
-        "IntelliJ project tree must describe its bundled Apache-2.0 license"
+        intellij.contains("[Apache License 2.0](LICENSE)"),
+        "IntelliJ README must describe its bundled Apache-2.0 license"
     );
     assert!(
         license.contains("Apache License") && license.contains("Version 2.0, January 2004"),
@@ -1079,6 +1079,135 @@ fn eng_383_checkpoint_preset_registry_drives_help_and_contract() {
     }
 }
 
+#[test]
+fn eng_384_intellij_docs_describe_the_plugin_instead_of_the_template() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let docs_root = root.join("agent-support/intellij");
+    let readme =
+        fs::read_to_string(docs_root.join("README.md")).expect("IntelliJ README must be readable");
+    let changelog = fs::read_to_string(docs_root.join("CHANGELOG.md"))
+        .expect("IntelliJ changelog must be readable");
+    let conduct = fs::read_to_string(docs_root.join("CODE_OF_CONDUCT.md"))
+        .expect("IntelliJ conduct note must be readable");
+    let detector = fs::read_to_string(
+        docs_root
+            .join("src/main/kotlin/org/jetbrains/plugins/template/listener/StackTraceAnalyzer.kt"),
+    )
+    .expect("IntelliJ stack-trace analyzer must be readable");
+
+    for required in [
+        "# Git AI for JetBrains IDEs",
+        "## Support status",
+        "## Install",
+        "## Uninstall",
+        "## How attribution works",
+        "## Privacy",
+        "## Development",
+        "## Validation",
+        "## License",
+        "GitHub Copilot",
+        "Junie",
+        "github-copilot-jetbrains",
+        "notes_backend.kind",
+        "git-ai install-hooks",
+        "Settings > Plugins",
+        "./gradlew buildPlugin",
+        "./gradlew check",
+        "Apache License 2.0",
+    ] {
+        assert!(
+            readme.contains(required),
+            "IntelliJ README is missing plugin-specific fact `{required}`"
+        );
+    }
+
+    for pattern in [
+        "com.github.copilot",
+        "com.intellij.ml.llm.matterhorn.junie",
+        "com.intellij.ml.llm.matterhorn",
+    ] {
+        assert!(
+            detector.contains(pattern) && readme.contains(pattern),
+            "IntelliJ README and detector disagree on package prefix `{pattern}`"
+        );
+    }
+
+    for stale in [
+        "IntelliJ Platform Plugin Template",
+        "Use this template",
+        "Template Cleanup",
+        "Sample code",
+        "MyPluginTest",
+        "com.github.username.repository",
+        "JetBrains Open Source and Community Code of Conduct",
+        "github.com/JetBrains/intellij-platform-plugin-template",
+    ] {
+        assert!(
+            ![&readme, &changelog, &conduct]
+                .iter()
+                .any(|contents| contents.contains(stale)),
+            "IntelliJ documentation retains template text `{stale}`"
+        );
+    }
+
+    assert_eq!(
+        readme.matches("<!-- Plugin description -->").count(),
+        1,
+        "IntelliJ README must retain one Gradle description start marker"
+    );
+    assert_eq!(
+        readme.matches("<!-- Plugin description end -->").count(),
+        1,
+        "IntelliJ README must retain one Gradle description end marker"
+    );
+    assert!(
+        conduct.contains("[contribution guide](../../CONTRIBUTING.md)"),
+        "IntelliJ conduct note must route contributors to the repository guide"
+    );
+
+    for required in [
+        "# Git AI JetBrains Plugin Changelog",
+        "## [Unreleased]",
+        "## [0.1.12]",
+        "## [0.1.3]",
+        "GitHub Copilot and Junie",
+    ] {
+        assert!(
+            changelog.contains(required),
+            "IntelliJ changelog is missing project history `{required}`"
+        );
+    }
+
+    let mut markdown_files = Vec::new();
+    collect_markdown_files(&docs_root, &mut markdown_files);
+    let mut broken_links = Vec::new();
+    for path in markdown_files {
+        let contents = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for target in local_markdown_targets(&contents) {
+            let target = target.split('#').next().unwrap_or_default();
+            if target.is_empty() {
+                continue;
+            }
+            let resolved = path
+                .parent()
+                .expect("Markdown file must have a parent")
+                .join(target);
+            if !resolved.exists() {
+                broken_links.push(format!(
+                    "{} -> {target}",
+                    path.strip_prefix(root).unwrap_or(&path).display()
+                ));
+            }
+        }
+    }
+    assert!(
+        broken_links.is_empty(),
+        "IntelliJ Markdown contains broken local links:\n{}",
+        broken_links.join("\n")
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(
@@ -1133,4 +1262,63 @@ fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
+}
+
+fn collect_markdown_files(directory: &Path, files: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()));
+    for entry in entries {
+        let entry = entry.expect("failed to read directory entry");
+        let path = entry.path();
+        if entry
+            .file_type()
+            .expect("failed to read entry file type")
+            .is_dir()
+        {
+            if !GRAPHITE_SCAN_IGNORED_DIRECTORIES
+                .iter()
+                .any(|ignored| path.file_name().is_some_and(|name| name == *ignored))
+            {
+                collect_markdown_files(&path, files);
+            }
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            files.push(path);
+        }
+    }
+}
+
+fn local_markdown_targets(contents: &str) -> Vec<&str> {
+    let mut targets = Vec::new();
+    for line in contents.lines() {
+        let mut remainder = line;
+        while let Some(start) = remainder.find("](") {
+            remainder = &remainder[start + 2..];
+            let Some(end) = remainder.find(')') else {
+                break;
+            };
+            let target = remainder[..end].trim().trim_matches(['<', '>']);
+            if is_local_markdown_target(target) {
+                targets.push(target);
+            }
+            remainder = &remainder[end + 1..];
+        }
+
+        if line.starts_with('[')
+            && let Some((_, target)) = line.split_once("]: ")
+        {
+            let target = target.trim().trim_matches(['<', '>']);
+            if is_local_markdown_target(target) {
+                targets.push(target);
+            }
+        }
+    }
+    targets
+}
+
+fn is_local_markdown_target(target: &str) -> bool {
+    !target.is_empty()
+        && !target.starts_with('#')
+        && !target.starts_with("http://")
+        && !target.starts_with("https://")
+        && !target.starts_with("mailto:")
 }

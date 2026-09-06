@@ -2,6 +2,7 @@
 name = "git-ai"
 version = "1.6.16"
 edition = "2024"
+rust-version = "1.93"
 license = "Apache-2.0"
 default-run = "git-ai"
 

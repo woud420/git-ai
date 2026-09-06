@@ -1409,6 +1409,100 @@ fn eng_386_coverage_docs_match_the_manual_workflow_and_make_targets() {
     }
 }
 
+#[test]
+fn eng_387_repository_declares_one_rust_minimum() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cargo_toml =
+        fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml must be readable");
+    let agents = fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md must be readable");
+    let readme = fs::read_to_string(root.join("README.md")).expect("README.md must be readable");
+    let contributing =
+        fs::read_to_string(root.join("CONTRIBUTING.md")).expect("CONTRIBUTING.md must be readable");
+    let nix_readme =
+        fs::read_to_string(root.join("README-nix.md")).expect("README-nix.md must be readable");
+    let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
+
+    assert!(
+        cargo_toml.contains("rust-version = \"1.93\""),
+        "Cargo.toml must declare Rust 1.93 as the package MSRV"
+    );
+    for (relative, contents) in [
+        ("AGENTS.md", agents.as_str()),
+        ("README.md", readme.as_str()),
+        ("CONTRIBUTING.md", contributing.as_str()),
+        ("README-nix.md", nix_readme.as_str()),
+    ] {
+        assert!(
+            contents.contains("Rust 1.93.0 or newer"),
+            "{relative} must state the repository MSRV"
+        );
+        assert!(
+            !contents.contains("Rust 1.97"),
+            "{relative} still claims a different Rust minimum"
+        );
+    }
+    for required in [
+        "minimum supported Rust 1.93.0",
+        "pkgs.rust-bin.stable.\"1.93.0\"",
+        "MSRV toolchain",
+    ] {
+        assert!(
+            flake.contains(required),
+            "flake.nix is missing the Rust minimum contract `{required}`"
+        );
+    }
+
+    for relative in [
+        ".github/workflows/coverage.yml",
+        ".github/workflows/lint-format.yml",
+        ".github/workflows/nightly-agent-integration.yml",
+        ".github/workflows/release.yml",
+    ] {
+        let contents = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"));
+        assert!(
+            contents.contains("1.93.0"),
+            "{relative} must exercise the repository MSRV"
+        );
+        assert!(
+            !contents.contains("toolchain: \"1.97") && !contents.contains("default-toolchain 1.97"),
+            "{relative} pins a Rust version above the repository MSRV"
+        );
+    }
+
+    let stable_marker = "# Intentionally tracks current stable above the 1.93.0 MSRV.";
+    let mut workflow_files = Vec::new();
+    collect_files(&root.join(".github"), &mut workflow_files);
+    for path in workflow_files.into_iter().filter(|path| {
+        matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("yml" | "yaml")
+        )
+    }) {
+        let contents = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        let lines = contents.lines().collect::<Vec<_>>();
+        for (index, line) in lines.iter().enumerate() {
+            if line.trim() == "toolchain: stable" {
+                assert!(
+                    index > 0 && lines[index - 1].trim() == stable_marker,
+                    "{}:{} tracks stable Rust without stating that it is intentionally above the MSRV",
+                    path.strip_prefix(root).unwrap_or(&path).display(),
+                    index + 1
+                );
+            }
+        }
+    }
+
+    let benchmark_setup =
+        fs::read_to_string(root.join(".github/actions/setup-performance-benchmarks/action.yml"))
+            .expect("performance benchmark setup action must be readable");
+    assert!(
+        !benchmark_setup.contains("pinned Rust/Python"),
+        "performance setup must not describe a stable-tracking Rust toolchain as pinned"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

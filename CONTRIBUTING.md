@@ -6,7 +6,7 @@ Thank you for your interest in contributing to `git-ai`. This is a cool moment f
 
 ### Prerequisites
 
-- Rust https://rustup.rs/ (compiler and tooling)
+- Rust 1.93.0 or newer from https://rustup.rs/ (compiler and tooling)
 - GNU Make 4.4.1 or newer
 
 On macOS, install the current GNU Make with Homebrew and put its unprefixed command first on `PATH`:

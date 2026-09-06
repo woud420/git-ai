@@ -197,7 +197,7 @@ home.packages = [
 
 ## Development
 
-Enter a development shell with Rust toolchain:
+Enter a development shell with Rust 1.93.0 or newer:
 ```bash
 nix develop github:woud420/git-ai
 ```

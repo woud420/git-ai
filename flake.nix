@@ -18,7 +18,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        # Pin Rust 1.93.0 via rust-overlay
+        # Pin the minimum supported Rust 1.93.0 via rust-overlay
         rustToolchain = pkgs.rust-bin.stable."1.93.0".default.override {
           extensions = [
             "rust-src"
@@ -167,7 +167,7 @@
         # Development shell with full Rust toolchain
         devShells.default = pkgs.mkShell {
           packages = [
-            # Pinned Rust 1.93.0 toolchain (includes rustc, cargo, clippy, rustfmt, rust-analyzer)
+            # MSRV toolchain (includes rustc, cargo, clippy, rustfmt, rust-analyzer)
             rustToolchain
           ] ++ (with pkgs; [
             # Build dependencies

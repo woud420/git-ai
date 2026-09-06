@@ -1513,6 +1513,7 @@ fn eng_388_readme_qualifies_the_no_heuristics_claim() {
         .expect("VS Code README must be readable");
     let visual_studio = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
         .expect("Visual Studio design must be readable");
+    let visual_studio = visual_studio.replace("\r\n", "\n");
     let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
         .expect("IntelliJ README must be readable");
 

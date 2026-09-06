@@ -13,8 +13,9 @@ git-ai checkpoint <preset> [--hook-input <json>] [file …]
 - `<preset>` selects the agent adapter (`operations/commands/checkpoint_agent/
   presets/`): `claude`, `codex`, `cursor`, `github-copilot`, `gemini`,
   `cline`, `continue-cli`, `amp`, `windsurf`, `opencode`, `pi`, `ai_tab`,
-  `firebender`, plus `human` (untracked), `known_human` (real human edits,
-  IDE extensions only) and the test presets `mock_ai` / `mock_known_human`.
+  `firebender`, plus `human` (compatibility name for an untracked boundary),
+  `known_human` (evidence-backed human edits, IDE extensions only), and the test
+  presets `mock_ai` / `mock_known_human`.
 - Hook input arrives via `--hook-input` or stdin; UTF-8 and UTF-16 LE/BE are
   accepted (BOM/heuristic detection in `cli/git_ai_handlers.rs:618-675`).
   Each preset parses its agent's native hook JSON.

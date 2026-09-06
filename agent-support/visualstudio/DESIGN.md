@@ -8,7 +8,7 @@ This document describes the design of a Visual Studio (VSIX) extension that dete
 
 - Detect when GitHub Copilot (inline completions or chat edits) modifies code in Visual Studio
 - Record AI-authored edits by calling `git ai checkpoint agent-v1 --hook-input stdin`
-- Record human edits as `known_human` checkpoints so git-ai can distinguish the before/after boundary
+- Record evidence-backed human edits as `known_human` checkpoints
 - Auto-install via `git ai install-hooks`
 
 ### Non-goals
@@ -122,7 +122,7 @@ CopilotEditDetector.Analyze(stackTrace)
     │
     ├── HIGH confidence match (Copilot namespace prefix found)
     │   │
-    │   ├── 1. Send "human" before_edit checkpoint (pre-edit content via e.Before)
+    │   ├── 1. Send compatibility "human" checkpoint as an untracked pre-edit boundary
     │   │      { "type": "human", "repo_working_dir": "...", "will_edit_filepaths": [...], "dirty_files": {...} }
     │   │
     │   └── 2. Debounce 300ms, then send "ai_agent" after_edit checkpoint
@@ -130,7 +130,7 @@ CopilotEditDetector.Analyze(stackTrace)
     │            "agent_name": "github-copilot-visualstudio", "model": "unknown",
     │            "conversation_id": "<session_id>", "dirty_files": {...} }
     │
-    └── No match or MEDIUM confidence (human edit)
+    └── No match or MEDIUM confidence (no high-confidence AI signal)
         │
         └── On save: send known_human checkpoint (debounced 500ms)
             { "editor": "visualstudio", "editor_version": "17.x", "extension_version": "0.1.0",
@@ -209,7 +209,7 @@ Attaches to every opened text editor via MEF `[Export(typeof(IVsTextViewCreation
 1. Capture `new StackTrace()` on the calling thread
 2. Pass to `CopilotEditDetector.Analyze()`
 3. If HIGH confidence AI edit:
-   a. If no recent `before_edit` was sent for this file (5s expiry), send a human checkpoint with pre-edit content from `e.Before.GetText()`
+   a. If no recent `before_edit` was sent for this file (5s expiry), send the compatibility `human` checkpoint with pre-edit content from `e.Before.GetText()`; this establishes an untracked boundary and does not claim human authorship
    b. Cancel any pending debounce timer for this file
    c. Schedule a new 300ms debounce timer; when it fires, send an `ai_agent` after_edit checkpoint with `buffer.CurrentSnapshot.GetText()`
 
@@ -321,7 +321,7 @@ Pure function tests that don't require a VS host (following IntelliJ's `VfsRefre
 ### Implemented in v0.1.0
 
 - Stack trace detection for GitHub Copilot (inline + chat)
-- Human before_edit / AI after_edit checkpoint pairs
+- Untracked before_edit / AI after_edit checkpoint pairs
 - known_human checkpoints on save
 - Rust `VisualStudioInstaller` for detection
 

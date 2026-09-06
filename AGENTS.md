@@ -68,8 +68,8 @@ A single binary serves two roles based on `argv[0]`:
 ### Core data flow: checkpoint --> working log --> authorship note
 
 1. **Checkpoint**: An AI coding agent calls `git-ai checkpoint <agent>` with hook input (typically JSON via stdin) before AND after it edits a file. The corresponding agent preset (`src/operations/commands/checkpoint_agent/agent_presets.rs`) extracts edited file paths, transcript, and model info. The checkpoint processor diffs the file against HEAD's version or the last-checkpointed value of that file and compute character-level attributions. The combination of pre and post file edit checkpoints is what allows us to know exactly what the AI changed (since we can compare the before and after). There are 3 main types of checkpoints in git-ai:
-    * Plain or legacy `human`: only due to legacy, it's still called `human` as it used to mean "human" edited files, but since we migrated to an explicit Human checkpoint (now called `known_human`), this checkpoint represents 'untracked' changes. This is the checkpoint that AI agent presets invoke to take the before edit snapshots. Changes caught by these checkpoints do get explicit attestations in the final authorship notes (they are basically holes in the data) and stats recognize them as untracked. For testing, invoke by calling `git-ai checkpoint human` (for unscoped) or `git-ai checkpoint human /path/to/file` (for scoped).
-    * Known human (`known_human`) checkpoints: this is the 'real' Human checkpoint. These are never called by the AI agent presets and are only invoked by our IDE/editor extensions that recognize when a change has actually been made by the human by typing, etc. For testing, invoke via `git-ai checkpoint mock_known_human` (for unscoped) or `git-ai checkpoint mock_known_human /path/to/file` (for scoped).
+    * Plain or legacy `human`: the name is retained for compatibility, but this checkpoint represents an untracked boundary and makes no human-authorship claim. AI agent presets invoke it for before-edit snapshots so pre-existing changes are excluded from the subsequent AI delta. Lines captured at this boundary remain unattested in final authorship notes and stats report them as unknown or untracked. For testing, invoke `git-ai checkpoint human` (unscoped) or `git-ai checkpoint human /path/to/file` (scoped).
+    * Evidence-backed known human (`known_human`): this checkpoint records edits that an IDE/editor integration identified as human input. AI agent presets never invoke it. For testing, invoke `git-ai checkpoint mock_known_human` (unscoped) or `git-ai checkpoint mock_known_human /path/to/file` (scoped).
     * AI checkpoint (`ai_agent`) checkpoints: this is the AI checkpoint that explicitly associates the captured changes with the particular AI agent and session. This is the checkpoint taht AI agent presets invoke to take the after edit snapshots. For testing, invoke via `git-ai checkpoint mock_ai` (for unscoped) or `git-ai checkpoint mock_ai /path/to/file` (for scoped).
 
 2. **Working log**: Checkpoint data is written to `.git/ai/working_logs/<base_commit>/` as JSON files. Each working log entry records per-file line attributions (which ranges are AI vs known human vs untracked (legacy human)) and session metadata.
@@ -124,7 +124,7 @@ fn test_using_test_repo() {
 }
 ```
 
-For certain test cases, especially where you are focused on testing specific checkpoint or attribution behavior, do NOT use the `file.set_contents` helper as it has a very specific (and unrealistic) ai vs human checkpointing flow that first sets file content to all the human values with explicit placeholders for the lines that are AI, calls a known human checkpoint, and then replaces the AI lines with their real values and calls the AI checkpoint after. As you can imagine, if you really want to test nuances of checkpointing, this is problematic. In those cases, explicitly write the file using standard Rust file write utils and explicitly call the ai vs human checkpoints mocking the real pre/post checkpointing flow using `mock_known_human` for explicit/known human changes, `human` for untracked changes, and `mock_ai` for AI changes. Example with custom writes+checkpointing for when you really care about exact replication of issues or testing checkpointing/attribution internals or any time the exact flow, order, etc. of checkpoints is relevant:
+For certain test cases, especially where you are focused on specific checkpoint or attribution behavior, do NOT use the `file.set_contents` helper. It uses a specific (and synthetic) known-human/AI checkpoint flow: first it sets file content to the expected known-human values with placeholders for AI lines and calls a known-human checkpoint; then it replaces the placeholders with the AI values and calls the AI checkpoint. That can hide ordering and boundary behavior. In those cases, write the file with standard Rust file utilities and invoke checkpoints explicitly: `mock_known_human` for evidence-backed human edits, the compatibility `human` preset for untracked boundaries, and `mock_ai` for AI edits. The following example uses explicit writes and checkpoints when exact flow and ordering matter:
 
 ```rust
 #[test]
@@ -188,7 +188,7 @@ Another untracked line
     fs::write(&file_path, fourth_edit).unwrap();
     // Mocking an AI agent preset's pre edit checkpoint, which all the AI agent presets do to exclude
     // changes made by something else (impossible to know what) before the AI makes its own edit. We mock
-    // that by calling a 'legacy human' (untracked) checkpoint.
+    // that with the compatibility `human` checkpoint, which records an untracked boundary.
     repo.git_ai(&["checkpoint", "human", "example.md"])
         .unwrap();
     

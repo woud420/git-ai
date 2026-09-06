@@ -690,6 +690,57 @@ fn eng_377_telemetry_contract_matches_current_storage_and_workers() {
     }
 }
 
+#[test]
+fn eng_378_active_docs_distinguish_untracked_and_known_human_evidence() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let agents = fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md must be readable");
+    let opencode = fs::read_to_string(root.join("agent-support/opencode/README.md"))
+        .expect("OpenCode README must be readable");
+    let visual_studio = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
+        .expect("Visual Studio design must be readable");
+    let checkpoint = fs::read_to_string(root.join("docs/contracts/checkpoint-interface.md"))
+        .expect("checkpoint contract must be readable");
+
+    for stale in [
+        "Changes caught by these checkpoints do get explicit attestations",
+        "mark code changes as either human or AI-authored",
+        "human checkpoint before AI edits",
+        "marking any intermediate changes as human-authored",
+        "mark any changes since the last checkpoint as human-authored",
+        "No match or MEDIUM confidence (human edit)",
+        "send a human checkpoint with pre-edit content",
+        "Human before_edit / AI after_edit checkpoint pairs",
+    ] {
+        assert!(
+            ![&agents, &opencode, &visual_studio, &checkpoint]
+                .iter()
+                .any(|contents| contents.contains(stale)),
+            "active checkpoint documentation still contains contradictory phrase `{stale}`"
+        );
+    }
+
+    for (name, contents) in [
+        ("AGENTS.md", &agents),
+        ("OpenCode README", &opencode),
+        ("Visual Studio design", &visual_studio),
+        ("checkpoint contract", &checkpoint),
+    ] {
+        assert!(
+            contents.contains("untracked"),
+            "{name} must describe the compatibility checkpoint as untracked"
+        );
+        assert!(
+            contents.contains("known_human"),
+            "{name} must reserve known-human attribution for `known_human` evidence"
+        );
+    }
+
+    assert!(
+        agents.contains("remain unattested") && checkpoint.contains("remain unattested"),
+        "AGENTS.md and the checkpoint contract must agree that untracked lines have no attestation"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

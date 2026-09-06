@@ -4,10 +4,16 @@ A plugin that integrates [git-ai](https://github.com/woud420/git-ai) with [OpenC
 
 ## Overview
 
-This plugin hooks into OpenCode's tool execution lifecycle to create checkpoints that mark code changes as either human or AI-authored. It uses the `tool.execute.before` and `tool.execute.after` events to:
+This plugin hooks into OpenCode's tool execution lifecycle to separate
+pre-existing, unattributed changes from edits made by the active AI session. It
+uses the `tool.execute.before` and `tool.execute.after` events to:
 
-1. Create a human checkpoint before AI edits (marking any intermediate changes as human-authored)
+1. Create a compatibility `human` checkpoint before AI edits, establishing an
+   untracked boundary without claiming human authorship
 2. Create an AI checkpoint after AI edits (marking the changes as AI-authored with model information)
+
+OpenCode does not emit `known_human` checkpoints. That evidence-backed category
+is reserved for editor integrations that can identify actual human input.
 
 ## Installation
 
@@ -24,7 +30,8 @@ Build `git-ai` (`cargo build`) and then run the `git-ai install-hooks` or `cargo
 
 The plugin intercepts file editing operations (`edit`, `write`, `patch`, `multiedit`, and `apply_patch`) and:
 
-1. **Before AI edit**: Creates a human checkpoint to mark any changes since the last checkpoint as human-authored
+1. **Before AI edit**: Creates a compatibility `human` checkpoint so changes
+   since the last checkpoint remain untracked and are excluded from the AI delta
 2. **After AI edit**: Creates an AI checkpoint with:
    - Model information (provider/model ID)
    - Session/conversation ID

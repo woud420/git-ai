@@ -1676,7 +1676,10 @@ fn eng_392_privacy_docs_disclose_editor_telemetry_gate() {
         (intellij_source.as_str(), "telemetry_oss"),
         (intellij_source.as_str(), "ingest.us.sentry.io"),
     ] {
-        assert!(source.contains(fact), "editor source is missing fact `{fact}`");
+        assert!(
+            source.contains(fact),
+            "editor source is missing fact `{fact}`"
+        );
     }
 }
 

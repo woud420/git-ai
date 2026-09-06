@@ -208,9 +208,9 @@ git clone https://github.com/woud420/git-ai
 cd git-ai
 nix develop
 
-cargo build
-cargo test
-cargo run -- --version
+make build
+make test
+git-ai --version
 ```
 
 ## Local Flake Development

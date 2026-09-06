@@ -1680,6 +1680,35 @@ fn eng_392_privacy_docs_disclose_editor_telemetry_gate() {
     }
 }
 
+#[test]
+fn eng_393_nix_development_uses_gnu_make_interface() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
+    let readme =
+        fs::read_to_string(root.join("README-nix.md")).expect("Nix README must be readable");
+
+    assert!(
+        flake.contains("gnumake") && flake.contains("Run 'make build'"),
+        "Nix development shell must provide and recommend GNU Make"
+    );
+    assert!(
+        !flake.contains("Run 'cargo build'"),
+        "Nix shell messages must not bypass the canonical Make interface"
+    );
+    for required in ["make build", "make test", "git-ai --version"] {
+        assert!(
+            readme.contains(required),
+            "Nix development guide is missing canonical command `{required}`"
+        );
+    }
+    for bypass in ["cargo build\ncargo test", "cargo run -- --version"] {
+        assert!(
+            !readme.contains(bypass),
+            "Nix development guide retains direct Cargo workflow `{bypass}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

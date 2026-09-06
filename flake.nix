@@ -182,6 +182,7 @@
             sqlite
 
             # Useful development tools
+            gnumake         # Canonical repository command surface (4.4.1+)
             cargo-edit      # cargo add, cargo rm, cargo upgrade
             cargo-watch     # Auto-rebuild on file changes
             cargo-expand    # Show macro expansions
@@ -211,7 +212,7 @@
 #!/bin/bash
 if [ ! -x "$BINARY" ]; then
   echo "git-ai: dev binary not found at $BINARY" >&2
-  echo "Run 'cargo build' first, then retry." >&2
+  echo "Run 'make build' first, then retry." >&2
   exit 1
 fi
 exec -a git "$BINARY" "\$@"
@@ -223,7 +224,7 @@ GITEOF
 #!/bin/bash
 if [ ! -x "$BINARY" ]; then
   echo "git-ai: dev binary not found at $BINARY" >&2
-  echo "Run 'cargo build' first, then retry." >&2
+  echo "Run 'make build' first, then retry." >&2
   exit 1
 fi
 exec "$BINARY" "\$@"
@@ -261,7 +262,7 @@ GITOGEOF
               echo "Hooks installed."
             else
               echo "Dev binary: $BINARY (not built yet)"
-              echo "Run 'cargo build' to build, then hooks will be installed on next 'nix develop'."
+              echo "Run 'make build' to build, then hooks will be installed on next 'nix develop'."
             fi
             echo ""
             echo "git, git-ai, git-og -> wrappers in $GITWRAP_DIR"

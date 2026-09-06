@@ -597,6 +597,7 @@ fn eng_377_telemetry_contract_matches_current_storage_and_workers() {
         .expect("telemetry examples must be readable");
     let index = fs::read_to_string(root.join("docs/contracts/README.md"))
         .expect("contracts index must be readable");
+    let index = index.replace("\r\n", "\n");
     let persistence = fs::read_to_string(root.join("docs/contracts/persistence-model.md"))
         .expect("persistence contract must be readable");
     let changelog =

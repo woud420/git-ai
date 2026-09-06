@@ -1767,6 +1767,51 @@ fn eng_395_nix_wrapper_selection_uses_package_outputs() {
     );
 }
 
+#[test]
+fn eng_396_remaining_historical_records_are_classified() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (relative, lifecycle, authority) in [
+        (
+            "docs/pr-1153-review-findings.md",
+            "historical",
+            "docs/contracts/",
+        ),
+        (
+            "docs/rewrite-simplification-spec.md",
+            "superseded",
+            "docs/architecture/rewrite-ops-spec.md",
+        ),
+        (
+            "docs/migrations/sessions-v2-note-format.md",
+            "historical",
+            "specs/git_ai_standard_v3.0.0.md",
+        ),
+    ] {
+        let contents = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"));
+        let statuses = contents
+            .lines()
+            .filter(|line| line.starts_with("Status: "))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            statuses.len(),
+            1,
+            "{relative} must have one lifecycle status"
+        );
+        assert!(
+            contents
+                .lines()
+                .take(6)
+                .any(|line| line.starts_with(&format!("Status: {lifecycle}"))),
+            "{relative} must be classified as {lifecycle} in its header"
+        );
+        assert!(
+            contents.contains(authority),
+            "{relative} must name current authority `{authority}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

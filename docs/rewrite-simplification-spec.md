@@ -1,5 +1,7 @@
 # Authorship Rewrite Simplification Spec
 
+Status: superseded — exploratory proposal retained for context; `docs/architecture/rewrite-ops-spec.md` is the current authoritative rewrite contract.
+
 ## Overview
 
 Replace the entire rewrite_log / per-operation-type / mid-operation-interception system with a single unified algorithm: when authorship notes need to follow code through history rewrites, use `diff-tree` to shift line-level attributions between old and new commit trees. The git wrapper/proxy is fully removed — only the daemon flow matters.

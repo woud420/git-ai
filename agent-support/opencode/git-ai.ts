@@ -13,7 +13,7 @@
  * Requirements:
  *   - git-ai must be installed (path is injected at install time)
  *
- * @see https://github.com/git-ai-project/git-ai
+ * @see https://github.com/woud420/git-ai
  * @see https://opencode.ai/docs/plugins/
  */
 

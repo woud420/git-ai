@@ -188,9 +188,8 @@ class GitAiService {
                     Searched locations: ${lastSearchedPaths.joinToString(", ")}
                     PATH: $currentPath
 
-                    To fix: Install git-ai using one of these methods:
-                    - cargo install git-ai
-                    - curl -fsSL https://install.usegitai.com | sh
+                    To fix: Build and install git-ai from this fork:
+                    - https://github.com/woud420/git-ai#install-and-quick-start
                     - Or ensure git-ai is in your PATH
                 """.trimIndent())
                 TelemetryService.getInstanceOrNull()?.reportGitAiNotFound(

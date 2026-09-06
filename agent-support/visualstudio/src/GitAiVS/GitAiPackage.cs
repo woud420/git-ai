@@ -49,7 +49,7 @@ namespace GitAiVS
 
                 if (binaryPath == null)
                 {
-                    ShowInfoBar("git-ai is not installed. Visit https://usegitai.com to install it.");
+                    ShowInfoBar("git-ai is not installed. Visit https://github.com/woud420/git-ai#install-and-quick-start to install it.");
                     return;
                 }
 

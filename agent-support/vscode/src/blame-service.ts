@@ -448,7 +448,7 @@ export class BlameService {
     ).then((choice) => {
       if (choice === 'Learn More') {
         vscode.env.openExternal(
-          vscode.Uri.parse('https://github.com/git-ai-project/git-ai')
+          vscode.Uri.parse('https://github.com/woud420/git-ai#install-and-quick-start')
         );
       }
     });
@@ -472,5 +472,4 @@ export class BlameService {
     return undefined;
   }
 }
-
 

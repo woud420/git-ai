@@ -111,7 +111,7 @@ The project uses standard Rust formatting. Please run `make fmt` and `make lint`
 
 ## Getting Help
 
-If you have questions about contributing, feel free to open an issue or reach out to the maintainers.
-
-- **Discord**: https://discord.gg/XJStYvkb5U
-- **Office Hours**: https://calendly.com/d/cxjh-z79-ktm/meeting-with-git-ai-authors
+For questions about this fork, open a
+[GitHub issue](https://github.com/woud420/git-ai/issues). Include the platform,
+the command you ran, and enough reproduction detail for another contributor to
+verify the behavior.

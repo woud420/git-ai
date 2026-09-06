@@ -145,6 +145,37 @@ const BUNDLED_SKILL_FILES: &[&str] = &[
     ".agents/skills/prompt-analysis/SKILL.md",
 ];
 const RETIRED_SKILL_COMMANDS: &[&str] = &["git-ai search", "git-ai continue", "git-ai prompts"];
+const ACTIVE_DISTRIBUTION_FILES: &[&str] = &[
+    "README-nix.md",
+    "CONTRIBUTING.md",
+    "agent-support/intellij/README.md",
+    "agent-support/intellij/gradle.properties",
+    "agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/GitAiService.kt",
+    "agent-support/opencode/README.md",
+    "agent-support/opencode/git-ai.ts",
+    "agent-support/visualstudio/README.md",
+    "agent-support/visualstudio/src/GitAiVS/GitAiPackage.cs",
+    "agent-support/visualstudio/src/GitAiVS/Services/BinaryResolver.cs",
+    "agent-support/visualstudio/src/GitAiVS/source.extension.vsixmanifest",
+    "agent-support/vscode/README.md",
+    "agent-support/vscode/package.json",
+    "agent-support/vscode/src/ai-edit-manager.ts",
+    "agent-support/vscode/src/blame-service.ts",
+    "agent-support/vscode/src/consts.ts",
+    "docs/operations/README.md",
+    "flake.nix",
+];
+const STALE_DISTRIBUTION_FRAGMENTS: &[&str] = &[
+    "github:acunniffe/git-ai",
+    "github.com/acunniffe/git-ai",
+    "github.com/git-ai-project/git-ai",
+    "install.usegitai.com",
+    "discord.gg/XJStYvkb5U",
+    "calendly.com/d/cxjh-z79-ktm",
+    "Visit https://usegitai.com to install it",
+    "<MoreInfo>https://usegitai.com</MoreInfo>",
+    "Learn more at [usegitai.com]",
+];
 
 // Regression coverage for ENG-351.
 #[test]
@@ -381,6 +412,42 @@ fn eng_372_bundled_skills_reference_supported_commands() {
         assert!(
             combined.contains(command),
             "bundled skills do not document supported command `{command}`"
+        );
+    }
+}
+
+#[test]
+fn eng_373_active_distribution_guidance_is_fork_local() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut violations = Vec::new();
+
+    for relative in ACTIVE_DISTRIBUTION_FILES {
+        let contents = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"));
+        for fragment in STALE_DISTRIBUTION_FRAGMENTS {
+            if contents.contains(fragment) {
+                violations.push(format!("{relative}: `{fragment}`"));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "active distribution surfaces still route users away from the fork:\n{}",
+        violations.join("\n")
+    );
+
+    let operations = fs::read_to_string(root.join("docs/operations/README.md"))
+        .expect("operations guide must be readable");
+    for required in [
+        "has not published tags or release artifacts",
+        "macOS Intel",
+        "macOS Apple Silicon",
+        "macOS universal",
+    ] {
+        assert!(
+            operations.contains(required),
+            "operations guide is missing release-state fact `{required}`"
         );
     }
 }

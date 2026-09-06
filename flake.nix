@@ -72,7 +72,7 @@
 
           meta = with pkgs.lib; {
             description = "AI-powered Git wrapper that tracks AI-generated code changes";
-            homepage = "https://github.com/acunniffe/git-ai";
+            homepage = "https://github.com/woud420/git-ai";
             license = licenses.gpl3Plus;
             maintainers = [ ];
             mainProgram = "git-ai";

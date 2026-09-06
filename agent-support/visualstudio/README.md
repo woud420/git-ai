@@ -1,13 +1,15 @@
 # git-ai Extension for Visual Studio
 
-A Visual Studio extension that tracks AI-generated code using [git-ai](https://github.com/git-ai-project/git-ai?tab=readme-ov-file#quick-start).
+A Visual Studio extension that tracks AI-generated code using [git-ai](https://github.com/woud420/git-ai#install-and-quick-start).
 
 ## Install
 
-The [git-ai quickstart](https://github.com/git-ai-project/git-ai?tab=readme-ov-file#quick-start) install script should automatically install the Visual Studio extension. If that didn't work or you'd like to install manually:
+Until this fork publishes release artifacts, build and install the CLI from
+[this fork's source](https://github.com/woud420/git-ai#install-and-quick-start).
+Then install the extension manually:
 
 1. **Install the extension** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=git-ai.git-ai-visualstudio), or search for `git-ai` in Extensions > Manage Extensions.
-2. **Install [`git-ai`](https://github.com/git-ai-project/git-ai)** Follow the `git-ai` installation [instructions](https://github.com/git-ai-project/git-ai?tab=readme-ov-file#quick-start) for your platform.
+2. **Install [`git-ai`](https://github.com/woud420/git-ai)** Follow this fork's [source installation instructions](https://github.com/woud420/git-ai#install-and-quick-start) for your platform.
 3. **Restart Visual Studio**
 
 ## Requirements

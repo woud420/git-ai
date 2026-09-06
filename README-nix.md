@@ -6,13 +6,17 @@ This project provides a Nix flake for easy installation on NixOS, nix-darwin, or
 
 Try without installing:
 ```bash
-nix run github:acunniffe/git-ai -- --version
+nix run github:woud420/git-ai -- --version
 ```
 
 Install to user profile:
 ```bash
-nix profile install github:acunniffe/git-ai
+nix profile install github:woud420/git-ai
 ```
+
+These commands evaluate this fork directly from source. The fork has not yet
+published versioned release tags, so pin the flake input to a commit when you
+need a reproducible installation.
 
 ## What's Included
 
@@ -48,7 +52,7 @@ Add the input to your flake:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     home-manager.url = "github:nix-community/home-manager";
-    git-ai.url = "github:acunniffe/git-ai";
+    git-ai.url = "github:woud420/git-ai";
   };
 }
 ```
@@ -88,7 +92,7 @@ This approach:
   inputs = {
     darwin.url = "github:lnl7/nix-darwin";
     home-manager.url = "github:nix-community/home-manager";
-    git-ai.url = "github:acunniffe/git-ai";
+    git-ai.url = "github:woud420/git-ai";
   };
 
   outputs = { darwin, home-manager, git-ai, nixpkgs, ... }: {
@@ -123,7 +127,7 @@ This approach:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    git-ai.url = "github:acunniffe/git-ai";
+    git-ai.url = "github:woud420/git-ai";
   };
 
   outputs = { nixpkgs, git-ai, ... }: {
@@ -182,12 +186,12 @@ home.packages = [
 
 Enter a development shell with Rust toolchain:
 ```bash
-nix develop github:acunniffe/git-ai
+nix develop github:woud420/git-ai
 ```
 
 Or clone and develop locally:
 ```bash
-git clone https://github.com/acunniffe/git-ai
+git clone https://github.com/woud420/git-ai
 cd git-ai
 nix develop
 

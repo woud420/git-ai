@@ -814,6 +814,77 @@ fn eng_379_active_docs_use_the_configured_authorship_backend() {
     }
 }
 
+#[test]
+fn eng_380_visual_studio_docs_match_install_and_detection_behavior() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("agent-support/visualstudio/README.md"))
+        .expect("Visual Studio README must be readable");
+    let design = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
+        .expect("Visual Studio design must be readable");
+    let detector = fs::read_to_string(
+        root.join("agent-support/visualstudio/src/GitAiVS/Detection/CopilotEditDetector.cs"),
+    )
+    .expect("Visual Studio detector must be readable");
+
+    for required in [
+        "Experimental support",
+        "`git-ai install-hooks` skips Visual Studio",
+        "`git-ai install-hooks --visual-studio-extension`",
+        "not download or install a VSIX",
+        "Extensions > Manage Extensions",
+        "Copilot Chat edits",
+        "Inline completions",
+    ] {
+        assert!(
+            readme.contains(required),
+            "Visual Studio README is missing lifecycle boundary `{required}`"
+        );
+    }
+
+    assert!(
+        readme.contains("agent-support/visualstudio/src/GitAiVS/GitAiVS.csproj")
+            && readme.contains("src/GitAiVS/bin/Release/")
+            && !readme.contains("GitAiVS.sln"),
+        "Visual Studio build instructions must name files and output paths that exist"
+    );
+
+    for required in [
+        "src/operations/mdm/agents/visual_studio.rs",
+        "Chat edits are the only currently evidenced AI detection path",
+        "completions are not attributed",
+        "`install_vsix()` returns `false`",
+    ] {
+        assert!(
+            design.contains(required),
+            "Visual Studio design is missing implementation boundary `{required}`"
+        );
+    }
+
+    for stale in [
+        "Auto-install via `git ai install-hooks`",
+        "Stack trace detection for GitHub Copilot (inline + chat)",
+        "stack trace analysis proved sufficient",
+        "**File**: `src/mdm/agents/visual_studio.rs`",
+        "Implementation.Copilot.*",
+    ] {
+        assert!(
+            !design.contains(stale),
+            "Visual Studio design retains unsupported claim `{stale}`"
+        );
+    }
+
+    for prefix in [
+        "GitHub.Copilot",
+        "Microsoft.VisualStudio.Copilot",
+        "Microsoft.VisualStudio.Conversations.UI.Internal.Copilot",
+    ] {
+        assert!(
+            detector.contains(prefix) && design.contains(prefix),
+            "Visual Studio design and detector disagree on prefix `{prefix}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

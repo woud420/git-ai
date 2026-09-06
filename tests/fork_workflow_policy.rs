@@ -1856,6 +1856,59 @@ fn eng_397_cli_output_contract_names_current_json_sources() {
     );
 }
 
+#[test]
+fn eng_399_opencode_docs_match_managed_plugin_contract() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("agent-support/opencode/README.md"))
+        .expect("OpenCode README must be readable");
+    let plugin = fs::read_to_string(root.join("agent-support/opencode/git-ai.ts"))
+        .expect("OpenCode plugin must be readable");
+    let installer = fs::read_to_string(root.join("src/operations/mdm/agents/opencode.rs"))
+        .expect("OpenCode installer must be readable");
+
+    for required in [
+        "## Support status",
+        "`opencode` and `opencode2`",
+        "~/.config/opencode/plugins/git-ai.ts",
+        "~/.config/opencode/plugin/git-ai.ts",
+        "git-ai uninstall-hooks --dry-run=false",
+        "make build",
+        "10-second",
+        "tool input",
+        "session ID",
+        "local git-ai CLI",
+        "does not make direct network requests",
+        "../../data-privacy.md",
+        "Apache License 2.0",
+    ] {
+        assert!(
+            readme.contains(required),
+            "OpenCode README is missing integration fact `{required}`"
+        );
+    }
+    for stale in ["`cargo build`", "`cargo run -- install-hooks`"] {
+        assert!(
+            !readme.contains(stale),
+            "OpenCode README retains unsupported development command `{stale}`"
+        );
+    }
+    assert!(
+        plugin.contains("untracked or AI-authored")
+            && !plugin.contains("mark code changes as human or AI-authored"),
+        "OpenCode plugin header must not turn the compatibility boundary into human evidence"
+    );
+    for source_fact in [
+        "detect_binary_names: &[\"opencode\", \"opencode2\"]",
+        ".join(\"plugins\")",
+        ".join(\"plugin\")",
+    ] {
+        assert!(
+            installer.contains(source_fact),
+            "OpenCode installer is missing documented fact `{source_fact}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

@@ -36,7 +36,7 @@ packages.${system}.minimal   # Without git symlink (for manual integration)
 packages.${system}.unwrapped # Just the binary
 devShells.${system}.default  # Development environment
 nixosModules.default         # NixOS module
-homeManagerModules.default   # Home Manager module (hooks and config only)
+homeManagerModules.default   # Home Manager package, hooks, and config module
 overlays.default             # Nixpkgs overlay
 ```
 
@@ -75,9 +75,16 @@ In your Home Manager configuration:
   programs.git-ai = {
     enable = true;
     installHooks = true;  # Runs git-ai install-hooks on activation
+    settings.allowRepositories = [
+      "https://github.com/myorg/*"
+    ];
   };
 }
 ```
+
+Collection is opt-in. Leaving `settings.allowRepositories` null or empty denies
+every repository, even when hooks are installed. Add only the local paths or
+remote URL globs that Git AI should process.
 
 This approach:
 - Replaces the standard git with git-ai throughout your environment
@@ -112,6 +119,9 @@ This approach:
             programs.git-ai = {
               enable = true;
               installHooks = true;
+              settings.allowRepositories = [
+                "https://github.com/myorg/*"
+              ];
             };
           };
         }
@@ -138,6 +148,9 @@ This approach:
           programs.git-ai = {
             enable = true;
             installHooks = true;
+            settings.allowRepositories = [
+              "https://github.com/myorg/*"
+            ];
           };
 
           # Add git-ai to system packages
@@ -213,12 +226,13 @@ For developing from a local checkout:
 
 ### homeManagerModules.default
 
-The Home Manager module handles hooks and configuration only (not package installation).
+The Home Manager module installs the selected package and manages per-user hooks
+and configuration.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enable` | bool | `false` | Enable git-ai hooks and config |
-| `package` | package | flake default | The git-ai package (for hooks) |
+| `package` | package | flake default | Package installed for the user |
 | `installHooks` | bool | `true` | Run `git-ai install-hooks` on activation |
 
 ### nixosModules.default
@@ -229,6 +243,50 @@ The Home Manager module handles hooks and configuration only (not package instal
 | `package` | package | flake default | The git-ai package to use |
 | `installHooks` | bool | `true` | Run `git-ai install-hooks` on activation |
 | `setGitAlias` | bool | `true` | Add git-ai to system PATH |
+
+### Shared settings
+
+Both modules expose these under `programs.git-ai.settings`. A `null` value is
+omitted from the generated JSON, so the runtime default applies.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `gitPath` | null or string | `null` | Real Git executable; defaults to the Nixpkgs Git binary |
+| `apiKey` | null or string | `null` | API key stored in the Nix store; prefer one of the indirect options |
+| `apiKeyFile` | null or string | `null` | File read at shell startup to set `GIT_AI_API_KEY` |
+| `apiKeyCommand` | null or string | `null` | Command run at shell startup to obtain `GIT_AI_API_KEY` |
+| `promptStorage` | null or `default`, `notes`, or `local` | `null` | Prompt storage mode |
+| `apiBaseUrl` | null or string | `null` | API base URL |
+| `excludePromptsInRepositories` | null or list of strings | `null` | Remote URL globs that must not share prompts |
+| `includePromptsInRepositories` | null or list of strings | `null` | Remote URL globs to which `promptStorage` applies |
+| `defaultPromptStorage` | null or `default`, `notes`, or `local` | `null` | Storage mode outside the prompt include list |
+| `allowRepositories` | null or list of strings | `null` (deny all) | Local path or remote URL globs opted into collection |
+| `excludeRepositories` | null or list of strings | `null` | Collection exclusions; take precedence over the allowlist |
+| `telemetryOss` | null or `on` or `off` | `null` | Legacy OSS telemetry setting |
+| `telemetryEnterpriseDsn` | null or string | `null` | Custom telemetry endpoint |
+| `disableVersionChecks` | null or bool | `null` | Disable version checks |
+| `disableAutoUpdates` | null or bool | `null` | Disable automatic updates |
+| `updateChannel` | null or channel name | `null` | Release/update channel |
+
+### Feature flags
+
+Typed feature flags live under `programs.git-ai.settings.featureFlags`. Their
+Nix default is `null`, which preserves the runtime's build-specific default.
+
+| Option | Runtime default (debug / release) | Purpose |
+|--------|-----------------------------------|---------|
+| `featureFlags.authKeyring` | off / off | System keyring authentication |
+| `featureFlags.transcriptStreaming` | on / on | Event-driven transcript streaming |
+| `featureFlags.transcriptSweep` | on / on | Periodic discovery of missed transcript data |
+| `featureFlags.checkpointDebugLog` | off / off | Detailed checkpoint debug logging |
+| `featureFlags.bashCheckpointsV2` | off / off | Daemon-based Bash checkpoint flow |
+| `featureFlags.daemonLogUpload` | on / on | Daemon log upload eligibility |
+| `featureFlags.rewriteMetricsEvents` | on / off | Rewrite metrics event emission |
+| `featureFlags.extraFlags` | `{}` | Forward-compatible snake_case boolean flags |
+
+The declarations in [`flake.nix`](flake.nix) are the source of truth for option
+types and descriptions. Unknown runtime flags can be supplied through
+`featureFlags.extraFlags` until a typed option is added.
 
 ## Platforms
 

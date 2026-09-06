@@ -452,6 +452,75 @@ fn eng_373_active_distribution_guidance_is_fork_local() {
     }
 }
 
+#[test]
+fn eng_374_nix_options_match_runtime_configuration() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
+    let readme =
+        fs::read_to_string(root.join("README-nix.md")).expect("README-nix.md must be readable");
+
+    for retired in [
+        "rewriteStash",
+        "rewrite_stash = cfg.settings.featureFlags",
+        "gitHooksEnabled",
+        "git_hooks_enabled = cfg.settings.featureFlags",
+        "gitHooksExternallyManaged",
+        "git_hooks_externally_managed = cfg.settings.featureFlags",
+    ] {
+        assert!(
+            !flake.contains(retired),
+            "Nix module still exposes retired feature flag `{retired}`"
+        );
+    }
+
+    assert_eq!(
+        flake
+            .matches("allowed_repositories = cfg.settings.allowRepositories;")
+            .count(),
+        2,
+        "both Nix modules must emit the canonical allowlist key"
+    );
+    assert_eq!(
+        flake
+            .matches("If empty or null, no repositories are allowed.")
+            .count(),
+        2,
+        "both Nix modules must document deny-all allowlist semantics"
+    );
+
+    for (option, key) in [
+        ("authKeyring", "auth_keyring"),
+        ("transcriptStreaming", "transcript_streaming"),
+        ("transcriptSweep", "transcript_sweep"),
+        ("checkpointDebugLog", "checkpoint_debug_log"),
+        ("bashCheckpointsV2", "bash_checkpoints_v2"),
+        ("daemonLogUpload", "daemon_log_upload"),
+        ("rewriteMetricsEvents", "rewrite_metrics_events"),
+    ] {
+        assert_eq!(
+            flake.matches(&format!("{option} = mkOption")).count(),
+            2,
+            "both Nix modules must type current option `{option}`"
+        );
+        assert_eq!(
+            flake
+                .matches(&format!("{key} = cfg.settings.featureFlags.{option};"))
+                .count(),
+            2,
+            "both Nix modules must serialize current option `{option}`"
+        );
+        assert!(
+            readme.contains(&format!("`featureFlags.{option}`")),
+            "Nix README must list current option `featureFlags.{option}`"
+        );
+    }
+
+    assert!(
+        readme.contains("settings.allowRepositories"),
+        "Nix README must show an explicit repository opt-in"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

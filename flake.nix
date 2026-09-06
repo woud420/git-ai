@@ -376,7 +376,7 @@ GITOGEOF
             exclude_prompts_in_repositories = cfg.settings.excludePromptsInRepositories;
             include_prompts_in_repositories = cfg.settings.includePromptsInRepositories;
             default_prompt_storage = cfg.settings.defaultPromptStorage;
-            allow_repositories = cfg.settings.allowRepositories;
+            allowed_repositories = cfg.settings.allowRepositories;
             exclude_repositories = cfg.settings.excludeRepositories;
             telemetry_oss = cfg.settings.telemetryOss;
             telemetry_enterprise_dsn = cfg.settings.telemetryEnterpriseDsn;
@@ -386,12 +386,13 @@ GITOGEOF
             feature_flags =
               let
                 knownFlags = filterAttrs (n: v: v != null) {
-                  rewrite_stash = cfg.settings.featureFlags.rewriteStash;
                   auth_keyring = cfg.settings.featureFlags.authKeyring;
-                  git_hooks_enabled = cfg.settings.featureFlags.gitHooksEnabled;
-                  git_hooks_externally_managed = cfg.settings.featureFlags.gitHooksExternallyManaged;
                   transcript_streaming = cfg.settings.featureFlags.transcriptStreaming;
                   transcript_sweep = cfg.settings.featureFlags.transcriptSweep;
+                  checkpoint_debug_log = cfg.settings.featureFlags.checkpointDebugLog;
+                  bash_checkpoints_v2 = cfg.settings.featureFlags.bashCheckpointsV2;
+                  daemon_log_upload = cfg.settings.featureFlags.daemonLogUpload;
+                  rewrite_metrics_events = cfg.settings.featureFlags.rewriteMetricsEvents;
                 };
                 merged = cfg.settings.featureFlags.extraFlags // knownFlags;
               in
@@ -536,8 +537,9 @@ GITOGEOF
                 default = null;
                 example = [ "https://github.com/myorg/*" ];
                 description = ''
-                  List of repository URL patterns (globs) to allow.
-                  If empty or null, all repositories are allowed (unless excluded).
+                  List of repository path or remote URL patterns (globs) to allow
+                  for collection. If empty or null, no repositories are allowed.
+                  Add at least one pattern to opt in; exclusions take precedence.
                 '';
               };
 
@@ -596,38 +598,12 @@ GITOGEOF
               };
 
               featureFlags = {
-                rewriteStash = mkOption {
-                  type = types.nullOr types.bool;
-                  default = null;
-                  description = ''
-                    Enable stash rewriting for improved AI tracking of stash
-                    operations.
-                  '';
-                };
-
                 authKeyring = mkOption {
                   type = types.nullOr types.bool;
                   default = null;
                   description = ''
                     Enable system keyring integration for authentication.
-                  '';
-                };
-
-                gitHooksEnabled = mkOption {
-                  type = types.nullOr types.bool;
-                  default = null;
-                  description = ''
-                    Enable git hooks integration for git-ai tracking.
-                  '';
-                };
-
-                gitHooksExternallyManaged = mkOption {
-                  type = types.nullOr types.bool;
-                  default = null;
-                  description = ''
-                    Indicate that git hooks are managed externally
-                    (e.g., by lefthook or husky). When enabled, git-ai will not
-                    attempt to install or manage git hooks itself.
+                    Runtime default: disabled in debug and release builds.
                   '';
                 };
 
@@ -635,8 +611,8 @@ GITOGEOF
                   type = types.nullOr types.bool;
                   default = null;
                   description = ''
-                    Enable transcript streaming for real-time AI session transcript
-                    capture. Defaults to enabled in both debug and release builds.
+                    Enable event-driven session transcript streaming.
+                    Runtime default: enabled in debug and release builds.
                   '';
                 };
 
@@ -644,8 +620,46 @@ GITOGEOF
                   type = types.nullOr types.bool;
                   default = null;
                   description = ''
-                    Enable periodic sweeping of old transcript data to reclaim
-                    storage. Defaults to enabled in debug builds only.
+                    Enable periodic discovery of transcript data missed by
+                    event-driven streaming. Runtime default: enabled in debug
+                    and release builds.
+                  '';
+                };
+
+                checkpointDebugLog = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Write detailed checkpoint orchestration debug logs.
+                    Runtime default: disabled in debug and release builds.
+                  '';
+                };
+
+                bashCheckpointsV2 = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Route supported Bash checkpoint events through the daemon.
+                    Runtime default: disabled in debug and release builds.
+                  '';
+                };
+
+                daemonLogUpload = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Permit daemon log upload when telemetry and endpoint
+                    eligibility also allow it. Runtime default: enabled in
+                    debug and release builds.
+                  '';
+                };
+
+                rewriteMetricsEvents = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Emit rewrite metrics events. Runtime default: enabled in
+                    debug builds and disabled in release builds.
                   '';
                 };
 
@@ -732,7 +746,7 @@ GITOGEOF
             exclude_prompts_in_repositories = cfg.settings.excludePromptsInRepositories;
             include_prompts_in_repositories = cfg.settings.includePromptsInRepositories;
             default_prompt_storage = cfg.settings.defaultPromptStorage;
-            allow_repositories = cfg.settings.allowRepositories;
+            allowed_repositories = cfg.settings.allowRepositories;
             exclude_repositories = cfg.settings.excludeRepositories;
             telemetry_oss = cfg.settings.telemetryOss;
             telemetry_enterprise_dsn = cfg.settings.telemetryEnterpriseDsn;
@@ -742,12 +756,13 @@ GITOGEOF
             feature_flags =
               let
                 knownFlags = filterAttrs (n: v: v != null) {
-                  rewrite_stash = cfg.settings.featureFlags.rewriteStash;
                   auth_keyring = cfg.settings.featureFlags.authKeyring;
-                  git_hooks_enabled = cfg.settings.featureFlags.gitHooksEnabled;
-                  git_hooks_externally_managed = cfg.settings.featureFlags.gitHooksExternallyManaged;
                   transcript_streaming = cfg.settings.featureFlags.transcriptStreaming;
                   transcript_sweep = cfg.settings.featureFlags.transcriptSweep;
+                  checkpoint_debug_log = cfg.settings.featureFlags.checkpointDebugLog;
+                  bash_checkpoints_v2 = cfg.settings.featureFlags.bashCheckpointsV2;
+                  daemon_log_upload = cfg.settings.featureFlags.daemonLogUpload;
+                  rewrite_metrics_events = cfg.settings.featureFlags.rewriteMetricsEvents;
                 };
                 merged = cfg.settings.featureFlags.extraFlags // knownFlags;
               in
@@ -879,8 +894,9 @@ GITOGEOF
                 default = null;
                 example = [ "https://github.com/myorg/*" ];
                 description = ''
-                  List of repository URL patterns (globs) to allow.
-                  If empty or null, all repositories are allowed (unless excluded).
+                  List of repository path or remote URL patterns (globs) to allow
+                  for collection. If empty or null, no repositories are allowed.
+                  Add at least one pattern to opt in; exclusions take precedence.
                 '';
               };
 
@@ -939,38 +955,12 @@ GITOGEOF
               };
 
               featureFlags = {
-                rewriteStash = mkOption {
-                  type = types.nullOr types.bool;
-                  default = null;
-                  description = ''
-                    Enable stash rewriting for improved AI tracking of stash
-                    operations.
-                  '';
-                };
-
                 authKeyring = mkOption {
                   type = types.nullOr types.bool;
                   default = null;
                   description = ''
                     Enable system keyring integration for authentication.
-                  '';
-                };
-
-                gitHooksEnabled = mkOption {
-                  type = types.nullOr types.bool;
-                  default = null;
-                  description = ''
-                    Enable git hooks integration for git-ai tracking.
-                  '';
-                };
-
-                gitHooksExternallyManaged = mkOption {
-                  type = types.nullOr types.bool;
-                  default = null;
-                  description = ''
-                    Indicate that git hooks are managed externally
-                    (e.g., by lefthook or husky). When enabled, git-ai will not
-                    attempt to install or manage git hooks itself.
+                    Runtime default: disabled in debug and release builds.
                   '';
                 };
 
@@ -978,8 +968,8 @@ GITOGEOF
                   type = types.nullOr types.bool;
                   default = null;
                   description = ''
-                    Enable transcript streaming for real-time AI session transcript
-                    capture. Defaults to enabled in both debug and release builds.
+                    Enable event-driven session transcript streaming.
+                    Runtime default: enabled in debug and release builds.
                   '';
                 };
 
@@ -987,8 +977,46 @@ GITOGEOF
                   type = types.nullOr types.bool;
                   default = null;
                   description = ''
-                    Enable periodic sweeping of old transcript data to reclaim
-                    storage. Defaults to enabled in debug builds only.
+                    Enable periodic discovery of transcript data missed by
+                    event-driven streaming. Runtime default: enabled in debug
+                    and release builds.
+                  '';
+                };
+
+                checkpointDebugLog = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Write detailed checkpoint orchestration debug logs.
+                    Runtime default: disabled in debug and release builds.
+                  '';
+                };
+
+                bashCheckpointsV2 = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Route supported Bash checkpoint events through the daemon.
+                    Runtime default: disabled in debug and release builds.
+                  '';
+                };
+
+                daemonLogUpload = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Permit daemon log upload when telemetry and endpoint
+                    eligibility also allow it. Runtime default: enabled in
+                    debug and release builds.
+                  '';
+                };
+
+                rewriteMetricsEvents = mkOption {
+                  type = types.nullOr types.bool;
+                  default = null;
+                  description = ''
+                    Emit rewrite metrics events. Runtime default: enabled in
+                    debug builds and disabled in release builds.
                   '';
                 };
 

@@ -1735,6 +1735,38 @@ fn eng_394_nix_readme_has_owner_aware_uninstall_sequence() {
     }
 }
 
+#[test]
+fn eng_395_nix_wrapper_selection_uses_package_outputs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
+    let readme =
+        fs::read_to_string(root.join("README-nix.md")).expect("Nix README must be readable");
+
+    assert!(
+        !flake.contains("setGitAlias") && !readme.contains("setGitAlias"),
+        "Nix must not expose an inert wrapper-selection option"
+    );
+    for required in [
+        "packages.${system}.default",
+        "packages.${system}.minimal",
+        "package = git-ai.packages.x86_64-linux.minimal;",
+        "latest`, `next`, `enterprise-latest`, or `enterprise-next",
+    ] {
+        assert!(
+            readme.contains(required),
+            "Nix README is missing executable option fact `{required}`"
+        );
+    }
+    assert!(
+        !readme.contains("environment.systemPackages = ["),
+        "NixOS module example must not install the module package twice"
+    );
+    assert!(
+        flake.contains("default = git-ai-package;") && flake.contains("minimal = git-ai-minimal;"),
+        "flake must retain explicit full and minimal wrapper package outputs"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

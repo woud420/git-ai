@@ -152,16 +152,19 @@ This approach:
               "https://github.com/myorg/*"
             ];
           };
-
-          # Add git-ai to system packages
-          environment.systemPackages = [
-            git-ai.packages.x86_64-linux.default
-          ];
         }
       ];
     };
   };
 }
+```
+
+The module already installs its selected `package`. Its default is the complete
+package with the `git` wrapper. To keep the system Git command and install only
+`git-ai` plus `git-og`, select the executable `minimal` output instead:
+
+```nix
+programs.git-ai.package = git-ai.packages.x86_64-linux.minimal;
 ```
 
 ### 4. Direct Package (Standalone)
@@ -288,7 +291,6 @@ and configuration.
 | `enable` | bool | `false` | Enable git-ai |
 | `package` | package | flake default | The git-ai package to use |
 | `installHooks` | bool | `true` | Run `git-ai install-hooks` on activation |
-| `setGitAlias` | bool | `true` | Add git-ai to system PATH |
 
 ### Shared settings
 
@@ -312,7 +314,7 @@ omitted from the generated JSON, so the runtime default applies.
 | `telemetryEnterpriseDsn` | null or string | `null` | Custom telemetry endpoint |
 | `disableVersionChecks` | null or bool | `null` | Disable version checks |
 | `disableAutoUpdates` | null or bool | `null` | Disable automatic updates |
-| `updateChannel` | null or channel name | `null` | Release/update channel |
+| `updateChannel` | null or `latest`, `next`, `enterprise-latest`, or `enterprise-next` | `null` | Release/update channel |
 
 ### Feature flags
 

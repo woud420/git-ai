@@ -423,16 +423,6 @@ GITOGEOF
               '';
             };
 
-            setGitAlias = mkOption {
-              type = types.bool;
-              default = true;
-              description = ''
-                Whether to make 'git' command use git-ai wrapper.
-                When enabled, git-ai is placed before regular git in PATH.
-                The original git is still accessible via 'git-og'.
-              '';
-            };
-
             settings = {
               gitPath = mkOption {
                 type = types.nullOr types.str;

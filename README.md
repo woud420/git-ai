@@ -5,9 +5,10 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/woud420/git-ai)](LICENSE)
 
 `git-ai` is a local-first Git extension for explicit, line-level authorship.
-Coding agents checkpoint their edits, and git-ai connects attributed lines to
-the agent, model, session, and prompt metadata that produced them. It does not
-use heuristics or an AI detector to guess who wrote code.
+Coding agents checkpoint directly; editor integrations may recognize agent-originated edits
+from high-confidence event or call-stack signatures. Git-ai connects only that evidence to
+agent, model, session, and prompt metadata. Unknown edits remain unknown or untracked;
+git-ai does not inspect source content with an AI detector.
 
 Collection is opt-in for each repository through `allowed_repositories`.
 Git commands are observed through Trace2 and processed asynchronously by a

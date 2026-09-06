@@ -1503,6 +1503,67 @@ fn eng_387_repository_declares_one_rust_minimum() {
     );
 }
 
+#[test]
+fn eng_388_readme_qualifies_the_no_heuristics_claim() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme = fs::read_to_string(root.join("README.md")).expect("README.md must be readable");
+    let vscode = fs::read_to_string(root.join("agent-support/vscode/README.md"))
+        .expect("VS Code README must be readable");
+    let visual_studio = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
+        .expect("Visual Studio design must be readable");
+    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
+        .expect("IntelliJ README must be readable");
+
+    assert!(
+        !readme.contains("does not\nuse heuristics or an AI detector")
+            && !readme.contains("does not use heuristics or an AI detector"),
+        "README must not make an absolute no-heuristics claim"
+    );
+    for required in [
+        "editor integrations may recognize agent-originated edits",
+        "high-confidence event or call-stack signatures",
+        "does not inspect source content with an AI detector",
+        "Unknown edits remain unknown or untracked",
+    ] {
+        assert!(
+            readme.contains(required),
+            "README is missing the qualified evidence boundary `{required}`"
+        );
+    }
+    assert!(
+        readme.lines().count() <= 125,
+        "README introduction update must preserve the concise README line budget"
+    );
+
+    for (relative, contents, required) in [
+        (
+            "agent-support/vscode/README.md",
+            vscode.as_str(),
+            "effectiveness of the heuristics",
+        ),
+        (
+            "agent-support/visualstudio/DESIGN.md",
+            visual_studio.as_str(),
+            "URI scheme sniffing",
+        ),
+        (
+            "agent-support/intellij/README.md",
+            intellij.as_str(),
+            "high-confidence stack-trace package prefixes",
+        ),
+    ] {
+        assert!(
+            contents.contains(required),
+            "{relative} no longer documents its editor-event recognition mechanism `{required}`"
+        );
+    }
+    assert!(
+        visual_studio.contains("must remain\nunattributed")
+            && intellij.contains("ambiguous matches are not labeled as AI"),
+        "editor integration docs must keep ambiguous edits unattributed"
+    );
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

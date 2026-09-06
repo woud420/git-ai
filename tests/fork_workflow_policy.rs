@@ -1709,6 +1709,32 @@ fn eng_393_nix_development_uses_gnu_make_interface() {
     }
 }
 
+#[test]
+fn eng_394_nix_readme_has_owner_aware_uninstall_sequence() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let readme =
+        fs::read_to_string(root.join("README-nix.md")).expect("Nix README must be readable");
+
+    for required in [
+        "## Uninstall",
+        "git-ai uninstall-hooks --dry-run=false",
+        "nix profile list",
+        "nix profile remove git-ai",
+        "home-manager switch",
+        "nixos-rebuild switch",
+        "darwin-rebuild switch",
+        "cannot remove a Nix-owned package or declaration",
+        "git-ai uninstall --yes --purge",
+        "repo-local `.git/ai`",
+        "nix3-profile-remove",
+    ] {
+        assert!(
+            readme.contains(required),
+            "Nix README is missing uninstall boundary `{required}`"
+        );
+    }
+}
+
 fn is_repository_text_file(path: &Path) -> bool {
     path.extension().is_none()
         || matches!(

@@ -50,12 +50,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        actual="$(make --version | head -n 1)"
-        expected="GNU Make 4.4.1"
-        if [ "$actual" != "$expected" ]; then
-          echo "Expected $expected, found $actual" >&2
-          exit 1
-        fi
+        actual="$(make --version)"
+        case "$actual" in
+          "GNU Make "*) printf '%s\n' "$actual" ;;
+          *) echo "Expected GNU Make, found $actual" >&2; exit 1 ;;
+        esac
+        # Reuse the repository's version floor, including newer Homebrew releases.
+        make --no-print-directory -f "$GITHUB_ACTION_PATH/../../../Makefile" \
+          --dry-run build TEST_THREADS=1
 
     - name: Verify GNU Make (Windows)
       if: runner.os == 'Windows'

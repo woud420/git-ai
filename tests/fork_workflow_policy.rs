@@ -1872,6 +1872,34 @@ fn eng_399_opencode_docs_match_managed_plugin_contract() {
     let installer = fs::read_to_string(root.join("src/operations/mdm/agents/opencode.rs"))
         .expect("OpenCode installer must be readable");
 
+    let development_commands = readme
+        .split("```bash")
+        .nth(1)
+        .unwrap()
+        .split("```")
+        .next()
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        development_commands,
+        ["make dev"],
+        "exercise the checkout through its installed dev build"
+    );
+    let makefile = fs::read_to_string(root.join("Makefile")).unwrap();
+    let dev_recipe = makefile
+        .split("\ndev:\n")
+        .nth(1)
+        .unwrap()
+        .split("\nclean:")
+        .next()
+        .unwrap();
+    for script in ["scripts/dev.sh", "scripts/dev.ps1"] {
+        assert!(dev_recipe.contains(script));
+        assert!(root.join(script).is_file());
+    }
+
     for required in [
         "## Support status",
         "`opencode` and `opencode2`",

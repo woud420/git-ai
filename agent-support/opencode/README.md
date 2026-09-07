@@ -24,13 +24,17 @@ The installer injects the absolute path of the installed git-ai binary. It
 also removes the obsolete `~/.config/opencode/plugin/git-ai.ts` path (singular
 `plugin`) so an older copy cannot shadow the managed plugin.
 
-For local repository development, use the canonical Make command before
-exercising the installer:
+For local repository development, install and exercise the checkout's build:
 
 ```bash
-make build
-git-ai install-hooks
+make dev
 ```
+
+This replaces the machine's installed git-ai with the development build, runs
+the installer, and restarts the daemon. Use it only when you intend to update
+your local installation. `make build` is compile-only: it does not replace the
+`git-ai` on `PATH`, so running that installed command afterward may still
+exercise an older build.
 
 ## How it works
 

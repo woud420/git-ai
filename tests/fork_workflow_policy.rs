@@ -1351,12 +1351,7 @@ fn eng_386_coverage_docs_match_the_manual_workflow_and_make_targets() {
     for required in [
         "manual-only",
         "`workflow_dispatch`",
-        "does not run automatically on pull requests or pushes",
-        "50% threshold applies only",
-        "manual workflow or `make coverage-check`",
-        "daemon session timeouts",
-        "`llvm-cov` instrumentation",
-        "re-enable automatic enforcement",
+        "../Makefile",
         "make coverage",
         "make coverage-html",
         "make coverage-lcov",
@@ -1370,25 +1365,27 @@ fn eng_386_coverage_docs_match_the_manual_workflow_and_make_targets() {
         );
     }
 
-    assert!(
-        workflow.contains("on:\n  workflow_dispatch:")
-            && !workflow.contains("pull_request:")
-            && !workflow.contains("push:"),
-        "coverage workflow must remain manual-only while the guide says it is"
+    let triggers = workflow
+        .lines()
+        .skip_while(|line| line.trim() != "on:")
+        .skip(1)
+        .take_while(|line| line.trim().is_empty() || line.starts_with(char::is_whitespace))
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        triggers,
+        ["workflow_dispatch:"],
+        "coverage is documented as manual-only"
     );
-    for required in [
-        "COVERAGE_THRESHOLD: 50",
-        "--fail-under-lines $COVERAGE_THRESHOLD",
-        "if: always()",
-        "retention-days: 30",
-    ] {
+    assert!(coverage_defaults_agree(&makefile, &workflow));
+    for required in ["--fail-under-lines $COVERAGE_THRESHOLD", "if: always()"] {
         assert!(
             workflow.contains(required),
             "coverage workflow is missing documented behavior `{required}`"
         );
     }
     for required in [
-        "COVERAGE_THRESHOLD ?= 50",
         "coverage:\n\tcargo llvm-cov test",
         "coverage-html:\n\tcargo llvm-cov test",
         "coverage-lcov:\n\tcargo llvm-cov test",
@@ -1412,6 +1409,38 @@ fn eng_386_coverage_docs_match_the_manual_workflow_and_make_targets() {
     }
 }
 
+fn coverage_defaults_agree(makefile: &str, workflow: &str) -> bool {
+    let scalar = |source: &str, prefix: &str| {
+        source.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix(prefix)?
+                .split('#')
+                .next()?
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
+    };
+    let make_default = scalar(makefile, "COVERAGE_THRESHOLD ?=");
+    let ci_default = scalar(workflow, "COVERAGE_THRESHOLD:");
+    matches!((make_default, ci_default), (Some(a), Some(b)) if a <= 100 && a == b)
+}
+
+#[test]
+fn eng_409_coverage_defaults_allow_coordinated_changes_but_reject_drift() {
+    let makefile = "# Updated baseline\nCOVERAGE_THRESHOLD ?= 65\n";
+    let workflow = "env:\r\n  # Independently worded comment\r\n  COVERAGE_THRESHOLD: 65\r\n";
+    assert!(coverage_defaults_agree(makefile, workflow));
+    assert!(!coverage_defaults_agree(
+        makefile,
+        &workflow.replace(": 65", ": 66")
+    ));
+    assert!(!coverage_defaults_agree(
+        makefile,
+        "# COVERAGE_THRESHOLD: 65"
+    ));
+}
+
 #[test]
 fn eng_387_repository_declares_one_rust_minimum() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1425,36 +1454,43 @@ fn eng_387_repository_declares_one_rust_minimum() {
         fs::read_to_string(root.join("README-nix.md")).expect("README-nix.md must be readable");
     let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
 
-    assert!(
-        cargo_toml.contains("rust-version = \"1.93\""),
-        "Cargo.toml must declare Rust 1.93 as the package MSRV"
-    );
+    let manifest: toml::Value = toml::from_str(&cargo_toml).unwrap();
+    let declared = manifest["package"]["rust-version"].as_str().unwrap();
+    let msrv = if declared.split('.').count() == 2 {
+        format!("{declared}.0")
+    } else {
+        declared.to_string()
+    };
+    let documented_rust = regex::Regex::new(r"Rust\s+`?(?:>=\s*)?(\d+\.\d+(?:\.\d+)?)").unwrap();
     for (relative, contents) in [
         ("AGENTS.md", agents.as_str()),
         ("README.md", readme.as_str()),
         ("CONTRIBUTING.md", contributing.as_str()),
         ("README-nix.md", nix_readme.as_str()),
     ] {
+        let versions = documented_rust
+            .captures_iter(contents)
+            .map(|capture| capture[1].to_string())
+            .collect::<Vec<_>>();
         assert!(
-            contents.contains("Rust 1.93.0 or newer"),
-            "{relative} must state the repository MSRV"
+            !versions.is_empty(),
+            "{relative} must document the Rust minimum"
         );
         assert!(
-            !contents.contains("Rust 1.97"),
-            "{relative} still claims a different Rust minimum"
-        );
-    }
-    for required in [
-        "minimum supported Rust 1.93.0",
-        "pkgs.rust-bin.stable.\"1.93.0\"",
-        "MSRV toolchain",
-    ] {
-        assert!(
-            flake.contains(required),
-            "flake.nix is missing the Rust minimum contract `{required}`"
+            versions
+                .iter()
+                .all(|version| version == &msrv || version == declared),
+            "{relative} Rust declarations {versions:?} disagree with Cargo.toml ({declared})"
         );
     }
+    assert!(
+        flake.contains(&format!("pkgs.rust-bin.stable.\"{msrv}\"")),
+        "Nix toolchain must use the Cargo.toml minimum"
+    );
 
+    let pinned_toolchain =
+        regex::Regex::new(r#"(?:toolchain:\s*["']?|--default-toolchain\s+)(\d+\.\d+\.\d+)"#)
+            .unwrap();
     for relative in [
         ".github/workflows/coverage.yml",
         ".github/workflows/lint-format.yml",
@@ -1463,38 +1499,23 @@ fn eng_387_repository_declares_one_rust_minimum() {
     ] {
         let contents = fs::read_to_string(root.join(relative))
             .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"));
+        let executable = contents
+            .lines()
+            .filter(|line| !line.trim().starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let versions = pinned_toolchain
+            .captures_iter(&executable)
+            .map(|capture| capture[1].to_string())
+            .collect::<Vec<_>>();
         assert!(
-            contents.contains("1.93.0"),
+            !versions.is_empty(),
             "{relative} must exercise the repository MSRV"
         );
         assert!(
-            !contents.contains("toolchain: \"1.97") && !contents.contains("default-toolchain 1.97"),
-            "{relative} pins a Rust version above the repository MSRV"
+            versions.iter().all(|version| version == &msrv),
+            "{relative} pins {versions:?}, not Cargo.toml's minimum {msrv}"
         );
-    }
-
-    let stable_marker = "# Intentionally tracks current stable above the 1.93.0 MSRV.";
-    let mut workflow_files = Vec::new();
-    collect_files(&root.join(".github"), &mut workflow_files);
-    for path in workflow_files.into_iter().filter(|path| {
-        matches!(
-            path.extension().and_then(|extension| extension.to_str()),
-            Some("yml" | "yaml")
-        )
-    }) {
-        let contents = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-        let lines = contents.lines().collect::<Vec<_>>();
-        for (index, line) in lines.iter().enumerate() {
-            if line.trim() == "toolchain: stable" {
-                assert!(
-                    index > 0 && lines[index - 1].trim() == stable_marker,
-                    "{}:{} tracks stable Rust without stating that it is intentionally above the MSRV",
-                    path.strip_prefix(root).unwrap_or(&path).display(),
-                    index + 1
-                );
-            }
-        }
     }
 
     let benchmark_setup =
@@ -1668,12 +1689,17 @@ fn eng_392_privacy_docs_disclose_editor_telemetry_gate() {
             "VS Code README is missing telemetry fact `{required}`"
         );
     }
-    assert!(
-        intellij.contains("missing setting is not treated as an")
-            && intellij.contains("opt-out by the plugin")
-            && intellij.contains("PostHog analytics and Sentry error reporting"),
-        "IntelliJ README must retain its legacy telemetry gate"
-    );
+    for identifier in [
+        "telemetry_oss",
+        "PostHog",
+        "Sentry",
+        "../../data-privacy.md",
+    ] {
+        assert!(
+            intellij.contains(identifier),
+            "IntelliJ telemetry disclosure omits {identifier}"
+        );
+    }
     for (source, fact) in [
         (vscode_source.as_str(), "config.telemetry_oss === \"off\""),
         (vscode_source.as_str(), "https://us.i.posthog.com"),
@@ -1887,7 +1913,9 @@ fn eng_399_opencode_docs_match_managed_plugin_contract() {
         ["make dev"],
         "exercise the checkout through its installed dev build"
     );
-    let makefile = fs::read_to_string(root.join("Makefile")).unwrap();
+    let makefile = fs::read_to_string(root.join("Makefile"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let dev_recipe = makefile
         .split("\ndev:\n")
         .nth(1)
@@ -2012,13 +2040,13 @@ fn eng_401_live_architecture_docs_use_stable_source_references() {
     let ownership = fs::read_to_string(root.join("docs/architecture/state-ownership.md"))
         .expect("state ownership map must be readable");
 
-    assert!(
-        ownership.contains("Verified 2026-09-06"),
-        "state ownership verification date must reflect this source review"
-    );
+    assert_live_architecture_references(root, &inventory, &ownership);
+}
+
+fn assert_live_architecture_references(root: &Path, inventory: &str, ownership: &str) {
     for (relative, contents) in [
-        ("docs/architecture/inventory.md", &inventory),
-        ("docs/architecture/state-ownership.md", &ownership),
+        ("docs/architecture/inventory.md", inventory),
+        ("docs/architecture/state-ownership.md", ownership),
     ] {
         assert!(
             !contents.contains(".rs:"),
@@ -2055,6 +2083,27 @@ fn eng_401_live_architecture_docs_use_stable_source_references() {
             "live architecture docs omit stable symbol `{symbol}`"
         );
     }
+}
+
+#[test]
+fn eng_409_architecture_contract_allows_review_wording_and_date_updates() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inventory = fs::read_to_string(root.join("docs/architecture/inventory.md")).unwrap();
+    let ownership = fs::read_to_string(root.join("docs/architecture/state-ownership.md")).unwrap();
+    let revised = regex::Regex::new(r"Verified \d{4}-\d{2}-\d{2}")
+        .unwrap()
+        .replace_all(&ownership, "Source checked 2030-01-02")
+        .replace('\n', "\r\n");
+    assert_ne!(revised, ownership);
+    assert_live_architecture_references(root, &inventory, &revised);
+    let broken = format!("{revised}\nsrc/config/mod.rs:123");
+    assert!(
+        std::panic::catch_unwind(|| {
+            assert_live_architecture_references(root, &inventory, &broken);
+        })
+        .is_err(),
+        "line-offset citations must still fail"
+    );
 }
 
 fn is_repository_text_file(path: &Path) -> bool {

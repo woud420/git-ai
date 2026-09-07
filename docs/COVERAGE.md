@@ -15,7 +15,8 @@ coverage measurement or manual workflow runs.
 
 ## Threshold
 
-The configured line-coverage threshold is 50%. The 50% threshold applies only
+The configured line-coverage threshold is the `COVERAGE_THRESHOLD` default in
+the [Makefile](../Makefile). That threshold applies only
 when the manual workflow or `make coverage-check` is actually run. A normal PR
 or push can pass its automatic checks without evaluating coverage.
 
@@ -57,7 +58,7 @@ and additionally skips the `performance_regression` test.
 ## Manual GitHub workflow
 
 Start **Coverage** from the repository's Actions page with **Run workflow**.
-During that dispatched run, the 50% threshold is enforced. HTML and LCOV upload
+During that dispatched run, the configured threshold is enforced. HTML and LCOV upload
 steps use `if: always()`, so they are attempted even if the threshold step
 fails, and uploaded artifacts are retained for 30 days. This report behavior
 applies only to a coverage workflow run, not to every CI run.
@@ -82,5 +83,5 @@ before committing them.
   the percentage.
 - Run the manual workflow or local threshold check when coverage risk is
   material.
-- Do not describe the 50% threshold as an automatic merge gate until the
+- Do not describe the threshold as an automatic merge gate until the
   workflow triggers have actually been restored.

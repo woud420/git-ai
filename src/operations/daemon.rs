@@ -58,6 +58,8 @@ pub(crate) mod parent_diff_batch;
 pub(crate) mod revert_rebase_helpers;
 pub(crate) mod self_check;
 pub(crate) mod side_effect_helpers;
+#[cfg(feature = "test-support")]
+mod side_effect_test_hooks;
 pub(crate) mod side_effects_commit;
 pub(crate) mod side_effects_git_ops;
 pub(crate) mod socket_listeners;

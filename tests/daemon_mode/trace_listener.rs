@@ -950,3 +950,105 @@ fn daemon_sync_for_unrelated_family_ignores_open_mutating_root_of_other_family()
     );
     waiter.join().expect("waiter thread should not panic");
 }
+
+#[test]
+#[serial]
+#[cfg(not(windows))]
+fn daemon_reaps_idle_mutating_root_after_activity_stops() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let _daemon = DaemonGuard::start_with_env(
+        &repo,
+        &[
+            ("GIT_AI_DAEMON_SOCKET_HEALTH_CHECK_SECS", "1"),
+            ("GIT_AI_TEST_TRACE_ROOT_IDLE_TIMEOUT_MS", "750"),
+            ("GIT_AI_DAEMON_UPDATE_CHECK_INTERVAL", "86400"),
+            ("GIT_AI_DAEMON_MAX_UPTIME_SECS", "86400"),
+        ],
+    );
+    let trace_socket = daemon_trace_socket_path(&repo);
+    let control_socket = daemon_control_socket_path(&repo);
+    let repo_working_dir = repo_workdir_string(&repo);
+    let git_dir = repo.path().join(".git").to_string_lossy().to_string();
+    let root_sid = "idle-mutating-root";
+
+    let mut open_root_stream =
+        open_local_socket_stream_with_timeout(&trace_socket, DAEMON_TEST_PROBE_TIMEOUT)
+            .expect("failed to open trace socket for the stalled root");
+    write_trace_frames_to_stream(
+        &mut open_root_stream,
+        &[
+            json!({
+                "event": "start",
+                "sid": root_sid,
+                "argv": ["git", "commit", "-m", "stalled commit"],
+                "time_ns": 1_000u64,
+            }),
+            json!({
+                "event": "def_repo",
+                "sid": root_sid,
+                "worktree": repo_working_dir,
+                "repo": git_dir,
+                "time_ns": 1_001u64,
+            }),
+        ],
+    );
+
+    let registered_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let probe = send_control_request_with_timeout(
+            &control_socket,
+            &ControlRequest::SyncFamily {
+                repo_working_dir: repo_workdir_string(&repo),
+            },
+            Duration::from_millis(200),
+        );
+        if probe.is_err() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < registered_deadline,
+            "the mutating root never started fencing its family"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    for sequence in 0..6u64 {
+        thread::sleep(Duration::from_millis(300));
+        write_trace_frames_to_stream(
+            &mut open_root_stream,
+            &[json!({
+                "event": "data",
+                "sid": root_sid,
+                "key": "progress",
+                "value": sequence,
+                "time_ns": 2_000u64 + sequence,
+            })],
+        );
+    }
+
+    assert!(
+        send_control_request_with_timeout(
+            &control_socket,
+            &ControlRequest::SyncFamily {
+                repo_working_dir: repo_workdir_string(&repo),
+            },
+            Duration::from_millis(200),
+        )
+        .is_err(),
+        "activity must refresh the idle deadline for a long-running root"
+    );
+
+    let response = send_control_request_with_timeout(
+        &control_socket,
+        &ControlRequest::SyncFamily {
+            repo_working_dir: repo_workdir_string(&repo),
+        },
+        Duration::from_secs(5),
+    )
+    .expect("the family fence should pass once the mutating root becomes idle");
+    assert!(
+        response.ok,
+        "the family sync should succeed after idle-root reclamation: {:?}",
+        response.error
+    );
+}

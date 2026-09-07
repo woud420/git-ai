@@ -237,6 +237,10 @@ pub fn daemon_socket_health_check_loop(
             coordinator.request_shutdown();
             return;
         }
+
+        if let Err(error) = coordinator.reap_idle_trace_roots() {
+            tracing::warn!(%error, "idle trace-root reclamation failed");
+        }
     }
 }
 

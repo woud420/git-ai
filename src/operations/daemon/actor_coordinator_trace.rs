@@ -101,6 +101,88 @@ impl ActorDaemonCoordinator {
         Ok(())
     }
 
+    /// Reclaims trace roots that stopped producing frames without closing.
+    ///
+    /// This scan runs on the socket-health cadence, outside trace ingestion.
+    /// A synthetic close marker preserves the existing sequencer cleanup path
+    /// for mutating roots. The observed activity timestamp travels with the
+    /// marker so a root that resumes after this scan is not reaped by a stale
+    /// decision.
+    pub(crate) fn reap_idle_trace_roots(&self) -> Result<usize, GitAiError> {
+        self.reap_idle_trace_roots_at(now_unix_nanos() as u64, trace_root_idle_timeout())
+    }
+
+    fn reap_idle_trace_roots_at(
+        &self,
+        now_ns: u64,
+        idle_timeout: tokio::time::Duration,
+    ) -> Result<usize, GitAiError> {
+        let idle_timeout_ns = u64::try_from(idle_timeout.as_nanos()).unwrap_or(u64::MAX);
+        let queued_roots = self
+            .queued_trace_payloads_by_root
+            .lock()
+            .map_err(|_| PersistenceError::LockPoisoned {
+                what: "queued trace payloads by root",
+            })?
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+
+        let markers = {
+            let mut ingress =
+                self.trace_ingress_state
+                    .lock()
+                    .map_err(|_| PersistenceError::LockPoisoned {
+                        what: "trace ingress state",
+                    })?;
+            let idle_roots = ingress
+                .root_last_activity_ns
+                .iter()
+                .filter(|(root_sid, last_activity_ns)| {
+                    !queued_roots.contains(*root_sid)
+                        && now_ns.saturating_sub(**last_activity_ns) >= idle_timeout_ns
+                })
+                .map(|(root_sid, last_activity_ns)| (root_sid.clone(), *last_activity_ns))
+                .collect::<Vec<_>>();
+            let mut markers = Vec::new();
+            for (root_sid, last_activity_ns) in idle_roots {
+                if !ingress.root_definitely_read_only.contains(&root_sid) {
+                    if ingress.root_close_markers_enqueued.insert(root_sid.clone()) {
+                        markers.push((root_sid, last_activity_ns));
+                    }
+                } else {
+                    Self::clear_trace_ingress_root_locked(&mut ingress, &root_sid);
+                }
+            }
+            markers
+        };
+
+        for (index, (root_sid, last_activity_ns)) in markers.iter().enumerate() {
+            if let Err(error) = self.enqueue_trace_payload(json!({
+                "event": TRACE_CONNECTION_CLOSED_EVENT,
+                "sid": root_sid,
+                "time_ns": now_ns,
+                (TRACE_IDLE_ROOT_LAST_ACTIVITY_NS_FIELD): last_activity_ns,
+            })) {
+                if let Ok(mut ingress) = self.trace_ingress_state.lock() {
+                    for (unqueued_root, _) in &markers[index..] {
+                        ingress.root_close_markers_enqueued.remove(unqueued_root);
+                    }
+                }
+                return Err(error);
+            }
+        }
+        if !markers.is_empty() {
+            tracing::warn!(
+                root_count = markers.len(),
+                idle_timeout_secs = idle_timeout.as_secs(),
+                "reaping idle trace roots"
+            );
+        }
+        self.trace_ingest_progress_notify.notify_waiters();
+        Ok(markers.len())
+    }
+
     pub(crate) fn trace_unidentified_connection_opened(&self) -> Result<(), GitAiError> {
         let mut ingress =
             self.trace_ingress_state

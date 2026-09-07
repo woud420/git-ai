@@ -9,8 +9,6 @@ use crate::operations::daemon::revert_rebase_helpers::strict_rebase_original_hea
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::oid::is_non_zero_oid;
 use std::ops::ControlFlow;
-#[cfg(feature = "test-support")]
-use std::time::Duration;
 
 /// Bundled rebase-mode flags threaded from `compute_rebase_mode` into
 /// the CommitCreated arm and `apply_event_side_effects`.
@@ -52,20 +50,7 @@ impl ActorDaemonCoordinator {
         let primary = cmd.primary_command.as_deref().unwrap_or("unknown");
 
         #[cfg(feature = "test-support")]
-        if let Ok(spec) = std::env::var("GIT_AI_TEST_DELAY_SIDE_EFFECT_MS_FOR_COMMAND") {
-            for entry in spec.split(',') {
-                let Some((command, delay_ms)) = entry.split_once('=') else {
-                    continue;
-                };
-                if command == primary
-                    && let Ok(delay_ms) = delay_ms.parse::<u64>()
-                    && delay_ms > 0
-                {
-                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                    break;
-                }
-            }
-        }
+        super::side_effect_test_hooks::wait(primary).await;
 
         log_write_op_completion(primary, cmd);
 

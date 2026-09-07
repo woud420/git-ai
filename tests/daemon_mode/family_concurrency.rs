@@ -39,50 +39,50 @@ fn family_b_note_exists(repo: &TestRepo, workdir: &Path) -> bool {
         .success()
 }
 
-/// Family A runs a rebase whose side effect is delayed by 6s (test hook).
-/// Family B then checkpoints and commits on the same daemon. B's authorship
-/// note must land well before A's rebase side effect finishes — with
-/// serialized drains (the old behavior) the single ingest worker sleeps
-/// inside A's drain, so B's checkpoint fence and post-commit authorship
-/// cannot complete before the 6s delay elapses.
+/// Family B must finish attribution while family A is explicitly held in
+/// its rebase side effect. A fixed sleep cannot establish this ordering on
+/// a busy runner because B's setup can outlast the sleep.
 #[test]
 fn slow_family_side_effect_does_not_stall_other_families() {
-    const REBASE_DELAY_MS: u64 = 6_000;
-    let delay = format!("rebase={REBASE_DELAY_MS}");
+    let gate_dir = tempfile::tempdir().expect("create side-effect gate directory");
+    let gate = gate_dir.path().join("rebase-gate");
+    fs::write(&gate, "").expect("create side-effect gate");
+    let gate_spec = format!("rebase={}", gate.display());
     let repo = TestRepo::new_with_daemon_env(&[(
-        "GIT_AI_TEST_DELAY_SIDE_EFFECT_MS_FOR_COMMAND",
-        delay.as_str(),
+        "GIT_AI_TEST_SIDE_EFFECT_GATE_FOR_COMMAND",
+        gate_spec.as_str(),
     )]);
 
-    // Family A: two commits, then rewrite the last one so the daemon sees a
-    // top-level rebase whose side effect sleeps for REBASE_DELAY_MS.
     fs::write(repo.path().join("a-base.txt"), "base\n").expect("failed to write base");
     repo.git(&["add", "a-base.txt"]).expect("stage base");
     repo.git(&["commit", "-m", "base"]).expect("commit base");
+    repo.filename("a-base.txt")
+        .assert_committed_lines(lines!["base".unattributed_human()]);
     fs::write(repo.path().join("a-second.txt"), "second\n").expect("failed to write second");
     repo.git(&["add", "a-second.txt"]).expect("stage second");
     repo.git(&["commit", "-m", "second"])
         .expect("commit second");
+    repo.filename("a-base.txt")
+        .assert_committed_lines(lines!["base".unattributed_human()]);
+    repo.filename("a-second.txt")
+        .assert_committed_lines(lines!["second".unattributed_human()]);
 
     repo.git(&["rebase", "--force-rebase", "HEAD~1"])
         .expect("rebase should succeed");
+    let entered_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !gate.with_extension("entered").exists() {
+        assert!(
+            std::time::Instant::now() < entered_deadline,
+            "family A never entered its rebase side-effect gate"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
 
     // Family B: a fresh repository under the allowed temp root, driven
     // through the same daemon's sockets.
-    let other = tempfile::tempdir().expect("failed to create family B dir");
-    let family_b = other.path().join("family-b");
-    fs::create_dir_all(&family_b).expect("failed to create family B repo dir");
+    let other = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let family_b = other.path().to_path_buf();
     let harness = WorkdirRaceHarness::new(&repo, repo.daemon_trace_socket_path());
-    RawGitCommand::in_working_dir(&family_b, &["init"])
-        .configure(|command| configure_test_home_env(command, repo.test_home_path()))
-        .output()
-        .expect("git init should run");
-    for (key, value) in [("user.email", "b@example.com"), ("user.name", "Family B")] {
-        RawGitCommand::in_working_dir(&family_b, &["config", key, value])
-            .configure(|command| configure_test_home_env(command, repo.test_home_path()))
-            .output()
-            .expect("git config should run");
-    }
     fs::write(family_b.join("b.txt"), "ai line for family b\n")
         .expect("failed to write family B file");
     family_b_git_ai(&repo, &family_b, &["checkpoint", "mock_ai", "b.txt"]);
@@ -90,9 +90,7 @@ fn slow_family_side_effect_does_not_stall_other_families() {
     let committed_at = std::time::Instant::now();
     harness.run_traced_git(&family_b, &["commit", "-m", "family b commit"]);
 
-    // B's post-commit authorship must land while A's rebase side effect is
-    // still sleeping.
-    let deadline = committed_at + Duration::from_millis(4_000);
+    let deadline = committed_at + Duration::from_secs(20);
     while !family_b_note_exists(&repo, &family_b) {
         assert!(
             std::time::Instant::now() < deadline,
@@ -107,8 +105,11 @@ fn slow_family_side_effect_does_not_stall_other_families() {
         "family A's delayed rebase side effect should still be in flight when \
          family B's note lands"
     );
+    other
+        .filename("b.txt")
+        .assert_committed_lines(lines!["ai line for family b".ai()]);
 
-    // Let family A finish so the daemon shuts down with no in-flight work.
+    fs::remove_file(&gate).expect("release family A's rebase side effect");
     let rebase_deadline = std::time::Instant::now() + Duration::from_secs(20);
     while completion_entries_for_command(&repo, "rebase").is_empty() {
         assert!(
@@ -117,4 +118,8 @@ fn slow_family_side_effect_does_not_stall_other_families() {
         );
         thread::sleep(Duration::from_millis(100));
     }
+    repo.filename("a-base.txt")
+        .assert_committed_lines(lines!["base".unattributed_human()]);
+    repo.filename("a-second.txt")
+        .assert_committed_lines(lines!["second".unattributed_human()]);
 }

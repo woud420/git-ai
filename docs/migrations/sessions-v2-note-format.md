@@ -1,5 +1,7 @@
 # Attribution Note Format: Sessions & Trace IDs
 
+Status: historical — v1.4.0 migration note retained for compatibility context; `specs/git_ai_standard_v3.0.0.md` and `docs/contracts/persistence-model.md` describe the current serialization and backend authority.
+
 **Date:** 2026-05-04
 
 This document describes several major, though strictly non-breaking, changes to the `refs/notes/ai` attribution note format for the Git AI community landing in v1.4.0.

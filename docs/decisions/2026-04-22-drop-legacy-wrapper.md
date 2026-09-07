@@ -1,5 +1,7 @@
 # Drop Legacy Synchronous Wrapper Mode
 
+Status: historical — implemented execution plan; current Trace2 architecture documentation is authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove the legacy synchronous wrapper mode and async_mode feature flag, leaving only daemon and wrapper-daemon modes.

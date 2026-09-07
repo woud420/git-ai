@@ -1,4 +1,6 @@
-## Code of Conduct
+# Project conduct
 
-This project and the corresponding community is governed by the [JetBrains Open Source and Community Code of Conduct](https://confluence.jetbrains.com/display/ALL/JetBrains+Open+Source+and+Community+Code+of+Conduct). Please make sure you read it. 
-
+This directory does not define a separate JetBrains community or conduct
+policy. It is maintained as part of Git AI; use the repository's
+[contribution guide](../../CONTRIBUTING.md) when proposing or reviewing changes,
+and keep project discussions professional and focused on the work.

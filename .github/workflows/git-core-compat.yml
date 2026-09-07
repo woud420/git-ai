@@ -20,6 +20,7 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/workflows/git-core-compat.yml'
+      - '.github/actions/setup-rust/**'
   push:
     branches: [main]
     paths:
@@ -31,6 +32,7 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/workflows/git-core-compat.yml'
+      - '.github/actions/setup-rust/**'
   merge_group:
     branches: [main]
 
@@ -46,7 +48,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
           toolchain: stable
 

@@ -1,5 +1,7 @@
 # Daemon Production Logging — Design Spec
 
+Status: historical — implemented design record; current telemetry contracts are authoritative.
+
 **Date:** 2026-04-14
 **Status:** Approved
 

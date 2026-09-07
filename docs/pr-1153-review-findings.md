@@ -1,5 +1,7 @@
 # PR 1153 Review: Sessions V2 & Trace IDs
 
+Status: historical — preserved review snapshot; current source and the contracts under `docs/contracts/` are authoritative.
+
 **Reviewer**: Claude Opus 4.6  
 **Date**: 2026-05-05  
 **Scope**: 293 files, ~54K insertions/deletions

@@ -15,11 +15,14 @@ payloads that other systems (servers, CI, teammates' clones) depend on.
 - [cli-output.md](cli-output.md) — machine-readable CLI output surfaces.
 - [checkpoint-interface.md](checkpoint-interface.md) — the agent checkpoint
   compatibility surface.
-- [telemetry-streams-summary.md](telemetry-streams-summary.md) — summary of
-  the telemetry stream pipeline and its event payloads.
+- [telemetry-streams-summary.md](telemetry-streams-summary.md) — current runtime
+  contract for stream cursors, metric persistence, and conditional delivery.
 - [telemetry-examples.md](telemetry-examples.md) — example telemetry payloads.
-- `../../specs/git_ai_standard_v3.0.0.md` — the Git AI note format standard
-  (authorship note schema `authorship/3.0.0`).
+- [`../../specs/git_ai_standard_v3.0.0.md`](../../specs/git_ai_standard_v3.0.0.md)
+  — the upstream standard whose `authorship/3.0.0` serialization format this
+  fork uses. Its normative Git Notes storage profile applies to the opt-in
+  `git_notes` backend; see [persistence-model.md](persistence-model.md) for the
+  fork's backend-specific authority rules.
 - `../migrations/` — note/session format migrations.
 
 The CLI surface itself is documented in the repo-root `README.md`; privacy

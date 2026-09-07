@@ -1,5 +1,7 @@
 # Agent Presets Rewrite Implementation Plan
 
+Status: historical — implemented execution plan; commands and unchecked boxes are preserved evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace ~7000 lines of duplicated agent preset code with a clean parse-then-orchestrate architecture where presets are pure parsers (~1500-2000 lines total).

@@ -1,7 +1,7 @@
 # Sweep-Based Transcript Discovery System
 
 **Date:** 2026-04-30  
-**Status:** Approved  
+Status: superseded — current stream-worker and telemetry contracts replace this design snapshot.
 **Related PR:** #1217 (sessions-v2 branch)
 
 ## Overview

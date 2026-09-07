@@ -499,7 +499,7 @@ export class AIEditManager {
           if (!this.hasShownGitAiErrorMessage) {
             // Show startup notification
             vscode.window.showInformationMessage(
-              "git-ai not installed. Visit https://github.com/git-ai-project/git-ai to install it."
+              "git-ai not installed. Visit https://github.com/woud420/git-ai#install-and-quick-start to install it."
             );
             this.hasShownGitAiErrorMessage = true;
           }

@@ -18,13 +18,17 @@ all-users or Administrator install mode. The macOS PKG copies its bundled
 binary into the active console user's `~/.git-ai/bin`, then runs setup as that
 user. It fails if no valid console user is logged in or per-user setup fails.
 
-For an enterprise endpoint, pass configuration to the MSI when installing:
+For an enterprise endpoint, pass configuration to the MSI when installing.
+The reserved example domain below is a placeholder; set `API_BASE` to the
+external or self-hosted operator your organization has chosen:
 
 ```powershell
-msiexec /i git-ai-windows-x64.msi API_BASE=https://usegitai.com API_KEY=your-api-key
+msiexec /i git-ai-windows-x64.msi API_BASE=https://git-ai.example.com API_KEY=your-api-key
 ```
 
 These values configure only the installing user's Git AI config. They are
 hidden from MSI logs, but command-line arguments can still be visible to local
 process inspection and shell history. Use your endpoint-management secret
-mechanism when available.
+mechanism when available. The endpoint operator controls data after receipt;
+review this fork's [privacy and external-service boundaries](../data-privacy.md)
+before configuring it.

@@ -1,5 +1,7 @@
 # Telemetry Streams Re-implementation Plan
 
+Status: historical — this plan did not land as written and is superseded by the current stream worker.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Re-implement telemetry-streams branch work on PR 1198 with polling-based transcript processing, unified watermarking, and enhanced telemetry linking via session_id/trace_id/tool_use_id.

@@ -1,5 +1,7 @@
 # Checkpoint Rewrite Design
 
+Status: historical — implemented design record; the current checkpoint interface is authoritative.
+
 First-principles rewrite of the checkpoint system to minimize CLI latency, eliminate unscoped checkpoints, and consolidate all processing in the daemon.
 
 ## Core Principles

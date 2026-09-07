@@ -1,91 +1,87 @@
-# Code Coverage Policy
+# Code Coverage
 
-## Overview
+## Current status
 
-This project maintains a minimum code coverage threshold to ensure code quality and prevent regressions in test coverage.
+The repository has Rust coverage tooling, local GNU Make targets, and a GitHub
+Actions workflow. The workflow is currently **manual-only**: its sole trigger
+is `workflow_dispatch`. It does not run automatically on pull requests or pushes,
+so it is not a required PR gate.
 
-## Current Threshold
+Automatic coverage was disabled because daemon session timeouts under
+`llvm-cov` instrumentation made roughly half of the runs flaky. The workflow
+should re-enable automatic enforcement only after the instrumented daemon tests
+have reliable timeout or retry behavior. This limitation does not disable local
+coverage measurement or manual workflow runs.
 
-**Minimum Coverage: 50%** (line coverage)
+## Threshold
 
-This threshold is enforced in CI via the GitHub Actions workflow at `.github/workflows/coverage.yml`.
+The configured line-coverage threshold is the `COVERAGE_THRESHOLD` default in
+the [Makefile](../Makefile). That threshold applies only
+when the manual workflow or `make coverage-check` is actually run. A normal PR
+or push can pass its automatic checks without evaluating coverage.
 
-## How the Threshold is Determined
+The workflow passes its `COVERAGE_THRESHOLD` value to
+`cargo llvm-cov --fail-under-lines`. The Makefile uses the same default and
+allows a one-run override:
 
-The threshold is calculated as:
-1. Measure current total code coverage percentage
-2. Round down to the nearest multiple of 5
-3. Set this as the minimum threshold
-
-**Example:** If current coverage is 54.10%, the threshold is set to 50%.
-
-## CI Enforcement
-
-Pull requests and pushes to main will fail if:
-- Code coverage falls below the configured threshold (50%)
-- This is enforced using `cargo llvm-cov --fail-under-lines` in CI
-
-Coverage reports are always generated and uploaded as artifacts, even if the threshold check fails.
-
-## Checking Coverage Locally
-
-### Quick Summary
-```bash
-make coverage
-```
-
-### HTML Report (Interactive)
-```bash
-make coverage-html
-```
-
-### LCOV Report (for tools/IDEs)
-```bash
-make coverage-lcov
-```
-
-### Check Against Threshold
 ```bash
 make coverage-check
+make coverage-check COVERAGE_THRESHOLD=55
 ```
 
-## Updating the Threshold
+The threshold originated by rounding a measured 54.10% line-coverage result
+down to the nearest multiple of five. It is a checked-in baseline, not a value
+that changes automatically on every run.
 
-When code coverage improves significantly, you can update the threshold:
+## Local coverage
 
-### Automatic Update
+Install the coverage tool and Rust component once:
+
+```bash
+rustup component add llvm-tools-preview
+cargo install cargo-llvm-cov --locked
+```
+
+Run the target that matches the output you need:
+
+| Command | Result |
+| --- | --- |
+| `make coverage` | Terminal summary |
+| `make coverage-html` | HTML report opened in the default browser |
+| `make coverage-lcov` | `lcov.info` for IDEs and other tools |
+| `make coverage-check` | Terminal run that fails below `COVERAGE_THRESHOLD` |
+
+All four targets exclude `tests/**`, `benches/**`, and `examples/**` from the
+calculation. The manually dispatched GitHub workflow uses the same exclusions
+and additionally skips the `performance_regression` test.
+
+## Manual GitHub workflow
+
+Start **Coverage** from the repository's Actions page with **Run workflow**.
+During that dispatched run, the configured threshold is enforced. HTML and LCOV upload
+steps use `if: always()`, so they are attempted even if the threshold step
+fails, and uploaded artifacts are retained for 30 days. This report behavior
+applies only to a coverage workflow run, not to every CI run.
+
+## Updating the threshold
+
+From the repository root, run:
+
 ```bash
 ./scripts/update-coverage-threshold.sh
 ```
 
-This script will:
-1. Run coverage analysis
-2. Calculate the new threshold (current coverage rounded down to nearest 5)
-3. Update `.github/workflows/coverage.yml`
+The script measures current coverage, rounds it down to the nearest multiple of
+five, and updates both `.github/workflows/coverage.yml` and the Makefile's
+`COVERAGE_THRESHOLD` default. Review the measured result and both file changes
+before committing them.
 
-### Manual Update
-Edit `.github/workflows/coverage.yml` and update the `COVERAGE_THRESHOLD` environment variable.
+## Coverage expectations
 
-## Exclusions
-
-The following are excluded from coverage calculation:
-- Test files (`tests/**`)
-- Benchmarks (`benches/**`)
-- Examples (`examples/**`)
-
-This ensures coverage metrics focus on production code quality.
-
-## Coverage Reports
-
-Coverage reports are generated on every CI run and available as artifacts:
-- **HTML Report**: Interactive browsable report showing line-by-line coverage
-- **LCOV Report**: Machine-readable format for IDE integration
-
-Artifacts are retained for 30 days.
-
-## Best Practices
-
-1. **Write tests for new code**: Aim to maintain or improve coverage with each PR
-2. **Review coverage reports**: Check which lines aren't covered and consider adding tests
-3. **Don't game the metrics**: Focus on meaningful test coverage, not just hitting numbers
-4. **Update threshold periodically**: As coverage improves, update the threshold to lock in gains
+- Add behavior-focused tests for new code and regressions.
+- Use reports to find meaningful untested paths rather than optimizing only for
+  the percentage.
+- Run the manual workflow or local threshold check when coverage risk is
+  material.
+- Do not describe the threshold as an automatic merge gate until the
+  workflow triggers have actually been restored.

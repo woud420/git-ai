@@ -14,6 +14,7 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/actions/setup-gnu-make/**'
+      - '.github/actions/setup-rust/**'
       - '.github/workflows/lint-format.yml'
   push:
     branches: [main]
@@ -26,6 +27,7 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/actions/setup-gnu-make/**'
+      - '.github/actions/setup-rust/**'
       - '.github/workflows/lint-format.yml'
   merge_group:
     branches: [main]
@@ -44,9 +46,9 @@ jobs:
       - name: Set up GNU Make
         uses: ./.github/actions/setup-gnu-make
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.93.0"
+          toolchain: msrv
           components: rustfmt
 
       - run: make format-check
@@ -64,9 +66,9 @@ jobs:
       - name: Set up GNU Make
         uses: ./.github/actions/setup-gnu-make
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.93.0"
+          toolchain: msrv
           components: clippy
 
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -78,6 +80,10 @@ jobs:
           key: ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-lint-
+
+      - name: Test Rust toolchain resolution
+        shell: bash
+        run: python3 -m unittest discover -s .github/actions/setup-rust -p 'test_*.py'
 
       - run: make lint
 
@@ -92,9 +98,9 @@ jobs:
       - name: Set up GNU Make
         uses: ./.github/actions/setup-gnu-make
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.93.0"
+          toolchain: msrv
 
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:

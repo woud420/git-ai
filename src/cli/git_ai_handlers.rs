@@ -145,8 +145,11 @@ pub fn handle_git_ai(args: &[String]) {
             println!("{}", config.git_cmd());
             std::process::exit(0);
         }
-        "install-hooks" | "install" => match commands::install_hooks::run(&args[1..]) {
-            Ok(statuses) => {
+        "install-hooks" | "install" => match commands::install_hooks::run_cli(&args[1..]) {
+            Ok(commands::install_hooks::InstallCommandOutcome::Help) => {
+                commands::install_hooks::print_install_help(args[0].as_str());
+            }
+            Ok(commands::install_hooks::InstallCommandOutcome::Installed(statuses)) => {
                 if let Ok(statuses_value) = serde_json::to_value(&statuses) {
                     log_message("install-hooks", "info", Some(statuses_value));
                 }
@@ -158,8 +161,11 @@ pub fn handle_git_ai(args: &[String]) {
                 fail("Uninstall", e);
             }
         }
-        "uninstall-hooks" => match commands::install_hooks::run_uninstall(&args[1..]) {
-            Ok(statuses) => {
+        "uninstall-hooks" => match commands::install_hooks::run_uninstall_cli(&args[1..]) {
+            Ok(commands::install_hooks::UninstallCommandOutcome::Help) => {
+                commands::install_hooks::print_uninstall_help();
+            }
+            Ok(commands::install_hooks::UninstallCommandOutcome::Uninstalled(statuses)) => {
                 if let Ok(statuses_value) = serde_json::to_value(&statuses) {
                     log_message("uninstall-hooks", "info", Some(statuses_value));
                 }
@@ -309,17 +315,19 @@ fn print_help() {
     eprintln!("Commands:");
     eprintln!("  checkpoint         Checkpoint working changes and attribute author");
     eprintln!(
-        "    Presets: claude, cline, codex, continue-cli, cursor, gemini, github-copilot, amp, windsurf, opencode, pi, ai_tab, firebender, human, mock_ai, mock_known_human, known_human"
+        "{}",
+        crate::operations::commands::checkpoint_agent::presets::checkpoint_preset_help()
     );
     eprintln!(
         "    --hook-input <json|stdin>   JSON payload required by presets, or 'stdin' to read from stdin"
     );
-    eprintln!("    human [pathspecs...]             Untracked/legacy human checkpoint");
-    eprintln!("    mock_ai [pathspecs...]           Test preset accepting optional file pathspecs");
-    eprintln!("    mock_known_human [pathspecs...]  Test preset for KnownHuman checkpoints");
+    eprintln!("    human [pathspecs...]             Compatibility untracked boundary");
+    eprintln!("    known_human [pathspecs...]       Evidence-backed human checkpoint");
+    eprintln!("    mock_* [pathspecs...]            Test-only checkpoint presets");
     eprintln!("  log [args...]      Show commit log with AI authorship stats");
     eprintln!("                        Use --raw or --notes to include raw authorship note data");
     eprintln!("  blame <file>       Git blame with AI authorship overlay");
+    eprintln!("    --json                 Output blame data as JSON");
     eprintln!("  diff <commit|range>  Show diff with AI authorship annotations");
     eprintln!("    <commit>              Diff from commit's parent to commit");
     eprintln!("    <commit1>..<commit2>  Diff between two commits");
@@ -355,14 +363,16 @@ fn print_help() {
     eprintln!("    unset <key>           Remove config value (reverts to default)");
     eprintln!("  debug              Print support/debug diagnostics");
     eprintln!("  bg                 Run and control git-ai background service");
-    eprintln!("  install-hooks      Install git hooks for AI authorship tracking");
+    eprintln!("  install-hooks      Configure Git Trace2 and supported agent/editor integrations");
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
-    eprintln!("                           Also install the Visual Studio extension on Windows");
+    eprintln!(
+        "                           Include Visual Studio detection and status checks on Windows"
+    );
+    eprintln!("                           This does not install a VSIX package");
     eprintln!(
         "  uninstall          Remove git-ai from this machine (hooks, git config, daemon, binaries; --purge for data)"
     );
-    eprintln!("  uninstall          Remove git-ai from this machine (add --purge to delete data)");
     eprintln!("  uninstall-hooks    Remove git-ai hooks from all detected tools");
     eprintln!("  ci                 Continuous integration utilities");
     eprintln!("    github                 GitHub CI helpers");

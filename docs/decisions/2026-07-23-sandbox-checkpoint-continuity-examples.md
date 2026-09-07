@@ -1,8 +1,6 @@
 # Sandbox Checkpoint Continuity Flows and Examples
 
-Status: implementation companion. The branch implements these paths in the
-phases defined by the design; production availability depends on the phase
-currently merged.
+Status: accepted — current implementation companion for the sandbox checkpoint continuity decision.
 
 This document makes the communication boundary in the
 [sandbox checkpoint continuity design](./2026-07-23-sandbox-checkpoint-continuity-design.md)

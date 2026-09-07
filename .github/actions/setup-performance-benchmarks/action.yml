@@ -1,5 +1,5 @@
 name: Setup performance benchmark toolchain
-description: Install the pinned Rust/Python toolchain and optionally restore Cargo caches.
+description: Install current-stable Rust and pinned Python, then optionally restore Cargo caches.
 
 inputs:
   cache-key:
@@ -15,7 +15,7 @@ runs:
   using: composite
   steps:
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+      uses: ./.github/actions/setup-rust
       with:
         toolchain: stable
 

@@ -1,5 +1,7 @@
 # Checkpoint Rewrite Implementation Plan
 
+Status: historical — implemented execution plan; commands and unchecked boxes are preserved evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rewrite the checkpoint system end-to-end so the CLI subcommand does ~50 lines of work (gather files, send to daemon) and all processing happens in the daemon.

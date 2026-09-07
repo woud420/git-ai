@@ -1,5 +1,7 @@
 # Transcript Secret Redaction
 
+Status: historical — implemented security design; current privacy and telemetry contracts are authoritative.
+
 ## Problem
 
 Transcript data (raw JSON events from Claude JSONL, Gemini JSONL, Cursor JSONL, etc.) flows through the metrics pipeline and is uploaded to our telemetry service via HTTP (`/worker/metrics/upload`). This data can contain secrets (API keys, tokens, credentials) that users paste into conversations or that appear in tool output. Currently there is zero redaction in this path — secrets leave the machine unfiltered.

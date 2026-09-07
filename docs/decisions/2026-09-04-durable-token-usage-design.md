@@ -1,7 +1,7 @@
 # Fork-Native Durable Token-Usage Ingestion
 
 **Date:** 2026-09-04  
-**Status:** Proposed  
+Status: proposed — the design is not implemented or accepted as current behavior.
 **Tracks:** ENG-323, ENG-278
 
 ## Decision

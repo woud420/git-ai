@@ -1,5 +1,7 @@
 # Session Event Attribution Recovery Plan
 
+Status: historical — implemented execution plan; current attribution recovery source and tests are authoritative.
+
 ## Problem
 
 Git AI can miss attribution when AI editing hooks were not installed, were

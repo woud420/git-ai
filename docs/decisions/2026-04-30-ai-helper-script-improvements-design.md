@@ -1,5 +1,7 @@
 # AI Helper Script Improvements
 
+Status: historical — implemented design record; the current `scripts/ai` interface is authoritative.
+
 **Date:** 2026-04-30
 
 ## Overview

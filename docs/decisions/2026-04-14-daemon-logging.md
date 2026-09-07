@@ -1,5 +1,7 @@
 # Daemon Production Logging Implementation Plan
 
+Status: historical — implemented execution plan; commands and unchecked boxes are preserved evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate the entire codebase from `debug_log()` to `tracing` with proper log levels, adding production-visible logging for daemon operations and a custom Sentry-forwarding Layer.

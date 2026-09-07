@@ -1,5 +1,7 @@
 # P9 — Layered Architecture on the Kickstart Structure
 
+Status: historical — partially implemented roadmap; current architecture and contract indexes are authoritative.
+
 Adapted from an external "explicit architectural layers" plan; grounded against the actual post-restructure codebase (see `../architecture/inventory.md` for the current per-module status). Execution began 2026-07-21 with P9.1 (this document's landing PR).
 
 Optimize for one property (unchanged from the source plan):

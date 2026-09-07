@@ -1,5 +1,7 @@
 # Runaway Memory Remediation Plan (Pragmatic, Phased)
 
+Status: accepted — active phased plan; only phases explicitly marked implemented are current claims.
+
 ## Goal
 Prevent `git-ai` from consuming runaway memory and long wall-clock time in heavy real-world sessions (long history, many files, large transcripts), while keeping checkpoint behavior correct.
 

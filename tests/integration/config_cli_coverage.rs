@@ -24,6 +24,74 @@ fn get_json_with_env(repo: &TestRepo, key: &str, envs: &[(&str, &str)]) -> Value
 }
 
 #[test]
+fn eng_374_nix_documented_updates_preserve_other_settings_and_replace_lists() {
+    let readme = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README-nix.md"),
+    )
+    .unwrap();
+    let ownership = readme
+        .split("## Configuration ownership")
+        .nth(1)
+        .expect("Nix guide must explain existing-file ownership")
+        .split("\n## ")
+        .next()
+        .unwrap();
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
+    let mut config: Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let object = config.as_object_mut().unwrap();
+    object.remove("allowed_repositories");
+    object.insert("allow_repositories".into(), serde_json::json!(["old-repo"]));
+    object.insert(
+        "custom_attributes".into(),
+        serde_json::json!({"owner": "kept"}),
+    );
+    let notes_backend = object.get("notes_backend").cloned();
+    std::fs::write(&config_path, serde_json::to_string(&config).unwrap()).unwrap();
+    assert_eq!(
+        get_json(&repo, "allowed_repositories"),
+        serde_json::json!(["old-repo"])
+    );
+
+    let mut updated_keys = std::collections::HashSet::new();
+    for command in ownership
+        .lines()
+        .filter_map(|line| line.strip_prefix("git-ai config set "))
+    {
+        let (key, quoted_json) = command.split_once(' ').unwrap();
+        assert!(matches!(
+            key,
+            "allowed_repositories" | "exclude_repositories"
+        ));
+        let json = quoted_json
+            .strip_prefix('\'')
+            .unwrap()
+            .strip_suffix('\'')
+            .unwrap();
+        let expected: Value = serde_json::from_str(json).unwrap();
+        repo.git_ai(&["config", "set", key, json]).unwrap();
+        assert_eq!(get_json(&repo, key), expected);
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            saved[key], expected,
+            "set must replace, not append to the list"
+        );
+        assert_eq!(saved["custom_attributes"], config["custom_attributes"]);
+        assert_eq!(saved.get("notes_backend"), notes_backend.as_ref());
+        updated_keys.insert(key);
+    }
+    assert!(updated_keys.contains("allowed_repositories"));
+    assert!(updated_keys.contains("exclude_repositories"));
+    assert_eq!(
+        get_json(&repo, "allowed_repositories"),
+        serde_json::json!([]),
+        "document revoking collection too"
+    );
+}
+
+#[test]
 fn test_config_allow_superuser_set_get_unset() {
     let repo = TestRepo::new();
 

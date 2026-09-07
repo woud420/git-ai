@@ -35,7 +35,7 @@ The five persistence stores, their module homes, and who may write them:
 |---|---|---|---|---|---|
 | Notes DB | `~/.git-ai/internal/notes-db` (or `GIT_AI_TEST_NOTES_DB_PATH` in tests) | notes-db v2 | `model/repository/notes_db.rs` | `NotesDatabase::global()` singleton (`OnceLock<Mutex<NotesDatabase>>`) | `SqliteNoteStore` (local-primary), `HttpNoteStore` (queue), `cache_synced_notes` (read-cache backfill) via `notes_store.rs` |
 | Internal DB | `~/.git-ai/internal/db` | v3 | `model/repository/internal_db.rs` | `InternalDatabase::global()` singleton | daemon post-commit pipeline, CAS queue |
-| Streams DB | `~/.git-ai/internal/streams-db` | v4 | `model/repository/streams_db.rs` | `StreamsDatabase` injected at daemon init | stream workers; `streams_db::update_watermark(&dyn WatermarkStrategy)` is the reference pattern for strategy injection |
+| Streams DB | `~/.git-ai/internal/transcripts-db` (historical filename retained for compatibility) | v4 | `model/repository/streams_db.rs` | `StreamsDatabase` injected at daemon init | stream workers; `streams_db::update_watermark(&dyn WatermarkStrategy)` is the reference pattern for strategy injection |
 | Metrics DB | `~/.git-ai/internal/metrics-db` | v5 | `model/repository/metrics_db/` | global singleton | telemetry worker, event emitters |
 | Bash-history DB | `~/.git-ai/internal/bash-history-db` | v2 | `model/repository/bash_history_db.rs` | global singleton | bash tool-use checkpoint pipeline |
 

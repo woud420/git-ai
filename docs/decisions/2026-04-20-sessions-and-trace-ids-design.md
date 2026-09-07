@@ -1,5 +1,7 @@
 # Sessions & Trace IDs: Authorship Notes V2
 
+Status: superseded — the authorship/3 serialization and current persistence contract replace this v2 design.
+
 ## Summary
 
 Replace the `prompts` system with a new `sessions` system for all new checkpoints. Sessions drop the problematic stats fields (`total_additions`, `total_deletions`, `accepted_lines`, `overriden_lines`) and add per-checkpoint trace IDs for higher-granularity attribution. Old `prompts` remain fully supported for backwards compatibility.

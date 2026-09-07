@@ -1,6 +1,6 @@
 # Reject Lite Mode
 
-Status: proposed; accepting this change records the decision
+Status: accepted — records the fork's current rewrite-fidelity policy.
 
 Tracking issue: ENG-301
 

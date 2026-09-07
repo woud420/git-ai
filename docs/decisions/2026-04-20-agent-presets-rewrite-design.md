@@ -1,5 +1,7 @@
 # Agent Presets Rewrite — Design Spec
 
+Status: historical — implemented design record; the checkpoint interface is authoritative.
+
 ## Goal
 
 Replace the current agent presets implementation (~7000 lines, massive duplication, mixed concerns) with a clean architecture where:

@@ -1,5 +1,7 @@
 # Remove TmpRepo and libgit2 Implementation Plan
 
+Status: historical — implemented execution plan; current source and repository policy are authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate all TmpRepo unit tests to integration tests using TestRepo, then remove TmpRepo and the libgit2 dependency entirely.

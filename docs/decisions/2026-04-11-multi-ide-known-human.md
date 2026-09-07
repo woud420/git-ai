@@ -1,5 +1,7 @@
 # Multi-IDE Known-Human Checkpoint — Implementation Plan
 
+Status: historical — partially implemented execution plan; unchecked steps are not current work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `known_human` checkpoint support (fire `git-ai checkpoint known_human --hook-input stdin` on file save with 500ms debounce) to 9 IDE/editor targets, one PR each, running as parallel worktree subagents.

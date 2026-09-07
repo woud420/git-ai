@@ -90,6 +90,26 @@ fn eng_218_packaging_sources_enforce_per_user_runtime_boundaries() {
 }
 
 #[test]
+fn eng_398_packaging_example_names_endpoint_ownership() {
+    let readme = repo_file("packaging/README.md");
+    for required in [
+        "API_BASE=https://git-ai.example.com",
+        "external or self-hosted operator",
+        "../data-privacy.md",
+        "process inspection and shell history",
+    ] {
+        assert!(
+            readme.contains(required),
+            "packaging guide is missing endpoint boundary `{required}`"
+        );
+    }
+    assert!(
+        !readme.contains("API_BASE=https://usegitai.com"),
+        "packaging example must not imply the inherited service is fork-operated"
+    );
+}
+
+#[test]
 fn eng_218_release_workflow_signs_tests_and_gates_native_packages() {
     let workflow = repo_file(".github/workflows/release.yml");
 

@@ -1,6 +1,6 @@
 # Preserve Residual Unattributed Lines
 
-Status: proposed; accepting this change records the decision
+Status: accepted — records the fork's current evidence boundary.
 
 Tracking issue: ENG-292
 

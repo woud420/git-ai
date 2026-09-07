@@ -32,7 +32,7 @@ jobs:
         uses: ./.github/actions/setup-gnu-make
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
           toolchain: stable
 

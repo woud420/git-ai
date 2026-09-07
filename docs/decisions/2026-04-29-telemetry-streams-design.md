@@ -1,7 +1,7 @@
 # Telemetry Streams Re-implementation Design
 
 **Date**: 2026-04-29  
-**Status**: Approved  
+Status: superseded — the current stream worker and telemetry contracts replace this design.
 **Base**: PR 1198 (sessions-v2-remove-messages)  
 **Approach**: Clean-slate rewrite (Approach B)
 

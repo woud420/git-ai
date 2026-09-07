@@ -1,252 +1,116 @@
-# Telemetry Streams System - Technical Summary
+# Telemetry Streams and Metrics Contract
 
-**Last Updated**: 2026-04-29  
-**Status**: Complete, ready for review  
-**Related**: `docs/decisions/2026-04-29-telemetry-streams-design.md`
+**Status:** Current implementation as of 2026-09-06
 
-## What Was Built
+**Privacy boundary:** [data-privacy.md](../../data-privacy.md)
 
-A complete transcript-based telemetry system that replaces the legacy `internal_db` with a purpose-built solution for AI agent session tracking and metrics correlation.
+**Persistence authority:** [persistence-model.md](persistence-model.md)
 
-### Core Components
+This document describes the stream cursors and metric-event pipeline implemented
+in this fork. The dated documents under `docs/decisions/` record earlier designs;
+they are not runtime contracts.
 
-1. **Transcripts Module** (`src/transcripts/`)
-   - Database layer (TranscriptsDatabase) with sessions tracking
-   - Watermark abstraction supporting multiple tracking strategies
-   - Transcript processor with incremental reading
-   - Format-specific readers for Claude, Cursor, Droid, Copilot
-   - Common types and error handling
+## Components and storage
 
-2. **TranscriptWorker** (`src/daemon/transcript_worker.rs`)
-   - Long-lived tokio task in daemon process
-   - Priority queue (checkpoint notifications > historical backfill)
-   - Polling-based modification detection (1-second interval)
-   - Exponential backoff retry logic
-   - Automatic migration from internal_db
+| Component | Current responsibility |
+|---|---|
+| `StreamWorker` in `src/operations/daemon/stream_worker.rs` | Accept validated checkpoint notifications, run discovery sweeps, incrementally read agent-owned streams, redact secret-shaped values, and advance watermarks. |
+| Stream adapters in `src/operations/streams/` | Discover supported agent sessions and decode each transcript or trace format in bounded batches. |
+| Streams repository in `src/model/repository/streams_db.rs` | Store schema-v4 `tracked_streams` rows: stream identity, source path, format, watermark, file metadata, repository context, and processing errors. It does not copy transcript content. |
+| Telemetry worker in `src/operations/daemon/telemetry_worker/` | Persist metric events and conditionally flush metrics and other configured telemetry destinations. Its regular flush interval is three seconds. |
+| Metrics repository in `src/model/repository/metrics_db/` | Store schema-v5 compact event JSON, query metadata, delivery state, and local history. |
 
-3. **Enhanced Metrics Schema**
-   - `session_id` (required) - Unique per conversation
-   - `trace_id` (nullable) - Links related operations
-   - `tool_use_id` (nullable) - Tracks tool invocations
-   - Applied to all event types (Checkpoint, Commit, AgentUsage, AgentTrace)
+Production paths are beneath the configured git-ai home:
 
-## How It Works
+- stream cursors: `~/.git-ai/internal/transcripts-db`;
+- metric events: `~/.git-ai/internal/metrics-db`.
 
-### Session Lifecycle
+The stream database keeps the historical `transcripts-db` filename for
+compatibility with existing installations. `streams-db`, `transcripts.db`, and
+top-level `metrics.db` are not paths opened by the current daemon.
 
-1. **First checkpoint**: Agent preset extracts session metadata, notifies daemon
-2. **Session creation**: TranscriptWorker creates session record with initial watermark
-3. **Incremental processing**: Worker polls file every 1s, reads from watermark on changes
-4. **Event emission**: AgentTrace events emitted to metrics.db with session_id/trace_id
-5. **Watermark update**: After successful processing, watermark advances
-6. **Trailing messages**: Messages after last tool call captured in next poll cycle
+## Processing flow
 
-### Priority Queue
+1. When an agent checkpoint supplies a stream source, the daemon validates that
+   the path belongs to that agent and that the session maps to a repository in
+   `allowed_repositories`. Valid notifications enter the immediate-priority
+   queue.
+2. With the `transcript_sweep` feature enabled, the worker also discovers stale
+   streams at startup, every 30 minutes, and after eligible commit or push
+   events. Triggered sweeps share a 30-second cooldown. Newly discovered files
+   use the configured lookback, seven days by default; a value of zero means no
+   lookback limit.
+3. The adapter reads a bounded batch from the stored watermark. The worker
+   assigns session and trace attributes, drops OTEL spans without an extractable
+   session, and redacts secret-shaped JSON values.
+4. The resulting `session_event` or `otel_trace` records are written to the
+   metrics database before the watermark advances. The worker repeats until the
+   adapter returns no more events, saving the watermark after every batch.
+5. Local metric persistence is independent of remote delivery. Upload is
+   attempted only when the master `telemetry` setting is on and an API key or
+   login is available. Session events are checked against current repository
+   eligibility again when dequeued for delivery.
 
-Three priority levels:
-- **High (100)**: Checkpoint notifications (real-time processing)
-- **Medium (50)**: Modification detection from polling
-- **Low (10)**: Historical transcript backfill
+The stream worker is created only while `transcript_streaming` is enabled.
+`transcript_streaming` and `transcript_sweep` currently default to enabled in
+debug and release builds, but an empty `allowed_repositories` list still denies
+all repository transcript collection. The master `telemetry` setting defaults
+to off. See the privacy boundary above before enabling any networked mode.
 
-Tasks are dequeued by priority, then by timestamp (FIFO within priority).
+## Metrics event surface
 
-### Watermarking Strategies
+The compact wire envelope is version 1 and uses `t` (timestamp), `e` (event
+kind), `v` (position-encoded values), and `a` (position-encoded attributes).
+Current event kinds are:
 
-- **ByteOffset**: Byte position in file (Claude, Cursor)
-- **RecordIndex**: Line/record number (unused currently)
-- **Timestamp**: Last processed message timestamp (unused currently)
-- **Hybrid**: Combination of offset + timestamp (Droid, Copilot)
+| ID | Event |
+|---:|---|
+| 1 | `committed` |
+| 2 | `agent_usage` |
+| 3 | `install_hooks` |
+| 4 | `checkpoint` |
+| 5 | `session_event` |
+| 6 | `otel_trace` |
+| 7 | `rewrite_committed` |
 
-Each strategy serializes to/from string for database storage.
+See [telemetry-examples.md](telemetry-examples.md) for anonymized payloads and
+`src/model/metrics/types.rs` for the event-ID and envelope definitions.
 
-### Migration
+## Failure and retention behavior
 
-On daemon startup, if `internal.db` exists:
-1. Read all prompt records
-2. For each with a transcript path mapping, create session record
-3. Initialize watermark to start (will reprocess)
-4. Migration is idempotent and non-destructive
+- Stream parse and fatal failures are recorded on the matching
+  `tracked_streams` row. Transient processing failures use a bounded retry
+  policy; there is no per-session one-second file poll.
+- Metric rows are local history as well as an offline delivery queue. Retriable
+  upload failures use row-level backoff and stop being eligible after six
+  attempts; server-rejected rows remain as non-retryable history.
+- Metric history has a 365-day retention window, with pruning considered at
+  most once per 24 hours when rows are written or marked delivered.
 
-## How to Use It
+Do not delete either database as routine troubleshooting. Removing the streams
+database discards watermarks and can cause eligible agent-owned content to be
+read again; removing the metrics database discards local history and queued
+delivery state. A full intentional removal belongs to the documented
+`git-ai uninstall --purge` lifecycle.
 
-### For Developers
+## Inspection and troubleshooting
 
-**Adding a new agent format:**
-1. Implement `TranscriptReader` trait in `src/transcripts/formats/`
-2. Add format variant to `TranscriptFormat` enum
-3. Update `process_transcript()` match statement
-4. Add tests in format-specific file
+`git-ai whoami` reports whether telemetry and metric delivery are enabled and
+summarizes the local metrics queue. For lower-level inspection, stop the daemon
+or use SQLite's read-only mode and inspect the current tables:
 
-**Debugging session processing:**
 ```bash
-# Check transcripts database
-sqlite3 ~/.git-ai/transcripts.db "SELECT * FROM sessions;"
+sqlite3 -readonly ~/.git-ai/internal/transcripts-db \
+  "SELECT session_id, stream_kind, tool, watermark_value, processing_errors, last_error FROM tracked_streams;"
 
-# Check watermark for session
-sqlite3 ~/.git-ai/transcripts.db "SELECT session_id, watermark_value FROM sessions WHERE session_id = 'YOUR_SESSION_ID';"
-
-# Check processing stats
-sqlite3 ~/.git-ai/transcripts.db "SELECT * FROM processing_stats WHERE session_id = 'YOUR_SESSION_ID';"
-
-# View metrics events with session_id
-sqlite3 ~/.git-ai/metrics.db "SELECT * FROM events WHERE session_id = 'YOUR_SESSION_ID';"
+sqlite3 -readonly ~/.git-ai/internal/metrics-db \
+  "SELECT COUNT(*) AS rows, SUM(delivered_ts IS NULL) AS pending FROM metrics;"
 ```
 
-**Monitoring worker health:**
-- Look for tracing logs with `transcript_worker` target
-- Check `processing_errors` column in sessions table
-- Review `last_error` field for failure messages
+Useful implementation entry points are:
 
-### For Users
-
-**No user action required.** System works transparently:
-- First checkpoint in conversation creates session
-- Trailing messages captured automatically
-- Migration from internal_db happens on daemon start
-- All historical transcripts processed incrementally in background
-
-## Testing Approach
-
-### Unit Tests
-- Watermark serialization/deserialization (all strategies)
-- Database operations (CRUD on sessions table)
-- Transcript reader implementations (each format)
-- Error handling (parse errors, I/O errors, fatal errors)
-
-### Integration Tests
-- Full checkpoint → transcript processing flow
-- Checkpoint notifications trigger immediate processing
-- Polling detects file modifications
-- Migration logic with various internal_db states
-- Multiple concurrent sessions
-
-### Manual Testing
-1. Install debug build
-2. Fire checkpoint from AI agent
-3. Verify session created in transcripts.db
-4. Write more messages in conversation
-5. Wait for polling interval
-6. Confirm watermark advanced
-7. Check AgentTrace events in metrics.db
-
-## Performance Characteristics
-
-### Polling Overhead
-- 1-second interval for active sessions
-- File stat syscalls only (no reads unless modified)
-- ~1-2ms CPU time per session per poll on typical systems
-- Scales linearly with active session count
-
-### Processing Throughput
-- Claude JSONL: ~10k messages/second (mostly I/O bound)
-- Droid SQLite: ~5k messages/second (query overhead)
-- Cursor JSONL: ~10k messages/second (similar to Claude)
-- Copilot hybrid: ~3k messages/second (dual file reads)
-
-### Memory Usage
-- ~100KB per active session (watermark + file handle)
-- Priority queue: ~1KB per pending task
-- Bounded by number of concurrent conversations (typically <10)
-
-### Database Growth
-- Sessions table: ~1KB per session
-- Processing stats: ~100B per session
-- Metrics events: ~500B per message (server-side storage)
-
-## Known Limitations
-
-1. **Polling Latency**: 1-second delay for trailing messages (not real-time)
-2. **File Format Assumptions**: Most readers assume append-only files
-3. **No Delta Updates**: Full transcript reprocessed from watermark each time
-4. **Single Agent Per Session**: Multi-agent conversations tracked as separate sessions
-5. **No Transcript Compaction**: Old messages never pruned from source files
-6. **No Session Lifecycle**: No explicit start/pause/resume/end events
-
-## Future Improvements
-
-### Short Term
-1. **Adaptive Polling**: Increase interval when no activity detected
-2. **Delta Updates**: Emit only new events since last processing
-3. **Session Merging**: Combine related sessions for multi-agent conversations
-
-### Medium Term
-4. **Real-Time Streaming**: Replace polling with inotify/FSEvents where available
-5. **Transcript Compaction**: Prune old messages to limit file growth
-6. **Session Lifecycle Events**: Track explicit start/pause/resume/end
-
-### Long Term
-7. **Distributed Tracing**: Integrate with OpenTelemetry for full observability
-8. **Historical Analysis**: Query tool for session replay and debugging
-9. **Cross-Machine Sync**: Share session state across multiple devices
-
-## Platform Considerations
-
-### Linux
-- Primary development platform
-- Uses standard file APIs
-- Polling works reliably
-
-### macOS
-- Same implementation as Linux
-- HFS+ timestamp granularity handled
-- No inotify (yet)
-
-### Windows
-- POSIX path normalization required
-- File metadata handling differs slightly
-- CREATE_NO_WINDOW flag for daemon process
-
-## Deployment
-
-### Prerequisites
-- Existing git-ai installation
-- Daemon must be restarted to load new code
-- No database schema migrations required (new database)
-
-### Rollout Strategy
-1. Deploy new binary with transcripts module
-2. Daemon restart triggers internal_db migration
-3. Background processing handles historical data
-4. No user-visible changes (transparent upgrade)
-
-### Rollback Plan
-If issues arise, revert to previous binary. Old internal_db remains intact (read-only). Transcripts.db can be deleted safely.
-
-### Monitoring
-- Check daemon logs for `transcript_worker` errors
-- Monitor sessions table for `processing_errors > 0`
-- Verify AgentTrace events appearing in metrics.db
-- Track session creation rate vs checkpoint rate
-
-## Troubleshooting
-
-### "Session not found" errors
-- Check if session_id exists in sessions table
-- Verify transcript_path is correct and file exists
-- Look for migration errors in daemon logs
-
-### Watermark not advancing
-- Check file modification time is updating
-- Verify no parse errors in last_error field
-- Confirm polling is running (check tracing logs)
-
-### Missing trailing messages
-- Wait at least 1 second after writing messages
-- Check watermark_value to see if it advanced
-- Verify file size increased
-
-### High CPU usage
-- Check number of active sessions
-- Look for processing errors causing retries
-- Verify polling interval is 1 second (not faster)
-
-## References
-
-- **Design Spec**: `docs/decisions/2026-04-29-telemetry-streams-design.md`
-- **Implementation Plan**: `docs/decisions/2026-04-29-telemetry-streams-reimplement.md`
-- **CHANGELOG**: See "Unreleased" section
-- **PR Description**: `PR_DESCRIPTION.md` (in repository root)
-
-## Credits
-
-Designed and implemented following the specification in `docs/decisions/2026-04-29-telemetry-streams-design.md`. Implementation completed in phases over multiple development sessions with comprehensive testing at each stage.
+- daemon startup and store wiring: `src/operations/daemon/lifecycle.rs`;
+- checkpoint stream authorization: `src/operations/daemon/checkpoint_stream_authority.rs`;
+- discovery coordination: `src/operations/daemon/sweep_coordinator.rs`;
+- stream processing: `src/operations/daemon/stream_worker.rs`;
+- metric persistence and upload: `src/operations/daemon/telemetry_worker/metrics_flush.rs`.

@@ -42,15 +42,18 @@ daemon-ingress "start" offsets captured after the fact.
 ## Data path
 
 ```
-git (trace2 socket target)
-  → socket listener (src/operations/daemon.rs)
+real Git process (direct or via src/cli/git_handlers.rs; trace2 socket target)
+  → socket listener (src/operations/daemon/socket_listeners.rs)
+  → ingress coordinator (src/operations/daemon/actor_coordinator_ingest.rs)
       prepare_trace_payload_for_ingest: filters definitely-read-only roots,
       enqueues mutating roots with sequence numbers
-  → TraceNormalizer (src/operations/daemon/trace_normalizer.rs)
+  → TraceNormalizer (src/operations/daemon/trace_normalizer/mod.rs)
       groups frames by root sid; terminal event → NormalizedCommand
-  → coordinator → family actor (one actor per repo family = common git dir)
+  → coordinator (src/operations/daemon/coordinator.rs)
+      → family actor (src/operations/daemon/family_actor.rs;
+        one actor per repo family = common git dir)
       owns ordered state for the family, including the RefCursor
-  → RefCursor::enrich_command (src/operations/daemon/ref_cursor.rs)
+  → RefCursor::enrich_command (src/operations/daemon/ref_cursor/enrichment.rs)
       consumes cursor-bounded reflog entries → cmd.ref_changes
   → analyzers (src/operations/daemon/analyzers/history.rs)
       classified semantic events → rewrite/post-commit side effects
@@ -177,8 +180,12 @@ so no cursor predates the first traced command.
   underlying HEAD/branch transitions.
 - **merge-tree / commit-tree alone**: create objects, move no refs — no
   transition to own; nothing happens until a ref moves.
-- **push / fetch / clone**: notes-sync side effects keyed off argv remotes;
-  missing `refs/notes/ai` is a no-op, not an error.
+- **push / fetch / clone**: authorship sync side effects are keyed off argv
+  remotes. Git Notes sync serves the `git_notes` backend and SQLite's
+  compatibility fallback; a missing `refs/notes/ai` ref is a no-op, not an
+  error. The `http` backend skips ref pushes and warms its remote-backed cache
+  after pulls and clones. All other authorship reads and writes go through the
+  configured notes backend.
 
 ## Reads must not sync
 
@@ -226,7 +233,7 @@ Deterministic tests must cover, at minimum:
 
 Primary suites: `tests/daemon_mode.rs`, `tests/commit_tree_update_ref.rs`,
 `tests/integration/rewrite_ops_attribution.rs`, ref-cursor unit tests in
-`src/operations/daemon/ref_cursor.rs`.
+`src/operations/daemon/ref_cursor/`.
 
 ## Bottom line
 

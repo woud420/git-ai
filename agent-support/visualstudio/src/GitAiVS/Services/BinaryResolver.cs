@@ -41,7 +41,7 @@ namespace GitAiVS.Services
                 var searched = _lastSearchedPaths != null ? string.Join(", ", _lastSearchedPaths) : "(none)";
                 Trace.WriteLine("[git-ai] git-ai not found");
                 Trace.WriteLine($"[git-ai]   Searched locations: {searched}");
-                Trace.WriteLine("[git-ai]   To fix: Install git-ai from https://usegitai.com");
+                Trace.WriteLine("[git-ai]   To fix: Install git-ai from https://github.com/woud420/git-ai#install-and-quick-start");
                 return null;
             }
 

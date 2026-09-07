@@ -3,7 +3,7 @@
  *
  * This plugin integrates git-ai with OpenCode to track AI-generated code.
  * It uses the tool.execute.before and tool.execute.after events to create
- * checkpoints that mark code changes as human or AI-authored.
+ * checkpoints that mark code changes as untracked or AI-authored.
  *
  * Installation:
  *   - Automatically installed by `git-ai install-hooks`
@@ -13,7 +13,7 @@
  * Requirements:
  *   - git-ai must be installed (path is injected at install time)
  *
- * @see https://github.com/git-ai-project/git-ai
+ * @see https://github.com/woud420/git-ai
  * @see https://opencode.ai/docs/plugins/
  */
 

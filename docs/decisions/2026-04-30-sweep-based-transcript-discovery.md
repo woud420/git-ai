@@ -1,5 +1,7 @@
 # Sweep-Based Transcript Discovery Implementation Plan
 
+Status: historical — implemented execution record whose design later evolved into the current stream worker.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace file polling with agent-specific sweep functions, unify transcript reading under a single Agent trait, and eliminate redundant control API events.

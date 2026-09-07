@@ -198,6 +198,47 @@ home.packages = [
 }
 ```
 
+## Configuration ownership
+
+Home Manager owns `~/.git-ai/config.json` as a link to generated Nix-store
+content. Change `programs.git-ai.settings` and run `home-manager switch` (or
+the NixOS/nix-darwin rebuild that includes Home Manager). Do not use
+`git-ai config set` to edit this managed file.
+
+The NixOS module without Home Manager behaves differently: when `installHooks`
+is enabled, activation copies initial defaults into an absent or symlinked
+config, producing a regular user-editable file. Later activations preserve an
+existing regular file. With `installHooks = false`, that activation does not
+create the config. Changing `settings.allowRepositories` or
+`settings.excludeRepositories` in Nix therefore does **not** update an existing
+regular file; removing an allowlist entry in Nix alone does not revoke its live
+permission.
+
+For that NixOS user-owned file, back up and inspect the existing config before
+changing it. Run these commands as the affected user, substituting the intended
+repository globs. `set` replaces the list; `--add` would retain old entries.
+Supported unrelated settings are retained by the CLI:
+
+```bash
+git-ai config allowed_repositories
+git-ai config exclude_repositories
+git-ai config set allowed_repositories '["https://github.com/myorg/*"]'
+git-ai config set exclude_repositories '["https://github.com/myorg/private-*"]'
+```
+
+To revoke collection for every repository in that file, explicitly clear the
+allowlist and verify the result:
+
+```bash
+git-ai config set allowed_repositories '[]'
+git-ai config allowed_repositories
+```
+
+The runtime accepts the older `allow_repositories` JSON key as an alias for
+`allowed_repositories`; valid existing files do not need a forced migration.
+The CLI writes the canonical spelling on its next config update. Do not keep
+both spellings in the same JSON object.
+
 ## Uninstall
 
 Nix owns the package and its declaration. `git-ai uninstall` cannot remove a

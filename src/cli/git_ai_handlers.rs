@@ -161,8 +161,11 @@ pub fn handle_git_ai(args: &[String]) {
                 fail("Uninstall", e);
             }
         }
-        "uninstall-hooks" => match commands::install_hooks::run_uninstall(&args[1..]) {
-            Ok(statuses) => {
+        "uninstall-hooks" => match commands::install_hooks::run_uninstall_cli(&args[1..]) {
+            Ok(commands::install_hooks::UninstallCommandOutcome::Help) => {
+                commands::install_hooks::print_uninstall_help();
+            }
+            Ok(commands::install_hooks::UninstallCommandOutcome::Uninstalled(statuses)) => {
                 if let Ok(statuses_value) = serde_json::to_value(&statuses) {
                     log_message("uninstall-hooks", "info", Some(statuses_value));
                 }

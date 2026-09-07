@@ -24,6 +24,57 @@ pub(crate) enum InstallCommandOutcome {
     Installed(HashMap<String, String>),
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct UninstallOptions {
+    pub(super) dry_run: bool,
+    pub(super) verbose: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum UninstallAction {
+    Help,
+    Uninstall(UninstallOptions),
+}
+
+pub(crate) enum UninstallCommandOutcome {
+    Help,
+    Uninstalled(HashMap<String, String>),
+}
+
+pub(super) fn parse_uninstall_action(args: &[String]) -> Result<UninstallAction, GitAiError> {
+    let mut options = UninstallOptions::default();
+    for arg in args {
+        match arg.as_str() {
+            "--help" | "-h" => return Ok(UninstallAction::Help),
+            "--dry-run" | "--dry-run=true" => options.dry_run = true,
+            "--dry-run=false" => options.dry_run = false,
+            "--verbose" | "-v" => options.verbose = true,
+            unknown => {
+                return Err(GitAiError::Generic(format!(
+                    "unknown uninstall-hooks option '{unknown}'; run 'git-ai uninstall-hooks --help' for usage"
+                )));
+            }
+        }
+    }
+    Ok(UninstallAction::Uninstall(options))
+}
+
+pub(crate) fn print_uninstall_help() {
+    println!("Usage: git-ai uninstall-hooks [options]");
+    println!();
+    println!("Remove managed hooks and skills across all supported agent/editor integrations.");
+    println!("Without --dry-run, removal is applied immediately.");
+    println!();
+    println!("Options:");
+    println!("  --dry-run[=true|false]       Preview changes, or explicitly apply them with false");
+    println!("  --verbose, -v                Show configuration diffs");
+    println!("  --help, -h                    Show this help message");
+    println!();
+    println!(
+        "Use 'git-ai uninstall --help' for full daemon, Git configuration, and binary removal."
+    );
+}
+
 pub(super) fn parse_install_action(args: &[String]) -> Result<InstallAction, GitAiError> {
     let mut options = InstallOptions::default();
 
@@ -223,5 +274,31 @@ mod tests {
         let args = vec!["--skils".to_string()];
         let err = parse_install_action(&args).unwrap_err();
         assert!(err.to_string().contains("unknown install option '--skils'"));
+    }
+
+    #[test]
+    fn eng_408_uninstall_parsing_separates_help_preview_and_apply() {
+        for flag in ["--help", "-h"] {
+            assert_eq!(
+                parse_uninstall_action(&[flag.to_string()]).unwrap(),
+                UninstallAction::Help
+            );
+        }
+        for (args, dry_run, verbose) in [
+            (vec![], false, false),
+            (vec!["--dry-run", "-v"], true, true),
+            (vec!["--dry-run=true", "--verbose"], true, true),
+            (vec!["--dry-run", "--dry-run=false"], false, false),
+            (vec!["--dry-run=false", "--dry-run"], true, false),
+        ] {
+            let args = args.into_iter().map(String::from).collect::<Vec<_>>();
+            assert_eq!(
+                parse_uninstall_action(&args).unwrap(),
+                UninstallAction::Uninstall(UninstallOptions { dry_run, verbose })
+            );
+        }
+        for flag in ["--dryrun", "--dry-run=tru", "--skills", "unexpected"] {
+            assert!(parse_uninstall_action(&[flag.to_string()]).is_err());
+        }
     }
 }

@@ -387,6 +387,67 @@ fn eng_389_invalid_api_values_leave_test_home_unchanged() {
 }
 
 #[test]
+fn eng_408_uninstall_help_and_invalid_options_preserve_managed_files() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let (extension, overrides) = seed_pi_uninstall_files(&repo);
+    let config = repo.test_home_path().join(".git-ai/config.json");
+    let original_config = fs::read(&config).unwrap();
+
+    for (flag, help) in [
+        ("--help", true),
+        ("-h", true),
+        ("--dryrun", false),
+        ("--dry-run=tru", false),
+        ("--skills", false),
+        ("unexpected", false),
+    ] {
+        let result = repo.git_ai_without_pre_sync_for_test(&["uninstall-hooks", flag]);
+        if help {
+            let output = result.expect("help must succeed");
+            assert!(output.contains("Usage: git-ai uninstall-hooks [options]"));
+        } else {
+            let error = result.expect_err("invalid options must fail closed");
+            assert!(error.contains("git-ai uninstall-hooks --help"));
+        }
+        assert_eq!(
+            fs::read_to_string(&extension).unwrap(),
+            "managed extension\n"
+        );
+        assert_eq!(fs::read_to_string(&overrides).unwrap(), "{}\n");
+        assert_eq!(fs::read(&config).unwrap(), original_config);
+    }
+}
+
+#[test]
+fn eng_408_uninstall_preview_and_apply_respect_file_ownership() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let (extension, overrides) = seed_pi_uninstall_files(&repo);
+    for flag in ["--dry-run", "--dry-run=true"] {
+        repo.git_ai_without_pre_sync_for_test(&["uninstall-hooks", flag, "-v"])
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(&extension).unwrap(),
+            "managed extension\n"
+        );
+        assert_eq!(fs::read_to_string(&overrides).unwrap(), "{}\n");
+    }
+    repo.git_ai_without_pre_sync_for_test(&["uninstall-hooks", "--dry-run", "--dry-run=false"])
+        .unwrap();
+    assert!(!extension.exists());
+    assert_eq!(fs::read_to_string(overrides).unwrap(), "{}\n");
+}
+
+fn seed_pi_uninstall_files(repo: &TestRepo) -> (std::path::PathBuf, std::path::PathBuf) {
+    let agent = repo.test_home_path().join(".pi/agent");
+    fs::create_dir_all(agent.join("extensions")).unwrap();
+    let extension = agent.join("extensions/git-ai.ts");
+    let overrides = agent.join("git-ai.override.json");
+    fs::write(&extension, "managed extension\n").unwrap();
+    fs::write(&overrides, "{}\n").unwrap();
+    (extension, overrides)
+}
+
+#[test]
 fn test_run_install_hooks_no_args() {
     // This will try to run against the actual system, but should not crash
     // It may fail if binary path cannot be determined, which is acceptable

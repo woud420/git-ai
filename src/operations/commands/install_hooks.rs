@@ -16,7 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use cli::{InstallAction, InstallOptions, parse_install_action};
-pub(crate) use cli::{InstallCommandOutcome, print_install_help};
+pub(crate) use cli::{
+    InstallCommandOutcome, UninstallCommandOutcome, print_install_help, print_uninstall_help,
+};
 
 pub(crate) const TRACE2_EVENT_TARGET_KEY: &str = "trace2.eventTarget";
 pub(crate) const TRACE2_EVENT_NESTING_KEY: &str = "trace2.eventNesting";
@@ -467,25 +469,28 @@ fn parse_git_og_cmd_path(contents: &str) -> Option<String> {
 
 /// Main entry point for uninstall-hooks command
 pub fn run_uninstall(args: &[String]) -> Result<HashMap<String, String>, GitAiError> {
-    // Parse flags
-    let mut dry_run = false;
-    let mut verbose = false;
-    for arg in args {
-        if arg == "--dry-run" || arg == "--dry-run=true" {
-            dry_run = true;
-        }
-        if arg == "--verbose" || arg == "-v" {
-            verbose = true;
-        }
+    match run_uninstall_cli(args)? {
+        UninstallCommandOutcome::Help => Ok(HashMap::new()),
+        UninstallCommandOutcome::Uninstalled(statuses) => Ok(statuses),
     }
+}
+
+pub(crate) fn run_uninstall_cli(args: &[String]) -> Result<UninstallCommandOutcome, GitAiError> {
+    let cli::UninstallAction::Uninstall(options) = cli::parse_uninstall_action(args)? else {
+        return Ok(UninstallCommandOutcome::Help);
+    };
 
     // Get absolute path to the current binary
     let binary_path = get_current_binary_path()?;
     let params = HookInstallerParams { binary_path };
 
     // Run async operations and convert result.
-    let statuses = crate::tokio_runtime::block_on(async_run_uninstall(&params, dry_run, verbose))?;
-    Ok(to_hashmap(statuses))
+    let statuses = crate::tokio_runtime::block_on(async_run_uninstall(
+        &params,
+        options.dry_run,
+        options.verbose,
+    ))?;
+    Ok(UninstallCommandOutcome::Uninstalled(to_hashmap(statuses)))
 }
 
 async fn async_run_install(

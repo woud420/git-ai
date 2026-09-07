@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::error::GitAiError;
 use super::installer_environment::InstallerEnvironment;
+use crate::error::GitAiError;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct InstallOptions {

@@ -38,7 +38,7 @@ fn job_needs(job: &str) -> &str {
 }
 
 #[test]
-fn eng_218_packaging_sources_enforce_per_user_runtime_boundaries() {
+fn packaging_sources_enforce_per_user_runtime_boundaries() {
     let readme = repo_file("packaging/README.md");
     assert!(readme.contains("install `git-ai` only"));
     assert!(readme.contains("must not install a `git`"));
@@ -90,7 +90,7 @@ fn eng_218_packaging_sources_enforce_per_user_runtime_boundaries() {
 }
 
 #[test]
-fn eng_398_packaging_example_names_endpoint_ownership() {
+fn packaging_example_names_endpoint_ownership() {
     let readme = repo_file("packaging/README.md");
     for required in [
         "API_BASE=https://git-ai.example.com",
@@ -110,7 +110,7 @@ fn eng_398_packaging_example_names_endpoint_ownership() {
 }
 
 #[test]
-fn eng_218_release_workflow_signs_tests_and_gates_native_packages() {
+fn release_workflow_signs_tests_and_gates_native_packages() {
     let workflow = repo_file(".github/workflows/release.yml");
 
     let package_msi = workflow_job(&workflow, "package-msi");
@@ -189,7 +189,7 @@ fn eng_218_release_workflow_signs_tests_and_gates_native_packages() {
 }
 
 #[test]
-fn eng_318_packaged_installers_forward_only_the_resolved_user_home() {
+fn packaged_installers_forward_only_the_resolved_user_home() {
     let wix = repo_file("packaging/windows/git-ai.wxs");
     assert!(
         wix.contains("--installer-env &quot;USERPROFILE=[WIX_DIR_PROFILE]&quot;"),

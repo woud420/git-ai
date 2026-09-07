@@ -448,6 +448,41 @@ fn seed_pi_uninstall_files(repo: &TestRepo) -> (std::path::PathBuf, std::path::P
 }
 
 #[test]
+fn eng_400_documented_pi_preview_does_not_apply_removal() {
+    let readme = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("agent-support/pi/README.md"),
+    )
+    .unwrap();
+    let commands = readme
+        .split("## Uninstall")
+        .nth(1)
+        .unwrap()
+        .split("```bash")
+        .nth(1)
+        .unwrap()
+        .split("```")
+        .next()
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(commands.len(), 2, "expected preview followed by apply");
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let (extension, overrides) = seed_pi_uninstall_files(&repo);
+    for (index, command) in commands.iter().enumerate() {
+        let words = command.split_whitespace().collect::<Vec<_>>();
+        assert_eq!(words[..2], ["git-ai", "uninstall-hooks"]);
+        repo.git_ai_without_pre_sync_for_test(&words[1..]).unwrap();
+        assert_eq!(
+            extension.exists(),
+            index == 0,
+            "incorrect action: {command}"
+        );
+        assert_eq!(fs::read_to_string(&overrides).unwrap(), "{}\n");
+    }
+}
+
+#[test]
 fn test_run_install_hooks_no_args() {
     // This will try to run against the actual system, but should not crash
     // It may fail if binary path cannot be determined, which is acceptable

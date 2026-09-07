@@ -123,14 +123,15 @@ Without an override file, the extension treats these tools as mutating:
 
 ## Uninstall
 
-Preview and then remove the managed extension:
+Preview and then remove managed integrations:
 
 ```bash
-git-ai uninstall-hooks
+git-ai uninstall-hooks --dry-run
 git-ai uninstall-hooks --dry-run=false
 ```
 
-Uninstall removes `~/.pi/agent/extensions/git-ai.ts`. The user-owned
+This command acts on all managed agent/editor hooks and skills, not just Pi.
+For Pi, it removes `~/.pi/agent/extensions/git-ai.ts`. The user-owned
 `~/.pi/agent/git-ai.override.json` file is left in place; delete it separately
 only if you no longer want the customization.
 

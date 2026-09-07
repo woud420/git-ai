@@ -120,16 +120,12 @@ impl TelemetryBuffer {
 
     pub(super) fn ingest_daemon_logs(&mut self, events: Vec<DaemonLogEvent>) {
         self.daemon_logs.extend(events);
-        self.cap_daemon_logs();
+        Self::cap_oldest(&mut self.daemon_logs);
     }
 
     pub(super) fn requeue_failed_daemon_logs(&mut self, mut failed_events: Vec<DaemonLogEvent>) {
         failed_events.append(&mut self.daemon_logs);
         self.daemon_logs = failed_events;
-        self.cap_daemon_logs();
-    }
-
-    fn cap_daemon_logs(&mut self) {
         Self::cap_oldest(&mut self.daemon_logs);
     }
 

@@ -353,6 +353,40 @@ fn install_rejects_unknown_options_before_side_effects() {
 }
 
 #[test]
+fn eng_389_invalid_api_values_leave_test_home_unchanged() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let config = repo.test_home_path().join(".git-ai/config.json");
+    let global = repo.test_home_path().join(".gitconfig");
+    let original_config = fs::read(&config).unwrap();
+    let original_global = fs::read(&global).ok();
+
+    for subcommand in ["install", "install-hooks"] {
+        for option in ["--api-base", "--api-key"] {
+            for value in ["", "  ", "--help", "-h", "--dry-run", "--skils"] {
+                let error = repo
+                    .git_ai_without_pre_sync_for_test(&[subcommand, option, value])
+                    .expect_err("invalid API value must not reach installation");
+                assert!(error.contains(&format!("missing value for {option}")));
+                assert_eq!(fs::read(&config).unwrap(), original_config);
+                assert_eq!(fs::read(&global).ok(), original_global);
+                assert!(
+                    !repo
+                        .test_home_path()
+                        .join(".git-ai/install-manifest.json")
+                        .exists()
+                );
+            }
+            let error = repo
+                .git_ai_without_pre_sync_for_test(&[subcommand, &format!("{option}=")])
+                .expect_err("empty equals value must not reach installation");
+            assert!(error.contains(&format!("missing value for {option}")));
+            assert_eq!(fs::read(&config).unwrap(), original_config);
+            assert_eq!(fs::read(&global).ok(), original_global);
+        }
+    }
+}
+
+#[test]
 fn test_run_install_hooks_no_args() {
     // This will try to run against the actual system, but should not crash
     // It may fail if binary path cannot be determined, which is acceptable

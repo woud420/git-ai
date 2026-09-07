@@ -37,22 +37,16 @@ pub(super) fn parse_install_action(args: &[String]) -> Result<InstallAction, Git
             "--skills" => options.install_skills = true,
             "--visual-studio-extension" => options.include_visual_studio_extension = true,
             value if value.starts_with("--api-base=") => {
-                options.api_base = non_empty_value(&value[11..]);
+                options.api_base = Some(required_value("--api-base", &value[11..])?);
             }
             "--api-base" => {
-                let value = args.next().ok_or_else(|| {
-                    GitAiError::Generic("missing value for --api-base".to_string())
-                })?;
-                options.api_base = non_empty_value(value);
+                options.api_base = Some(next_value("--api-base", &mut args)?);
             }
             value if value.starts_with("--api-key=") => {
-                options.api_key = non_empty_value(&value[10..]);
+                options.api_key = Some(required_value("--api-key", &value[10..])?);
             }
             "--api-key" => {
-                let value = args.next().ok_or_else(|| {
-                    GitAiError::Generic("missing value for --api-key".to_string())
-                })?;
-                options.api_key = non_empty_value(value);
+                options.api_key = Some(next_value("--api-key", &mut args)?);
             }
             unknown => {
                 return Err(GitAiError::Generic(format!(
@@ -86,12 +80,25 @@ pub(crate) fn print_install_help(command: &str) {
     println!("                               This does not install a VSIX package");
     println!("  --api-base <url>              Save an API base URL in git-ai configuration");
     println!("  --api-key <key>               Save an API key in git-ai configuration");
+    println!("                               Use --api-key=<key> for a key starting with '-'");
     println!("  --help, -h                    Show this help message");
 }
 
-fn non_empty_value(value: &str) -> Option<String> {
+fn next_value(option: &str, args: &mut std::slice::Iter<'_, String>) -> Result<String, GitAiError> {
+    let value = args
+        .next()
+        .map(String::as_str)
+        .filter(|value| !value.trim_start().starts_with('-'))
+        .unwrap_or_default();
+    required_value(option, value)
+}
+
+fn required_value(option: &str, value: &str) -> Result<String, GitAiError> {
     let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
+    if value.is_empty() {
+        return Err(GitAiError::Generic(format!("missing value for {option}")));
+    }
+    Ok(value.to_string())
 }
 
 #[cfg(test)]
@@ -164,6 +171,40 @@ mod tests {
         let args = vec!["--api-base".to_string()];
         let err = parse_install_action(&args).unwrap_err();
         assert!(err.to_string().contains("missing value for --api-base"));
+    }
+
+    #[test]
+    fn eng_389_rejects_empty_or_option_shaped_api_values() {
+        for option in ["--api-base", "--api-key"] {
+            for value in ["", "  ", "--help", "-h", "--dry-run", "--skils", " --help"] {
+                let args = [option.to_string(), value.to_string()];
+                assert!(
+                    parse_install_action(&args).is_err(),
+                    "{option} accepted an empty value or consumed another option"
+                );
+            }
+            for value in ["", "  "] {
+                assert!(parse_install_action(&[format!("{option}={value}")]).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn eng_389_explicit_values_do_not_hide_following_safety_flags() {
+        let options = parsed_install_options(&[
+            "--api-base".to_string(),
+            "https://api.example".to_string(),
+            "--api-key=--literal-key".to_string(),
+            "--dry-run".to_string(),
+        ]);
+        assert!(options.dry_run);
+        assert_eq!(options.api_base.as_deref(), Some("https://api.example"));
+        assert_eq!(options.api_key.as_deref(), Some("--literal-key"));
+        assert_eq!(
+            parse_install_action(&["--api-key=test-key".to_string(), "--help".to_string()])
+                .unwrap(),
+            InstallAction::Help
+        );
     }
 
     #[test]

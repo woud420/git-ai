@@ -1,4 +1,5 @@
 mod cli;
+mod installer_environment;
 
 use crate::config;
 use crate::error::GitAiError;
@@ -329,6 +330,7 @@ pub(crate) fn run_cli(args: &[String]) -> Result<InstallCommandOutcome, GitAiErr
 }
 
 fn run_install(options: InstallOptions) -> Result<HashMap<String, String>, GitAiError> {
+    options.installer_environment.apply();
     let install_config = InstallConfig {
         api_base: options.api_base.clone().or_else(|| {
             std::env::var("API_BASE")

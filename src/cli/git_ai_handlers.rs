@@ -364,6 +364,8 @@ fn print_help() {
     eprintln!("  debug              Print support/debug diagnostics");
     eprintln!("  bg                 Run and control git-ai background service");
     eprintln!("  install-hooks      Configure Git Trace2 and supported agent/editor integrations");
+    eprintln!("    --installer-env NAME=ABSOLUTE_PATH");
+    eprintln!("                           Package-only user path handoff (repeatable)");
     eprintln!("    --skills               Also install agent skill files");
     eprintln!("    --visual-studio-extension");
     eprintln!(

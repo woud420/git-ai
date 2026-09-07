@@ -190,6 +190,9 @@ fn eng_351_review_workflow_has_no_unused_bot_assumptions() {
 
     let mut violations = Vec::new();
     for path in files {
+        if !is_repository_text_file(&path) {
+            continue;
+        }
         let contents = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
         for (line_index, line) in contents.lines().enumerate() {
@@ -1488,6 +1491,21 @@ fn eng_387_repository_declares_one_rust_minimum() {
         "Nix toolchain must use the Cargo.toml minimum"
     );
 
+    // Windows executable search prefers the WSL stub unless PATH is resolved first.
+    let bash_name = if cfg!(windows) { "bash.exe" } else { "bash" };
+    let bash_path = std::env::split_paths(&std::env::var_os("PATH").expect("PATH must be set"))
+        .map(|directory| directory.join(bash_name))
+        .find(|candidate| candidate.is_file())
+        .expect("Git Bash must be available on PATH");
+    let resolved = std::process::Command::new(bash_path)
+        .arg(".github/actions/setup-rust/resolve.sh")
+        .arg("msrv")
+        .current_dir(root)
+        .output()
+        .expect("Rust minimum resolver must run");
+    assert!(resolved.status.success(), "{:?}", resolved);
+    assert_eq!(String::from_utf8(resolved.stdout).unwrap().trim(), msrv);
+
     let pinned_toolchain =
         regex::Regex::new(r#"(?:toolchain:\s*["']?|--default-toolchain\s+)(\d+\.\d+\.\d+)"#)
             .unwrap();
@@ -1504,19 +1522,21 @@ fn eng_387_repository_declares_one_rust_minimum() {
             .filter(|line| !line.trim().starts_with('#'))
             .collect::<Vec<_>>()
             .join("\n");
-        let versions = pinned_toolchain
-            .captures_iter(&executable)
-            .map(|capture| capture[1].to_string())
-            .collect::<Vec<_>>();
         assert!(
-            !versions.is_empty(),
+            executable
+                .lines()
+                .any(|line| line.trim() == "toolchain: msrv"),
             "{relative} must exercise the repository MSRV"
         );
         assert!(
-            versions.iter().all(|version| version == &msrv),
-            "{relative} pins {versions:?}, not Cargo.toml's minimum {msrv}"
+            !pinned_toolchain.is_match(&executable),
+            "{relative} must resolve the MSRV from Cargo.toml instead of duplicating it"
         );
     }
+
+    let release = fs::read_to_string(root.join(".github/workflows/release.yml")).unwrap();
+    assert!(release.contains("bash .github/actions/setup-rust/resolve.sh msrv"));
+    assert!(release.contains("--default-toolchain $RUST_TOOLCHAIN --target"));
 
     let benchmark_setup =
         fs::read_to_string(root.join(".github/actions/setup-performance-benchmarks/action.yml"))

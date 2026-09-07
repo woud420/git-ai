@@ -26,9 +26,9 @@ jobs:
           fetch-depth: 2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.93.0"
+          toolchain: msrv
           components: llvm-tools-preview
 
       - name: Cache dependencies

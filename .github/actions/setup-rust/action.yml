@@ -1,0 +1,30 @@
+name: Setup Rust
+description: Install the repository MSRV or current stable Rust with job-specific components and targets.
+
+inputs:
+  toolchain:
+    description: 'Required policy: msrv (Cargo.toml) or stable (forward-compatibility coverage).'
+    required: true
+  components:
+    description: Comma-separated additional Rust components.
+    default: ''
+  targets:
+    description: Comma-separated additional target triples.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        TOOLCHAIN_POLICY: ${{ inputs.toolchain }}
+      run: |
+        toolchain="$(bash "$GITHUB_ACTION_PATH/resolve.sh" "$TOOLCHAIN_POLICY")"
+        echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+
+    - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      with:
+        toolchain: ${{ steps.resolve.outputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}

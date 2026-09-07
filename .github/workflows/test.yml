@@ -17,6 +17,7 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/actions/setup-gnu-make/**'
+      - '.github/actions/setup-rust/**'
       - '.github/workflows/test.yml'
   push:
     branches: [main]
@@ -30,6 +31,7 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/actions/setup-gnu-make/**'
+      - '.github/actions/setup-rust/**'
       - '.github/workflows/test.yml'
   merge_group:
     branches: [main]
@@ -108,9 +110,8 @@ jobs:
         uses: ./.github/actions/setup-gnu-make
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
-          # Intentionally tracks current stable above the 1.93.0 MSRV.
           toolchain: stable
 
       - name: Cache dependencies
@@ -498,9 +499,8 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
-          # Intentionally tracks current stable above the 1.93.0 MSRV.
           toolchain: stable
 
       - name: Cache dependencies

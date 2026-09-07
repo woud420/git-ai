@@ -90,6 +90,7 @@ jobs:
       - name: Build in Docker (Linux)
         if: matrix.use_docker == true
         run: |
+          RUST_TOOLCHAIN="$(bash .github/actions/setup-rust/resolve.sh msrv)"
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
@@ -101,7 +102,7 @@ jobs:
             bash -c "
               apt-get update && \
               apt-get install -y curl build-essential pkg-config musl-tools && \
-              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.93.0 --target ${{ matrix.target }} && \
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $RUST_TOOLCHAIN --target ${{ matrix.target }} && \
               . \$HOME/.cargo/env && \
               cargo build --release --target ${{ matrix.target }} && \
               strip target/${{ matrix.target }}/release/git-ai
@@ -109,9 +110,9 @@ jobs:
 
       - name: Install Rust toolchain (non-Docker)
         if: matrix.use_docker == false
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.93.0"
+          toolchain: msrv
           targets: ${{ matrix.target }}
 
       - name: Cache dependencies (non-Docker)
@@ -265,9 +266,9 @@ jobs:
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
-          toolchain: "1.93.0"
+          toolchain: msrv
           targets: x86_64-apple-darwin
 
       - name: Cache dependencies
@@ -847,9 +848,8 @@ jobs:
 
       - name: Install Rust toolchain
         if: inputs.release_production == true
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: ./.github/actions/setup-rust
         with:
-          # Intentionally tracks current stable above the 1.93.0 MSRV.
           toolchain: stable
 
       - name: Bump version in Cargo.toml

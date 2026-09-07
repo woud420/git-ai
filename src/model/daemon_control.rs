@@ -27,6 +27,8 @@ pub enum ControlRequest {
     SyncFamily { repo_working_dir: String },
     #[serde(rename = "status.family")]
     StatusFamily { repo_working_dir: String },
+    #[serde(rename = "status.daemon")]
+    StatusDaemon,
     #[serde(rename = "telemetry.submit")]
     SubmitTelemetry { envelopes: Vec<TelemetryEnvelope> },
     #[serde(rename = "cas.submit")]
@@ -223,5 +225,12 @@ mod tests {
                 "params": { "from_ts": 100, "to_ts": 200 }
             })
         );
+    }
+
+    #[test]
+    fn daemon_health_uses_stable_control_method() {
+        let value = serde_json::to_value(ControlRequest::StatusDaemon).unwrap();
+
+        assert_eq!(value, serde_json::json!({ "method": "status.daemon" }));
     }
 }

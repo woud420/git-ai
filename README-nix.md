@@ -200,13 +200,24 @@ home.packages = [
 
 ## Uninstall
 
-Nix owns the package and its declaration; the git-ai binary cannot remove
-either. While `git-ai` is still available, first remove the managed agent and
-editor hooks:
+Nix owns the package and its declaration. `git-ai uninstall` cannot remove a
+Nix-owned package or declaration, but it cleans up runtime hooks, Trace2
+configuration, the daemon, and installer-owned state. While the binary is still
+available, run this cleanup before removing the package:
 
 ```bash
-git-ai uninstall-hooks --dry-run=false
+git-ai uninstall --yes
 ```
+
+The default retains local configuration and databases in `~/.git-ai`. If you
+want to delete those too, use this alternative **instead of** the command above,
+also before removing the package:
+
+```bash
+git-ai uninstall --yes --purge
+```
+
+Neither path removes repo-local `.git/ai` directories.
 
 Editor extensions that require manual removal remain documented in their
 integration READMEs. For a direct profile install, inspect the profile's
@@ -231,18 +242,6 @@ home-manager switch
 sudo nixos-rebuild switch
 darwin-rebuild switch --flake .
 ```
-
-`git-ai uninstall` can remove runtime hooks, Trace2 configuration, and
-installer-owned state, but it cannot remove a Nix-owned package or declaration.
-If local configuration and databases should also be deleted, run the purge
-while the binary is still available:
-
-```bash
-git-ai uninstall --yes --purge
-```
-
-The default uninstall path retains `~/.git-ai`; purge removes it. Neither path
-removes repo-local `.git/ai` directories.
 
 ## Development
 

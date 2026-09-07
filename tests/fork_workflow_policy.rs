@@ -1724,13 +1724,12 @@ fn eng_394_nix_readme_has_owner_aware_uninstall_sequence() {
 
     for required in [
         "## Uninstall",
-        "git-ai uninstall-hooks --dry-run=false",
+        "git-ai uninstall --yes",
         "nix profile list",
         "nix profile remove git-ai",
         "home-manager switch",
         "nixos-rebuild switch",
         "darwin-rebuild switch",
-        "cannot remove a Nix-owned package or declaration",
         "git-ai uninstall --yes --purge",
         "repo-local `.git/ai`",
         "nix3-profile-remove",

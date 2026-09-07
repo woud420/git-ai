@@ -33,7 +33,9 @@ fn daemon_limits_glibc_allocator_arenas() {
 
 #[test]
 fn bounded_helper_pool_sustains_multifile_checkpoint_throughput() {
-    const FILE_COUNT: usize = 12;
+    // Amortize fixed CLI and daemon-control overhead across enough batches
+    // for the throughput floor to stay meaningful on slower hosts.
+    const FILE_COUNT: usize = 48;
     const FILE_WORK_MILLIS: u64 = 200;
     const MIN_FILES_PER_SECOND: f64 = 10.0;
 

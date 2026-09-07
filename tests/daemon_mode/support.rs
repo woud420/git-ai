@@ -33,6 +33,9 @@ mod reingestion;
 #[path = "health.rs"]
 mod health;
 
+#[path = "http_mock.rs"]
+mod http_mock;
+
 #[path = "family_concurrency.rs"]
 mod family_concurrency;
 
@@ -551,6 +554,11 @@ fn handle_http_connection(mut stream: TcpStream, tx: &mpsc::Sender<Value>) {
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Option<(String, Vec<u8>)> {
+    // Accepted sockets inherit the listener's nonblocking mode on macOS.
+    // This parser must wait for client bytes instead of treating WouldBlock as EOF.
+    stream
+        .set_nonblocking(false)
+        .expect("failed to make mock API request reads blocking");
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .expect("failed to set mock API read timeout");

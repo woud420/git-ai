@@ -17,7 +17,7 @@ mod real;
 #[path = "jj_view_support.rs"]
 mod support;
 #[path = "jj_view_vectors.rs"]
-mod vectors;
+pub(super) mod vectors;
 
 use support::*;
 use vectors::*;

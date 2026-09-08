@@ -58,12 +58,13 @@ def metadata(*, rich=False, workspace=None, attrs=(), description=b''):
     return wire, domain
 
 
-def operation(*, meta=None, parents=None, predecessors=None, explicit_meta=True):
+def operation(*, meta=None, parents=None, predecessors=None, explicit_meta=True, view=None):
     if meta is None:
         meta = metadata()
     if parents is None:
         parents = [bytes([0x22]) * 64]
-    view = bytes([0x11]) * 64
+    if view is None:
+        view = bytes([0x11]) * 64
     wire = field(1, view) + b''.join(field(2, p) for p in parents)
     if explicit_meta:
         wire += field(3, meta[0])

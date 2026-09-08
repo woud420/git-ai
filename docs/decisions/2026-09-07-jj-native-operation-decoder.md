@@ -88,6 +88,7 @@ policy checks and all 33 fork workflow policy tests. The dependency lock was
 validated with `cargo metadata --locked`; existing package versions did not change.
 
 The [native view decoder](2026-09-07-jj-native-view-decoder.md) now verifies the
-referenced view format independently. Joining both hashes to journal envelopes,
-bounded integrated-head traversal and validated journal boundaries remain pending.
+referenced view format independently. The [evidence verifier](2026-09-07-jj-native-evidence-verifier.md) joins both hashes
+to journal envelopes. Bounded integrated-head traversal and validated journal
+boundaries remain pending.
 Operation decoding alone does not make native jj checkpoint attribution usable.

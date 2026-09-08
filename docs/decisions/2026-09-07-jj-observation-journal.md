@@ -138,8 +138,9 @@ schema changes, CLI behavior, or daemon work were added.
 
 The native [operation](2026-09-07-jj-native-operation-decoder.md) and
 [view](2026-09-07-jj-native-view-decoder.md) decoders now verify individual content
-addresses. Join them to the evidence envelope, then add bounded traversal and
-validated durable membership queries. A checksummed opaque ancestor is not a
+addresses. The [evidence verifier](2026-09-07-jj-native-evidence-verifier.md) now
+checks their exact envelope join. Bounded traversal and validated durable
+membership queries remain pending. A checksummed opaque ancestor is not a
 certified native boundary; resumed reads must preserve that distinction. Qualify the adapter against real jj operations and
 missing-history cases before connecting an observer or checkpoint ordering.
 Workspace registration, notifications, native capture and attribution application

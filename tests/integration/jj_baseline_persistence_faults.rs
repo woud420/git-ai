@@ -280,3 +280,58 @@ fn jj_baseline_persistence_after_insert_changes_cannot_acknowledge_invalid_nativ
         assert_eq!(native_counts(&fixture), (1, 1));
     }
 }
+
+#[test]
+fn jj_baseline_persistence_caller_rollback_after_both_native_rows_are_inserted() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    journal
+        .capture(&fixture.batch(FIRST_ID, vec![first()]))
+        .unwrap();
+    let opaque_status = journal.status(&fixture.source).unwrap();
+    let opaque_pending = journal.pending(&fixture.source, 8).unwrap();
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER fail_after_both_native_rows
+         AFTER INSERT ON jj_native_sources
+         BEGIN
+           SELECT CASE WHEN
+             (SELECT count(*) FROM jj_native_baselines
+              WHERE source_id = NEW.source_id AND baseline_id = NEW.baseline_id) = 1
+             AND (SELECT count(*) FROM jj_native_sources
+                  WHERE source_id = NEW.source_id AND baseline_id = NEW.baseline_id) = 1
+           THEN RAISE(FAIL, 'injected failure after both native rows')
+           ELSE RAISE(FAIL, 'injected failure before both native rows') END;
+         END;",
+    )
+    .unwrap();
+
+    // FAIL retains the statement's prior changes; the transaction owner must
+    // roll back both rows after the trigger confirms their simultaneous presence.
+    rejected(
+        install(&mut journal, &fixture.source, &[first()]),
+        "injected failure after both native rows",
+    );
+    assert_eq!(native_counts(&fixture), (0, 0));
+    assert_eq!(journal.status(&fixture.source).unwrap(), opaque_status);
+    assert_eq!(journal.pending(&fixture.source, 8).unwrap(), opaque_pending);
+    drop(journal);
+
+    let mut journal = fixture.open();
+    let mut budget = ReadBudget::new(0);
+    assert!(
+        reopen_current_state_baseline(&journal, &fixture.source, &mut budget)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(budget.consumed(), 0);
+    assert_eq!(journal.status(&fixture.source).unwrap(), opaque_status);
+    assert_eq!(journal.pending(&fixture.source, 8).unwrap(), opaque_pending);
+    conn.execute_batch("DROP TRIGGER fail_after_both_native_rows")
+        .unwrap();
+    let receipt = installed(install(&mut journal, &fixture.source, &[first()]).unwrap());
+    assert_receipt(&receipt, &fixture.source, &[FIRST_ID.to_owned()]);
+    assert_eq!(native_counts(&fixture), (1, 1));
+    assert_eq!(journal.status(&fixture.source).unwrap(), opaque_status);
+    assert_eq!(journal.pending(&fixture.source, 8).unwrap(), opaque_pending);
+}

@@ -1,13 +1,15 @@
 //! Structural storage for a current-state cutoff; no native decoding occurs here.
 
-use super::{JjObservationJournal, JournalError, ReadBudget, codec, invalid, sql_error};
+use super::{JjObservationJournal, JournalError, ReadBudget, invalid, sql_error};
 use crate::model::jj_observation::{JjOperationEvidence, validate_source};
-use rusqlite::{TransactionBehavior, params};
+use rusqlite::TransactionBehavior;
 
 mod bounded;
+mod prepared;
 mod read;
 mod types;
 
+use prepared::PreparedBaseline;
 pub(crate) use types::NativeBaselineState;
 use types::{MAX_BASELINE_BYTES, MAX_STATE_BYTES, Request, StoredBaseline};
 
@@ -31,11 +33,7 @@ impl JjObservationJournal {
         anchors: &[&JjOperationEvidence],
     ) -> Result<NativeInstallOutcome, JournalError> {
         let request = Request::new(source, expected_generation, profile, heads, anchors)?;
-        // Only bounded vectors of references are canonicalized; raw evidence is not cloned.
-        let record_bytes = codec::encode(&request, MAX_BASELINE_BYTES)?;
-        let baseline_id = codec::checksum(&record_bytes);
-        let state = request.state(baseline_id);
-        let state_bytes = codec::encode(&state, MAX_STATE_BYTES)?;
+        let prepared = PreparedBaseline::new(request)?;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -46,34 +44,15 @@ impl JjObservationJournal {
             &mut ReadBudget::new(MAX_BASELINE_BYTES + MAX_STATE_BYTES),
         )?;
         if let Some(existing) = existing {
-            if existing.state.baseline_id == state.baseline_id {
-                if !request.matches(&existing.record) || existing.state != state {
+            if existing.state.baseline_id == prepared.state.baseline_id {
+                if !prepared.request.matches(&existing.record) || existing.state != prepared.state {
                     return Err(invalid("native baseline receipt identity conflict"));
                 }
                 return Ok(NativeInstallOutcome::AlreadyInstalled(existing.state));
             }
             return Err(invalid("native baseline installation conflict"));
         }
-        let inserted = tx.execute(
-            "INSERT INTO jj_native_baselines(source_id, baseline_id, record, checksum) VALUES (?1, ?2, ?3, ?4)",
-            params![source, state.baseline_id, record_bytes, state.baseline_id],
-        ).map_err(|error| sql_error("persist native baseline record", error))?;
-        if inserted != 1 {
-            return Err(invalid(
-                "native baseline record insert did not persist one row",
-            ));
-        }
-        let inserted = tx.execute(
-            "INSERT INTO jj_native_sources(source_id, baseline_id, state, checksum) VALUES (?1, ?2, ?3, ?4)",
-            params![source, state.baseline_id, state_bytes, codec::checksum(&state_bytes)],
-        ).map_err(|error| sql_error("persist native baseline state", error))?;
-        if inserted != 1 {
-            return Err(invalid(
-                "native baseline state insert did not persist one row",
-            ));
-        }
-        drop(record_bytes);
-        drop(state_bytes);
+        let (request, state) = prepared.insert_into(&tx)?;
         // AFTER triggers can alter rows despite a successful affected-row count.
         let installed = read::snapshot(
             &tx,

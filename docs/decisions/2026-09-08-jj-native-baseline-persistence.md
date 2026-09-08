@@ -47,6 +47,13 @@ SQLite uses the journal's existing
 FULL synchronous, WAL, foreign-key, cache, and bounded busy-timeout policies.
 Commit acknowledgment is not a universal power-loss guarantee.
 
+A private `PreparedBaseline` now owns canonical encoding and the two inserts.
+Its consuming insertion method borrows the caller transaction and releases both
+encoded buffers before returning the request and state for bounded readback.
+The existing persistence path remains the immediate consumer and owns the sole
+commit. This permits later atomic registration composition without changing the
+namespace-only API, wire format, retry order or read allowance.
+
 A missing state with a retained receipt is a gap. A missing active receipt,
 unexpected extra source-local receipt, scalar/payload identity disagreement, or
 corruption is an error. Neither reinstall nor opaque-row fallback repairs these
@@ -89,14 +96,14 @@ must make the discontinuity explicit and preserve appropriate receipts.
 
 ## Verification
 
-The integration package includes 27 default TestRepo cases and one ignored pinned
+The original persistence increment included 27 default TestRepo cases and one ignored pinned
 real-jj lane. It covers canonical/raw-sensitive retries, source isolation, opaque
 independence, concurrent writers, atomic, ignored-insert and after-insert readback faults, missing/extra
 records, malformed types/limits, budgets, and native corruption after storage
 checksums/digests have been repaired. The real lane leaves prior parents unread
 and checks unchanged source/workspace files after install/reopen/retry.
 
-All 28 persistence cases passed, including the explicit pinned real-jj lane.
+All 28 original persistence cases passed, including the explicit pinned real-jj lane.
 The complete increment passed 180 top-level tests: 45 baseline preparation and
 persistence cases, 86 journal cases, four journal unit tests (including the two
 sequence-hint checks), twelve source/storage policies and 33 fork workflow
@@ -108,3 +115,13 @@ failed against the initial implementation before transactional readback was
 added. Independent review cleared the final change. Local runtime qualification
 is on macOS; new-head Linux and Windows execution remains a CI gate. Logs are
 retained as `git-ai-jj-baseline-persistence-*`.
+
+The transaction extraction added a TestRepo failure after both native inserts;
+all 28 ordinary persistence cases passed before and after the refactor. Its new
+private helper test first failed on the missing symbol, then proved uncommitted
+visibility on a separate connection, caller rollback, and caller commit. The
+pinned real-jj case passed again, as did all 303 default jj integration cases
+(with 14 explicit/child lanes ignored by that command). Independent comparison
+confirmed the moved SQL, error text, retry ordering and final readback behavior.
+The extraction changes transaction composition only; no registration install or
+filesystem seal is enabled.

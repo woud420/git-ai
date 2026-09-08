@@ -168,5 +168,6 @@ mod usage_period;
 mod utf8_filenames;
 mod virtual_attribution_unit;
 mod windsurf;
+mod workspace_context;
 mod worktrees;
 mod wsl_packaged_install;

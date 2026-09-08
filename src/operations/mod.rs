@@ -8,3 +8,4 @@ pub mod git;
 pub mod jj;
 pub mod mdm;
 pub mod streams;
+pub mod workspace_context;

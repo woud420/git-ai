@@ -9,7 +9,7 @@ fn repo() -> TestRepo {
     TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon)
 }
 
-fn context_output(repo: &TestRepo, cwd: &Path) -> Output {
+pub(super) fn context_output(repo: &TestRepo, cwd: &Path) -> Output {
     repo.git_ai_command_without_pre_sync_for_test(&["debug", "context", "--json"], &[])
         .current_dir(cwd)
         .output()
@@ -31,7 +31,7 @@ fn canonical(path: &Path) -> Value {
     json!(path.canonicalize().unwrap())
 }
 
-fn jj_layout(root: &Path) {
+pub(super) fn jj_layout(root: &Path) {
     fs::create_dir_all(root.join(".jj/working_copy")).unwrap();
     fs::write(root.join(".jj/working_copy/type"), "local").unwrap();
     fs::create_dir_all(root.join(".jj/repo/store")).unwrap();

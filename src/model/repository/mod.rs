@@ -24,3 +24,6 @@ pub mod metrics_db;
 pub mod notes_db;
 pub mod sqlite;
 pub mod streams_db;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod jj_observer_intent;

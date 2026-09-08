@@ -15,7 +15,7 @@ mod templates;
 mod worktree;
 
 use command_runner::*;
-pub(crate) use command_runner::{RawGitCommand, run_raw_git_plumbing};
+pub(crate) use command_runner::{RawGitCommand, run_command_output, run_raw_git_plumbing};
 pub(crate) use completion_log::DaemonTestCompletionLogEntry;
 use completion_log::*;
 use daemon_process::*;

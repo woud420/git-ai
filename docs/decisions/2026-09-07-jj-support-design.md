@@ -1,13 +1,13 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification, explicit source registration and bounded registered-history collection are implemented on the draft branch. The collector is locally qualified on macOS. Durable native admission is implemented and locally qualified on macOS; experimental read-only observation diagnostics are also implemented and locally qualified. Explicit initialization/capture commands, bounded reconciliation and finite foreground observation are also implemented and locally qualified; unattended restart, scalable catch-up and attribution remain pending.
+Status: proposed native-attribution architecture; discovery, verified native reading, durable observations, explicit registration, bounded history admission/reconciliation, and experimental foreground and daemon observation are implemented on the draft branch and locally qualified on macOS. Scalable catch-up and native attribution remain pending.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
 
 Reader decision: [ENG-413 proof and replay contract](2026-09-07-jj-reader-proof.md). The prototype validates operation/view domain hashes without Git object access. Resumption requires durable operation membership; raw head sets alone do not cover late concurrency. Recorded import predecessors may be synthetic, so they do not by themselves prove attribution.
 
-Journal contract: [ENG-415 local storage increment](2026-09-07-jj-observation-journal.md). Atomic evidence capture and observed progress are implemented independently of the daemon. Applied attribution remains empty until later replay work.
+Journal contract: [ENG-415 local storage increment](2026-09-07-jj-observation-journal.md). Atomic evidence capture and observed progress are implemented. The experimental [daemon observer](2026-09-08-jj-daemon-observation.md) consumes the native admission journal; applied attribution remains empty until later replay work.
 
 ## Problem and recommendation
 
@@ -75,9 +75,10 @@ CLI output as proof of what happened before a checkpoint.
 
 ## Architecture
 
-Solid arrows below describe the intended end state. The jj observer, validated
-event envelope, and jj checkpoint identity are proposed components; the Git
-Trace2, repository-family actor, and authorship backend already exist.
+Solid arrows below describe the intended end state. The bounded native observer
+now exists; its integration with the shared ordering/attribution pipeline and jj
+checkpoint identity remain proposed. The Git Trace2, repository-family actor,
+and authorship backend already exist.
 
 ```mermaid
 flowchart TD
@@ -317,7 +318,7 @@ is recorded in that decision. It returns evidence without advancing any journal 
 [Durable native admission](2026-09-08-jj-native-admission.md) now composes retained
 collection, transactional native revalidation and a separate generation cursor;
 local qualification is recorded in that decision. P2/ENG-415 stays in progress. Attachment
-mutation, explicit recovery and unattended observation remain pending.
+mutation and scalable history recovery remain pending.
 The [observation diagnostics decision](2026-09-08-jj-observation-diagnostics.md)
 records the implemented experimental status/receipt commands and exact-schema read-only opener.
 The [explicit capture decision](2026-09-08-jj-explicit-capture.md) records the
@@ -330,7 +331,10 @@ adds no scheduler or automatic activation.
 The [finite observation decision](2026-09-08-jj-finite-observation.md) records the
 implemented foreground command: serial attempts, fresh collection policy,
 verified cursor carry and flushed JSON output. It retains the original target
-and stops on failure; durable restart and scalable closure remain pending.
+and stops on failure. The [daemon observation decision](2026-09-08-jj-daemon-observation.md)
+adds explicit activation, one durable target per daemon home, verified restart,
+serial reconciliation and explicit resume after a block. Scalable closure and
+native attribution remain pending.
 Later phases remain tracked until their acceptance tests pass. These increments are
 published on [draft PR #247](https://github.com/woud420/git-ai/pull/247) and do not
 enable native attribution. Work continues in scoped commits with human review

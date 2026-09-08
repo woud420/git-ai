@@ -26,6 +26,7 @@ pub mod transcript_redaction;
 // methods via the type itself.
 pub(crate) mod actor_coordinator_base;
 pub(crate) mod actor_coordinator_control;
+pub(crate) mod actor_coordinator_control_requests;
 pub(crate) mod actor_coordinator_drain;
 pub(crate) mod actor_coordinator_fences;
 pub(crate) mod actor_coordinator_ingest;
@@ -53,6 +54,9 @@ pub(crate) mod client_helpers;
 pub(crate) mod daemon_config;
 pub(crate) mod git_op_side_effects;
 pub(crate) mod health;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod jj_observer;
+pub(crate) mod jj_observer_control;
 pub(crate) mod lifecycle;
 pub(crate) mod log_setup;
 pub(crate) mod memory_watchdog;

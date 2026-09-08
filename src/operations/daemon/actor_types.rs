@@ -239,6 +239,8 @@ pub struct ActorDaemonCoordinator {
     pub(crate) trace_ingest_tx: std::sync::OnceLock<mpsc::Sender<Value>>,
     pub(crate) telemetry_worker:
         Option<crate::operations::daemon::telemetry_worker::DaemonTelemetryWorkerHandle>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(crate) jj_observer: Option<Arc<super::jj_observer::Observer>>,
     pub(crate) stream_worker: Option<crate::operations::daemon::stream_worker::StreamWorkerHandle>,
     pub(crate) transcript_shutdown_notify: std::sync::OnceLock<Arc<tokio::sync::Notify>>,
     pub(crate) streams_db: Option<Arc<crate::model::repository::streams_db::StreamsDatabase>>,

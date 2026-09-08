@@ -101,6 +101,7 @@ mod jj_capture;
 mod jj_checkout;
 mod jj_debug_cli;
 mod jj_debug_observe_cli;
+mod jj_debug_observer_cli;
 mod jj_debug_write_cli;
 mod jj_evidence;
 mod jj_history_platform;

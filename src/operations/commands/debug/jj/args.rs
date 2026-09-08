@@ -51,6 +51,7 @@ pub(super) enum Request<'a> {
         expected: ExpectedArgs<'a>,
     },
     Observe(ObserveArgs<'a>),
+    Observer(super::observer_args::Request<'a>),
 }
 
 pub(super) fn is_help(input: &[String]) -> bool {
@@ -59,14 +60,19 @@ pub(super) fn is_help(input: &[String]) -> bool {
         [action, flag] => {
             matches!(
                 action.as_str(),
-                "status" | "receipt" | "initialize" | "capture" | "observe"
+                "status" | "receipt" | "initialize" | "capture" | "observe" | "observer"
             ) && matches!(flag.as_str(), "--help" | "-h")
+        }
+        [group, action, flag] => {
+            group == "observer"
+                && matches!(action.as_str(), "enable" | "status" | "disable" | "resume")
+                && matches!(flag.as_str(), "--help" | "-h")
         }
         _ => false,
     }
 }
 
-fn usage() -> Error {
+pub(super) fn usage() -> Error {
     Error::new("usage", "Use git-ai debug jj --help for command syntax.")
 }
 
@@ -117,6 +123,9 @@ fn bounded_control(
 }
 
 pub(super) fn parse(input: &[String]) -> Result<Request<'_>, Error> {
+    if input.first().is_some_and(|value| value == "observer") {
+        return super::observer_args::parse(&input[1..]).map(Request::Observer);
+    }
     let (action, options) = input.split_first().ok_or_else(usage)?;
     let action = action.as_str();
     let limit = match action {

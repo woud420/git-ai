@@ -77,11 +77,12 @@ Polling more often and restarting this command do not shorten that history.
 Missing required ancestry, target changes and cursor conflicts stop the run;
 there is no rebaseline, partial resume or automatic recovery.
 
-A durable unattended observer needs separately designed restart bookkeeping,
-scheduling and scalable closure. Shared ordinary checkpoint, status, blame and
-stats behavior still depends on the ordering and attribution phases. This
-command exercises observation through the common `git-ai` executable while
-those phases remain pending.
+A separately enabled [daemon observer](2026-09-08-jj-daemon-observation.md)
+adds unattended scheduling and intentional restart from verified source progress.
+It retains the same original-cutoff limitation; scalable closure remains pending.
+Shared ordinary checkpoint, status, blame and stats behavior still depends on
+the ordering and attribution phases. This finite command keeps its existing
+foreground lifetime and caller-supplied expectation semantics.
 
 ## Qualification
 

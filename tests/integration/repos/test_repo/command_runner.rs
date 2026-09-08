@@ -165,7 +165,7 @@ pub(super) fn configure_test_home_env(command: &mut Command, test_home: &Path) {
     }
 }
 
-pub(super) fn run_command_output(command: &mut Command, label: &str) -> Result<Output, String> {
+pub(crate) fn run_command_output(command: &mut Command, label: &str) -> Result<Output, String> {
     run_command_output_with_timeout(command, label, TEST_SUBPROCESS_TIMEOUT)
 }
 

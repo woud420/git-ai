@@ -9,4 +9,6 @@ pub mod git_handlers;
 mod hook_input;
 mod machine_json;
 pub(crate) use machine_json::print_machine_json;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) use machine_json::print_machine_json_serializable;
 pub(crate) mod style;

@@ -381,6 +381,12 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
     remove_socket_if_exists(&config.control_socket_path)?;
 
     let mut coordinator_inner = ActorDaemonCoordinator::new();
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        coordinator_inner.jj_observer = Some(Arc::new(super::jj_observer::Observer::new(
+            config.internal_dir.join("jj-observer-intent.sqlite"),
+        )));
+    }
 
     // Resolve store handles once here (pre-Arc window) so neither the telemetry
     // flush loop nor the coordinator control handlers call ::global() at runtime.
@@ -447,6 +453,11 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
 
     let coordinator = Arc::new(coordinator_inner);
     coordinator.register_self();
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let observer_task = coordinator
+        .jj_observer
+        .as_ref()
+        .map(|observer| observer.start(Arc::clone(&coordinator)));
     coordinator.start_trace_ingest_worker()?;
     if let Some(limit_mb) = crate::config::Config::get().daemon_memory_limit_mb()
         && let Some(limit_bytes) = limit_mb.checked_mul(crate::config::MEBIBYTE_BYTES)
@@ -552,6 +563,17 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(task) = observer_task {
+        let remaining = join_deadline.saturating_duration_since(std::time::Instant::now());
+        // A timed-out JoinHandle detaches; it does not cancel a blocking native job.
+        match tokio::time::timeout(remaining, task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!(%error, "jj observer worker did not exit cleanly"),
+            Err(_) => tracing::warn!("jj observer worker did not drain before shutdown deadline"),
         }
     }
 

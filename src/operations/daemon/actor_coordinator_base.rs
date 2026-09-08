@@ -75,6 +75,8 @@ impl ActorDaemonCoordinator {
             trace_ingest_tx: std::sync::OnceLock::new(),
             telemetry_worker: None,
             stream_worker: None,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            jj_observer: None,
             transcript_shutdown_notify: std::sync::OnceLock::new(),
             streams_db: None,
             bash_history_db: None,

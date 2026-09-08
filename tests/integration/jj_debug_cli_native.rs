@@ -122,3 +122,6 @@ pub(super) fn dispatch(case: &Case, config: &Config) {
         other => panic!("unknown debug CLI fixture {other}"),
     }
 }
+
+#[path = "jj_daemon_observer_native.rs"]
+mod daemon_observer;

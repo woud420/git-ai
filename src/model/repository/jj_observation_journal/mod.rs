@@ -47,6 +47,29 @@ impl fmt::Display for JournalError {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl JournalError {
+    pub(crate) fn diagnostic(self) -> String {
+        match self {
+            // Opening errors may embed filenames in their free-form cause.
+            JournalError::Persistence(PersistenceError::Sqlite {
+                operation, code, ..
+            }) => {
+                let code = code
+                    .map(|code| format!("{code:?}"))
+                    .unwrap_or_else(|| "SQLite error".to_owned());
+                format!("Journal {operation} failed ({code}).")
+            }
+            JournalError::Persistence(PersistenceError::Io {
+                operation, kind, ..
+            }) => {
+                format!("Journal {operation} failed ({kind:?}).")
+            }
+            other => other.to_string(),
+        }
+    }
+}
+
 impl std::error::Error for JournalError {}
 
 impl From<JjObservationError> for JournalError {

@@ -37,3 +37,10 @@ pub(super) fn observe(request: super::args::ObserveArgs<'_>) -> Result<Value, Er
     let _ = (expected, workspace, attachment, attempts, interval_ms);
     status(journal)
 }
+
+pub(super) fn observer(request: super::observer_args::Request<'_>) -> Result<Value, Error> {
+    if let super::observer_args::Request::Enable { journal } = request {
+        let _ = journal;
+    }
+    status(Path::new(""))
+}

@@ -5,6 +5,9 @@ mod args;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod observe;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+mod observer;
+mod observer_args;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod shared;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod write;
@@ -53,7 +56,13 @@ pub(super) fn handle(input: &[String]) -> i32 {
              Initialize, capture and observe can create or migrate the journal before full repository policy checks.\n\
              Initialize retains the original cutoff on retry; capture requires an explicit expected cursor.\n\
              Capture accepts 1-32 distinct nonroot heads and canonical generation 0 through i64::MAX-1.\n\
-             Initialization failure may leave an unavailable source seal. No automatic recovery or background observer."
+             git-ai debug jj observer enable --journal PATH --json\n\
+             git-ai debug jj observer status --json\n\
+             git-ai debug jj observer disable --json\n\
+             git-ai debug jj observer resume --json\n\
+             Observer explicitly enables one experimental daemon target and retains the original cutoff.\n\
+             Disable reports stopping until in-flight work drains; resume validates the saved target and current journal cursor.\n\
+             Initialization failure may leave an unavailable source seal. No automatic recovery."
         );
         return 0;
     }
@@ -74,6 +83,16 @@ pub(super) fn handle(input: &[String]) -> i32 {
         args::Request::Initialize { journal } => write::initialize(journal),
         args::Request::Capture { journal, expected } => {
             write::capture(journal, expected.expectation())
+        }
+        args::Request::Observer(request) => {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                return observer::run(request);
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                read::observer(request)
+            }
         }
         args::Request::Observe(request) => {
             #[cfg(any(target_os = "linux", target_os = "macos"))]

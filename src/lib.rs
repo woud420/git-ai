@@ -5,6 +5,7 @@ pub mod config;
 pub mod diagnostic_sentinels;
 pub mod error;
 pub mod feature_flags;
+pub(crate) mod hex;
 pub mod metrics;
 pub mod model;
 pub mod notes;

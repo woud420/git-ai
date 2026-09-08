@@ -1,6 +1,5 @@
 use super::Error;
 use crate::config::Config;
-use crate::model::repository::error::PersistenceError;
 use crate::model::repository::jj_observation_journal::{JjObservationJournal, JournalError};
 use crate::operations::workspace_context::{WorkspaceContext, discover};
 use std::path::Path;
@@ -33,23 +32,7 @@ pub(super) fn current_context(config: &Config, action: &str) -> Result<Workspace
 }
 
 pub(super) fn journal_error(error: JournalError) -> Error {
-    let message = match error {
-        // Opening errors may embed filenames in their free-form cause.
-        JournalError::Persistence(PersistenceError::Sqlite {
-            operation, code, ..
-        }) => {
-            let code = code
-                .map(|code| format!("{code:?}"))
-                .unwrap_or_else(|| "SQLite error".to_owned());
-            format!("Journal {operation} failed ({code}).")
-        }
-        JournalError::Persistence(PersistenceError::Io {
-            operation, kind, ..
-        }) => {
-            format!("Journal {operation} failed ({kind:?}).")
-        }
-        other => other.to_string(),
-    };
+    let message = error.diagnostic();
     Error::new("journal_unavailable", message)
 }
 
@@ -64,7 +47,7 @@ pub(super) fn open_writable_journal(
     Ok(journal)
 }
 
-fn ordinary_journal_path(path: &Path) -> Result<(), Error> {
+pub(super) fn ordinary_journal_path(path: &Path) -> Result<(), Error> {
     // Bundled SQLite interprets URI names even without SQLITE_OPEN_URI.
     if path.as_os_str().is_empty()
         || path == Path::new(":memory:")

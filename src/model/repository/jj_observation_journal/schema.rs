@@ -1,5 +1,7 @@
 use super::{DB_LABEL, JournalError, PersistenceError, sql_error};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, TransactionBehavior};
+
+mod native;
 
 const SCHEMA: &str = "
 CREATE TABLE schema_metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -47,30 +49,80 @@ pub(super) fn initialize(conn: &mut Connection) -> Result<(), JournalError> {
     if table_count == 0 {
         tx.execute_batch(SCHEMA)
             .map_err(|error| sql_error("create schema", error))?;
-    } else {
-        let version = tx.query_row(
-            "SELECT length(value), substr(value, 1, 16) FROM schema_metadata WHERE key = 'version'",
-            [], |row| Ok((row.get::<_, u64>(0)?, row.get::<_, String>(1)?)),
-        ).optional().map_err(|error| sql_error("read schema version", error))?;
-        if version != Some((1, "1".to_owned())) {
-            return Err(PersistenceError::Migration {
-                db: DB_LABEL,
-                found: "unsupported or malformed".to_owned(),
-                supported: "1".to_owned(),
-            }
-            .into());
-        }
-        tx.prepare("SELECT source_id, state, checksum FROM jj_sources LIMIT 0")
-            .map_err(|error| sql_error("verify source schema", error))?;
-        tx.prepare("SELECT source_id, operation_id, sequence, payload, checksum FROM jj_operations LIMIT 0")
-            .map_err(|error| sql_error("verify operation schema", error))?;
-        tx.prepare("SELECT source_id, digest, receipt, checksum FROM jj_batches LIMIT 0")
-            .map_err(|error| sql_error("verify receipt schema", error))?;
-        tx.prepare("SELECT source_id, view_id, operation_id FROM jj_views LIMIT 0")
-            .map_err(|error| sql_error("verify view schema", error))?;
     }
+    let version = read_version(&tx)?;
+    verify_opaque_schema(&tx)?;
+    if version == 1 {
+        // Unconditional creation rejects even correctly shaped partial native
+        // tables. The version and all DDL remain in this same transaction.
+        native::create(&tx)?;
+        let updated = tx
+            .execute(
+                "UPDATE schema_metadata SET value = '2' WHERE key = 'version'",
+                [],
+            )
+            .map_err(|error| sql_error("record native schema version", error))?;
+        if updated != 1 || read_version(&tx)? != 2 {
+            return Err(unsupported_schema());
+        }
+    }
+    native::verify(&tx)?;
     tx.commit()
         .map_err(|error| sql_error("commit schema initialization", error))
+}
+
+fn read_version(conn: &Connection) -> Result<u8, JournalError> {
+    // Compare bytes so a permissive column collation cannot accept another
+    // spelling; only the bounded numeric result is materialized.
+    let mut statement = conn
+        .prepare(
+            "SELECT CASE WHEN typeof(value) = 'text' THEN
+                 CASE CAST(value AS BLOB) WHEN X'31' THEN 1 WHEN X'32' THEN 2 END
+             END FROM schema_metadata WHERE key = 'version' LIMIT 2",
+        )
+        .map_err(|error| sql_error("read schema version", error))?;
+    let mut rows = statement
+        .query([])
+        .map_err(|error| sql_error("read schema version", error))?;
+    let row = rows
+        .next()
+        .map_err(|error| sql_error("read schema version", error))?
+        .ok_or_else(unsupported_schema)?;
+    let version = row
+        .get::<_, Option<u8>>(0)
+        .map_err(|error| sql_error("read schema version", error))?
+        .ok_or_else(unsupported_schema)?;
+    if rows
+        .next()
+        .map_err(|error| sql_error("read schema version", error))?
+        .is_some()
+    {
+        return Err(unsupported_schema());
+    }
+    Ok(version)
+}
+
+fn verify_opaque_schema(conn: &Connection) -> Result<(), JournalError> {
+    conn.prepare("SELECT source_id, state, checksum FROM jj_sources LIMIT 0")
+        .map_err(|error| sql_error("verify source schema", error))?;
+    conn.prepare(
+        "SELECT source_id, operation_id, sequence, payload, checksum FROM jj_operations LIMIT 0",
+    )
+    .map_err(|error| sql_error("verify operation schema", error))?;
+    conn.prepare("SELECT source_id, digest, receipt, checksum FROM jj_batches LIMIT 0")
+        .map_err(|error| sql_error("verify receipt schema", error))?;
+    conn.prepare("SELECT source_id, view_id, operation_id FROM jj_views LIMIT 0")
+        .map_err(|error| sql_error("verify view schema", error))?;
+    Ok(())
+}
+
+fn unsupported_schema() -> JournalError {
+    PersistenceError::Migration {
+        db: DB_LABEL,
+        found: "unsupported or malformed".to_owned(),
+        supported: "2".to_owned(),
+    }
+    .into()
 }
 
 #[cfg(test)]

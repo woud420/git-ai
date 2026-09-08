@@ -1488,3 +1488,6 @@ fn jj_journal_lookup_rejects_a_missing_requested_observed_head() {
 
 #[path = "jj_observation_read_budget.rs"]
 mod read_budget;
+
+#[path = "jj_observation_schema_migration.rs"]
+mod schema_migration;

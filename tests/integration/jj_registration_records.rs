@@ -89,6 +89,10 @@ fn jj_registration_records_reopen_preserves_both_platforms_and_exact_raw_bytes()
         let (fixture, conn) = record_fixture();
         insert_record(&conn, vector(source));
         insert_record(&conn, vector(workspace));
+        let payloads = registered_payload_snapshot(&conn);
+        drop(fixture.open());
+        assert_eq!(registered_payload_snapshot(&conn), payloads);
+        assert_version(&conn, "4");
         let before = complete_snapshot(&conn);
         for _ in 0..2 {
             let journal = fixture.open();

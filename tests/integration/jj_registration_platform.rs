@@ -82,5 +82,5 @@ fn jj_registration_unqualified_platform_rejects_before_context_or_policy_access(
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "3");
+    assert_eq!(version, "4");
 }

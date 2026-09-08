@@ -42,7 +42,7 @@ fn jj_registration_schema_aborted_v3_version_update_rolls_back_entire_upgrade_ch
             conn.execute_batch("DROP TRIGGER reject_registration_upgrade")
                 .unwrap();
             fixture.assert_only_first(&fixture.open());
-            assert_v3_shape(&conn);
+            assert_latest_registration_shape(&conn);
             assert_registration_tables_empty(&conn);
             assert_eq!(opaque_snapshot(&conn), before_opaque);
             if let Some(before_native) = before_native {
@@ -74,7 +74,7 @@ fn jj_registration_schema_ignored_v3_update_cannot_commit_registration_or_native
         conn.execute_batch("DROP TRIGGER ignore_registration_upgrade")
             .unwrap();
         drop(fixture.open());
-        assert_v3_shape(&conn);
+        assert_latest_registration_shape(&conn);
         assert_registration_tables_empty(&conn);
     }
 }

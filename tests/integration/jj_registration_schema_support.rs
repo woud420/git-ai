@@ -172,6 +172,15 @@ pub(super) fn index(origin: &str, columns: &[&str]) -> IndexShape {
 
 pub(super) fn assert_v3_shape(conn: &Connection) {
     assert_version(conn, "3");
+    assert_registration_shape(conn);
+}
+
+pub(super) fn assert_latest_registration_shape(conn: &Connection) {
+    assert_version(conn, "4");
+    assert_registration_shape(conn);
+}
+
+fn assert_registration_shape(conn: &Connection) {
     assert_columns(
         conn,
         "jj_native_registrations",
@@ -239,4 +248,13 @@ pub(super) fn assert_v3_shape(conn: &Connection) {
         workspace_fk,
         vec![fk(0, "jj_native_registrations", "source_id", "source_id")]
     );
+}
+
+pub(super) fn registered_payload_snapshot(conn: &Connection) -> Vec<Vec<Vec<Value>>> {
+    let mut result = opaque_snapshot(conn);
+    result.extend(native_snapshot(conn));
+    for table in ["jj_native_registrations", "jj_native_workspaces"] {
+        result.push(rows(conn, &format!("SELECT * FROM {table} ORDER BY rowid")));
+    }
+    result
 }

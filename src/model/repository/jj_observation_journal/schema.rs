@@ -1,6 +1,7 @@
 use super::{DB_LABEL, JournalError, PersistenceError, sql_error};
 use rusqlite::{Connection, TransactionBehavior};
 
+mod admission;
 mod indexes;
 mod metadata;
 mod native;
@@ -66,8 +67,14 @@ pub(super) fn initialize(conn: &mut Connection) -> Result<(), JournalError> {
     if version == 2 {
         registration::create(&tx)?;
         advance_version(&tx, 3, "record registration schema version")?;
+        version = 3;
     }
     registration::verify(&tx)?;
+    if version == 3 {
+        admission::create(&tx)?;
+        advance_version(&tx, 4, "record admission schema version")?;
+    }
+    admission::verify(&tx)?;
     tx.commit()
         .map_err(|error| sql_error("commit schema initialization", error))
 }
@@ -95,7 +102,7 @@ fn read_version(conn: &Connection) -> Result<u8, JournalError> {
     let mut statement = conn
         .prepare(
             "SELECT CASE WHEN typeof(value) = 'text' THEN
-                 CASE CAST(value AS BLOB) WHEN X'31' THEN 1 WHEN X'32' THEN 2 WHEN X'33' THEN 3 END
+                 CASE CAST(value AS BLOB) WHEN X'31' THEN 1 WHEN X'32' THEN 2 WHEN X'33' THEN 3 WHEN X'34' THEN 4 END
              END FROM schema_metadata WHERE key = 'version' LIMIT 2",
         )
         .map_err(|error| sql_error("read schema version", error))?;
@@ -138,7 +145,7 @@ fn unsupported_schema() -> JournalError {
     PersistenceError::Migration {
         db: DB_LABEL,
         found: "unsupported or malformed".to_owned(),
-        supported: "3".to_owned(),
+        supported: "4".to_owned(),
     }
     .into()
 }

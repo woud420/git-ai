@@ -16,6 +16,11 @@ const NATIVE_STATE_COUNT_SQL: &str = "SELECT 1 FROM jj_native_sources
 const NATIVE_BASELINE_EXISTS_SQL: &str = "SELECT 1 FROM jj_native_baselines
     WHERE source_id COLLATE BINARY = ?1 LIMIT 1";
 
+const NATIVE_ADMISSION_EXISTS_SQL: &str = "SELECT 1 FROM jj_native_admissions
+    WHERE source_id COLLATE BINARY = ?1 LIMIT 1";
+const NATIVE_ADMISSION_STATE_EXISTS_SQL: &str = "SELECT 1 FROM jj_native_admission_states
+    WHERE source_id COLLATE BINARY = ?1 LIMIT 1";
+
 fn exists(conn: &Connection, sql: &str, key: &str) -> Result<bool, JournalError> {
     let mut statement = conn
         .prepare(sql)
@@ -41,7 +46,9 @@ pub(super) fn guards_occupied(
 fn unregistered_rows_present(conn: &Connection, source: &str) -> Result<bool, JournalError> {
     Ok(exists(conn, NATIVE_STATE_COUNT_SQL, source)?
         || exists(conn, NATIVE_BASELINE_EXISTS_SQL, source)?
-        || exists(conn, SOURCE_WORKSPACE_EXISTS_SQL, source)?)
+        || exists(conn, SOURCE_WORKSPACE_EXISTS_SQL, source)?
+        || exists(conn, NATIVE_ADMISSION_EXISTS_SQL, source)?
+        || exists(conn, NATIVE_ADMISSION_STATE_EXISTS_SQL, source)?)
 }
 
 pub(super) fn require_absent(conn: &Connection, source: &str) -> Result<(), JournalError> {

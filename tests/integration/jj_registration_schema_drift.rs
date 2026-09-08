@@ -43,7 +43,7 @@ fn jj_registration_schema_equivalent_explicit_unique_indexes_are_supported() {
         &explicit_workspace_indexes(),
     );
     let conn = open_with_memory_limits(&fixture.path).unwrap();
-    let before = complete_snapshot(&conn);
+    let before = registered_payload_snapshot(&conn);
     let registration_indexes = index_shapes(&conn, "jj_native_registrations");
     let workspace_indexes = index_shapes(&conn, "jj_native_workspaces");
     assert_eq!(
@@ -61,7 +61,19 @@ fn jj_registration_schema_equivalent_explicit_unique_indexes_are_supported() {
         2
     );
     drop(fixture.open());
-    assert_eq!(complete_snapshot(&conn), before);
+    assert_eq!(registered_payload_snapshot(&conn), before);
+    assert_eq!(
+        index_shapes(&conn, "jj_native_registrations"),
+        registration_indexes
+    );
+    assert_eq!(
+        index_shapes(&conn, "jj_native_workspaces"),
+        workspace_indexes
+    );
+    assert_version(&conn, "4");
+    let latest = complete_snapshot(&conn);
+    drop(fixture.open());
+    assert_eq!(complete_snapshot(&conn), latest);
 }
 
 #[test]

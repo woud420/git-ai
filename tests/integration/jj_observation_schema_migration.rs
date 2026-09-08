@@ -163,7 +163,7 @@ fn jj_schema_new_database_has_exact_native_v2_columns_and_no_native_rows() {
     let fixture = Fixture::new();
     drop(fixture.open());
     let conn = open_with_memory_limits(&fixture.path).unwrap();
-    assert_version(&conn, "3");
+    assert_version(&conn, "4");
     assert_columns(
         &conn,
         "jj_native_baselines",
@@ -194,7 +194,7 @@ fn jj_schema_v1_upgrade_preserves_opaque_bytes_order_and_historical_receipts() {
     let conn = open_with_memory_limits(&fixture.path).unwrap();
     let before = opaque_snapshot(&conn);
     let mut journal = fixture.open();
-    assert_version(&conn, "3");
+    assert_version(&conn, "4");
     assert_native_tables_empty(&conn);
     assert_eq!(opaque_snapshot(&conn), before);
     assert_opaque_wire_version_one(&conn);
@@ -239,7 +239,7 @@ fn jj_schema_existing_complete_v2_opens_without_rewriting_opaque_records() {
     let before = opaque_snapshot(&conn);
     fixture.assert_only_first(&fixture.open());
     assert_eq!(opaque_snapshot(&conn), before);
-    assert_version(&conn, "3");
+    assert_version(&conn, "4");
 }
 
 #[test]
@@ -381,7 +381,7 @@ fn jj_schema_failed_version_update_rolls_back_native_ddl_and_opaque_data() {
         assert_version(&conn, "1");
         conn.execute_batch("DROP TRIGGER fail_upgrade").unwrap();
         fixture.assert_only_first(&fixture.open());
-        assert_version(&conn, "3");
+        assert_version(&conn, "4");
         assert_native_tables_empty(&conn);
     }
 }
@@ -476,7 +476,7 @@ fn jj_schema_concurrent_initializers_publish_only_complete_latest_schema() {
                         barrier.wait();
                         drop(open_after_contention(&path));
                         let conn = open_with_memory_limits(&path).unwrap();
-                        assert_version(&conn, "3");
+                        assert_version(&conn, "4");
                         assert_native_tables_empty(&conn);
                     })
                 })
@@ -507,7 +507,7 @@ fn jj_schema_ignored_version_update_rolls_back_native_ddl() {
     assert_version(&conn, "1");
     conn.execute_batch("DROP TRIGGER ignore_upgrade").unwrap();
     fixture.assert_only_first(&fixture.open());
-    assert_version(&conn, "3");
+    assert_version(&conn, "4");
     assert_native_tables_empty(&conn);
 }
 
@@ -528,7 +528,7 @@ fn jj_schema_silently_rewritten_version_rolls_back_native_ddl() {
         assert_version(&conn, "1");
         conn.execute_batch("DROP TRIGGER rewrite_upgrade").unwrap();
         fixture.assert_only_first(&fixture.open());
-        assert_version(&conn, "3");
+        assert_version(&conn, "4");
         assert_native_tables_empty(&conn);
     }
 }

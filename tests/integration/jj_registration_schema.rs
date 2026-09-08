@@ -8,6 +8,9 @@ mod support;
 mod versions;
 use support::*;
 
+#[path = "jj_native_admission_schema.rs"]
+mod admission;
+
 #[test]
 fn jj_registration_schema_frozen_v2_native_and_opaque_receipts_are_compatible() {
     let fixture = frozen_v2();
@@ -25,7 +28,7 @@ fn jj_registration_schema_fresh_database_has_exact_v3_keys_and_empty_registratio
     let fixture = Fixture::new();
     drop(fixture.open());
     let conn = open_with_memory_limits(&fixture.path).unwrap();
-    assert_v3_shape(&conn);
+    assert_latest_registration_shape(&conn);
     assert_registration_tables_empty(&conn);
     assert_native_tables_empty(&conn);
     assert!(opaque_snapshot(&conn).iter().all(Vec::is_empty));
@@ -38,7 +41,7 @@ fn jj_registration_schema_v1_chain_preserves_frozen_opaque_bytes_without_backfil
     let conn = open_with_memory_limits(&fixture.path).unwrap();
     let before = opaque_snapshot(&conn);
     fixture.assert_only_first(&fixture.open());
-    assert_v3_shape(&conn);
+    assert_latest_registration_shape(&conn);
     assert_registration_tables_empty(&conn);
     assert_native_tables_empty(&conn);
     assert_eq!(opaque_snapshot(&conn), before);
@@ -51,7 +54,7 @@ fn jj_registration_schema_v2_upgrade_preserves_unregistered_native_baseline_exac
     let before_native = native_snapshot(&conn);
     let before_opaque = opaque_snapshot(&conn);
     assert_existing_native_and_opaque(&fixture, &mut fixture.open());
-    assert_v3_shape(&conn);
+    assert_latest_registration_shape(&conn);
     assert_registration_tables_empty(&conn);
     assert_eq!(native_snapshot(&conn), before_native);
     assert_eq!(opaque_snapshot(&conn), before_opaque);
@@ -68,11 +71,13 @@ fn jj_registration_schema_v3_reopen_preserves_schema_rows_payloads_and_checksums
     // Schema opening does not decode or confer authority on registration records.
     conn.execute("INSERT INTO jj_native_registrations SELECT source_id, baseline_id, 'root-key', X'001122', 'historical registration' FROM jj_native_sources", []).unwrap();
     conn.execute("INSERT INTO jj_native_workspaces VALUES (?1, 'default', 'locator-key', 'workspace-root', X'334455', 'historical workspace')", [&fixture.source]).unwrap();
-    let before = complete_snapshot(&conn);
+    let before = registered_payload_snapshot(&conn);
     assert_existing_native_and_opaque(&fixture, &mut fixture.open());
+    assert_eq!(registered_payload_snapshot(&conn), before);
+    let latest = complete_snapshot(&conn);
     drop(fixture.open());
-    assert_eq!(complete_snapshot(&conn), before);
-    assert_v3_shape(&conn);
+    assert_eq!(complete_snapshot(&conn), latest);
+    assert_latest_registration_shape(&conn);
 }
 
 #[test]
@@ -148,7 +153,7 @@ fn jj_registration_schema_keys_foreign_keys_and_scoped_workspace_root_are_enforc
 }
 
 #[test]
-fn jj_registration_schema_concurrent_v2_openers_observe_complete_v3_only() {
+fn jj_registration_schema_concurrent_v2_openers_observe_complete_latest_schema() {
     let fixture = frozen_v2();
     let conn = open_with_memory_limits(&fixture.path).unwrap();
     let before_native = native_snapshot(&conn);
@@ -163,7 +168,7 @@ fn jj_registration_schema_concurrent_v2_openers_observe_complete_v3_only() {
                     barrier.wait();
                     drop(open_after_contention(&path));
                     let conn = open_with_memory_limits(&path).unwrap();
-                    assert_v3_shape(&conn);
+                    assert_latest_registration_shape(&conn);
                     assert_registration_tables_empty(&conn);
                 })
             })

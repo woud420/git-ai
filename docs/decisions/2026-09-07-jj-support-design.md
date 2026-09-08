@@ -1,6 +1,6 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed architecture; implementation starts with read-only context discovery.
+Status: proposed native-attribution architecture; P1 read-only context discovery is locally implemented and verified.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.

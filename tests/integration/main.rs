@@ -57,6 +57,7 @@ mod cursor;
 mod daemon_commit_carryover;
 mod daemon_completion_routing;
 mod daemon_runtime_memory;
+mod debug_context;
 mod diff;
 mod diff_comprehensive;
 mod diff_ignore_binary;

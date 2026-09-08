@@ -21,6 +21,10 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+mod context;
+mod help;
+use help::print_debug_help;
+
 const MIN_GIT_VERSION: GitVersion = GitVersion {
     major: 2,
     minor: 22,
@@ -37,6 +41,9 @@ struct DebugOptions {
 }
 
 pub fn handle_debug(args: &[String]) {
+    if args.first().is_some_and(|arg| arg == "context") {
+        std::process::exit(context::handle(&args[1..]));
+    }
     if args
         .iter()
         .any(|arg| arg == "--help" || arg == "-h" || arg == "help")
@@ -56,20 +63,6 @@ pub fn handle_debug(args: &[String]) {
 
     let report = build_debug_report(options);
     println!("{}", report);
-}
-
-fn print_debug_help() {
-    eprintln!("git-ai debug - Print diagnostic information for troubleshooting");
-    eprintln!();
-    eprintln!("Usage:");
-    eprintln!("  git-ai debug [--skip-trace2-checks]");
-    eprintln!("  git-ai debug --help");
-    eprintln!();
-    eprintln!("Options:");
-    eprintln!(
-        "  {}  Skip per-git Trace2 config and Trace2 file self-checks",
-        SKIP_TRACE2_CHECKS_FLAG
-    );
 }
 
 fn parse_debug_options(args: &[String]) -> Result<DebugOptions, String> {

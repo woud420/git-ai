@@ -101,6 +101,96 @@ Snapshot supplied by the coordinating implementation task on 2026-09-07. Researc
 | P9 | [ENG-422](https://linear.app/polarcoordinates/issue/ENG-422) | Backlog |
 | P10 | [ENG-423](https://linear.app/polarcoordinates/issue/ENG-423) | Backlog |
 
-## Implementation verification: pending
+## Implementation verification
 
-P1 is being implemented. Implementation tests, regression checks, review, and integration results are pending and must be recorded separately by the coordinating task. The successful runtime probe does not verify Git AI attribution, checkpoint routing, asynchronous reconciliation, or native jj rewrite support.
+P1 is implemented locally on `codex/jj-support-foundation` in the persistent
+isolated worktree `/Users/jm/workspace/projects/git-ai-jj-support`.
+The system installation is unchanged and the branch has not been pushed.
+ENG-414 remains In Progress pending publication and human review; native jj
+attribution remains unimplemented.
+
+`git-ai debug context --json` reports schema version 1, `discovery_only`, VCS,
+canonical workspace root, Git directory/common directory, jj repository/store
+paths, and colocation. It resolves the nearest selected boundary without
+subprocesses, daemon startup or attribution storage initialization. It supports
+actual colocated/noncolocated jj, additional workspaces, Git worktrees, and
+colocation through a Git file pointing at a separate Git directory.
+
+Pointer/type reads are capped at 16 KiB. Unknown backends, invalid UTF-8 paths,
+malformed pointers and dangling boundaries return explicit JSON errors.
+jj pointers preserve raw path whitespace; Git `commondir` is authoritative.
+This is paths-only discovery: it does not parse checkout protobufs, establish
+jj's internal workspace ID, validate an operation frontier, or enable checkpoints.
+
+The existing Git discovery and ingestion paths are unchanged. The shared
+`is_valid_git_dir` predicate is reused; the diagnostic resolves selected-root
+pointers itself because the existing helper walks ancestors and guesses common
+directories from a parent named `worktrees`. A small help extraction reduced
+`debug.rs` from 1642 to 1635 lines; the new resolver is 259 lines.
+
+### Verified checks
+
+All logs below are local files under `/private/tmp/git-ai-jj-support-`; the
+suffix column completes each filename with `.log`.
+
+| Check | Observed result | Log suffix |
+| --- | --- | --- |
+| TDD before production implementation | 11 behavioral failures | `red-expanded` |
+| Added review regressions before fixes | 13 passed, 2 failed as predicted | `review-red` |
+| Final context qualification, including real jj | 15 passed, zero ignored | `final-green` |
+| Existing debug unit tests | 18 passed | `debug-regression` |
+| Existing explicit-path Git checkpoint regression | 1 passed | `checkpoint-regression-unsandboxed` |
+| Source file-length ratchet | 1 passed | `file-length` |
+| Layer import policy | 8 passed | `layer-policy` |
+| CI-equivalent Clippy 1.93 with warnings denied | Passed | `lint-msrv` |
+| Formatting | Passed | `format-check` |
+| Explicit jj lane with its binary omitted | 3 failures with the required-binary explanation, as intended | `jj-missing-binary` |
+
+The three real-jj cases cover colocated dirty-tree nonmutation, standalone/additional
+workspace pointers, and a colocated separate Git directory under a parent literally
+named `worktrees`. The last case checks the external store's content manifest too.
+Review also added a regression preventing a dangling nested marker from returning
+an inner workspace root paired with an outer Git store.
+
+A fresh native build preceded final GREEN (`review-build.log`).
+The tested binary SHA256 is
+`a0e1b4bcc400e41ca33f10aaadf652547a34531668bef48021bae2913864cb18`.
+After verification, the worktree was moved from its temporary location to the
+persistent path above; source contents and the tested binary were preserved.
+
+### Reproducing the implementation tests
+
+From this branch's worktree on macOS with GNU Make and an explicitly installed
+test jj binary:
+
+```sh
+rtk gmake build
+rtk proxy env \
+  GIT_AI_TEST_BINARY_PATH="$PWD/target/debug/git-ai" \
+  GIT_AI_TEST_JJ_BINARY=/absolute/path/to/jj \
+  gmake test CARGO_TEST_ARGS="--test integration" \
+  TEST_FILTER=debug_context EXTRA_TEST_BINARY_ARGS=--include-ignored TEST_THREADS=2
+rtk gmake format-check
+```
+
+The existing test-binary override avoided a stalled nested Cargo build in this
+host's TestRepo harness. Always rebuild after source edits before using that
+override. It was used only by the test harness; the system git-ai installation
+was not replaced.
+
+CI lint uses `toolchain: msrv`; `Cargo.toml` currently specifies Rust 1.93.
+The installed 1.93 toolchain's bin directory was placed first on PATH, with
+`RUSTUP_TOOLCHAIN=1.93.0` and a separate target directory, then `gmake lint` passed.
+Merely selecting rustup while Homebrew's `cargo-clippy` remains first on PATH
+does not establish that toolchain. Host Clippy 1.98 reported
+`chunks_exact_to_as_chunks` in unchanged `src/cli/hook_input.rs`; that file was
+verified byte-identical to the fork baseline and was not edited.
+
+The first checkpoint regression attempt could not bind its isolated test sockets
+inside the sandbox. The same test passed when socket binding was permitted.
+The full integration suite and Linux/Windows execution were not run for this
+diagnostic slice; broad native-jj qualification remains ENG-423.
+
+Next: ENG-413 must prove the bounded operation/lineage reader before ENG-415 can
+start native event ingestion. Preliminary research and this diagnostic do not
+satisfy that proof gate.

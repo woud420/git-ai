@@ -1,6 +1,6 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; P1 context discovery and the first P2 durable journal increment are locally implemented. P0 has selected and qualified a bounded direct-store reader prototype. Native capture and attribution remain pending.
+Status: proposed native-attribution architecture; context discovery, durable observation storage and native metadata verification are implemented on the draft branch. Integrated observation and attribution remain pending.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
@@ -162,6 +162,14 @@ source ownership and deduplicate semantically with immutable transition evidence
 Do not let a delayed Git event and a jj import both apply the same checkpoint.
 A bare content match is not sufficient to transfer ownership.
 
+First-time collection uses an [explicit current-state baseline](2026-09-08-jj-current-state-baseline.md).
+The selected head bytes are verified, while their earlier history remains unverified.
+Baseline anchors receive no retrospective attribution and do not enter the pending
+application queue. Ordinary checksummed observations are not native ancestry
+boundaries; subsequent traversal must close on the permitted baseline or verified
+extensions in the same epoch. A stale workspace outside that range remains unavailable
+until its relationship and stable completed-checkout context are proved.
+
 Garbage-collected or missing operations, unsupported stores, size limits, and
 unresolvable divergence preserve pending evidence and expose degraded status.
 Rebaseline requires an explicit procedure that reports any unknown interval;
@@ -210,9 +218,9 @@ Do not force jj into a misleading Git command category.
 ```mermaid
 flowchart TD
     S["jj operation heads change or checkpoint arrives"]:::external --> V{"Compatible reader and authorized workspace?"}
-    V -- No --> D["Report unsupported; preserve pending evidence"]:::service
+    V -- No --> D["Report unsupported or incomplete; preserve pending evidence"]:::service
     V -- Yes --> I["Capture immutable operation IDs and workspace context"]:::job
-    I --> B{"Bounded DAG reaches durably observed operations?"}
+    I --> B{"DAG closes on verified native history or explicit baseline?"}
     B -- No --> D
     B -- Yes --> P["Atomically persist evidence, receipt and generation/head state"]:::storage
     P --> Q["Order with checkpoint journal in repository family"]:::queue
@@ -280,11 +288,14 @@ baseline measurement, not invented in the proposal.
 | P9 | Backend-aware sync and colocated Git/jj interoperability | P6, P8 |
 | P10 | Cross-platform qualification, performance gates, packaging and docs | P7, P8, P9 |
 
-P0's reader proof and P1's diagnostic are committed locally. P2 now has a durable
-observation journal; the native adapter and observer remain pending. Later phases
-remain tracked until their acceptance tests pass. These increments do not enable
-native attribution. Work continues as local commits at the user's request; future
-focused PRs target `woud420/git-ai`, with human review before merge.
+P0's reader proof and P1's diagnostic are committed. P2 has a durable observation
+journal, bounded lookup, native operation/view hashing, captured-envelope joins
+and completed-checkout decoding. Bounded filesystem sampling, explicit baseline
+persistence, native ancestry admission and the observer remain pending. Later
+phases remain tracked until their acceptance tests pass. These increments are
+published on [draft PR #247](https://github.com/woud420/git-ai/pull/247) and do not
+enable native attribution. Work continues in scoped commits with human review
+before merge.
 
 ## Validation and rollout
 

@@ -10,9 +10,9 @@ use git_ai::model::repository::jj_observation_journal::{CaptureOutcome, JjObserv
 use git_ai::operations::jj::evidence::{JjEvidenceError, VerifiedJjEvidence, verify_evidence};
 
 #[path = "jj_evidence_support.rs"]
-mod support;
+pub(super) mod support;
 #[path = "jj_evidence_vectors.rs"]
-mod vectors;
+pub(super) mod vectors;
 
 use support::*;
 use vectors::*;

@@ -124,6 +124,183 @@ verify_checksum() {
     success "Checksum verified for $binary_name"
 }
 
+# BEGIN WSL PACKAGE INSTALLER HELPERS
+is_wsl_environment() {
+    local os_name="${1:-}"
+    local kernel_release="${2:-}"
+    local interop="${3:-}"
+
+    [ "$os_name" = "linux" ] || return 1
+    case "$kernel_release" in
+        *[Mm][Ii][Cc][Rr][Oo][Ss][Oo][Ff][Tt]*) return 0 ;;
+    esac
+    [ -n "$interop" ]
+}
+
+validate_wsl_host_tools() {
+    local tool
+    for tool in cmd.exe wslpath msiexec.exe; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            printf 'Error: WSL Windows package installation requires %s from Windows interoperability.\n' "$tool" >&2
+            return 1
+        fi
+    done
+}
+
+is_absolute_windows_path() {
+    local path="${1:-}"
+    case "$path" in
+        [A-Za-z]:[\\/]*|\\\\*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+resolve_windows_user_home() {
+    local windows_home
+    if ! windows_home="$(cmd.exe /d /s /c 'echo %USERPROFILE%' 2>/dev/null)"; then
+        printf 'Error: WSL could not resolve the Windows user profile through cmd.exe.\n' >&2
+        return 1
+    fi
+    windows_home="${windows_home//$'\r'/}"
+    if [ -z "$windows_home" ] || [[ "$windows_home" == *$'\n'* ]] || ! is_absolute_windows_path "$windows_home"; then
+        printf 'Error: WSL did not resolve an absolute Windows user profile through cmd.exe.\n' >&2
+        return 1
+    fi
+    printf '%s\n' "$windows_home"
+}
+
+windows_msi_asset() {
+    local architecture="${1:-}"
+    case "$architecture" in
+        x64|arm64) printf 'git-ai-windows-%s.msi\n' "$architecture" ;;
+        *)
+            printf 'Error: Unsupported WSL Windows architecture: %s\n' "$architecture" >&2
+            return 1
+            ;;
+    esac
+}
+
+windows_msi_download_url() {
+    local asset="$1"
+    local release_tag="$2"
+    if [ "$release_tag" = "latest" ]; then
+        printf 'https://github.com/%s/releases/latest/download/%s\n' "$REPO" "$asset"
+    else
+        printf 'https://github.com/%s/releases/download/%s/%s\n' "$REPO" "$release_tag" "$asset"
+    fi
+}
+
+install_windows_msi_from_wsl() {
+    local architecture="$1"
+    local release_tag="$2"
+    local asset
+    if ! asset="$(windows_msi_asset "$architecture")"; then
+        return 1
+    fi
+    if ! validate_wsl_host_tools; then
+        return 1
+    fi
+
+    local windows_home
+    if ! windows_home="$(resolve_windows_user_home)"; then
+        return 1
+    fi
+    local windows_home_linux
+    if ! windows_home_linux="$(wslpath -u "$windows_home" 2>/dev/null)"; then
+        printf 'Error: wslpath could not translate the Windows user profile.\n' >&2
+        return 1
+    fi
+    windows_home_linux="${windows_home_linux//$'\r'/}"
+    if [[ "$windows_home_linux" == *$'\n'* ]]; then
+        printf 'Error: wslpath returned an invalid Windows user profile path.\n' >&2
+        return 1
+    fi
+    case "$windows_home_linux" in
+        /*) ;;
+        *)
+            printf 'Error: wslpath returned an invalid Windows user profile path.\n' >&2
+            return 1
+            ;;
+    esac
+
+    local windows_git_ai="$windows_home_linux/.git-ai/bin/git-ai.exe"
+    if [ -f "$windows_git_ai" ]; then
+        success "Git AI is already installed for the Windows user; skipping the MSI handoff."
+        return 0
+    fi
+
+    if [ "$release_tag" = "local" ] && [ -z "${GIT_AI_LOCAL_MSI:-}" ]; then
+        warn "Skipping the Windows MSI handoff because GIT_AI_LOCAL_MSI is not set for this local WSL install."
+        return 0
+    fi
+
+    local windows_temp_dir="$windows_home_linux/AppData/Local/Temp"
+    if ! mkdir -p "$windows_temp_dir" >/dev/null 2>&1; then
+        printf 'Error: WSL could not access the Windows user temporary directory.\n' >&2
+        return 1
+    fi
+    local staging_dir
+    if ! staging_dir="$(mktemp -d "$windows_temp_dir/git-ai-windows-${architecture}.XXXXXX" 2>/dev/null)"; then
+        printf 'Error: WSL could not create a Windows user staging directory.\n' >&2
+        return 1
+    fi
+    local linux_msi_path="$staging_dir/$asset"
+
+    if [ "$release_tag" = "local" ]; then
+        if [ ! -f "$GIT_AI_LOCAL_MSI" ] || ! cp "$GIT_AI_LOCAL_MSI" "$linux_msi_path" >/dev/null 2>&1; then
+            rmdir "$staging_dir" 2>/dev/null || true
+            printf 'Error: GIT_AI_LOCAL_MSI does not identify a readable MSI file.\n' >&2
+            return 1
+        fi
+    else
+        local download_url
+        download_url="$(windows_msi_download_url "$asset" "$release_tag")"
+        if ! curl --fail --location --silent --show-error -o "$linux_msi_path" "$download_url"; then
+            rm -f "$linux_msi_path" 2>/dev/null || true
+            rmdir "$staging_dir" 2>/dev/null || true
+            printf 'Error: Failed to download the Windows MSI from WSL.\n' >&2
+            return 1
+        fi
+        verify_checksum "$linux_msi_path" "$asset"
+    fi
+
+    local windows_msi_path
+    if ! windows_msi_path="$(wslpath -w "$linux_msi_path" 2>/dev/null)"; then
+        rm -f "$linux_msi_path" 2>/dev/null || true
+        rmdir "$staging_dir" 2>/dev/null || true
+        printf 'Error: wslpath could not translate the staged Windows MSI path.\n' >&2
+        return 1
+    fi
+    windows_msi_path="${windows_msi_path//$'\r'/}"
+    if [[ "$windows_msi_path" == *$'\n'* ]] || ! is_absolute_windows_path "$windows_msi_path"; then
+        rm -f "$linux_msi_path" 2>/dev/null || true
+        rmdir "$staging_dir" 2>/dev/null || true
+        printf 'Error: wslpath returned an invalid staged MSI path.\n' >&2
+        return 1
+    fi
+
+    # Keep this at one host installer process and use the MSI's existing,
+    # dedicated configuration properties instead of forwarding process env.
+    local -a msi_args=(/i "$windows_msi_path" /qn /norestart)
+    [ -n "${API_BASE:-}" ] && msi_args+=("API_BASE=$API_BASE")
+    [ -n "${API_KEY:-}" ] && msi_args+=("API_KEY=$API_KEY")
+    local install_status=0
+    if msiexec.exe "${msi_args[@]}" >/dev/null 2>&1; then
+        install_status=0
+    else
+        install_status=$?
+    fi
+    rm -f "$linux_msi_path" 2>/dev/null || true
+    rmdir "$staging_dir" 2>/dev/null || true
+
+    if [ "$install_status" -ne 0 ]; then
+        printf 'Error: Windows Installer failed while installing Git AI from WSL (exit code %s).\n' "$install_status" >&2
+        return 1
+    fi
+    success "Successfully installed Git AI for the Windows user from WSL."
+}
+# END WSL PACKAGE INSTALLER HELPERS
+
 # Function to detect all shells with existing config files
 # Returns shell configurations in format: "shell_name|config_file" (one per line)
 detect_all_shells() {
@@ -255,6 +432,16 @@ else
     # Default to latest
     RELEASE_TAG="latest"
     DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${BINARY_NAME}"
+fi
+
+WSL_KERNEL_RELEASE=""
+if [ -r /proc/sys/kernel/osrelease ]; then
+    IFS= read -r WSL_KERNEL_RELEASE < /proc/sys/kernel/osrelease || true
+fi
+if is_wsl_environment "$OS" "$WSL_KERNEL_RELEASE" "${WSL_INTEROP:-}"; then
+    if ! install_windows_msi_from_wsl "$ARCH" "$RELEASE_TAG"; then
+        error "Windows MSI installation from WSL failed; fix the prerequisite above and retry"
+    fi
 fi
 
 # Install into the user's bin directory ~/.git-ai/bin

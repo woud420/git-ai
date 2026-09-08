@@ -1,4 +1,5 @@
 use super::*;
+use crate::operations::daemon::git_backend::GitBackend;
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -29,6 +30,16 @@ pub(super) fn make_atexit_payload(sid: &str) -> Value {
         "sid": sid,
         "code": 0,
     })
+}
+
+async fn apply_trace_frames(coord: &Arc<ActorDaemonCoordinator>, frames: Vec<Value>) {
+    for mut frame in frames {
+        assert!(coord.prepare_trace_payload_for_ingest(&mut frame));
+        coord
+            .apply_trace_payload_to_state(frame)
+            .await
+            .expect("trace frame should apply");
+    }
 }
 
 #[test]
@@ -224,7 +235,7 @@ async fn mutating_commit_start_event_is_enqueued() {
 
 #[tokio::test]
 async fn mutating_pending_root_is_created_when_repo_and_argv_arrive_on_different_events() {
-    let coord = ActorDaemonCoordinator::new();
+    let coord = std::sync::Arc::new(ActorDaemonCoordinator::new());
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let init = std::process::Command::new("git")
@@ -333,6 +344,116 @@ async fn mutating_trace_payload_captures_repo_reflog_start_offsets() {
             .and_then(Value::as_u64),
         Some(old_branch_reflog.len() as u64)
     );
+}
+
+#[tokio::test]
+async fn later_nonsequencer_command_cannot_overtake_blocked_family_command() {
+    let coord = Arc::new(ActorDaemonCoordinator::new());
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let init = std::process::Command::new("git")
+        .arg("-C")
+        .arg(temp.path())
+        .arg("init")
+        .arg("repo")
+        .output()
+        .expect("git init should run");
+    assert!(init.status.success());
+    let worktree = repo.to_string_lossy().to_string();
+    let family = coord.backend.resolve_family(&repo).unwrap().0;
+
+    let first_permit = coord.command_side_effect_semaphore.acquire().await.unwrap();
+    let second_permit = coord.command_side_effect_semaphore.acquire().await.unwrap();
+
+    let earlier_sid = "20260411T120000.000000-Psid-earlier-family-command";
+    apply_trace_frames(
+        &coord,
+        vec![
+            serde_json::json!({
+                "event": "start",
+                "sid": earlier_sid,
+                "argv": ["git", "remote", "add", "example", "https://example.invalid/repo"],
+                "time_ns": 10u64,
+            }),
+            serde_json::json!({
+                "event": "def_repo",
+                "sid": earlier_sid,
+                "worktree": worktree,
+                "time_ns": 11u64,
+            }),
+            serde_json::json!({
+                "event": "atexit",
+                "sid": earlier_sid,
+                "code": 0,
+                "time_ns": 12u64,
+            }),
+        ],
+    )
+    .await;
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let entry_was_popped = coord
+                .family_sequencers_by_family
+                .lock()
+                .unwrap()
+                .get(&family)
+                .is_some_and(|state| state.entries.is_empty());
+            if entry_was_popped && coord.has_inflight_family_effects() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("earlier family command should block on the command-side-effect limit");
+
+    let later_sid = "20260411T120000.000000-Psid-later-am-command";
+    apply_trace_frames(
+        &coord,
+        vec![
+            serde_json::json!({
+                "event": "start",
+                "sid": later_sid,
+                "argv": ["git", "am", "change.patch"],
+                "time_ns": 20u64,
+            }),
+            serde_json::json!({
+                "event": "def_repo",
+                "sid": later_sid,
+                "worktree": worktree,
+                "time_ns": 21u64,
+            }),
+            serde_json::json!({
+                "event": "atexit",
+                "sid": later_sid,
+                "code": 0,
+                "time_ns": 22u64,
+            }),
+        ],
+    )
+    .await;
+
+    let status = coord.status_for_family(worktree.clone()).await.unwrap();
+    assert_eq!(
+        status.latest_seq, 0,
+        "the later git am must remain queued until the earlier family command is applied"
+    );
+
+    drop(first_permit);
+    drop(second_permit);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        coord.sync_family(worktree),
+    )
+    .await
+    .expect("family commands should drain after permits are released")
+    .unwrap();
+    let status = coord
+        .status_for_family(repo.to_string_lossy().to_string())
+        .await
+        .unwrap();
+    assert_eq!(status.latest_seq, 2);
 }
 
 #[tokio::test]

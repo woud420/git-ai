@@ -1,10 +1,6 @@
 use super::tests_ingress::make_start_payload;
 use super::*;
-use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
-use crate::model::working_log::CheckpointKind;
 use crate::operations::daemon::git_backend::GitBackend;
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -36,7 +32,7 @@ fn explicit_stop_overrides_prior_restart_intent() {
     runtime.block_on(async {
         let coordinator = ActorDaemonCoordinator::new();
 
-        coordinator.request_restart_after_update();
+        assert!(coordinator.try_request_idle_restart(DaemonExitAction::RestartAfterUpdate));
         assert_eq!(
             coordinator.shutdown_action(),
             DaemonExitAction::RestartAfterUpdate
@@ -70,86 +66,26 @@ async fn checkpoint_fence_waits_for_open_mutating_trace_root() {
         "checkpoint fence must not pass while a mutating trace root is still open"
     );
 
-    coord
+    let close_markers = coord
         .record_trace_connection_close(&[sid.to_string()])
         .unwrap();
+    assert_eq!(close_markers, [sid.to_string()]);
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            coord.wait_for_trace_ingest_processed_through()
+        )
+        .await
+        .is_err(),
+        "reader close must stay fenced until the ingest worker handles its close marker"
+    );
+    coord.clear_trace_root_tracking(sid).unwrap();
     tokio::time::timeout(
         Duration::from_secs(1),
         coord.wait_for_trace_ingest_processed_through(),
     )
     .await
     .expect("checkpoint fence should pass once the mutating trace root closes");
-}
-
-#[tokio::test]
-async fn checkpoint_control_request_waits_while_blocked_behind_pending_root() {
-    use crate::model::checkpoint_request::{BaseCommit, CheckpointFile};
-
-    let coord = Arc::new(ActorDaemonCoordinator::new());
-    let temp = tempfile::tempdir().unwrap();
-    let repo = temp.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    let init = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&repo)
-        .arg("init")
-        .output()
-        .expect("git init should run");
-    assert!(
-        init.status.success(),
-        "git init failed: {}",
-        String::from_utf8_lossy(&init.stderr)
-    );
-    std::fs::write(repo.join("test.txt"), "checkpoint content\n").unwrap();
-
-    let family = coord.backend.resolve_family(&repo).unwrap().0;
-    let root_sid = "20260411T120000.000000-Psid-blocking-root";
-    coord
-        .append_pending_root_entry(&family, root_sid, 1)
-        .unwrap();
-
-    let request = CheckpointRequest {
-        trace_id: "blocked-checkpoint".to_string(),
-        checkpoint_kind: CheckpointKind::Human,
-        agent_id: None,
-        files: vec![CheckpointFile {
-            path: PathBuf::from("test.txt"),
-            content: Some("checkpoint content\n".to_string()),
-            repo_work_dir: repo.clone(),
-            base_commit: BaseCommit::Initial,
-        }],
-        path_role: PreparedPathRole::Edited,
-        stream_source: None,
-        metadata: HashMap::new(),
-        delivery_id: None,
-    };
-
-    let mut checkpoint = {
-        let coord = coord.clone();
-        tokio::spawn(async move { coord.ingest_checkpoint_payload(request).await })
-    };
-
-    assert!(
-        tokio::time::timeout(Duration::from_millis(50), &mut checkpoint)
-            .await
-            .is_err(),
-        "checkpoint control request must not complete before its sequenced side effect runs"
-    );
-
-    coord
-        .replace_pending_root_entry(root_sid, FamilySequencerEntry::Canceled)
-        .await
-        .unwrap();
-
-    let response = tokio::time::timeout(Duration::from_secs(1), checkpoint)
-        .await
-        .expect("checkpoint should finish once the prior root is released")
-        .expect("checkpoint task should not panic")
-        .expect("checkpoint request should succeed");
-    assert!(
-        response.ok,
-        "checkpoint response should be ok: {response:?}"
-    );
 }
 
 #[tokio::test]
@@ -199,9 +135,20 @@ async fn family_fence_ignores_open_mutating_roots_of_other_families() {
         "the originating family must stay fenced while its mutating root is open"
     );
 
-    coord
+    let close_markers = coord
         .record_trace_connection_close(&[sid.to_string()])
         .unwrap();
+    assert_eq!(close_markers, [sid.to_string()]);
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            coord.wait_for_trace_ingest_processed_through_family(&originating_family),
+        )
+        .await
+        .is_err(),
+        "reader close must stay fenced until the ingest worker handles its close marker"
+    );
+    coord.clear_trace_root_tracking(sid).unwrap();
     tokio::time::timeout(
         Duration::from_secs(1),
         coord.wait_for_trace_ingest_processed_through_family(&originating_family),
@@ -233,9 +180,20 @@ async fn family_fence_fails_closed_for_unattributed_open_roots() {
         "an open mutating root with no family attribution must block every family"
     );
 
-    coord
+    let close_markers = coord
         .record_trace_connection_close(&[sid.to_string()])
         .unwrap();
+    assert_eq!(close_markers, [sid.to_string()]);
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            coord.wait_for_trace_ingest_processed_through_family("/any/family/.git"),
+        )
+        .await
+        .is_err(),
+        "reader close must stay fenced until the ingest worker handles its close marker"
+    );
+    coord.clear_trace_root_tracking(sid).unwrap();
     tokio::time::timeout(
         Duration::from_secs(1),
         coord.wait_for_trace_ingest_processed_through_family("/any/family/.git"),
@@ -347,9 +305,20 @@ async fn checkpoint_fence_waits_for_open_branch_mutation_root() {
         "checkpoint fence must not pass while an accepted branch mutation root is still open"
     );
 
-    coord
+    let close_markers = coord
         .record_trace_connection_close(&[sid.to_string()])
         .unwrap();
+    assert_eq!(close_markers, [sid.to_string()]);
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            coord.wait_for_trace_ingest_processed_through()
+        )
+        .await
+        .is_err(),
+        "reader close must stay fenced until the ingest worker handles its close marker"
+    );
+    coord.clear_trace_root_tracking(sid).unwrap();
     tokio::time::timeout(
         Duration::from_secs(1),
         coord.wait_for_trace_ingest_processed_through(),

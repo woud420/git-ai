@@ -4,10 +4,13 @@ use super::*;
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
 use crate::operations::git::repo_state::common_dir_for_worktree;
+use futures::StreamExt;
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+
+const FAMILY_DRAIN_CONCURRENCY: usize = 2;
 
 impl ActorDaemonCoordinator {
     pub(crate) fn trace_invocation_participates_in_family_sequencer(
@@ -124,29 +127,25 @@ impl ActorDaemonCoordinator {
         self.append_pending_root_entry(&family, root_sid, started_at_ns)
     }
 
-    pub(crate) async fn append_ready_command_entry(
+    /// Appends an entry without waiting for the family's execution lock.
+    /// Callers on the serial trace-ingest worker must only perform this
+    /// constant-time map mutation and schedule the drain separately.
+    pub(crate) fn append_family_sequencer_entry(
         &self,
         family: &str,
-        command: crate::model::domain::NormalizedCommand,
+        started_at_ns: u128,
+        entry: FamilySequencerEntry,
     ) -> Result<(), GitAiError> {
-        let exec_lock = self.side_effect_exec_lock(family)?;
-        let _guard = exec_lock.lock().await;
-        {
-            let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
-                PersistenceError::LockPoisoned {
-                    what: "family sequencer map",
-                }
-            })?;
-            let state = sequencers
-                .entry(family.to_string())
-                .or_insert_with(FamilySequencerState::new);
-            state.insert_entry(
-                command.started_at_ns,
-                FamilySequencerEntry::ReadyCommand(Box::new(command)),
-            );
-        }
-        drop(_guard);
-        self.schedule_family_drain(family).await
+        let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
+            PersistenceError::LockPoisoned {
+                what: "family sequencer map",
+            }
+        })?;
+        let state = sequencers
+            .entry(family.to_string())
+            .or_insert_with(FamilySequencerState::new);
+        state.insert_entry(started_at_ns, entry);
+        Ok(())
     }
 
     pub(crate) async fn drain_ready_family_sequencer_entries(
@@ -166,12 +165,17 @@ impl ActorDaemonCoordinator {
                     what: "family sequencer map",
                 }
             })?;
-            map.keys().cloned().collect::<Vec<_>>()
+            map.iter()
+                .filter(|(_, state)| !state.entries.is_empty())
+                .map(|(family, _)| family.clone())
+                .collect::<Vec<_>>()
         };
-        let results = futures::future::join_all(families.into_iter().map(|family| async move {
+        let results = futures::stream::iter(families.into_iter().map(|family| async move {
             let result = self.drain_ready_family_sequencer_entries(&family).await;
             (family, result)
         }))
+        .buffer_unordered(FAMILY_DRAIN_CONCURRENCY)
+        .collect::<Vec<_>>()
         .await;
         // Surface the first failure only after every family had its drain
         // pass: one family's error must not starve the others.
@@ -185,30 +189,37 @@ impl ActorDaemonCoordinator {
         first_error.map_or(Ok(()), Err)
     }
 
-    pub(crate) async fn drain_ready_family_sequencers_after_root_cleared(
-        &self,
+    pub(crate) fn drain_ready_family_sequencers_after_root_cleared(
+        self: &std::sync::Arc<Self>,
         family: Option<String>,
     ) -> Result<(), GitAiError> {
         match family {
-            Some(family) => self.schedule_family_drain(&family).await,
+            Some(family) => self.schedule_family_drain_detached(&family),
             None => {
-                let families = {
-                    let map = self.family_sequencers_by_family.lock().map_err(|_| {
-                        PersistenceError::LockPoisoned {
-                            what: "family sequencer map",
+                // An unattributed root can unblock several families. Hand the
+                // scan off as one task so trace ingestion stays constant-time
+                // regardless of the number of known repositories.
+                let coordinator = std::sync::Arc::clone(self);
+                tokio::spawn(async move {
+                    let families = match coordinator.family_sequencers_by_family.lock() {
+                        Ok(map) => map.keys().cloned().collect::<Vec<_>>(),
+                        Err(error) => {
+                            tracing::error!(%error, "failed reading family sequencers for drain");
+                            return;
                         }
-                    })?;
-                    map.keys().cloned().collect::<Vec<_>>()
-                };
-                for family in families {
-                    self.schedule_family_drain(&family).await?;
-                }
+                    };
+                    for family in families {
+                        if let Err(error) = coordinator.schedule_family_drain_detached(&family) {
+                            tracing::error!(%error, %family, "failed scheduling family drain");
+                        }
+                    }
+                });
                 Ok(())
             }
         }
     }
 
-    pub(crate) async fn replace_pending_root_entry(
+    pub(crate) fn replace_pending_root_entry(
         &self,
         root_sid: &str,
         replacement: FamilySequencerEntry,
@@ -217,8 +228,6 @@ impl ActorDaemonCoordinator {
             return Ok(None);
         };
         let family = slot.family.clone();
-        let exec_lock = self.side_effect_exec_lock(&family)?;
-        let _guard = exec_lock.lock().await;
         {
             let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
                 PersistenceError::LockPoisoned {
@@ -229,6 +238,7 @@ impl ActorDaemonCoordinator {
                 .entry(family.clone())
                 .or_insert_with(FamilySequencerState::new);
             let Some(entry) = state.entries.get_mut(&slot.order) else {
+                // Retain the established diagnostic text for sequencing failures.
                 return Err(GitAiError::Generic(format!(
                     "missing pending root sequencer entry for sid={} family={} order={:?}",
                     root_sid, family, slot.order
@@ -239,6 +249,7 @@ impl ActorDaemonCoordinator {
                     *entry = replacement;
                 }
                 _ => {
+                    // Retain the established diagnostic text for sequencing failures.
                     return Err(GitAiError::Generic(format!(
                         "sequencer entry for sid={} family={} order={:?} was not pending",
                         root_sid, family, slot.order
@@ -246,8 +257,6 @@ impl ActorDaemonCoordinator {
                 }
             }
         }
-        drop(_guard);
-        self.schedule_family_drain(&family).await?;
         Ok(Some(family))
     }
 

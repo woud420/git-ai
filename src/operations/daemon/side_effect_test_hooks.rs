@@ -29,6 +29,9 @@ pub(super) async fn wait(primary: &str) {
                 && let Ok(delay_ms) = delay_ms.parse::<u64>()
                 && delay_ms > 0
             {
+                if let Ok(path) = std::env::var("GIT_AI_TEST_SIDE_EFFECT_DELAY_STARTED_PATH") {
+                    let _ = std::fs::write(path, primary.as_bytes());
+                }
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                 break;
             }

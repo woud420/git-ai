@@ -1,5 +1,7 @@
 # Durable jj observation journal: first implementation increment
 
+Status: accepted — maintained journal contract; native reader and attribution integration remain pending.
+
 This ENG-415 increment persists captured evidence. It does not run an observer,
 register a workspace, invoke jj/Git, apply attribution, or alter the daemon's
 Trace2 path. The [reader proof](2026-09-07-jj-reader-proof.md) remains research

@@ -1,5 +1,7 @@
 # Native jj reader selection (ENG-413)
 
+Status: accepted — selected reader profile and qualification contract for native implementation.
+
 The next implementation uses a bounded reader of immutable jj operation and view
 files. The stock CLI remains a test oracle. No observer, checkpoint integration,
 or native attribution is enabled by this research increment.

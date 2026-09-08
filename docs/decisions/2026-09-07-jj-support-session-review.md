@@ -1,5 +1,7 @@
 # Session review: native jj proposal and foundation
 
+Status: historical — review of the initial local design and context-discovery session.
+
 Date: 2026-09-07 (America/New_York).
 Scope: research, proposal and two flowcharts, Linear decomposition, and the first
 local implementation slice in the woud420/git-ai fork.

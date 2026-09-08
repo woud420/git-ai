@@ -1,5 +1,7 @@
 # Native jj support: runtime evidence and delivery status
 
+Status: historical — initial research and context-discovery implementation evidence.
+
 Date: 2026-09-07. Scope: discovery experiments for the proposed native jj integration. These results do not establish implemented attribution support or a supported-version range.
 
 Proposal: [Native jj support — proposal, architecture, and delivery plan](https://linear.app/polarcoordinates/document/native-jj-support-proposal-architecture-and-delivery-plan-f4fd7edf1f13).

@@ -1,4 +1,4 @@
-use super::{GitAiError, ParsedHookEvent, json, resolve_preset};
+use super::{ParsedHookEvent, json, preset_error_message, resolve_preset};
 
 // ==============================================================================
 // ContinueCliPreset Error Cases
@@ -24,13 +24,8 @@ fn test_continue_preset_missing_session_id() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("session_id not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("session_id not found"));
 }
 
 #[test]
@@ -45,13 +40,8 @@ fn test_continue_preset_missing_transcript_path() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("transcript_path not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("transcript_path not found"));
 }
 
 #[test]
@@ -130,13 +120,11 @@ fn test_codex_preset_missing_session_id() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("session_id") || msg.contains("thread_id"));
-        }
-        _ => panic!("Expected PresetError for missing session_id/thread_id"),
-    }
+    let msg = preset_error_message(
+        result,
+        "Expected PresetError for missing session_id/thread_id",
+    );
+    assert!(msg.contains("session_id") || msg.contains("thread_id"));
 }
 
 #[test]

@@ -304,25 +304,12 @@ fn line_author_map(authorship_log: &AuthorshipLog, file_path: &str) -> BTreeMap<
 }
 
 fn contiguous_runs(lines: &[u32]) -> Vec<Vec<u32>> {
-    if lines.is_empty() {
-        return Vec::new();
-    }
     let mut sorted = lines.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
-
-    let mut runs: Vec<Vec<u32>> = Vec::new();
-    let mut current = vec![sorted[0]];
-    for line in sorted.into_iter().skip(1) {
-        if line == current.last().copied().unwrap_or(line) + 1 {
-            current.push(line);
-        } else {
-            runs.push(current);
-            current = vec![line];
-        }
-    }
-    runs.push(current);
-    runs
+    LineRange::contiguous_chunks(&sorted)
+        .map(<[u32]>::to_vec)
+        .collect()
 }
 
 struct EdgeRecovery {
@@ -503,6 +490,19 @@ mod tests {
     use crate::model::authorship_log_serialization::{
         AttestationEntry, AuthorshipLog, FileAttestation,
     };
+
+    #[test]
+    fn contiguous_runs_sort_and_deduplicate() {
+        assert!(contiguous_runs(&[]).is_empty());
+        assert_eq!(
+            contiguous_runs(&[3, 1, 2, 2, 7]),
+            vec![vec![1, 2, 3], vec![7]]
+        );
+        assert_eq!(
+            contiguous_runs(&[u32::MAX, 0, 1, u32::MAX]),
+            vec![vec![0, 1], vec![u32::MAX]]
+        );
+    }
 
     #[test]
     fn unknown_lines_exclude_existing_attestations() {

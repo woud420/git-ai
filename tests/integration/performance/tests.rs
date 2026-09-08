@@ -1,12 +1,52 @@
 use super::{
-    Duration, FindRandomFilesOptions, OpenOptions, Sampler, Write, find_random_files,
-    find_random_files_with_options, get_performance_repos,
+    BenchmarkSampleResult, Duration, FindRandomFilesOptions, OpenOptions, Sampler, Write,
+    find_random_files, find_random_files_with_options, get_performance_repos,
 };
 use rand::seq::IndexedRandom;
 use rstest::rstest;
 
 // Performance floor constant (270ms) - used to determine if overhead is acceptable
 const PERFORMANCE_FLOOR_MS: Duration = Duration::from_millis(270);
+
+fn append_to_file(full_path: &std::path::Path, file_path: &str, contents: &[u8]) {
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(full_path)
+        .unwrap_or_else(|_| panic!("Should be able to open file: {}", file_path));
+
+    file.write_all(contents)
+        .unwrap_or_else(|_| panic!("Should be able to write to file: {}", file_path));
+}
+
+fn assert_commit_overhead(result: &BenchmarkSampleResult) {
+    let (percent_overhead, average_overhead) = result.average_overhead();
+
+    assert!(
+        percent_overhead < 10.0 || average_overhead < PERFORMANCE_FLOOR_MS,
+        "Average overhead should be less than 10% or under 70ms"
+    );
+}
+
+fn assert_reset_performance(repo_name: &str, args: &[&str], summary: &str) {
+    let repos = get_performance_repos();
+    let test_repo = repos
+        .get(repo_name)
+        .unwrap_or_else(|| panic!("{} repo should be available", repo_name));
+
+    let sampler = Sampler::new(10);
+    let result = sampler.sample(test_repo, |repo| {
+        repo.benchmark_git(args).expect("Reset should succeed")
+    });
+
+    result.print_summary(&format!("{} ({})", summary, repo_name));
+
+    let (percent_overhead, _) = result.average_overhead();
+
+    assert!(
+        percent_overhead < 20.0,
+        "Average overhead should be less than 20%"
+    );
+}
 
 #[rstest]
 #[case("chromium")]
@@ -44,13 +84,7 @@ fn test_human_only_edits_then_commit(#[case] repo_name: &str) {
         for file_path in &files_to_edit {
             let full_path = repo.path().join(file_path);
 
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(&full_path)
-                .unwrap_or_else(|_| panic!("Should be able to open file: {}", file_path));
-
-            file.write_all(b"\n# Human Line\n")
-                .unwrap_or_else(|_| panic!("Should be able to write to file: {}", file_path));
+            append_to_file(&full_path, file_path, b"\n# Human Line\n");
         }
 
         // Stage the files (regular git, no benchmark)
@@ -67,12 +101,7 @@ fn test_human_only_edits_then_commit(#[case] repo_name: &str) {
     // Print the results
     result.print_summary(&format!("Human-only edits + commit ({})", repo_name));
 
-    let (percent_overhead, average_overhead) = result.average_overhead();
-
-    assert!(
-        percent_overhead < 10.0 || average_overhead < PERFORMANCE_FLOOR_MS,
-        "Average overhead should be less than 10% or under 70ms"
-    );
+    assert_commit_overhead(&result);
 }
 
 #[rstest]
@@ -107,13 +136,7 @@ fn test_ai_and_human_edits(#[case] repo_name: &str) {
 
             // Step 1: Append "# Human Line" to the file
             {
-                let mut file = OpenOptions::new()
-                    .append(true)
-                    .open(&full_path)
-                    .unwrap_or_else(|_| panic!("Should be able to open file: {}", file_path));
-
-                file.write_all(b"\n# Human Line\n")
-                    .unwrap_or_else(|_| panic!("Should be able to write to file: {}", file_path));
+                append_to_file(&full_path, file_path, b"\n# Human Line\n");
             }
 
             // Step 2: Run git-ai checkpoint
@@ -144,12 +167,7 @@ fn test_ai_and_human_edits(#[case] repo_name: &str) {
     // Print the results
     result.print_summary(&format!("AI and human edits + commit ({})", repo_name));
 
-    let (percent_overhead, average_overhead) = result.average_overhead();
-
-    assert!(
-        percent_overhead < 10.0 || average_overhead < PERFORMANCE_FLOOR_MS,
-        "Average overhead should be less than 10% or under 70ms"
-    );
+    assert_commit_overhead(&result);
 }
 
 #[rstest]
@@ -159,29 +177,10 @@ fn test_ai_and_human_edits(#[case] repo_name: &str) {
 #[case("chakracore")]
 #[ignore]
 fn test_git_reset_head_5_mixed(#[case] repo_name: &str) {
-    let repos = get_performance_repos();
-    let test_repo = repos
-        .get(repo_name)
-        .unwrap_or_else(|| panic!("{} repo should be available", repo_name));
-
-    // Create a sampler that runs 10 times
-    let sampler = Sampler::new(10);
-
-    // Sample the performance of git reset HEAD~5 --mixed
-    let result = sampler.sample(test_repo, |repo| {
-        // Benchmark the reset operation with explicit --mixed flag
-        repo.benchmark_git(&["reset", "HEAD~5", "--mixed"])
-            .expect("Reset should succeed")
-    });
-
-    // Print the results
-    result.print_summary(&format!("git reset HEAD~5 --mixed ({})", repo_name));
-
-    let (percent_overhead, _) = result.average_overhead();
-
-    assert!(
-        percent_overhead < 20.0,
-        "Average overhead should be less than 20%"
+    assert_reset_performance(
+        repo_name,
+        &["reset", "HEAD~5", "--mixed"],
+        "git reset HEAD~5 --mixed",
     );
 }
 
@@ -217,13 +216,7 @@ fn test_human_only_edits_in_big_files_then_commit(#[case] repo_name: &str) {
         for file_path in &files_to_edit {
             let full_path = repo.path().join(file_path);
 
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(&full_path)
-                .unwrap_or_else(|_| panic!("Should be able to open file: {}", file_path));
-
-            file.write_all(b"\n# Human Line\n")
-                .unwrap_or_else(|_| panic!("Should be able to write to file: {}", file_path));
+            append_to_file(&full_path, file_path, b"\n# Human Line\n");
         }
 
         // Stage the files (regular git, no benchmark)
@@ -243,12 +236,7 @@ fn test_human_only_edits_in_big_files_then_commit(#[case] repo_name: &str) {
         repo_name
     ));
 
-    let (percent_overhead, average_overhead) = result.average_overhead();
-
-    assert!(
-        percent_overhead < 10.0 || average_overhead < PERFORMANCE_FLOOR_MS,
-        "Average overhead should be less than 10% or under 70ms"
-    );
+    assert_commit_overhead(&result);
 }
 
 #[rstest]
@@ -258,30 +246,7 @@ fn test_human_only_edits_in_big_files_then_commit(#[case] repo_name: &str) {
 #[case("chakracore")]
 #[ignore]
 fn test_git_reset_head_5(#[case] repo_name: &str) {
-    let repos = get_performance_repos();
-    let test_repo = repos
-        .get(repo_name)
-        .unwrap_or_else(|| panic!("{} repo should be available", repo_name));
-
-    // Create a sampler that runs 10 times
-    let sampler = Sampler::new(10);
-
-    // Sample the performance of git reset HEAD~5
-    let result = sampler.sample(test_repo, |repo| {
-        // Benchmark the reset operation (--mixed is the default)
-        repo.benchmark_git(&["reset", "HEAD~5"])
-            .expect("Reset should succeed")
-    });
-
-    // Print the results
-    result.print_summary(&format!("git reset HEAD~5 ({})", repo_name));
-
-    let (percent_overhead, _) = result.average_overhead();
-
-    assert!(
-        percent_overhead < 20.0,
-        "Average overhead should be less than 20%"
-    );
+    assert_reset_performance(repo_name, &["reset", "HEAD~5"], "git reset HEAD~5");
 }
 
 #[rstest]
@@ -325,13 +290,7 @@ fn test_large_checkpoints(#[case] repo_name: &str) {
         for file_path in &all_files {
             let full_path = repo.path().join(file_path);
 
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(&full_path)
-                .unwrap_or_else(|_| panic!("Should be able to open file: {}", file_path));
-
-            file.write_all(b"\n# AI Generated Line\n")
-                .unwrap_or_else(|_| panic!("Should be able to write to file: {}", file_path));
+            append_to_file(&full_path, file_path, b"\n# AI Generated Line\n");
         }
 
         // Step 2: Run git-ai checkpoint mock_ai -- <all pathspecs>
@@ -357,13 +316,7 @@ fn test_large_checkpoints(#[case] repo_name: &str) {
         for file_path in &files_to_re_edit {
             let full_path = repo.path().join(file_path);
 
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(&full_path)
-                .unwrap_or_else(|_| panic!("Should be able to open file: {}", file_path));
-
-            file.write_all(b"\n# Human Line\n")
-                .unwrap_or_else(|_| panic!("Should be able to write to file: {}", file_path));
+            append_to_file(&full_path, file_path, b"\n# Human Line\n");
         }
 
         // Step 4: Benchmark the checkpoint on the 100 human-edited files

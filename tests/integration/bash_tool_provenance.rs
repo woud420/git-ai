@@ -137,6 +137,20 @@ fn run_git_with_hooks(repo: &TestRepo, args: &[&str]) -> std::process::Output {
         .unwrap_or_else(|e| panic!("git {:?} failed to start: {}", args, e))
 }
 
+fn assert_read_only_command<T>(
+    (session_id, tool_use_id): (&str, &str),
+    prepare: impl FnOnce(&TestRepo),
+    command: impl FnOnce(&TestRepo) -> T,
+) {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    prepare(&repo);
+    pre_hook(&root, session_id, tool_use_id);
+    drop(command(&repo));
+    let post_action = post_hook(&root, session_id, tool_use_id);
+    assert_no_changes(&post_action);
+}
+
 mod bulk_changes;
 mod file_operations;
 mod filesystem_edges;

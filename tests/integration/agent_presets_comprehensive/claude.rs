@@ -1,5 +1,6 @@
 use super::{
-    ByteOffsetWatermark, ClaudeAgent, GitAiError, ParsedHookEvent, fs, json, resolve_preset,
+    ByteOffsetWatermark, ClaudeAgent, ParsedHookEvent, fs, json, preset_error_message,
+    resolve_preset,
 };
 use git_ai::operations::streams::agent::Agent;
 
@@ -12,13 +13,8 @@ fn test_claude_preset_invalid_json() {
     let preset = resolve_preset("claude").unwrap();
     let result = preset.parse("not valid json", "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Invalid JSON"));
-        }
-        _ => panic!("Expected PresetError for invalid JSON"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for invalid JSON");
+    assert!(msg.contains("Invalid JSON"));
 }
 
 #[test]
@@ -32,13 +28,8 @@ fn test_claude_preset_missing_transcript_path() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("transcript_path not found"));
-        }
-        _ => panic!("Expected PresetError for missing transcript_path"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for missing transcript_path");
+    assert!(msg.contains("transcript_path not found"));
 }
 
 #[test]
@@ -52,13 +43,8 @@ fn test_claude_preset_missing_cwd() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("cwd not found"));
-        }
-        _ => panic!("Expected PresetError for missing cwd"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for missing cwd");
+    assert!(msg.contains("cwd not found"));
 }
 
 #[test]
@@ -193,13 +179,11 @@ fn test_claude_vscode_copilot_detection() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Skipping VS Code hook payload in Claude preset"));
-        }
-        _ => panic!("Expected PresetError for VS Code Copilot payload in Claude preset"),
-    }
+    let msg = preset_error_message(
+        result,
+        "Expected PresetError for VS Code Copilot payload in Claude preset",
+    );
+    assert!(msg.contains("Skipping VS Code hook payload in Claude preset"));
 }
 
 #[test]
@@ -220,13 +204,11 @@ fn test_claude_cursor_detection() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Skipping Cursor hook payload in Claude preset"));
-        }
-        _ => panic!("Expected PresetError for Cursor payload in Claude preset"),
-    }
+    let msg = preset_error_message(
+        result,
+        "Expected PresetError for Cursor payload in Claude preset",
+    );
+    assert!(msg.contains("Skipping Cursor hook payload in Claude preset"));
 }
 
 // ==============================================================================

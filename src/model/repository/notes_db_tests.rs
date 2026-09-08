@@ -324,6 +324,49 @@ fn test_get_notes_batch() {
     );
 }
 
+#[test]
+fn test_batch_bindings_preserve_selection_and_empty_inputs() {
+    let (mut db, _tmp) = create_test_db();
+    for sha in ["'quoted'", "two", "other"] {
+        db.upsert_note(sha, sha).unwrap();
+    }
+    let batch = db.dequeue_pending(2).unwrap();
+    assert_eq!(batch.len(), 2);
+    let locked: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM notes WHERE processing_started_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(locked, 2);
+    for note in &batch {
+        assert_eq!(note.content, note.commit_sha);
+    }
+    let selected: Vec<_> = batch.iter().map(|note| note.commit_sha.clone()).collect();
+    let mut requested = selected.clone();
+    requested.extend([selected[0].clone(), "missing".into()]);
+    let before = unix_now();
+    assert_eq!(db.mark_synced(&requested).unwrap(), 2);
+    let synced: i64 = db.conn.query_row("SELECT COUNT(*) FROM notes WHERE synced = 1 AND last_sync_at >= ?1 AND processing_started_at IS NULL", [before], |row| row.get(0)).unwrap();
+    assert_eq!(synced, 2);
+    let query = ["other", "two", "'quoted'", "missing", "two"];
+    assert_eq!(
+        db.get_synced_shas(&query).unwrap(),
+        selected.into_iter().collect()
+    );
+    let expected = ["other", "two", "'quoted'"]
+        .into_iter()
+        .map(|sha| (sha.to_string(), sha.to_string()))
+        .collect();
+    assert_eq!(db.get_notes(&query).unwrap(), expected);
+    assert_eq!(db.dequeue_pending(2).unwrap().len(), 1);
+    assert_eq!(db.mark_synced(&[]).unwrap(), 0);
+    assert!(db.get_synced_shas(&[]).unwrap().is_empty());
+    assert!(db.get_notes(&[]).unwrap().is_empty());
+}
+
 // --- database_path ---
 
 #[test]

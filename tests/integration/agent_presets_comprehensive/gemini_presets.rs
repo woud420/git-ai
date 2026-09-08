@@ -1,5 +1,6 @@
 use super::{
-    ByteOffsetWatermark, GeminiAgent, GitAiError, ParsedHookEvent, fs, json, resolve_preset,
+    ByteOffsetWatermark, GeminiAgent, ParsedHookEvent, fs, json, preset_error_message,
+    resolve_preset,
 };
 use git_ai::operations::streams::agent::Agent;
 
@@ -12,13 +13,8 @@ fn test_gemini_preset_invalid_json() {
     let preset = resolve_preset("gemini").unwrap();
     let result = preset.parse("invalid{json", "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Invalid JSON"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("Invalid JSON"));
 }
 
 #[test]
@@ -32,13 +28,8 @@ fn test_gemini_preset_missing_session_id() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("session_id not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("session_id not found"));
 }
 
 #[test]
@@ -52,13 +43,8 @@ fn test_gemini_preset_missing_transcript_path() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("transcript_path not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("transcript_path not found"));
 }
 
 #[test]
@@ -72,13 +58,8 @@ fn test_gemini_preset_missing_cwd() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("cwd not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("cwd not found"));
 }
 
 #[test]

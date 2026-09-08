@@ -79,21 +79,9 @@ impl CodexInstaller {
 
 impl CodexInstaller {
     pub(super) fn canonical_json(value: &JsonValue) -> JsonValue {
-        match value {
-            JsonValue::Object(map) => {
-                let mut sorted = serde_json::Map::new();
-                let mut keys: Vec<&String> = map.keys().collect();
-                keys.sort();
-                for key in keys {
-                    sorted.insert(key.clone(), Self::canonical_json(&map[key]));
-                }
-                JsonValue::Object(sorted)
-            }
-            JsonValue::Array(items) => {
-                JsonValue::Array(items.iter().map(Self::canonical_json).collect())
-            }
-            other => other.clone(),
-        }
+        let mut canonical = value.clone();
+        canonical.sort_all_objects();
+        canonical
     }
 
     pub(super) fn compute_trust_hash(

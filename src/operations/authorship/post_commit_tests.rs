@@ -47,6 +47,10 @@ fn test_count_line_ranges_handles_scattered_and_contiguous_lines() {
     assert_eq!(count_line_ranges(&[1, 3, 5]), 3);
     // Includes unsorted and duplicate values.
     assert_eq!(count_line_ranges(&[5, 3, 3, 4, 10]), 2);
+    assert_eq!(
+        count_line_ranges(&[u32::MAX, 0, 1, u32::MAX, u32::MAX - 1]),
+        2
+    );
 }
 
 #[test]

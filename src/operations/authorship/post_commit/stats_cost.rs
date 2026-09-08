@@ -1,4 +1,5 @@
 use crate::error::GitAiError;
+use crate::model::authorship_log::LineRange;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -120,21 +121,8 @@ pub(super) fn estimate_stats_cost(
 
 #[doc(hidden)]
 pub fn count_line_ranges(lines: &[u32]) -> usize {
-    if lines.is_empty() {
-        return 0;
-    }
-
     let mut sorted = lines.to_vec();
     sorted.sort_unstable();
     sorted.dedup();
-
-    let mut ranges = 1usize;
-    let mut prev = sorted[0];
-    for &line in &sorted[1..] {
-        if line != prev + 1 {
-            ranges += 1;
-        }
-        prev = line;
-    }
-    ranges
+    LineRange::contiguous_chunks(&sorted).count()
 }

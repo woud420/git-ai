@@ -1,4 +1,4 @@
-use super::{GitAiError, ParsedHookEvent, json, resolve_preset};
+use super::{ParsedHookEvent, json, preset_error_message, resolve_preset};
 
 // ==============================================================================
 // CursorPreset Error Cases
@@ -23,13 +23,8 @@ fn test_cursor_preset_missing_conversation_id() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("conversation_id not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("conversation_id not found"));
 }
 
 #[test]
@@ -44,13 +39,8 @@ fn test_cursor_preset_missing_workspace_roots() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("workspace_roots not found"));
-        }
-        _ => panic!("Expected PresetError for missing workspace_roots"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for missing workspace_roots");
+    assert!(msg.contains("workspace_roots not found"));
 }
 
 // ==============================================================================
@@ -77,14 +67,9 @@ fn test_github_copilot_preset_invalid_hook_event_name() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Invalid hook_event_name"));
-            assert!(msg.contains("before_edit") || msg.contains("after_edit"));
-        }
-        _ => panic!("Expected PresetError for invalid hook_event_name"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for invalid hook_event_name");
+    assert!(msg.contains("Invalid hook_event_name"));
+    assert!(msg.contains("before_edit") || msg.contains("after_edit"));
 }
 
 // ==============================================================================
@@ -148,14 +133,9 @@ fn test_aitab_preset_invalid_hook_event_name() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Unsupported hook_event_name"));
-            assert!(msg.contains("expected 'before_edit' or 'after_edit'"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("Unsupported hook_event_name"));
+    assert!(msg.contains("expected 'before_edit' or 'after_edit'"));
 }
 
 #[test]
@@ -170,13 +150,8 @@ fn test_aitab_preset_empty_tool() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("tool must be a non-empty string"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("tool must be a non-empty string"));
 }
 
 #[test]
@@ -191,13 +166,8 @@ fn test_aitab_preset_empty_model() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("model must be a non-empty string"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("model must be a non-empty string"));
 }
 
 #[test]

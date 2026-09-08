@@ -52,9 +52,33 @@ pub(super) fn operation_pair(
     } else {
         MAX_JJ_OBSERVATION_OPERATION_BYTES
     };
+    let evidence = operation_pair_at(
+        operation_id,
+        [source.operations, source.views],
+        directories,
+        maximum,
+        stage,
+        budget,
+        hooks,
+    )?;
+    if anchor {
+        budget.retain_anchor_bytes(evidence.operation_bytes.len() + evidence.view_bytes.len())?;
+    }
+    Ok(evidence)
+}
+
+pub(super) fn operation_pair_at(
+    operation_id: &str,
+    locations: [usize; 2],
+    directories: &DirectoryRegistry,
+    maximum: usize,
+    stage: &'static str,
+    budget: &mut CaptureBudget,
+    hooks: &mut impl CaptureHooks,
+) -> Result<JjOperationEvidence, E> {
     let operation_bytes = read_file(
         directories,
-        source.operations,
+        locations[0],
         operation_id,
         maximum,
         stage,
@@ -71,7 +95,7 @@ pub(super) fn operation_pair(
     let decoded = decoded.map_err(|error| E::caused(stage, error))?;
     let view_bytes = read_file(
         directories,
-        source.views,
+        locations[1],
         &decoded.view_id,
         maximum - operation_bytes.len(),
         stage,
@@ -89,9 +113,6 @@ pub(super) fn operation_pair(
     let proof = verify_evidence(JJ_OBSERVATION_READER_PROFILE, &evidence);
     budget.check(hooks)?;
     proof.map_err(|error| E::caused(stage, error))?;
-    if anchor {
-        budget.retain_anchor_bytes(evidence.operation_bytes.len() + evidence.view_bytes.len())?;
-    }
     Ok(evidence)
 }
 

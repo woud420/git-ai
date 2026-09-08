@@ -1,8 +1,9 @@
 //! Bounded, read-only sampling of one jj source's current heads and checkout.
 //!
 //! Matching samples are not an atomic filesystem snapshot or lifetime source
-//! identity. This off-Trace2 API does not walk ancestry, admit journal records,
-//! enable collection, or certify dirty working-file contents.
+//! identity. Standalone capture does not walk ancestry; the retained history
+//! producer reads a bounded closure. Neither admits journal records, enables
+//! attributed collection, or certifies dirty working-file contents.
 
 use super::baseline::{
     JjBaselineError, PreparedCurrentStateBaseline, prepare_current_state_baseline,
@@ -23,6 +24,8 @@ mod directories;
 mod evidence;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod heads;
+mod history_types;
+pub(crate) use history_types::CapturedJjHistoryEvidence;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod metadata;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

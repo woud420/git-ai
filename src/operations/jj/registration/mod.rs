@@ -1,5 +1,5 @@
 //! Explicit source registration and sampled reopening of a saved native cutoff.
-//! A registered result does not enable collection or prove later ancestry.
+//! A registered result does not enable attribution or prove later ancestry.
 
 use super::baseline_persistence::DurableCurrentStateBaseline;
 use super::checkout::DecodedJjCheckout;
@@ -90,3 +90,6 @@ pub fn reopen_registered_current_state(
 ) -> Result<Option<RegisteredJjCurrentState>, JjRegistrationError> {
     platform::reopen(journal, context, config, deadline, read_budget)
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) use unix::history::collect as collect_history;

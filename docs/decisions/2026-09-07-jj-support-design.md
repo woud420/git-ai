@@ -1,6 +1,6 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification and explicit source registration are implemented on the draft branch. Integrated observation and attribution remain pending.
+Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification, explicit source registration and bounded registered-history collection are implemented on the draft branch. The collector is locally qualified on macOS; integrated observation and attribution remain pending.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
@@ -174,8 +174,10 @@ source and workspace records without backfill.
 validates canonical bytes and exact keys. [Explicit source registration](2026-09-08-jj-native-registration.md)
 now joins the first workspace, published seal and saved cutoff, with all four SQL
 rows installed atomically. Filesystem publication and SQL commit remain separate
-steps. Attachment mutation, recovery and durable ancestry admission remain gates.
-Baseline anchors receive no retrospective attribution and do not enter the pending
+steps. [Registered history collection](2026-09-08-jj-native-history-collection.md) now reads a bounded DAG from
+the sampled heads to the original saved baseline IDs or virtual root; it never
+uses opaque observations or earlier extensions as terminals. Local collector qualification is recorded in that decision. Attachment mutation, recovery and durable ancestry admission remain
+gates. Baseline anchors receive no retrospective attribution and do not enter the pending
 application queue. Ordinary checksummed observations are not native ancestry
 boundaries; subsequent traversal must close on the permitted baseline or verified
 extensions in the same epoch. A stale workspace outside that range remains unavailable
@@ -308,6 +310,9 @@ preserving existing baseline receipts. Bounded individual registration-record
 reads are implemented. [Explicit source registration](2026-09-08-jj-native-registration.md)
 now publishes a seal and atomically installs the first workspace and saved native
 cutoff in SQL; reopen and retry retain that cutoff after heads or checkout advance.
+[Registered history collection](2026-09-08-jj-native-history-collection.md) now composes that fresh registration
+join with bounded parent traversal and final retained rechecks; its local qualification
+is recorded in that decision. It returns evidence without advancing any journal progress.
 Attachment mutation, explicit recovery, native admission and the observer remain
 pending. Later phases
 remain tracked until their acceptance tests pass. These increments are

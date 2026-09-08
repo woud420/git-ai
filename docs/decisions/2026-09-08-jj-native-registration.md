@@ -15,10 +15,13 @@ allowlist nor enables attribution.
 
 This increment supports the pinned `jj-simple-op-store/0.45.1` profile on Linux
 and macOS. Other platforms reject before path or policy access. It introduces
-no CLI dispatch, wrapper, Trace2 ingestion work, history collection, attachment
-mutation or recovery. Standalone native baselines remain namespace-scoped;
-individual registration-record readers retain their orphan-inspection contract.
-Neither API substitutes those records for complete source registration.
+no CLI dispatch, wrapper, Trace2 ingestion work, attachment mutation or recovery.
+The registration APIs do not walk history. [Registered history collection](2026-09-08-jj-native-history-collection.md)
+is implemented separately and locally qualified; it reuses the fresh
+registration join and preserves the original saved cutoff. Standalone native
+baselines remain namespace-scoped; individual registration-record readers retain
+their orphan-inspection contract. Neither API substitutes those records for
+complete source registration.
 
 [Initialization flow](../architecture/diagrams/jj-native-registration-flow.svg)
 and [saved-receipt flow](../architecture/diagrams/jj-native-registration-reopen.svg)
@@ -101,6 +104,9 @@ source record, its original workspace, the requested workspace and native state.
 When the requested workspace is original, it is decoded and charged only once.
 Unselected workspace records are outside this bounded read's claim. Native
 operation/view hashes are mandatory on reopen, even if local checksums match.
+The saved binding, historical checkout and native baseline are verified before
+the final retained metadata, directory-edge and seal checks. Only then is the
+original receipt and fresh checkout context returned.
 
 Fresh capture must match the saved physical/workspace bindings and prove that
 the selected workspace belongs to its own native checkout view. Historical

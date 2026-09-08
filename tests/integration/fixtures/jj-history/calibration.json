@@ -1,0 +1,81 @@
+{
+  "qualification": "independent Python fixture calibration; no Rust test claim",
+  "native_operation_hashes_verified": 531,
+  "native_view_hashes_verified": 3,
+  "source_oracles": {
+    "generate_operation_vectors.py": "c46c92286602fe4b4fa13ba88fa83739dd1739589819d58417a2e1a4b5249cfc",
+    "generate_view_vectors.py": "3ac5c2d813de68321296dc9bd0b6e2e158e406dd92af51b526724046b7c142ba",
+    "generate_evidence_vectors.py": "65f4d8ac86be3b15ed04833facb29431c1f79f949cfc8672b1259b1d1a0012bc"
+  },
+  "reader_sha256": "fd1155a77780420c1a100fb1ee97fb97ea1b86bf67d5dfc3c45de025d7add1b0",
+  "merge_pair_bytes": 1139,
+  "raw_description_bytes": 32584,
+  "raw_baseline_description_bytes": 64213,
+  "max_description_bytes": 64214,
+  "predecessor_counts": [
+    4096,
+    4097
+  ],
+  "view_reference_counts": [
+    4096,
+    4097
+  ],
+  "cases": {
+    "chain_exact": {
+      "nonterminal_nodes": 256,
+      "read_pair_union": 256,
+      "union_raw_bytes": 47360,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    },
+    "chain_over": {
+      "nonterminal_nodes": 257,
+      "read_pair_union": 257,
+      "union_raw_bytes": 47545,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    },
+    "baseline_union_exact": {
+      "nonterminal_nodes": 255,
+      "read_pair_union": 256,
+      "union_raw_bytes": 48314,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    },
+    "baseline_union_over": {
+      "nonterminal_nodes": 256,
+      "read_pair_union": 257,
+      "union_raw_bytes": 48499,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    },
+    "raw_exact": {
+      "nonterminal_nodes": 256,
+      "read_pair_union": 256,
+      "union_raw_bytes": 8388608,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    },
+    "raw_over": {
+      "nonterminal_nodes": 256,
+      "read_pair_union": 256,
+      "union_raw_bytes": 8388609,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    },
+    "raw_baseline_exact": {
+      "nonterminal_nodes": 255,
+      "read_pair_union": 256,
+      "union_raw_bytes": 8388608,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    },
+    "raw_baseline_over": {
+      "nonterminal_nodes": 255,
+      "read_pair_union": 256,
+      "union_raw_bytes": 8388609,
+      "missing_parents": 0,
+      "detached_nodes": 0
+    }
+  }
+}

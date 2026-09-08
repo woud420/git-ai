@@ -99,6 +99,7 @@ mod jj_baseline_persistence;
 mod jj_capture;
 mod jj_checkout;
 mod jj_evidence;
+mod jj_history_platform;
 mod jj_observation_journal;
 mod jj_operation;
 mod jj_registration_platform;

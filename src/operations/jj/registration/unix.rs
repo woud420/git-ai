@@ -10,6 +10,8 @@ use crate::operations::workspace_context::WorkspaceContext;
 use rand::{TryRng, rngs::SysRng};
 use std::time::Instant;
 
+#[path = "history.rs"]
+pub(super) mod history;
 #[path = "policy.rs"]
 mod policy;
 #[path = "saved.rs"]
@@ -76,7 +78,7 @@ pub(super) fn register(
     let snapshot = staged
         .commit()
         .map_err(|error| E::caused("registration commit", error))?;
-    saved::finish(snapshot, current.into_captured()).map(JjRegistrationOutcome::Installed)
+    saved::finish(snapshot, &current.into_captured()).map(JjRegistrationOutcome::Installed)
 }
 
 pub(super) fn reopen(
@@ -109,6 +111,20 @@ fn reopen_present(
     deadline: Instant,
     read_budget: &mut ReadBudget,
 ) -> Result<RegisteredJjCurrentState, E> {
+    let registered = load_registered_context(journal, &current, deadline, read_budget)?;
+    check_deadline(deadline)?;
+    current
+        .final_recheck()
+        .map_err(|error| E::caused("registration recheck", error))?;
+    Ok(registered)
+}
+
+fn load_registered_context(
+    journal: &JjObservationJournal,
+    current: &RetainedCapture<'_>,
+    deadline: Instant,
+    read_budget: &mut ReadBudget,
+) -> Result<RegisteredJjCurrentState, E> {
     let seal = current
         .seal()
         .ok_or_else(|| E::invalid("seal", "registered source seal is absent"))?;
@@ -121,12 +137,8 @@ fn reopen_present(
         )
         .map_err(|error| E::caused("saved registration", error))?
         .ok_or_else(|| E::invalid("saved registration", "seal has no complete registration"))?;
-    saved::validate(&current, &snapshot)?;
-    check_deadline(deadline)?;
-    current
-        .final_recheck()
-        .map_err(|error| E::caused("registration recheck", error))?;
-    saved::finish(snapshot, current.into_captured())
+    saved::validate(current, &snapshot)?;
+    saved::finish(snapshot, current.captured())
 }
 
 fn require_empty_guards(

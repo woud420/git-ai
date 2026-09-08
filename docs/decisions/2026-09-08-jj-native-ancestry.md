@@ -126,5 +126,8 @@ model. This API accepts a bounded complete supplied DAG to the original cut;
 it cannot use a previous extension ID as a terminal. Larger input fails visibly
 rather than widening the cutoff. [Explicit source registration](2026-09-08-jj-native-registration.md)
 now binds the first workspace and saved cutoff to a sampled source and seal.
-Bounded ancestor collection, durable admission, workspace readiness and attribution
-remain separate steps; registration does not supply this ancestry proof.
+[Registered history collection](2026-09-08-jj-native-history-collection.md) now composes a fresh registration join, bounded
+filesystem parent reads and this verifier; local qualification is recorded in that decision. It stops only
+at the original saved baseline or root and never advances durable progress.
+Durable admission, workspace readiness and attribution remain separate steps;
+registration alone does not supply this ancestry proof.

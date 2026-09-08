@@ -91,7 +91,7 @@ fn validate_historical_checkout(
 
 pub(super) fn finish(
     snapshot: StoredRegistrationSnapshot,
-    captured: CapturedJjCurrentState,
+    captured: &CapturedJjCurrentState,
 ) -> Result<RegisteredJjCurrentState, E> {
     let selected = &snapshot.selected_workspace().record;
     let source_id = snapshot.registration.record.source_id.clone();

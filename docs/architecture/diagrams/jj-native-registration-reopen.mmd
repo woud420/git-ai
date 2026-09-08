@@ -6,9 +6,9 @@ flowchart TD
     D --> E["Reopen returns None; no initialization authority"]:::service
     C -- "Valid seal" --> F["Read source, original, selected and native snapshot"]:::db
     C -- "Incomplete or malformed" --> L["Unavailable; no adoption, cleanup or rebaseline"]:::external
-    F --> G["Join fresh bindings and verify saved checkout"]:::job
+    F --> G["Join fresh bindings; verify saved checkout and native baseline"]:::job
     G --> H["Final retained metadata, edge and seal check"]:::storage
-    H --> I["Reverify baseline; return original receipt and fresh checkout relation"]:::service
+    H --> I["Return original receipt and fresh checkout relation"]:::service
     F -. "Missing or conflicting state" .-> L
     G -. "Mismatch" .-> L
     classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30

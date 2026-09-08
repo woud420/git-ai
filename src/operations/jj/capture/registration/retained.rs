@@ -6,6 +6,7 @@ impl<'a> RetainedCapture<'a> {
         context: &WorkspaceContext,
         budget: &'a mut CaptureBudget,
         created: Option<CreatedSourceSeal>,
+        history_mode: bool,
         hooks: &mut impl SealHooks,
     ) -> Result<Self, E> {
         budget.check(hooks)?;
@@ -18,6 +19,7 @@ impl<'a> RetainedCapture<'a> {
             captured: None,
             repository: 0,
             policy_directories: [0; 3],
+            operation_directories: [0; 2],
             policy_paths: SampledPolicyPaths {
                 workspace_root: context.workspace_root.clone(),
                 git_dir: context.git.git_dir.clone(),
@@ -29,6 +31,9 @@ impl<'a> RetainedCapture<'a> {
             held: None,
             expected_policy: None,
             final_checked: false,
+            final_succeeded: false,
+            history_mode,
+            history_state: HistoryState::NotStarted,
         };
         let bound = source::bind(
             context,
@@ -38,6 +43,7 @@ impl<'a> RetainedCapture<'a> {
             hooks,
         )?;
         session.repository = bound.repository;
+        session.operation_directories = [bound.operations, bound.views];
         session.policy_directories = bound.policy_directories;
         if let Some(created) = created {
             if created.continuity.source != bound.binding
@@ -109,6 +115,12 @@ impl<'a> RetainedCapture<'a> {
         source_id: &str,
         hooks: &mut impl SealHooks,
     ) -> Result<CreatedSourceSeal, E> {
+        if self.history_mode {
+            return Err(E::invalid(
+                "history",
+                "read-only session cannot publish a source seal",
+            ));
+        }
         if self.held.is_some() || self.namespace.is_some() || self.final_checked {
             return Err(E::invalid(
                 "seal publication",

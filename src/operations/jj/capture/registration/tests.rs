@@ -17,3 +17,5 @@ use support::*;
 mod additional_source_binding;
 
 mod additional_rename_phase;
+
+mod history;

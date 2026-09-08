@@ -89,6 +89,7 @@ validated with `cargo metadata --locked`; existing package versions did not chan
 
 The [native view decoder](2026-09-07-jj-native-view-decoder.md) now verifies the
 referenced view format independently. The [evidence verifier](2026-09-07-jj-native-evidence-verifier.md) joins both hashes
-to journal envelopes. Bounded integrated-head traversal and validated journal
-boundaries remain pending.
+to journal envelopes. [Registered history collection](2026-09-08-jj-native-history-collection.md) now verifies a bounded
+parent DAG from sampled heads to the original saved baseline or root; local qualification
+is recorded in that decision. Validated durable admission remains separate.
 Operation decoding alone does not make native jj checkpoint attribution usable.

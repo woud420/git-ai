@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 mod facts;
+mod history;
+use history::{HistoryHooks, HistoryState};
 mod retained;
 mod seal;
 pub(crate) use seal::SourceSeal;
@@ -67,7 +69,7 @@ impl RegistrationCaptureBudget {
         hooks: &mut impl SealHooks,
     ) -> Result<RetainedCapture<'a>, E> {
         self.once(0)?;
-        RetainedCapture::open(context, &mut self.sessions[0], None, hooks)
+        RetainedCapture::open(context, &mut self.sessions[0], None, false, hooks)
     }
 
     fn open_created_with<'a>(
@@ -83,7 +85,7 @@ impl RegistrationCaptureBudget {
             ));
         }
         self.once(1)?;
-        RetainedCapture::open(context, &mut self.sessions[1], Some(created), hooks)
+        RetainedCapture::open(context, &mut self.sessions[1], Some(created), false, hooks)
     }
 
     fn once(&mut self, index: usize) -> Result<(), E> {
@@ -96,6 +98,46 @@ impl RegistrationCaptureBudget {
     #[cfg(test)]
     fn session_counters(&self, index: usize) -> CaptureCounters {
         self.sessions[index].counters()
+    }
+}
+
+pub(crate) struct HistoryCaptureBudget {
+    budget: CaptureBudget,
+    opened: bool,
+}
+
+impl HistoryCaptureBudget {
+    pub(crate) fn new(deadline: Instant) -> Self {
+        Self::with_limits(deadline, CaptureLimits::default())
+    }
+
+    fn with_limits(deadline: Instant, mut limits: CaptureLimits) -> Self {
+        limits.live_directory_descriptors = limits.live_directory_descriptors.min(254);
+        let mut budget = CaptureBudget::with_limits(deadline, limits);
+        budget.metadata =
+            crate::regular_file::MetadataReadBudget::new(10 * 1024 * 1024, 640, deadline);
+        Self {
+            budget,
+            opened: false,
+        }
+    }
+
+    pub(crate) fn open<'a>(
+        &'a mut self,
+        context: &WorkspaceContext,
+    ) -> Result<RetainedCapture<'a>, E> {
+        self.open_with(context, &mut DirectCapture)
+    }
+
+    fn open_with<'a>(
+        &'a mut self,
+        context: &WorkspaceContext,
+        hooks: &mut impl HistoryHooks,
+    ) -> Result<RetainedCapture<'a>, E> {
+        if std::mem::replace(&mut self.opened, true) {
+            return Err(E::invalid("history", "session already opened"));
+        }
+        RetainedCapture::open(context, &mut self.budget, None, true, hooks)
     }
 }
 
@@ -118,6 +160,7 @@ pub(crate) struct RetainedCapture<'a> {
     captured: Option<CapturedJjCurrentState>,
     repository: usize,
     policy_directories: [usize; 3],
+    operation_directories: [usize; 2],
     policy_paths: SampledPolicyPaths,
     canonical_paths: Option<SampledPolicyPaths>,
     colocated: bool,
@@ -125,6 +168,9 @@ pub(crate) struct RetainedCapture<'a> {
     held: Option<HeldSeal>,
     expected_policy: Option<SampledPolicyPaths>,
     final_checked: bool,
+    final_succeeded: bool,
+    history_mode: bool,
+    history_state: HistoryState,
 }
 
 impl RetainedCapture<'_> {
@@ -224,7 +270,9 @@ impl RetainedCapture<'_> {
                 ));
             }
         }
-        self.directories.recheck(self.budget, hooks)
+        self.directories.recheck(self.budget, hooks)?;
+        self.final_succeeded = true;
+        Ok(())
     }
 
     pub(crate) fn into_captured(mut self) -> CapturedJjCurrentState {

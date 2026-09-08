@@ -17,6 +17,8 @@ use support::*;
 mod behavior;
 #[path = "jj_registration_faults.rs"]
 mod faults;
+#[path = "jj_history.rs"]
+mod history;
 #[path = "jj_registration_policy.rs"]
 mod policy;
 #[path = "jj_registration_real.rs"]
@@ -155,6 +157,7 @@ fn registration_case_child() {
         "include_denied" => policy::included(&case, &config, true),
         name if name.starts_with("row_gap:") => faults::row_gap(&case, &config),
         name if name.starts_with("sql_abort:") => faults::sql_abort(&case, &config),
+        name if name.starts_with("history:") => history::dispatch(&case, &config),
         name => panic!("unknown registration fixture {name}"),
     }
     println!("REGISTRATION_CASE_COMPLETED:{}", case.name);

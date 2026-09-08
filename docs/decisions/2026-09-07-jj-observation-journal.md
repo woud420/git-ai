@@ -143,7 +143,9 @@ checks their exact envelope join. [Bounded native capture](2026-09-08-jj-native-
 [pure ancestry verification](2026-09-08-jj-native-ancestry.md) and
 [explicit source registration](2026-09-08-jj-native-registration.md) are now
 implemented, including the first workspace and saved cutoff. A checksummed opaque
-ancestor is still not a certified native boundary. Bounded ancestor collection,
-validated durable admission, attachment mutation, recovery, notifications,
+ancestor is still not a certified native boundary. [Registered history collection](2026-09-08-jj-native-history-collection.md)
+is now implemented and locally qualified on macOS. It reads native parents to the
+original saved cutoff or root without consulting opaque lookups or writing
+progress. Validated durable admission, attachment mutation, recovery, notifications,
 checkpoint ordering and attribution application remain separate work; ENG-415
 stays in progress.

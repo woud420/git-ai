@@ -34,39 +34,21 @@ pub fn read_jsonl_line(
 }
 
 /// Errors that can occur during transcript processing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum StreamError {
     /// Transient errors that should be retried (file locked, network timeout).
+    #[error("Transient error (retry after {retry_after:?}): {message}")]
     Transient {
         message: String,
         retry_after: Duration,
     },
     /// Parse errors from malformed data (bad JSON, unexpected format).
+    #[error("Parse error at line {line}: {message}")]
     Parse { line: usize, message: String },
     /// Fatal errors that cannot be recovered (file deleted, permissions denied).
+    #[error("Fatal error: {message}")]
     Fatal { message: String },
 }
-
-impl std::fmt::Display for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StreamError::Transient {
-                message,
-                retry_after,
-            } => write!(
-                f,
-                "Transient error (retry after {:?}): {}",
-                retry_after, message
-            ),
-            StreamError::Parse { line, message } => {
-                write!(f, "Parse error at line {}: {}", line, message)
-            }
-            StreamError::Fatal { message } => write!(f, "Fatal error: {}", message),
-        }
-    }
-}
-
-impl std::error::Error for StreamError {}
 
 /// Batch of transcript events returned by transcript readers after processing.
 pub struct StreamBatch {

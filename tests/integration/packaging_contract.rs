@@ -213,3 +213,32 @@ fn packaged_installers_forward_only_the_resolved_user_home() {
         );
     }
 }
+
+#[test]
+fn linux_installer_hands_wsl_to_the_existing_windows_package() {
+    let installer = repo_file("install.sh");
+    for contract in [
+        "is_wsl_environment \"$OS\"",
+        "install_windows_msi_from_wsl \"$ARCH\" \"$RELEASE_TAG\"",
+        "git-ai-windows-%s.msi",
+        "msiexec.exe",
+        "API_BASE=",
+        "API_KEY=",
+    ] {
+        assert!(
+            installer.contains(contract),
+            "WSL package handoff must preserve {contract}"
+        );
+    }
+
+    let guard = installer
+        .find("if is_wsl_environment")
+        .expect("WSL host installation must be guarded");
+    let handoff = installer
+        .find("install_windows_msi_from_wsl \"$ARCH\"")
+        .expect("WSL host installation must invoke the MSI helper");
+    assert!(
+        guard < handoff,
+        "native installers must not invoke the MSI helper"
+    );
+}

@@ -16,7 +16,7 @@
 
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, ToSql, params, params_from_iter};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -317,40 +317,22 @@ impl NotesDatabase {
         }
 
         // Lock the selected rows.
-        let placeholders: String = shas
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 2))
-            .collect::<Vec<_>>()
-            .join(",");
+        let placeholders = numbered_placeholders(shas.len(), 2);
         let update_sql = format!(
             "UPDATE notes SET processing_started_at = ?1 WHERE commit_sha IN ({})",
             placeholders
         );
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now)];
-        for sha in &shas {
-            params_vec.push(Box::new(sha.clone()));
-        }
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
-        self.conn.execute(&update_sql, param_refs.as_slice())?;
+        let params =
+            std::iter::once(&now as &dyn ToSql).chain(shas.iter().map(|sha| sha as &dyn ToSql));
+        self.conn.execute(&update_sql, params_from_iter(params))?;
 
         // Read back the locked rows.
         let select_sql = format!(
             "SELECT commit_sha, content, attempts FROM notes WHERE commit_sha IN ({})",
-            shas.iter()
-                .enumerate()
-                .map(|(i, _)| format!("?{}", i + 1))
-                .collect::<Vec<_>>()
-                .join(",")
+            numbered_placeholders(shas.len(), 1)
         );
         let mut stmt = self.conn.prepare(&select_sql)?;
-        let sha_params: Vec<Box<dyn rusqlite::ToSql>> = shas
-            .iter()
-            .map(|s| Box::new(s.clone()) as Box<dyn rusqlite::ToSql>)
-            .collect();
-        let sha_param_refs: Vec<&dyn rusqlite::ToSql> =
-            sha_params.iter().map(|b| b.as_ref()).collect();
-        let rows = stmt.query_map(sha_param_refs.as_slice(), |row| {
+        let rows = stmt.query_map(params_from_iter(shas.iter()), |row| {
             Ok(PendingNote {
                 commit_sha: row.get(0)?,
                 content: row.get(1)?,
@@ -376,26 +358,16 @@ impl NotesDatabase {
         let now = unix_now();
 
         // Build a parameterised `IN (...)` clause.
-        let placeholders: String = commit_shas
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 2))
-            .collect::<Vec<_>>()
-            .join(",");
+        let placeholders = numbered_placeholders(commit_shas.len(), 2);
         let sql = format!(
             "UPDATE notes SET synced = 1, last_sync_at = ?1, processing_started_at = NULL \
              WHERE commit_sha IN ({})",
             placeholders
         );
 
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now)];
-        for sha in commit_shas {
-            params_vec.push(Box::new(sha.clone()));
-        }
-
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
-        let updated = self.conn.execute(&sql, params_refs.as_slice())?;
+        let params = std::iter::once(&now as &dyn ToSql)
+            .chain(commit_shas.iter().map(|sha| sha as &dyn ToSql));
+        let updated = self.conn.execute(&sql, params_from_iter(params))?;
         Ok(updated)
     }
 
@@ -458,22 +430,15 @@ impl NotesDatabase {
         if commit_shas.is_empty() {
             return Ok(HashSet::new());
         }
-        let placeholders: String = commit_shas
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 1))
-            .collect::<Vec<_>>()
-            .join(",");
+        let placeholders = numbered_placeholders(commit_shas.len(), 1);
         let sql = format!(
             "SELECT commit_sha FROM notes WHERE synced = 1 AND commit_sha IN ({})",
             placeholders
         );
-        let params_vec: Vec<&dyn rusqlite::ToSql> = commit_shas
-            .iter()
-            .map(|s| s as &dyn rusqlite::ToSql)
-            .collect();
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_vec.as_slice(), |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map(params_from_iter(commit_shas.iter()), |row| {
+            row.get::<_, String>(0)
+        })?;
         let mut result = HashSet::new();
         for row in rows {
             result.insert(row?);
@@ -489,23 +454,13 @@ impl NotesDatabase {
         if commit_shas.is_empty() {
             return Ok(HashMap::new());
         }
-        let placeholders: String = commit_shas
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 1))
-            .collect::<Vec<_>>()
-            .join(",");
+        let placeholders = numbered_placeholders(commit_shas.len(), 1);
         let sql = format!(
             "SELECT commit_sha, content FROM notes WHERE commit_sha IN ({})",
             placeholders
         );
-        let params_vec: Vec<&dyn rusqlite::ToSql> = commit_shas
-            .iter()
-            .map(|s| s as &dyn rusqlite::ToSql)
-            .collect();
-
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_vec.as_slice(), |row| {
+        let rows = stmt.query_map(params_from_iter(commit_shas.iter()), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
@@ -561,6 +516,13 @@ impl NotesDatabase {
         )?;
         Ok(deleted)
     }
+}
+
+fn numbered_placeholders(count: usize, first: usize) -> String {
+    (0..count)
+        .map(|i| format!("?{}", i + first))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn unix_now() -> i64 {

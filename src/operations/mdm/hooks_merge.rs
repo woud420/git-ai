@@ -101,47 +101,27 @@ pub fn edit_settings_json(
 pub fn upsert_singleton_command_hook(
     array: &mut Vec<Value>,
     desired_cmd: &str,
-    desired_hook: Value,
+    mut desired_hook: Value,
 ) {
-    let mut found_idx: Option<usize> = None;
-    let mut needs_update = false;
-
-    for (idx, item) in array.iter().enumerate() {
-        if let Some(cmd) = item.get("command").and_then(|c| c.as_str())
-            && is_git_ai_checkpoint_command(cmd)
-            && found_idx.is_none()
-        {
-            found_idx = Some(idx);
-            if cmd != desired_cmd {
-                needs_update = true;
-            }
+    let mut found = false;
+    array.retain_mut(|item| {
+        let Some(cmd) = item.get("command").and_then(|c| c.as_str()) else {
+            return true;
+        };
+        if !is_git_ai_checkpoint_command(cmd) {
+            return true;
         }
-    }
-
-    match found_idx {
-        Some(idx) => {
-            if needs_update {
-                array[idx] = desired_hook;
-            }
-            let keep_idx = idx;
-            let mut current_idx = 0;
-            array.retain(|item| {
-                if current_idx == keep_idx {
-                    current_idx += 1;
-                    true
-                } else if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-                    let is_dup = is_git_ai_checkpoint_command(cmd);
-                    current_idx += 1;
-                    !is_dup
-                } else {
-                    current_idx += 1;
-                    true
-                }
-            });
+        if found {
+            return false;
         }
-        None => {
-            array.push(desired_hook);
+        found = true;
+        if cmd != desired_cmd {
+            *item = desired_hook.take();
         }
+        true
+    });
+    if !found {
+        array.push(desired_hook);
     }
 }
 
@@ -448,28 +428,29 @@ mod tests {
 
     #[test]
     fn upsert_updates_stale_command_in_place() {
-        let mut array = vec![json!({"command": "/old/git-ai checkpoint x"})];
-        upsert_singleton_command_hook(
-            &mut array,
-            "git-ai checkpoint x",
-            json!({"command": "git-ai checkpoint x"}),
-        );
-        assert_eq!(array.len(), 1);
-        assert_eq!(array[0]["command"], "git-ai checkpoint x");
+        let foreign = json!({"command": "echo hi"});
+        let malformed = json!({"command": 42});
+        let desired = json!({"command": "git-ai checkpoint x", "timeout": 600});
+        let mut array = vec![
+            foreign.clone(),
+            json!({"command": "/old/git-ai checkpoint x", "timeout": 1}),
+            malformed.clone(),
+            json!({"command": "git-ai checkpoint y"}),
+        ];
+        upsert_singleton_command_hook(&mut array, "git-ai checkpoint x", desired.clone());
+        assert_eq!(array, vec![foreign, desired, malformed]);
     }
 
     #[test]
     fn upsert_dedupes_extra_matches_keeping_first() {
-        let mut array = vec![
-            json!({"command": "git-ai checkpoint x"}),
-            json!({"command": "git-ai checkpoint x"}),
-        ];
+        let first = json!({"command": "git-ai checkpoint x", "timeout": 1});
+        let mut array = vec![first.clone(), json!({"command": "git-ai checkpoint x"})];
         upsert_singleton_command_hook(
             &mut array,
             "git-ai checkpoint x",
             json!({"command": "git-ai checkpoint x"}),
         );
-        assert_eq!(array.len(), 1);
+        assert_eq!(array, vec![first]);
     }
 
     // ---- install_catch_all_hooks / uninstall_catch_all_hooks / catch_all_hook_status ----

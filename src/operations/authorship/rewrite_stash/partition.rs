@@ -6,6 +6,7 @@ use crate::operations::authorship::checkpoint_history::{
 use crate::operations::authorship::virtual_attribution::{
     VirtualAttributions, checkout_merge_rebased_content,
 };
+use crate::operations::git::repository::batch_read_paths_at_treeishes;
 use std::collections::BTreeSet;
 
 pub(super) fn partition_stash_attributions(

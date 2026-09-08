@@ -1,4 +1,5 @@
-use super::{PersistedWorkingLog, persistence_error};
+use super::PersistedWorkingLog;
+use super::storage_files::persistence_error;
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};

@@ -1,9 +1,10 @@
-use std::path::Path;
-
-#[cfg(not(windows))]
+use super::FileConfig;
+use super::storage::config_file_path;
+#[cfg(unix)]
 use crate::operations::mdm::paths::home_dir;
-
-use super::{FileConfig, config_file_path, is_real_git_candidate};
+#[cfg(unix)]
+use std::fs;
+use std::path::Path;
 
 pub(super) fn resolve_git_path(file_cfg: &Option<FileConfig>) -> String {
     // Nix wrappers supply their store Git without taking ownership of user config.
@@ -114,4 +115,84 @@ pub(super) fn resolve_git_path(file_cfg: &Option<FileConfig>) -> String {
             .unwrap_or_else(|| "~/.git-ai/config.json".to_string()),
     );
     std::process::exit(1);
+}
+
+pub(super) fn is_executable(path: &Path) -> bool {
+    if !path.exists() || !path.is_file() {
+        return false;
+    }
+    // Basic check: existence is sufficient for our purposes; OS will enforce exec perms.
+    // On Unix we could check permissions, but many filesystems differ. Keep it simple.
+    true
+}
+
+/// Check whether two paths refer to the same underlying file.
+/// On Unix this compares (dev, ino); on other platforms it falls back to
+/// comparing canonicalized paths.
+#[cfg(not(windows))]
+pub(super) fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(ma), Ok(mb)) = (fs::metadata(a), fs::metadata(b)) {
+            return ma.dev() == mb.dev() && ma.ino() == mb.ino();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if let (Ok(ca), Ok(cb)) = (a.canonicalize(), b.canonicalize()) {
+            return ca == cb;
+        }
+    }
+    false
+}
+
+/// Detect if a path is actually the git-ai binary (or a symlink to it).
+/// This prevents `git_cmd()` from returning the git-ai shim, which would
+/// cause infinite recursion: handle_git() → proxy_to_git() → shim → handle_git() → ...
+pub(crate) fn path_is_git_ai_binary(path: &Path) -> bool {
+    // Check canonical path — if the path resolves to a binary whose name
+    // is git-ai (or a variant), it is the git-ai binary regardless of what
+    // the original path looks like (catches symlinks like `git → git-ai`).
+    if let Ok(canonical) = path.canonicalize()
+        && let Some(name) = canonical.file_name().and_then(|n| n.to_str())
+    {
+        let stem = name.strip_suffix(".exe").unwrap_or(name);
+        if stem == "git-ai" || stem.starts_with("git-ai-") || stem.starts_with("git_ai") {
+            return true;
+        }
+    }
+
+    // Check if a sibling "git-ai" exists in the same directory.
+    // On Windows the installer copies git-ai.exe to git.exe (not a symlink or
+    // hard-link), so same_file() would return false. A sibling git-ai.exe
+    // existing is sufficient to identify this as the git-ai install directory.
+    // On Unix, additionally verify both refer to the same underlying file
+    // (hard-link / bind-mount) to avoid false-positives in environments where
+    // a real git binary legitimately coexists with a git-ai symlink (e.g.
+    // Docker images that compile git from source into /usr/local/bin).
+    if let Some(parent) = path.parent() {
+        #[cfg(windows)]
+        let sibling = parent.join("git-ai.exe");
+        #[cfg(not(windows))]
+        let sibling = parent.join("git-ai");
+
+        #[cfg(windows)]
+        if sibling.exists() {
+            return true;
+        }
+        #[cfg(not(windows))]
+        if sibling.exists() && same_file(path, &sibling) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Returns true if `p` is an executable git binary that is NOT git-ai.
+/// Used by test infrastructure to probe for the real git binary independently
+/// of `Config::get()` (which reads HOME and must not be called before HOME is isolated).
+pub fn is_real_git_candidate(p: &Path) -> bool {
+    is_executable(p) && !path_is_git_ai_binary(p)
 }

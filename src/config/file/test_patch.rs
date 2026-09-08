@@ -6,7 +6,7 @@ use std::env;
 /// Apply test config patch from environment variable (test-only)
 /// Reads GIT_AI_TEST_CONFIG_PATCH env var containing JSON and applies patches to config
 #[cfg(any(test, feature = "test-support"))]
-pub(super) fn apply_test_config_patch(config: &mut Config) {
+pub(in crate::config) fn apply_test_config_patch(config: &mut Config) {
     if let Ok(patch_json) = env::var("GIT_AI_TEST_CONFIG_PATCH")
         && let Ok(patch) = serde_json::from_str::<ConfigPatch>(&patch_json)
     {

@@ -1,13 +1,15 @@
 use super::{
-    DaemonTelemetryWorkerHandle, ProcessingTask, SHARED_STREAM_SESSION_ID, StreamError,
-    StreamWorker, StreamsDatabase, extract_event_timestamp, generate_session_id,
-    transcript_collection_allowed,
+    DaemonTelemetryWorkerHandle, ProcessingTask, StreamWorker, StreamsDatabase,
+    extract_event_timestamp, transcript_collection_allowed,
 };
 use crate::metrics::{
     EventAttributes, MetricEvent, OtelTraceValues, PosEncoded, SessionEventValues,
 };
+use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::authorship_log_serialization::generate_trace_id;
+use crate::model::stream_types::StreamError;
 use crate::operations::daemon::transcript_redaction::redact_json_secrets;
+use crate::operations::streams::agent::SHARED_STREAM_SESSION_ID;
 use chrono::{TimeZone, Utc};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

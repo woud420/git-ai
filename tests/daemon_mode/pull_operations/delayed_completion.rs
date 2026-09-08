@@ -1,0 +1,302 @@
+use super::super::*;
+
+#[test]
+fn daemon_delayed_pull_rebase_autostash_does_not_consume_later_commit() {
+    let (local, _upstream) =
+        TestRepo::new_with_remote_with_daemon_scope(DaemonTestScope::Dedicated);
+    let trace_socket = daemon_trace_socket_path(&local);
+    let worktree = repo_workdir_string(&local);
+    let git_dir = local.path().join(".git").to_string_lossy().to_string();
+
+    let mut readme = local.filename("README.md");
+    readme.set_contents(lines!["# Test Repo".human()]);
+    let initial = local
+        .stage_all_and_commit("initial commit")
+        .expect("initial commit should succeed");
+    readme.assert_committed_lines(lines!["# Test Repo".human()]);
+
+    local
+        .git(&["push", "-u", "origin", "HEAD"])
+        .expect("push initial commit should succeed");
+
+    let mut committed_ai = local.filename("ai_feature.txt");
+    committed_ai.set_contents(lines![
+        "AI generated feature line 1".ai(),
+        "AI generated feature line 2".ai(),
+    ]);
+    let local_ai = local
+        .stage_all_and_commit("add AI feature")
+        .expect("AI feature commit should succeed");
+    committed_ai.assert_committed_lines(lines![
+        "AI generated feature line 1".ai(),
+        "AI generated feature line 2".ai(),
+    ]);
+
+    let branch = local.current_branch();
+    local
+        .git(&["reset", "--hard", &initial.commit_sha])
+        .expect("reset to initial commit should succeed");
+
+    let mut upstream_file = local.filename("upstream_change.txt");
+    upstream_file.set_contents(lines!["upstream content".human()]);
+    local
+        .stage_all_and_commit("upstream divergent commit")
+        .expect("upstream commit should succeed");
+    upstream_file.assert_committed_lines(lines!["upstream content".human()]);
+
+    local
+        .git(&["push", "--force", "origin", &format!("HEAD:{}", branch)])
+        .expect("force push upstream commit should succeed");
+    local
+        .git(&["reset", "--hard", &local_ai.commit_sha])
+        .expect("reset back to local AI commit should succeed");
+
+    let mut uncommitted_ai = local.filename("uncommitted_ai.txt");
+    uncommitted_ai.set_contents(lines!["Uncommitted AI line".ai()]);
+    local
+        .git_ai(&["checkpoint", "mock_ai", "uncommitted_ai.txt"])
+        .expect("checkpoint should succeed");
+    local.sync_daemon();
+
+    local
+        .git_og(&["pull", "--rebase", "--autostash"])
+        .expect("raw pull --rebase --autostash should succeed");
+    local
+        .git_og(&["add", "-A"])
+        .expect("raw add should succeed");
+    local
+        .git_og(&["commit", "-m", "commit uncommitted AI work"])
+        .expect("raw commit should succeed");
+    let final_commit = local
+        .git_og(&["rev-parse", "HEAD"])
+        .expect("rev-parse final commit should succeed")
+        .trim()
+        .to_string();
+
+    let pull_session = repos::test_repo::new_daemon_test_sync_session_id();
+    let commit_session = repos::test_repo::new_daemon_test_sync_session_id();
+    let pull_session_arg = format!("git-ai.testSyncSession={pull_session}");
+    let commit_session_arg = format!("git-ai.testSyncSession={commit_session}");
+
+    let mut frames = TraceCommandFrames::new(
+        "delayed-pull-autostash",
+        &[
+            "git",
+            "-c",
+            pull_session_arg.as_str(),
+            "-C",
+            worktree.as_str(),
+            "pull",
+            "--rebase",
+            "--autostash",
+        ],
+        worktree.as_str(),
+        git_dir.as_str(),
+        1_000,
+    )
+    .into_frames();
+    frames.extend(
+        TraceCommandFrames::new(
+            "delayed-commit-after-pull",
+            &[
+                "git",
+                "-c",
+                commit_session_arg.as_str(),
+                "-C",
+                worktree.as_str(),
+                "commit",
+                "-m",
+                "commit uncommitted AI work",
+            ],
+            worktree.as_str(),
+            git_dir.as_str(),
+            2_000,
+        )
+        .into_frames(),
+    );
+    send_trace_frames(&trace_socket, &frames);
+    local.sync_daemon_external_completion_sessions(&[pull_session, commit_session]);
+
+    assert!(
+        local.read_authorship_note(&final_commit).is_some(),
+        "delayed pull processing must not consume the following commit reflog entry"
+    );
+    uncommitted_ai.assert_committed_lines(lines!["Uncommitted AI line".ai()]);
+}
+
+#[test]
+fn daemon_delayed_failed_rebase_continue_does_not_consume_final_continue() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::Dedicated);
+    let trace_socket = daemon_trace_socket_path(&repo);
+    let worktree = repo_workdir_string(&repo);
+    let git_dir = repo.path().join(".git").to_string_lossy().to_string();
+
+    fs::write(repo.path().join("config_a.py"), "FLAG_A = 0\n").unwrap();
+    repo.git_og(&["add", "config_a.py"]).unwrap();
+    repo.git_og(&["commit", "-m", "Initial config_a"]).unwrap();
+    fs::write(repo.path().join("config_b.py"), "FLAG_B = 0\nBATCH = 10\n").unwrap();
+    repo.git_og(&["add", "config_b.py"]).unwrap();
+    repo.git_og(&["commit", "-m", "Initial config_b"]).unwrap();
+    let main_branch = repo.current_branch();
+
+    fs::write(repo.path().join("config_a.py"), "FLAG_A = 1\n").unwrap();
+    repo.git_og(&["add", "config_a.py"]).unwrap();
+    repo.git_og(&["commit", "-m", "main sets flag_a"]).unwrap();
+    fs::write(repo.path().join("config_b.py"), "FLAG_B = 1\nBATCH = 50\n").unwrap();
+    repo.git_og(&["add", "config_b.py"]).unwrap();
+    repo.git_og(&["commit", "-m", "main sets config_b"])
+        .unwrap();
+
+    let base_sha = repo
+        .git_og(&["rev-parse", "HEAD~2"])
+        .unwrap()
+        .trim()
+        .to_string();
+    repo.git(&["checkout", "-b", "feature", &base_sha]).unwrap();
+
+    let mut module_a = repo.filename("module_a.py");
+    module_a.set_contents(lines!["class ModuleA:".ai(), "    pass".ai()]);
+    let original_c1 = repo.stage_all_and_commit("feat: C1 add ModuleA").unwrap();
+    module_a.assert_committed_lines(lines!["class ModuleA:".ai(), "    pass".ai()]);
+
+    let mut config_a = repo.filename("config_a.py");
+    config_a.set_contents(lines!["FLAG_A = 2".ai()]);
+    let original_c2 = repo.stage_all_and_commit("feat: C2 sets flag_a").unwrap();
+    config_a.assert_committed_lines(lines!["FLAG_A = 2".ai()]);
+
+    let mut module_c = repo.filename("module_c.py");
+    module_c.set_contents(lines!["class ModuleC:".ai(), "    pass".ai()]);
+    let original_c3 = repo.stage_all_and_commit("feat: C3 add ModuleC").unwrap();
+    module_c.assert_committed_lines(lines!["class ModuleC:".ai(), "    pass".ai()]);
+
+    let mut config_b = repo.filename("config_b.py");
+    config_b.set_contents(lines!["FLAG_B = 1".ai(), "BATCH = 200".ai()]);
+    let original_c4 = repo.stage_all_and_commit("feat: C4 sets batch").unwrap();
+    config_b.assert_committed_lines(lines!["FLAG_B = 1".ai(), "BATCH = 200".ai()]);
+
+    let mut module_e = repo.filename("module_e.py");
+    module_e.set_contents(lines!["class ModuleE:".ai(), "    pass".ai()]);
+    let original_c5 = repo.stage_all_and_commit("feat: C5 add ModuleE").unwrap();
+    module_e.assert_committed_lines(lines!["class ModuleE:".ai(), "    pass".ai()]);
+    for commit in [
+        &original_c1,
+        &original_c2,
+        &original_c3,
+        &original_c4,
+        &original_c5,
+    ] {
+        assert!(
+            repo.read_authorship_note(&commit.commit_sha).is_some(),
+            "original feature commit should have authorship note"
+        );
+    }
+    repo.sync_daemon();
+
+    assert!(
+        repo.git_og(&["rebase", &main_branch]).is_err(),
+        "initial raw rebase should stop at config_a conflict"
+    );
+    fs::write(repo.path().join("config_a.py"), "FLAG_A = 2\n").unwrap();
+    repo.git_og(&["add", "config_a.py"]).unwrap();
+    assert!(
+        repo.git_og_with_env(&["rebase", "--continue"], &[("GIT_EDITOR", "true")])
+            .is_err(),
+        "first raw rebase --continue should stop at config_b conflict"
+    );
+    fs::write(repo.path().join("config_b.py"), "FLAG_B = 1\nBATCH = 75\n").unwrap();
+    repo.git_og(&["add", "config_b.py"]).unwrap();
+    repo.git_og_with_env(&["rebase", "--continue"], &[("GIT_EDITOR", "true")])
+        .expect("final raw rebase --continue should finish");
+
+    let final_chain = (0..5)
+        .rev()
+        .map(|offset| {
+            let rev = if offset == 0 {
+                "HEAD".to_string()
+            } else {
+                format!("HEAD~{offset}")
+            };
+            repo.git_og(&["rev-parse", &rev])
+                .unwrap()
+                .trim()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    let initial_rebase_session = repos::test_repo::new_daemon_test_sync_session_id();
+    let first_continue_session = repos::test_repo::new_daemon_test_sync_session_id();
+    let final_continue_session = repos::test_repo::new_daemon_test_sync_session_id();
+    let initial_session_arg = format!("git-ai.testSyncSession={initial_rebase_session}");
+    let first_continue_session_arg = format!("git-ai.testSyncSession={first_continue_session}");
+    let final_continue_session_arg = format!("git-ai.testSyncSession={final_continue_session}");
+
+    let mut frames = TraceCommandFrames::new(
+        "delayed-rebase-start",
+        &[
+            "git",
+            "-c",
+            initial_session_arg.as_str(),
+            "-C",
+            worktree.as_str(),
+            "rebase",
+            main_branch.as_str(),
+        ],
+        worktree.as_str(),
+        git_dir.as_str(),
+        1_000,
+    )
+    .with_exit_code(1)
+    .into_frames();
+    frames.extend(
+        TraceCommandFrames::new(
+            "delayed-first-rebase-continue",
+            &[
+                "git",
+                "-c",
+                first_continue_session_arg.as_str(),
+                "-C",
+                worktree.as_str(),
+                "rebase",
+                "--continue",
+            ],
+            worktree.as_str(),
+            git_dir.as_str(),
+            2_000,
+        )
+        .with_exit_code(1)
+        .into_frames(),
+    );
+    frames.extend(
+        TraceCommandFrames::new(
+            "delayed-final-rebase-continue",
+            &[
+                "git",
+                "-c",
+                final_continue_session_arg.as_str(),
+                "-C",
+                worktree.as_str(),
+                "rebase",
+                "--continue",
+            ],
+            worktree.as_str(),
+            git_dir.as_str(),
+            3_000,
+        )
+        .into_frames(),
+    );
+    send_trace_frames(&trace_socket, &frames);
+    repo.sync_daemon_external_completion_sessions(&[
+        initial_rebase_session,
+        first_continue_session,
+        final_continue_session,
+    ]);
+
+    for (idx, sha) in final_chain.iter().enumerate() {
+        assert!(
+            repo.read_authorship_note(sha).is_some(),
+            "rebased commit {} should have authorship note after delayed continue processing",
+            idx + 1
+        );
+    }
+    module_e.assert_committed_lines(lines!["class ModuleE:".ai(), "    pass".ai()]);
+}

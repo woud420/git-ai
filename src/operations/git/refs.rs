@@ -1,11 +1,24 @@
-use crate::clients::git_cli::{
-    exec_git, exec_git_allow_nonzero, exec_git_stdin, exec_git_with_stdin_writer,
+mod batch_read;
+mod batch_write;
+mod constants;
+mod ref_queries;
+
+pub use batch_read::{copy_missing_notes_for_commits_from_ref, parse_batch_check_blob_oid};
+#[cfg(feature = "test-support")]
+pub(in crate::operations::git) use batch_write::notes_add_blob_batch;
+pub(in crate::operations::git) use batch_write::{fast_import_args, notes_add, notes_add_batch};
+pub use constants::{
+    AI_AUTHORSHIP_FORK_TRACKING_REF, AI_AUTHORSHIP_FULL_REF, AI_AUTHORSHIP_PUSH_REFSPEC,
+    AI_AUTHORSHIP_REFNAME,
 };
+use ref_queries::parse_output_error;
+pub use ref_queries::ref_exists;
+
+use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::working_log::Checkpoint;
 use crate::operations::git::cat_file::batch_read_blob_contents;
-use crate::operations::git::oid::is_full_oid;
 use crate::operations::git::repository::Repository;
 use serde_json;
 use std::collections::{HashMap, HashSet};
@@ -19,7 +32,6 @@ pub(in crate::operations::git) use note_reads::{
     notes_for_commits_utf8, parse_reference_as_authorship_log_v3,
 };
 
-use note_fanout::write_note_entry;
 #[doc(hidden)]
 pub use note_fanout::{
     fanout_note_pathspec_for_commit, fanout_note_pathspec_for_ref, flat_note_pathspec_for_commit,
@@ -27,239 +39,10 @@ pub use note_fanout::{
 };
 pub(in crate::operations::git) use note_fanout::{write_blob_stanza, write_notes_commit_header};
 
-// Modern refspecs without force to enable proper merging
-pub const AI_AUTHORSHIP_REFNAME: &str = "ai";
-pub const AI_AUTHORSHIP_FULL_REF: &str = "refs/notes/ai";
-pub const AI_AUTHORSHIP_FORK_TRACKING_REF: &str = "refs/notes/ai-remote/fork";
-pub const AI_AUTHORSHIP_PUSH_REFSPEC: &str = "refs/notes/ai:refs/notes/ai";
-
-fn parse_output_error(what: &str) -> GitAiError {
-    GitAiError::Generic(format!("Failed to parse {} output", what))
-}
-
-pub(in crate::operations::git) fn notes_add(
-    repo: &Repository,
-    commit_sha: &str,
-    note_content: &str,
-) -> Result<(), GitAiError> {
-    // Route through notes_add_batch to ensure consistent fanout tree format.
-    // Using git's native `notes add` can produce flat entries for small trees,
-    // leading to mixed-fanout trees that trigger assertion failures in
-    // `git notes merge` (notes-merge.c diff_tree_remote).
-    notes_add_batch(repo, &[(commit_sha.to_string(), note_content.to_string())])
-}
-
-#[doc(hidden)]
-pub fn parse_batch_check_blob_oid(line: &str) -> Option<String> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    let oid = parts.first().copied().unwrap_or_default();
-    if parts.len() >= 2 && parts[1] == "blob" && is_full_oid(oid) {
-        Some(oid.to_string())
-    } else {
-        None
-    }
-}
-
-/// Copy missing notes for a bounded commit set from `source_ref` into `refs/notes/ai`.
-///
-/// This deliberately does not merge `source_ref` wholesale. The source ref may
-/// contain untrusted notes from a fork, so callers must pass the exact commits
-/// whose notes are allowed to enter the local authorship ref. Existing local
-/// notes win on conflicts, matching the `git notes merge -s ours` behavior used
-/// for trusted tracking refs.
-pub fn copy_missing_notes_for_commits_from_ref(
-    repo: &Repository,
-    source_ref: &str,
-    commit_shas: &[String],
-) -> Result<usize, GitAiError> {
-    if commit_shas.is_empty() || !ref_exists(repo, source_ref) {
-        return Ok(0);
-    }
-
-    let source_note_oids = note_blob_oids_for_commits_from_ref(repo, source_ref, commit_shas)?;
-    if source_note_oids.is_empty() {
-        return Ok(0);
-    }
-
-    let local_note_oids = note_blob_oids_for_commits(repo, commit_shas)?;
-    let entries: Vec<(String, String)> = commit_shas
-        .iter()
-        .filter(|commit_sha| !local_note_oids.contains_key(*commit_sha))
-        .filter_map(|commit_sha| {
-            source_note_oids
-                .get(commit_sha)
-                .map(|blob_oid| (commit_sha.clone(), blob_oid.clone()))
-        })
-        .collect();
-
-    let copied = entries.len();
-    notes_add_blob_batch(repo, &entries)?;
-    Ok(copied)
-}
-
-/// Shared prologue for `notes_add_batch`/`notes_add_blob_batch`: resolve the
-/// current `refs/notes/ai` tip (if any), collapse `entries` to one
-/// `(commit_sha, value)` pair per commit (last write wins, original relative
-/// order preserved), and stamp the fast-import commit time.
-///
-/// Returns `None` when `entries` is empty — callers should return `Ok(())`.
-/// `(existing_notes_tip, deduped_entries, commit_timestamp)` from
-/// [`prepare_notes_batch_write`]; `None` when there is nothing to write.
-/// Entries are borrowed so large note batches are never copied.
-type PreparedNotesBatch<'a> = Option<(Option<String>, Vec<&'a (String, String)>, u64)>;
-
-fn prepare_notes_batch_write<'a>(
-    repo: &Repository,
-    entries: &'a [(String, String)],
-) -> Result<PreparedNotesBatch<'a>, GitAiError> {
-    if entries.is_empty() {
-        return Ok(None);
-    }
-
-    let mut args = repo.global_args_for_exec();
-    args.push("rev-parse".to_string());
-    args.push("--verify".to_string());
-    args.push("refs/notes/ai".to_string());
-    let existing_notes_tip = match exec_git(&args) {
-        Ok(output) => Some(String::from_utf8(output.stdout)?.trim().to_string()),
-        Err(GitAiError::GitCliError {
-            code: Some(128), ..
-        })
-        | Err(GitAiError::GitCliError { code: Some(1), .. }) => None,
-        Err(e) => return Err(e),
-    };
-
-    let mut deduped_entries: Vec<&(String, String)> = Vec::with_capacity(entries.len());
-    let mut seen = HashSet::with_capacity(entries.len());
-    for entry in entries.iter().rev() {
-        if seen.insert(entry.0.as_str()) {
-            deduped_entries.push(entry);
-        }
-    }
-    deduped_entries.reverse();
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| GitAiError::Generic(format!("System clock before epoch: {}", e)))?
-        .as_secs();
-
-    Ok(Some((existing_notes_tip, deduped_entries, now)))
-}
-
-pub(in crate::operations::git) fn fast_import_args(repo: &Repository) -> Vec<String> {
-    let mut args = repo.global_args_for_exec();
-    args.push("fast-import".to_string());
-    args.push("--quiet".to_string());
-    args
-}
-
-pub(in crate::operations::git) fn notes_add_batch(
-    repo: &Repository,
-    entries: &[(String, String)],
-) -> Result<(), GitAiError> {
-    let Some((existing_notes_tip, deduped_entries, now)) =
-        prepare_notes_batch_write(repo, entries)?
-    else {
-        return Ok(());
-    };
-
-    exec_git_with_stdin_writer(&fast_import_args(repo), |writer| {
-        for (idx, (_commit_sha, note_content)) in deduped_entries.iter().copied().enumerate() {
-            write_blob_stanza(writer, idx + 1, note_content)?;
-        }
-
-        write_notes_commit_header(
-            writer,
-            AI_AUTHORSHIP_FULL_REF,
-            format_args!("git-ai <git-ai@local> {now} +0000"),
-            existing_notes_tip.as_deref(),
-        )?;
-
-        for (idx, (commit_sha, _note_content)) in deduped_entries.iter().copied().enumerate() {
-            write_note_entry(writer, commit_sha, format_args!(":{}", idx + 1))?;
-        }
-        writer.write_all(b"\n")
-    })?;
-    crate::operations::authorship::git_ai_hooks::post_notes_updated_refs(
-        repo,
-        deduped_entries
-            .iter()
-            .map(|(commit_sha, note_content)| (commit_sha.as_str(), note_content.as_str())),
-    );
-
-    Ok(())
-}
-
-/// Batch-attach existing note blobs to commits without rewriting blob contents.
-///
-/// Each entry is (commit_sha, existing_note_blob_oid).
-pub(in crate::operations::git) fn notes_add_blob_batch(
-    repo: &Repository,
-    entries: &[(String, String)],
-) -> Result<(), GitAiError> {
-    let Some((existing_notes_tip, deduped_entries, now)) =
-        prepare_notes_batch_write(repo, entries)?
-    else {
-        return Ok(());
-    };
-
-    exec_git_with_stdin_writer(&fast_import_args(repo), |writer| {
-        write_notes_commit_header(
-            writer,
-            AI_AUTHORSHIP_FULL_REF,
-            format_args!("git-ai <git-ai@local> {now} +0000"),
-            existing_notes_tip.as_deref(),
-        )?;
-
-        for (commit_sha, blob_oid) in deduped_entries.iter().copied() {
-            write_note_entry(writer, commit_sha, format_args!("{blob_oid}"))?;
-        }
-        writer.write_all(b"\n")
-    })?;
-
-    let has_post_notes_updated_hooks = crate::config::Config::get()
-        .git_ai_hook_commands("post_notes_updated")
-        .is_some_and(|commands| !commands.is_empty());
-    if has_post_notes_updated_hooks {
-        let hook_entries = (|| -> Result<Vec<(String, String)>, GitAiError> {
-            let mut unique_blob_oids: Vec<String> = deduped_entries
-                .iter()
-                .map(|(_commit_sha, blob_oid)| blob_oid.clone())
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
-            unique_blob_oids.sort();
-            let blob_contents = batch_read_blob_contents(repo, &unique_blob_oids)?;
-
-            Ok(deduped_entries
-                .iter()
-                .filter_map(|(commit_sha, blob_oid)| {
-                    blob_contents
-                        .get(blob_oid)
-                        .map(|note_content| (commit_sha.clone(), note_content.clone()))
-                })
-                .collect())
-        })();
-        match hook_entries {
-            Ok(entries) if !entries.is_empty() => {
-                crate::operations::authorship::git_ai_hooks::post_notes_updated(repo, &entries)
-            }
-            Ok(_) => {}
-            Err(e) => tracing::debug!(
-                "Failed to prepare post_notes_updated payload for notes_add_blob_batch: {}",
-                e
-            ),
-        }
-    }
-
-    Ok(())
-}
-
 // Check which commits from the given list have authorship notes.
 // Uses git cat-file --batch-check to efficiently check multiple commits in one invocation.
 // Returns a Vec of CommitAuthorship for each commit.
 #[derive(Debug, Clone)]
-
 pub enum CommitAuthorship {
     NoLog {
         sha: String,
@@ -439,17 +222,6 @@ pub fn sanitize_remote_name(remote: &str) -> String {
 /// - **WILL** be pushed if user explicitly specifies refs/notes/ai-remote/* (extremely rare)
 pub fn tracking_ref_for_remote(remote_name: &str) -> String {
     format!("refs/notes/ai-remote/{}", sanitize_remote_name(remote_name))
-}
-
-/// Check if a ref exists in the repository
-pub fn ref_exists(repo: &Repository, ref_name: &str) -> bool {
-    let mut args = repo.global_args_for_exec();
-    args.push("show-ref".to_string());
-    args.push("--verify".to_string());
-    args.push("--quiet".to_string());
-    args.push(ref_name.to_string());
-
-    exec_git(&args).is_ok()
 }
 
 /// Merge notes from a source ref into refs/notes/ai
@@ -726,102 +498,6 @@ pub mod git_backend_for_tests {
     }
 }
 
+#[path = "refs_tests.rs"]
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_batch_check_blob_oid_accepts_sha1_and_sha256() {
-        let sha1 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa blob 10";
-        let sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb blob 20";
-        let invalid = "cccccccc blob 10";
-
-        assert_eq!(
-            parse_batch_check_blob_oid(sha1),
-            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string())
-        );
-        assert_eq!(
-            parse_batch_check_blob_oid(sha256),
-            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string())
-        );
-        assert_eq!(parse_batch_check_blob_oid(invalid), None);
-    }
-
-    #[test]
-    fn test_notes_path_for_object() {
-        // Short SHA (edge case)
-        assert_eq!(notes_path_for_object("a"), "a");
-        assert_eq!(notes_path_for_object("ab"), "ab");
-
-        // Normal SHA (40 chars)
-        assert_eq!(
-            notes_path_for_object("abcdef1234567890abcdef1234567890abcdef12"),
-            "ab/cdef1234567890abcdef1234567890abcdef12"
-        );
-
-        // SHA-256 (64 chars)
-        assert_eq!(
-            notes_path_for_object(
-                "abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd"
-            ),
-            "ab/c1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd"
-        );
-    }
-
-    #[test]
-    fn test_flat_note_pathspec_for_commit() {
-        let sha = "abcdef1234567890abcdef1234567890abcdef12";
-        let pathspec = flat_note_pathspec_for_commit(sha);
-        assert_eq!(
-            pathspec,
-            "refs/notes/ai:abcdef1234567890abcdef1234567890abcdef12"
-        );
-    }
-
-    #[test]
-    fn test_fanout_note_pathspec_for_commit() {
-        let sha = "abcdef1234567890abcdef1234567890abcdef12";
-        let pathspec = fanout_note_pathspec_for_commit(sha);
-        assert_eq!(
-            pathspec,
-            "refs/notes/ai:ab/cdef1234567890abcdef1234567890abcdef12"
-        );
-    }
-
-    #[test]
-    fn test_sanitize_remote_name() {
-        assert_eq!(sanitize_remote_name("origin"), "origin");
-        assert_eq!(sanitize_remote_name("my-remote"), "my-remote");
-        assert_eq!(sanitize_remote_name("remote_123"), "remote_123");
-        assert_eq!(
-            sanitize_remote_name("remote/with/slashes"),
-            "remote_with_slashes"
-        );
-        assert_eq!(
-            sanitize_remote_name("remote@with#special$chars"),
-            "remote_with_special_chars"
-        );
-        assert_eq!(sanitize_remote_name("has spaces"), "has_spaces");
-    }
-
-    #[test]
-    fn test_tracking_ref_for_remote() {
-        assert_eq!(
-            tracking_ref_for_remote("origin"),
-            "refs/notes/ai-remote/origin"
-        );
-        assert_eq!(
-            tracking_ref_for_remote("upstream"),
-            "refs/notes/ai-remote/upstream"
-        );
-        assert_eq!(
-            tracking_ref_for_remote("my-fork"),
-            "refs/notes/ai-remote/my-fork"
-        );
-        // Special characters get sanitized
-        assert_eq!(
-            tracking_ref_for_remote("remote/with/slashes"),
-            "refs/notes/ai-remote/remote_with_slashes"
-        );
-    }
-}
+mod tests;

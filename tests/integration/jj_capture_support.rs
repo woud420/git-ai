@@ -140,7 +140,11 @@ pub enum Entry {
 
 // Unlike diagnostic snapshot(), this fixture manifest never follows a symlink.
 pub fn manifest(root: &Path) -> BTreeMap<PathBuf, Entry> {
-    fn visit(root: &Path, path: &Path, result: &mut BTreeMap<PathBuf, Entry>) {
+    manifest_excluding(root, &[])
+}
+
+pub fn manifest_excluding(root: &Path, excluded: &[&str]) -> BTreeMap<PathBuf, Entry> {
+    fn visit(root: &Path, path: &Path, excluded: &[&str], result: &mut BTreeMap<PathBuf, Entry>) {
         let entries: Vec<_> = fs::read_dir(path).unwrap().take(1025).collect();
         assert!(entries.len() <= 1024);
         for entry in entries {
@@ -148,6 +152,16 @@ pub fn manifest(root: &Path) -> BTreeMap<PathBuf, Entry> {
             let entry = entry.unwrap();
             let path = entry.path();
             let key = path.strip_prefix(root).unwrap().to_owned();
+            // Opening and closing an unrelated descriptor can release SQLite's
+            // process-wide POSIX locks; discarding its bytes afterward is too late.
+            if excluded.iter().any(|name| key == Path::new(name)) {
+                // Exclude this entry only; descendants of an unexpected directory
+                // were included by the old post-traversal removal too.
+                if entry.file_type().unwrap().is_dir() {
+                    visit(root, &path, excluded, result);
+                }
+                continue;
+            }
             let kind = entry.file_type().unwrap();
             let value = if kind.is_symlink() {
                 Entry::Symlink(fs::read_link(&path).unwrap())
@@ -160,12 +174,12 @@ pub fn manifest(root: &Path) -> BTreeMap<PathBuf, Entry> {
             };
             result.insert(key, value);
             if kind.is_dir() {
-                visit(root, &path, result);
+                visit(root, &path, excluded, result);
             }
         }
     }
     let mut result = BTreeMap::new();
-    visit(root, root, &mut result);
+    visit(root, root, excluded, &mut result);
     result
 }
 

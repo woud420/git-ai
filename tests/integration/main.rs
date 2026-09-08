@@ -100,6 +100,7 @@ mod jj_baseline_persistence;
 mod jj_capture;
 mod jj_checkout;
 mod jj_debug_cli;
+mod jj_debug_write_cli;
 mod jj_evidence;
 mod jj_history_platform;
 mod jj_observation_journal;

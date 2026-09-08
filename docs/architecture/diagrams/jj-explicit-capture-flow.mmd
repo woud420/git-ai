@@ -1,0 +1,39 @@
+%% Explicit CLI consumer, implemented and locally qualified on macOS.
+%% Grounding: CLI plan/review; journal open_at_path; registration/admission coordinators.
+flowchart TD
+    A["Explicit initialize or capture request"]:::ui
+    B["Parse, platform, empty opt-in, jj discovery and ordinary-path gates"]:::service
+    C[("Writable journal open<br/>May create, configure WAL or migrate")]:::db
+    D["Coordinator full canonical policy<br/>and retained source verification"]:::service
+    S["First initialize only<br/>Publish seal, then capture and authorize C1"]:::storage
+    E["Stage native rows and verify readback<br/>or verify exact saved retry"]:::service
+    F["Final retained-source check"]:::service
+    H["Coordinator's sole native-update commit"]:::db
+    I["Project returned result to metadata JSON"]:::ui
+    U["Early refusal<br/>No command-driven journal opening"]:::external
+    V["Failure after opening<br/>Journal, migration or sidecar effects may remain"]:::external
+    W["Namespace, temporary file or final seal may remain<br/>Unavailable: no automatic adoption or cleanup"]:::storage
+
+    A --> B --> C --> D
+    B -->|Refused| U
+    D -->|First initialization| S --> E
+    D -->|Capture or existing registration| E
+    E --> F
+    F -->|Fresh native update| H --> I
+    F -->|Verified retry: no native write| I
+    C -->|Open failed| V
+    D -->|Refused| V
+    S -->|Publication or C1 failed| V
+    E -->|Verification or staging failed| V
+    F -->|Source check failed| V
+    V -->|First initialization after publication began| W
+
+    %% SQL rollback does not reverse opening or publication effects.
+    %% No cross-filesystem/SQLite atomicity. Output failure can lose a committed reply.
+    %% Sources: model/repository/jj_observation_journal/mod.rs;
+    %% operations/jj/registration/{unix,policy}.rs; operations/jj/admission/unix.rs.
+    classDef ui fill:#E0F7FA,stroke:#00838F,color:#00363A
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16
+    classDef db fill:#FFF3E0,stroke:#EF6C00,color:#4A2500
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30

@@ -185,5 +185,6 @@ resumes partial history. Power-loss simulation and tamper-proof storage are not
 claimed by transaction rollback tests.
 
 The later [observation diagnostics increment](2026-09-08-jj-observation-diagnostics.md)
-adds experimental read-only status and historical receipt commands. Explicit
-initialization/capture commands and automatic observation remain follow-ups.
+adds experimental read-only status and historical receipt commands.
+[Explicit initialization/capture commands](2026-09-08-jj-explicit-capture.md) are
+also implemented; automatic observation remains a follow-up.

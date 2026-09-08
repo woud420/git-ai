@@ -35,17 +35,16 @@ pub fn admission_rows(case: &Case) -> Vec<(String, Vec<Vec<SqlValue>>)> {
 }
 
 fn home(case: &Case) -> BTreeMap<PathBuf, Entry> {
-    let mut files = manifest(&case.test_home);
-    for name in [
-        "registration.sqlite",
-        "registration.sqlite-wal",
-        "registration.sqlite-shm",
-        "registration-child.stdout",
-        "registration-child.stderr",
-    ] {
-        files.remove(&PathBuf::from(name));
-    }
-    files
+    crate::jj_capture::support::manifest_excluding(
+        &case.test_home,
+        &[
+            "registration.sqlite",
+            "registration.sqlite-wal",
+            "registration.sqlite-shm",
+            "registration-child.stdout",
+            "registration-child.stderr",
+        ],
+    )
 }
 
 fn schema(case: &Case) -> Vec<(String, String, String, Option<String>)> {

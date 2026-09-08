@@ -112,5 +112,6 @@ Independent reviews covered source boundaries, fixture isolation and output.
 Earlier native admission/history/registration real-jj qualification remains
 recorded in its decisions; those six lanes were not rerun for this increment.
 These macOS results do not establish Linux or Windows runtime qualification.
-Initialization/capture commands, automatic observation and native attribution
+The later [explicit capture increment](2026-09-08-jj-explicit-capture.md) implements
+initialization/capture commands. Automatic observation and native attribution
 remain separate follow-ups.

@@ -1,5 +1,8 @@
 use super::*;
+use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::checkpoint_request::StreamSource as CheckpointStreamSource;
+use crate::model::stream_watermark::WatermarkType;
+use crate::operations::streams::sweep::StreamFormat;
 use std::ffi::OsString;
 use std::io::Write;
 use tempfile::TempDir;

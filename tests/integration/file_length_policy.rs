@@ -6,7 +6,7 @@
 //! - a baselined file grows past its recorded ceiling (offenders may only
 //!   shrink), or
 //! - a baselined file is at or under the cap, or no longer exists (its entry
-//!   must be deleted so the baseline only ever shrinks).
+//!   must be deleted or explicitly retired so the baseline only ever shrinks).
 //!
 //! A baselined file that shrinks but stays above the cap passes without a
 //! baseline update; lowering its ceiling voluntarily is welcome.
@@ -16,6 +16,10 @@ use std::path::{Path, PathBuf};
 
 const MAX_LINES: usize = 600;
 const BASELINE_FILE: &str = ".file-length-baseline.txt";
+
+// This source/test-only refactor cannot edit the root baseline. Retiring an
+// exemption here applies the normal cap even if the old path is reintroduced.
+const RETIRED_BASELINE_FILES: &str = include_str!("file_length_policy/retired_baselines.txt");
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,6 +42,15 @@ fn read_baseline(root: &Path) -> BTreeMap<String, usize> {
             .parse()
             .unwrap_or_else(|_| panic!("malformed ceiling in baseline line: {line}"));
         baseline.insert(path.to_string(), ceiling);
+    }
+    for path in RETIRED_BASELINE_FILES
+        .lines()
+        .filter(|line| !line.is_empty())
+    {
+        assert!(
+            baseline.remove(path).is_some(),
+            "retired exemption {path} is absent from {BASELINE_FILE}; remove the retirement too"
+        );
     }
     baseline
 }

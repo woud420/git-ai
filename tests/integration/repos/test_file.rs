@@ -6,96 +6,10 @@ use insta::assert_debug_snapshot;
 
 use super::blame_support::{is_ai_blame_author, parse_blame_line};
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthorType {
-    Human,
-    UnattributedHuman,
-    Ai,
-}
-
-#[derive(Debug, Clone)]
-pub struct ExpectedLine {
-    pub contents: String,
-    pub author_type: AuthorType,
-}
-
-impl ExpectedLine {
-    fn new(contents: String, author_type: AuthorType) -> Self {
-        if contents.contains('\n') {
-            panic!(
-                "fluent test file API does not support strings with new lines (must be a single line): {:?}",
-                contents
-            );
-        }
-        Self {
-            contents,
-            author_type,
-        }
-    }
-}
-
-/// Trait to add .ai(), .human(), and .unattributed_human() methods to string types
-pub trait ExpectedLineExt {
-    fn ai(self) -> ExpectedLine;
-    fn human(self) -> ExpectedLine;
-    fn unattributed_human(self) -> ExpectedLine;
-}
-
-impl ExpectedLineExt for &str {
-    fn ai(self) -> ExpectedLine {
-        ExpectedLine::new(self.to_string(), AuthorType::Ai)
-    }
-
-    fn human(self) -> ExpectedLine {
-        ExpectedLine::new(self.to_string(), AuthorType::Human)
-    }
-
-    fn unattributed_human(self) -> ExpectedLine {
-        ExpectedLine::new(self.to_string(), AuthorType::UnattributedHuman)
-    }
-}
-
-impl ExpectedLineExt for String {
-    fn ai(self) -> ExpectedLine {
-        ExpectedLine::new(self, AuthorType::Ai)
-    }
-
-    fn human(self) -> ExpectedLine {
-        ExpectedLine::new(self, AuthorType::Human)
-    }
-
-    fn unattributed_human(self) -> ExpectedLine {
-        ExpectedLine::new(self, AuthorType::UnattributedHuman)
-    }
-}
-
-impl ExpectedLineExt for ExpectedLine {
-    fn ai(self) -> ExpectedLine {
-        ExpectedLine::new(self.contents, AuthorType::Ai)
-    }
-
-    fn human(self) -> ExpectedLine {
-        ExpectedLine::new(self.contents, AuthorType::Human)
-    }
-
-    fn unattributed_human(self) -> ExpectedLine {
-        ExpectedLine::new(self.contents, AuthorType::UnattributedHuman)
-    }
-}
-
-/// Default conversion from &str to ExpectedLine (defaults to Human authorship)
-impl From<&str> for ExpectedLine {
-    fn from(s: &str) -> Self {
-        ExpectedLine::new(s.to_string(), AuthorType::Human)
-    }
-}
-
-/// Default conversion from String to ExpectedLine (defaults to Human authorship)
-impl From<String> for ExpectedLine {
-    fn from(s: String) -> Self {
-        ExpectedLine::new(s, AuthorType::Human)
-    }
-}
+mod expected_line;
+#[allow(unused_imports)] // Shared test binaries use different parts of the fluent API.
+pub use expected_line::ExpectedLineExt;
+pub use expected_line::{AuthorType, ExpectedLine};
 
 #[derive(Debug, Clone)]
 pub struct TestFile<'a> {
@@ -665,62 +579,6 @@ macro_rules! lines {
     }};
 }
 
+#[path = "test_file_tests.rs"]
 #[cfg(test)]
-mod tests {
-    use super::TestFile;
-
-    #[test]
-    fn blame_parser_preserves_multi_word_author_and_email() {
-        let line = "abc123 (Jane Mary Doe <jane@example.com> 2026-07-22 12:00:00 -0400 1) content";
-
-        assert_eq!(
-            TestFile::parse_blame_line_static(line),
-            (
-                "Jane Mary Doe <jane@example.com>".to_string(),
-                "content".to_string(),
-            )
-        );
-    }
-
-    #[test]
-    fn ai_detection_ignores_agent_names_inside_email_addresses() {
-        assert!(!TestFile::is_ai_author_helper(
-            "Human Developer <amp@example.com>"
-        ));
-        assert!(TestFile::is_ai_author_helper(
-            "GitHub Copilot <human@example.com>"
-        ));
-    }
-
-    #[test]
-    fn malformed_blame_line_is_returned_as_unknown() {
-        let line = "abc123 (Jane Doe 2026-07-22 12:00:00 -0400 1 content";
-
-        assert_eq!(
-            TestFile::parse_blame_line_static(line),
-            ("unknown".to_string(), line.to_string())
-        );
-    }
-
-    #[test]
-    fn committed_line_filter_only_removes_not_committed_yet() {
-        let blame_output = "\
-abc123 (Jane Doe 2026-07-22 12:00:00 -0400 1) committed human
-000000 (Not Committed Yet 2026-07-22 12:00:00 -0400 2) pending
-def456 (mock_ai 2026-07-22 12:00:00 -0400 3) committed ai
-";
-
-        let all_lines = TestFile::parse_blame_lines(blame_output);
-        let committed_lines = TestFile::parse_committed_blame_lines(blame_output);
-
-        assert_eq!(all_lines.len(), 3);
-        assert_eq!(all_lines[1].0, "Not Committed Yet");
-        assert_eq!(
-            committed_lines,
-            vec![
-                ("Jane Doe".to_string(), "committed human".to_string()),
-                ("mock_ai".to_string(), "committed ai".to_string()),
-            ]
-        );
-    }
-}
+mod tests;

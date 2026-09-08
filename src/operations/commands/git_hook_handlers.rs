@@ -7,6 +7,9 @@
 //!   hooks path and to set `ENV_SKIP_MANAGED_HOOKS` on child git processes
 //!   during the transition period.
 
+mod hook_names;
+use hook_names::CORE_GIT_HOOK_NAMES;
+
 use crate::error::GitAiError;
 use crate::operations::git::repository::Repository;
 use serde::{Deserialize, Serialize};
@@ -32,37 +35,6 @@ pub const ENV_SKIP_MANAGED_HOOKS: &str = "GITAI_SKIP_MANAGED_HOOKS";
 // ---------------------------------------------------------------------------
 // Core git hook names (used for binary-name detection)
 // ---------------------------------------------------------------------------
-
-const CORE_GIT_HOOK_NAMES: &[&str] = &[
-    "applypatch-msg",
-    "pre-applypatch",
-    "post-applypatch",
-    "pre-commit",
-    "pre-merge-commit",
-    "prepare-commit-msg",
-    "commit-msg",
-    "post-commit",
-    "pre-rebase",
-    "post-checkout",
-    "post-merge",
-    "pre-push",
-    "pre-auto-gc",
-    "post-rewrite",
-    "sendemail-validate",
-    "fsmonitor-watchman",
-    "p4-changelist",
-    "p4-prepare-changelist",
-    "p4-post-changelist",
-    "p4-pre-submit",
-    "post-index-change",
-    "pre-receive",
-    "update",
-    "proc-receive",
-    "post-receive",
-    "post-update",
-    "push-to-checkout",
-    "reference-transaction",
-];
 
 // ---------------------------------------------------------------------------
 // Serde types (needed to read existing state files during removal)

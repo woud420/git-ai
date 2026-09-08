@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
 use crate::repos::test_repo::TestRepo;
+use git_ai::model::authorship_log::LineRange;
+use git_ai::model::authorship_log_serialization::AuthorshipLog;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -410,4 +412,22 @@ pub fn isolated_bash_history_db_path() -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir().expect("failed to create isolated bash history db dir");
     let path = dir.path().join("bash-history.db");
     (dir, path.to_string_lossy().to_string())
+}
+
+pub(crate) fn session_line_count(log: &AuthorshipLog) -> u32 {
+    log.attestations
+        .iter()
+        .flat_map(|attestation| &attestation.entries)
+        .filter(|entry| entry.hash.starts_with("s_"))
+        .flat_map(|entry| &entry.line_ranges)
+        .map(|range| match range {
+            LineRange::Single(_) => 1,
+            LineRange::Range(start, end) => end - start + 1,
+        })
+        .sum()
+}
+
+pub(crate) fn diff_json(repo: &TestRepo, args: &[&str]) -> Value {
+    let output = repo.git_ai(args).expect("git-ai diff should succeed");
+    serde_json::from_str(&output).expect("diff JSON should parse")
 }

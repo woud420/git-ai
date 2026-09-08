@@ -1,8 +1,15 @@
+mod storage_paths;
+use storage_paths::{
+    cleanup_legacy_stashes_dir, filtered_stash_working_log_base, stash_entry_dir,
+    stash_metadata_path, working_log_for_dir,
+};
+
+mod reconstruct;
+use reconstruct::reconstruct_stash_applied_contents;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
 
-use crate::clients::git_cli::{disable_internal_git_hooks, exec_git_allow_nonzero_with_env};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
@@ -10,7 +17,7 @@ use crate::model::imara_diff_utils::{DiffOp, capture_diff_slices};
 use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
 use crate::operations::git::repo_storage::PersistedWorkingLog;
-use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
+use crate::operations::git::repository::Repository;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StashMetadata {
@@ -18,45 +25,6 @@ pub struct StashMetadata {
     pub timestamp: u64,
     #[serde(default)]
     pub pathspecs: Vec<String>,
-}
-
-fn stashes_dir(repo: &Repository) -> PathBuf {
-    repo.storage.ai_dir.join("stashes")
-}
-
-fn stashes_v2_dir(repo: &Repository) -> PathBuf {
-    repo.storage.ai_dir.join("stashes_v2")
-}
-
-fn cleanup_legacy_stashes_dir(repo: &Repository) {
-    let legacy = stashes_dir(repo);
-    if legacy.exists() {
-        let _ = fs::remove_dir_all(legacy);
-    }
-}
-
-fn stash_entry_dir(repo: &Repository, stash_sha: &str) -> PathBuf {
-    stashes_v2_dir(repo).join(stash_sha)
-}
-
-fn stash_metadata_path(repo: &Repository, stash_sha: &str) -> PathBuf {
-    stash_entry_dir(repo, stash_sha).join("metadata.json")
-}
-
-fn filtered_stash_working_log_base(stash_sha: &str) -> String {
-    format!("_stash_filter_{}", stash_sha)
-}
-
-fn working_log_for_dir(repo: &Repository, dir: PathBuf, base_commit: &str) -> PersistedWorkingLog {
-    let canonical_workdir =
-        crate::operations::git::canonicalize::canonicalize_or_self(&repo.storage.repo_workdir);
-    PersistedWorkingLog::new(
-        dir,
-        base_commit,
-        repo.storage.repo_workdir.clone(),
-        canonical_workdir,
-        None,
-    )
 }
 
 fn path_matches_any(path: &str, pathspecs: &[String]) -> bool {
@@ -612,115 +580,6 @@ fn merge_initial_replacing_paths_with_contents(
             sessions,
         },
     )
-}
-
-fn reconstruct_stash_applied_contents(
-    repo: &Repository,
-    stash_sha: &str,
-    target_head: &str,
-    file_paths: &[String],
-) -> Result<HashMap<String, String>, GitAiError> {
-    if file_paths.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let unique = format!(
-        "git-ai-stash-apply-{}-{}",
-        std::process::id(),
-        crate::model::clock::now_nanos()
-    );
-    let temp_dir = std::env::temp_dir().join(unique);
-    let index_path = temp_dir.join("index");
-    let worktree_path = temp_dir.join("worktree");
-    fs::create_dir_all(&worktree_path)?;
-
-    let result = (|| {
-        let _guard = disable_internal_git_hooks();
-        run_isolated_git(
-            repo,
-            vec!["read-tree".to_string(), target_head.to_string()],
-            &index_path,
-            &worktree_path,
-            true,
-        )?;
-        // `-f` (force) is required: on case-insensitive filesystems (macOS/Windows)
-        // a tree with case-colliding paths (e.g. `README.md` and `readme.md`) makes
-        // `checkout-index -a` fail with "already exists, no checkout" for the second
-        // entry. This is a throwaway scratch worktree, so last-casing-wins is harmless.
-        run_isolated_git(
-            repo,
-            vec![
-                "checkout-index".to_string(),
-                "-a".to_string(),
-                "-f".to_string(),
-            ],
-            &index_path,
-            &worktree_path,
-            true,
-        )?;
-        let _ = run_isolated_git(
-            repo,
-            vec![
-                "stash".to_string(),
-                "apply".to_string(),
-                stash_sha.to_string(),
-            ],
-            &index_path,
-            &worktree_path,
-            false,
-        )?;
-        run_isolated_git(
-            repo,
-            vec!["add".to_string(), "-A".to_string()],
-            &index_path,
-            &worktree_path,
-            true,
-        )?;
-        let output = run_isolated_git(
-            repo,
-            vec!["write-tree".to_string()],
-            &index_path,
-            &worktree_path,
-            true,
-        )?;
-        let result_tree = String::from_utf8(output.stdout)?.trim().to_string();
-        let requests: Vec<(String, String)> = file_paths
-            .iter()
-            .map(|path| (result_tree.clone(), path.clone()))
-            .collect();
-        let contents = batch_read_paths_at_treeishes(repo, &requests)?;
-        Ok(contents
-            .into_iter()
-            .map(|((_, path), content)| (path, content))
-            .collect())
-    })();
-
-    let _ = fs::remove_dir_all(&temp_dir);
-    result
-}
-
-fn run_isolated_git(
-    repo: &Repository,
-    args: Vec<String>,
-    index_path: &std::path::Path,
-    worktree_path: &std::path::Path,
-    require_success: bool,
-) -> Result<std::process::Output, GitAiError> {
-    let mut full_args = repo.global_args_for_exec();
-    full_args.extend(args);
-    let envs = [
-        ("GIT_INDEX_FILE", index_path.as_os_str()),
-        ("GIT_WORK_TREE", worktree_path.as_os_str()),
-    ];
-    let output = exec_git_allow_nonzero_with_env(&full_args, &envs)?;
-    if require_success && !output.status.success() {
-        return Err(GitAiError::GitCliError {
-            code: output.status.code(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            args: full_args,
-        });
-    }
-    Ok(output)
 }
 
 #[cfg(test)]

@@ -126,6 +126,6 @@ pub fn unescape_git_path(path: &str) -> String {
     })
 }
 
-#[cfg(test)]
 #[path = "path_format_tests.rs"]
+#[cfg(test)]
 mod tests;

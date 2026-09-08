@@ -167,10 +167,9 @@ fn required_value(option: &str, value: &str) -> Result<String, GitAiError> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::configuration::should_include_installer;
     use super::*;
-    use crate::operations::commands::install_hooks::{
-        VISUAL_STUDIO_INSTALLER_ID, should_include_installer,
-    };
+    use crate::operations::commands::install_hooks::VISUAL_STUDIO_INSTALLER_ID;
 
     fn parsed_install_options(args: &[String]) -> InstallOptions {
         let InstallAction::Install(options) = parse_install_action(args).unwrap() else {

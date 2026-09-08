@@ -95,6 +95,7 @@ mod jetbrains_download;
 mod jetbrains_ide_types;
 mod jj_baseline;
 mod jj_baseline_persistence;
+mod jj_capture;
 mod jj_checkout;
 mod jj_evidence;
 mod jj_observation_journal;

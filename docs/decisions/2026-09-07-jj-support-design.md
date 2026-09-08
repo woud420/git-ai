@@ -164,6 +164,9 @@ A bare content match is not sufficient to transfer ownership.
 
 First-time collection uses an [explicit current-state baseline](2026-09-08-jj-current-state-baseline.md).
 The selected head bytes are verified, while their earlier history remains unverified.
+[Bounded current-state capture](2026-09-08-jj-native-capture.md) now supplies
+source-bound sampled head evidence and the workspace checkout's own verified view;
+durable registration and ancestry admission remain separate gates.
 Baseline anchors receive no retrospective attribution and do not enter the pending
 application queue. Ordinary checksummed observations are not native ancestry
 boundaries; subsequent traversal must close on the permitted baseline or verified

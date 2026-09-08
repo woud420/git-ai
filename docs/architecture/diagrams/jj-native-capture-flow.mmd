@@ -1,0 +1,18 @@
+flowchart TD
+    A[Discovery locators and absolute deadline]:::external --> B[Bind directories, pointers and backend metadata]:::job
+    B --> C[Read raw heads H0 and completed checkout C0]:::storage
+    C --> D[Read exact head operation and view pairs]:::storage
+    D --> E[Verify native hashes and prepare current-state anchors]:::job
+    E --> F{Checkout operation is a captured head?}
+    F -- Yes --> G[Borrow that anchor]
+    F -- No --> H[Read and verify one separate checkout pair]
+    G --> I[Require workspace in its own verified view]
+    H --> I
+    I --> J[Read C1 and H1; resample binding metadata]:::storage
+    J --> K{Samples equal, retained edges valid, deadline available?}
+    K -- Yes --> L[Return owned capture; close all descriptors]:::service
+    K -- No --> M[Reject capture; close all descriptors]:::external
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30
+    classDef job fill:#E8EAF6,stroke:#3949AB,color:#111A55
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16

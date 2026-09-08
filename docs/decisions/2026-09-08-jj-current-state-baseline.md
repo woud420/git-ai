@@ -173,8 +173,12 @@ test. The updated flowchart was rendered and visually inspected.
 
 Explicit [baseline persistence and reopening](2026-09-08-jj-native-baseline-persistence.md)
 now provide generation checks, two-writer winner, receipt replay, corruption and
-rollback coverage. Next add native extension admission and tests for N→H, late D→B, mixed-parent
-joins, opaque-known-parent rejection, source/epoch mismatch, and bounded gaps.
+rollback coverage. [Bounded native capture](2026-09-08-jj-native-capture.md) now
+revalidates source locators, samples heads/checkout and joins the checkout
+workspace to its own verified view. The captured source identity is sampled;
+durable registration and workspace readiness remain separate. Next add native
+extension admission and tests for N→H, late D→B, mixed-parent joins, opaque-known-
+parent rejection, source/epoch mismatch, and bounded gaps.
 The separate workspace-join slice must include a real stale linked workspace C
 outside H, prove it remains unavailable, and only make it ready after an admitted
 relation and stable checkout recheck establish the binding.

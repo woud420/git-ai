@@ -93,11 +93,11 @@ fn truncate_reflog_to_first_entry(path: &Path) {
 }
 
 mod checkpoint_ranges;
-mod cherry_pick;
+mod cherry_pick_recovery;
 mod edit_preservation;
 mod file_coverage;
 mod rebase_resolution;
-mod ref_cursor;
+mod ref_cursor_integrity;
 mod reset_checkpoints;
 mod revert_attribution;
 mod spawn_bounds;

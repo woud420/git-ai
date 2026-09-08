@@ -35,6 +35,6 @@ mod determinism_and_small_rebases;
 mod diff_reconstruction;
 mod heavy_rebases;
 mod mixed_workload;
-mod monorepo_rebase;
-mod plumbing_rebase;
+mod monorepo_history;
+mod plumbing_history;
 mod realistic_monorepo;

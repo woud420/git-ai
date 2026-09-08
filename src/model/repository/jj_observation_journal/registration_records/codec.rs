@@ -10,9 +10,7 @@ use crate::model::jj_observation::{
 };
 use serde::Serialize;
 
-pub(in crate::model::repository::jj_observation_journal) fn validate_name(
-    name: &str,
-) -> Result<(), JournalError> {
+pub(crate) fn validate_name(name: &str) -> Result<(), JournalError> {
     if name.is_empty() || name.len() > MAX_NAME_BYTES {
         return Err(invalid("native registration workspace name length invalid"));
     }

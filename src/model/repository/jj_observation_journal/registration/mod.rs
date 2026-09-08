@@ -7,7 +7,8 @@ use crate::model::jj_observation::validate_source;
 pub(crate) use super::registration_records::StoredRecord;
 pub(crate) use super::registration_records::bounded::ByteString;
 pub(crate) use super::registration_records::codec::{
-    source_root_guard, workspace_locator_guard, workspace_root_guard,
+    source_root_guard, validate_name as validate_workspace_name, workspace_locator_guard,
+    workspace_root_guard,
 };
 pub(crate) use super::registration_records::types::{
     BaselineRelation, DirectoryIdentity, Platform, RegistrationRecord, SelectedCheckout,

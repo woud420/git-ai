@@ -165,3 +165,9 @@ pub enum NativeAdmissionOutcome {
     Admitted(RegisteredNativeAdmission),
     AlreadyAdmitted(RegisteredNativeAdmission),
 }
+
+#[derive(Debug)]
+pub enum NativeReconciliationOutcome {
+    Unchanged(RegisteredNativeAdmissionState),
+    Admission(NativeAdmissionOutcome),
+}

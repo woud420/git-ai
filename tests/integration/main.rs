@@ -105,6 +105,7 @@ mod jj_evidence;
 mod jj_history_platform;
 mod jj_observation_journal;
 mod jj_operation;
+mod jj_reconciliation_platform;
 mod jj_registration_platform;
 mod jj_view;
 mod layer_import_policy;

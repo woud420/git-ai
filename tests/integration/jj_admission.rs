@@ -230,6 +230,7 @@ pub(super) fn dispatch(case: &Case, config: &Config) {
         "real_install" => real::install(case, config),
         "real_admit" => real::admit(case, config),
         name if name.starts_with("cli:") => debug_cli::dispatch(case, config),
+        name if name.starts_with("reconcile:") => storage::reconciliation::dispatch(case, config),
         name if name.starts_with("corrupt:") => storage::corrupt(case, config),
         name if name.starts_with("gap:") => storage::gap(case, config),
         name if name.starts_with("duplicate:") => storage::duplicate(case, config),

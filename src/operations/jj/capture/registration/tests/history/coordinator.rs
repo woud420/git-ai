@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 mod faults;
 mod native_baseline;
+mod reconciliation;
 mod support;
 use support::*;
 

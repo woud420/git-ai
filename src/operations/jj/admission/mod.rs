@@ -15,7 +15,7 @@ mod verify;
 pub use error::JjNativeAdmissionError;
 pub use types::{
     DurableNativeAdmission, NativeAdmissionCursor, NativeAdmissionOutcome, NativeAdmissionReceipt,
-    RegisteredNativeAdmission, RegisteredNativeAdmissionState,
+    NativeReconciliationOutcome, RegisteredNativeAdmission, RegisteredNativeAdmissionState,
 };
 
 /// Untrusted optimistic constraints; a sampled cursor does not authorize a write.
@@ -25,6 +25,13 @@ pub struct NativeAdmissionExpectation<'a> {
     pub baseline_id: &'a str,
     pub generation: u64,
     pub admitted_head_ids: &'a [String],
+}
+
+/// Untrusted scope and progress constraints, including the remembered selected workspace.
+pub struct NativeReconciliationExpectation<'a> {
+    pub admission: NativeAdmissionExpectation<'a>,
+    pub workspace_name: &'a str,
+    pub attachment_id: &'a str,
 }
 
 /// Rechecks the current source and saved evidence without collecting ancestry.
@@ -59,6 +66,35 @@ pub fn admit_registered_history(
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         unix::admit_with_hooks(
+            journal,
+            context,
+            config,
+            expected,
+            deadline,
+            read_budget,
+            &mut unix::Live,
+        )
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (journal, context, config, expected, deadline, read_budget);
+        Err(JjNativeAdmissionError::UnsupportedPlatform)
+    }
+}
+
+/// Reconciles one sampled head set without appending unchanged progress.
+/// A changed set uses the original-cutoff admission and exact retry rules.
+pub fn reconcile_registered_history(
+    journal: &mut JjObservationJournal,
+    context: &WorkspaceContext,
+    config: &Config,
+    expected: NativeReconciliationExpectation<'_>,
+    deadline: Instant,
+    read_budget: &mut ReadBudget,
+) -> Result<NativeReconciliationOutcome, JjNativeAdmissionError> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        unix::reconcile_with_hooks(
             journal,
             context,
             config,

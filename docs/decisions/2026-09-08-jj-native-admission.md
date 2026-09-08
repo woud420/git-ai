@@ -5,7 +5,8 @@ Status: accepted — implemented and locally qualified on macOS for the pinned j
 Refs: [ENG-415](https://linear.app/polarcoordinates/issue/ENG-415),
 [schema 4](2026-09-08-jj-native-admission-schema.md),
 [registered collection](2026-09-08-jj-native-history-collection.md),
-[source registration](2026-09-08-jj-native-registration.md).
+[source registration](2026-09-08-jj-native-registration.md),
+[reconciliation](2026-09-08-jj-native-reconciliation.md).
 
 ## Decision
 

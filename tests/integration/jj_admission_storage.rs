@@ -1,6 +1,9 @@
 use super::*;
 use ciborium::Value;
 
+#[path = "jj_reconciliation.rs"]
+pub(super) mod reconciliation;
+
 fn two(
     case: &Case,
     config: &Config,

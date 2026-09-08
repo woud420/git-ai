@@ -6,7 +6,10 @@ use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::marker::PhantomData;
 
-fn sequence<'de, D, T>(deserializer: D, limit: usize) -> Result<Vec<T>, D::Error>
+pub(in crate::model::repository::jj_observation_journal) fn sequence<'de, D, T>(
+    deserializer: D,
+    limit: usize,
+) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
@@ -120,6 +123,7 @@ mod tests {
             super::super::types::MAX_HEADS,
             MAX_JJ_OBSERVATION_PARENTS,
             MAX_JJ_OBSERVATION_OPERATION_BYTES,
+            crate::model::jj_observation::MAX_JJ_OBSERVATION_OPERATIONS,
         ] {
             let source = SeqAccessDeserializer::new(Unreadable {
                 hint: Some(limit + 1),
@@ -142,5 +146,27 @@ mod tests {
                 .to_string()
                 .contains("length")
         );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn native_admission_field_visitors_reuse_early_sequence_hint_guards() {
+        use super::super::super::native_admission::bounded as admission;
+        for (field, limit) in [("heads", 32), ("parents", 32), ("operations", 256)] {
+            for hint in [None, Some(limit + 1)] {
+                let source = SeqAccessDeserializer::new(Unreadable { hint });
+                let error = match field {
+                    "heads" => admission::heads(source).err(),
+                    "parents" => admission::parents(source).err(),
+                    _ => admission::operations(source).err(),
+                }
+                .unwrap();
+                assert!(error.to_string().contains(if hint.is_none() {
+                    "length"
+                } else {
+                    "limit"
+                }));
+            }
+        }
     }
 }

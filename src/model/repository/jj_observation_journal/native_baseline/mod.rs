@@ -4,7 +4,7 @@ use super::{JjObservationJournal, JournalError, ReadBudget, invalid, sql_error};
 use crate::model::jj_observation::{JjOperationEvidence, validate_source};
 use rusqlite::TransactionBehavior;
 
-mod bounded;
+pub(super) mod bounded;
 mod prepared;
 pub(super) mod read;
 mod types;

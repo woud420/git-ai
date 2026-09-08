@@ -170,3 +170,6 @@ The real-jj lane used 0.45.1 commit
 invoke their isolated helper; none was merely counted as an ignored success.
 Linux/Windows runtime qualification belongs to CI. These results do not qualify
 power-loss recovery, attachment mutation, durable admission or native attribution.
+The separate [admission implementation](2026-09-08-jj-native-admission.md) now consumes
+retained registration checks and the original saved cutoff; its local qualification
+is recorded in that decision. Registration alone still grants no attribution readiness.

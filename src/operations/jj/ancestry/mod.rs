@@ -25,7 +25,7 @@ pub struct JjAncestryInput<'a> {
 /// Borrows the cutoff authority and exact input bytes of a complete bounded DAG.
 /// Storage changes do not update this proof; a later writer must check live state.
 pub struct VerifiedJjAncestry<'a> {
-    baseline: &'a DurableCurrentStateBaseline,
+    baseline: &'a BaselineReceipt,
     head_ids: &'a [String],
     ordered_operations: Vec<VerifiedJjEvidence<'a>>,
     reached_baseline_ids: Vec<String>,
@@ -34,7 +34,7 @@ pub struct VerifiedJjAncestry<'a> {
 
 impl<'a> VerifiedJjAncestry<'a> {
     pub fn baseline_receipt(&self) -> &BaselineReceipt {
-        self.baseline.receipt()
+        self.baseline
     }
 
     pub fn head_ids(&self) -> &'a [String] {
@@ -89,7 +89,14 @@ pub fn verify_ancestry_to_baseline<'a>(
     baseline: &'a DurableCurrentStateBaseline,
     input: JjAncestryInput<'a>,
 ) -> Result<VerifiedJjAncestry<'a>, JjAncestryError> {
-    preflight::validate(baseline.receipt(), &input)?;
+    verify_ancestry_to_receipt(baseline.receipt(), input)
+}
+
+pub(crate) fn verify_ancestry_to_receipt<'a>(
+    baseline: &'a BaselineReceipt,
+    input: JjAncestryInput<'a>,
+) -> Result<VerifiedJjAncestry<'a>, JjAncestryError> {
+    preflight::validate(baseline, &input)?;
     let mut verified = Vec::with_capacity(input.operations.len());
     let mut predecessor_references = 0usize;
     let mut view_references = 0usize;
@@ -125,11 +132,7 @@ pub fn verify_ancestry_to_baseline<'a>(
             parents: &proof.operation().parent_ids,
         })
         .collect();
-    let order = graph::order_to_baseline(
-        input.head_ids,
-        &nodes,
-        baseline.receipt().captured_head_ids(),
-    )?;
+    let order = graph::order_to_baseline(input.head_ids, &nodes, baseline.captured_head_ids())?;
     let mut remaining: Vec<_> = verified.into_iter().map(Some).collect();
     let ordered_operations = order
         .operation_indices

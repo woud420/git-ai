@@ -12,6 +12,7 @@ use std::time::Instant;
 
 mod facts;
 mod history;
+pub(crate) use history::BorrowedJjHistoryEvidence;
 use history::{HistoryHooks, HistoryState};
 mod retained;
 mod seal;

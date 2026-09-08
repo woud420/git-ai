@@ -1,6 +1,6 @@
 # Native jj evidence envelope verification (ENG-415)
 
-Status: accepted — maintained single-record verification contract; ancestry and admission remain pending.
+Status: accepted — maintained single-record verification contract; ancestry and admission are separate consumers.
 
 `verify_evidence(profile, evidence)` joins an opaque `JjOperationEvidence` envelope
 to the native operation and view decoders. It reuses the envelope's identity,
@@ -53,5 +53,8 @@ all-target lint and format check passed, as did 27 operation tests, 36 view test
 53 journal tests and 45 source/storage/fork policy checks. Independent review found
 no actionable issue. No dependency or journal schema change was added.
 
-Checkout decoding and an explicit validated admission contract remain separate
-increments.
+[Checkout decoding](2026-09-07-jj-native-checkout-decoder.md) and
+[pure ancestry verification](2026-09-08-jj-native-ancestry.md) are separate
+implemented increments. The [native admission](2026-09-08-jj-native-admission.md)
+adds retained source and transaction checks; local qualification is recorded in that decision.
+Single-record verification alone never authorizes durable progress.

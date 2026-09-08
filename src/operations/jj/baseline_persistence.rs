@@ -140,16 +140,33 @@ pub fn reopen_current_state_baseline(
 pub(crate) fn verify_native_baseline_snapshot(
     snapshot: NativeBaselineSnapshot,
 ) -> Result<DurableCurrentStateBaseline, JjBaselinePersistenceError> {
-    prepare_current_state_baseline(
-        &snapshot.record.reader_profile,
-        &snapshot.record.captured_head_ids,
-        &snapshot.record.anchors,
-    )
-    .map_err(JjBaselinePersistenceError::Baseline)?;
+    verify_native_baseline_contents(&snapshot)?;
     Ok(DurableCurrentStateBaseline {
         receipt: BaselineReceipt {
             state: snapshot.state,
         },
         anchors: snapshot.record.anchors,
     })
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn verify_native_baseline_snapshot_ref(
+    snapshot: &NativeBaselineSnapshot,
+) -> Result<BaselineReceipt, JjBaselinePersistenceError> {
+    verify_native_baseline_contents(snapshot)?;
+    Ok(BaselineReceipt {
+        state: snapshot.state.clone(),
+    })
+}
+
+fn verify_native_baseline_contents(
+    snapshot: &NativeBaselineSnapshot,
+) -> Result<(), JjBaselinePersistenceError> {
+    prepare_current_state_baseline(
+        &snapshot.record.reader_profile,
+        &snapshot.record.captured_head_ids,
+        &snapshot.record.anchors,
+    )
+    .map_err(JjBaselinePersistenceError::Baseline)?;
+    Ok(())
 }

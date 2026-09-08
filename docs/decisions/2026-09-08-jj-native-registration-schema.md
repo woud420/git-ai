@@ -111,4 +111,6 @@ separate tests-first boundaries; filesystem publication and SQL commit are not a
 The later [native admission schema](2026-09-08-jj-native-admission-schema.md)
 advances the journal to version 4 with two empty admission tables. It preserves
 these registration rows and extends absent-source collision detection to the
-two new row families. Admission codecs and write coordination remain separate.
+two new row families. The separate [admission implementation](2026-09-08-jj-native-admission.md)
+now supplies canonical codecs and checked write coordination; its local qualification is
+recorded in that decision, outside these migration results.

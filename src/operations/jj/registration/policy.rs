@@ -7,21 +7,21 @@ use crate::operations::jj::capture::registration::{RetainedCapture, SampledPolic
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-pub(super) fn require_opt_in(config: &Config) -> Result<(), E> {
+pub(in crate::operations::jj) fn require_opt_in(config: &Config) -> Result<(), E> {
     if !config.has_allowed_repositories() {
         return Err(E::invalid("policy", "repository collection is not allowed"));
     }
     Ok(())
 }
 
-pub(super) fn check_deadline(deadline: Instant) -> Result<(), E> {
+pub(in crate::operations::jj) fn check_deadline(deadline: Instant) -> Result<(), E> {
     if Instant::now() >= deadline {
         return Err(E::invalid("deadline", "cooperative deadline elapsed"));
     }
     Ok(())
 }
 
-pub(super) fn authorize(
+pub(in crate::operations::jj) fn authorize(
     session: &mut RetainedCapture<'_>,
     config: &Config,
     deadline: Instant,

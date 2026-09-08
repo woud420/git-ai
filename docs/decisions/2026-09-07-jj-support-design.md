@@ -1,6 +1,6 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification, explicit source registration and bounded registered-history collection are implemented on the draft branch. The collector is locally qualified on macOS; integrated observation and attribution remain pending.
+Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification, explicit source registration and bounded registered-history collection are implemented on the draft branch. The collector is locally qualified on macOS. Durable native admission is implemented and locally qualified on macOS; observer integration and attribution remain pending.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
@@ -176,11 +176,12 @@ now joins the first workspace, published seal and saved cutoff, with all four SQ
 rows installed atomically. Filesystem publication and SQL commit remain separate
 steps. [Registered history collection](2026-09-08-jj-native-history-collection.md) now reads a bounded DAG from
 the sampled heads to the original saved baseline IDs or virtual root; it never
-uses opaque observations or earlier extensions as terminals. Local collector qualification is recorded in that decision. Attachment mutation, recovery and durable ancestry admission remain
-gates. Baseline anchors receive no retrospective attribution and do not enter the pending
-application queue. Ordinary checksummed observations are not native ancestry
-boundaries; subsequent traversal must close on the permitted baseline or verified
-extensions in the same epoch. A stale workspace outside that range remains unavailable
+uses opaque observations or earlier extensions as terminals. Local collector qualification is recorded in that decision.
+[Durable native admission](2026-09-08-jj-native-admission.md) is now implemented and locally qualified on macOS. It records a separate historical cursor
+and still closes only on the original baseline or root; trusted extension cuts,
+attachment mutation and recovery remain deferred. Baseline anchors receive no
+retrospective attribution and do not enter the pending application queue. Ordinary
+checksummed observations are not native ancestry boundaries. A stale workspace outside that range remains unavailable
 until its relationship and stable completed-checkout context are proved.
 
 Garbage-collected or missing operations, unsupported stores, size limits, and
@@ -313,8 +314,10 @@ cutoff in SQL; reopen and retry retain that cutoff after heads or checkout advan
 [Registered history collection](2026-09-08-jj-native-history-collection.md) now composes that fresh registration
 join with bounded parent traversal and final retained rechecks; its local qualification
 is recorded in that decision. It returns evidence without advancing any journal progress.
-Attachment mutation, explicit recovery, native admission and the observer remain
-pending. Later phases
+[Durable native admission](2026-09-08-jj-native-admission.md) now composes retained
+collection, transactional native revalidation and a separate generation cursor;
+local qualification is recorded in that decision. P2/ENG-415 stays in progress. Attachment
+mutation, explicit recovery, observer and CLI integration remain pending. Later phases
 remain tracked until their acceptance tests pass. These increments are
 published on [draft PR #247](https://github.com/woud420/git-ai/pull/247) and do not
 enable native attribution. Work continues in scoped commits with human review

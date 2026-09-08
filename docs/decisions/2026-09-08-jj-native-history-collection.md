@@ -158,9 +158,10 @@ cooperatively; it cannot cancel a blocked filesystem/configuration syscall or
 bound every raw EINTR retry.
 
 The complete path to the original cutoff eventually may exceed these limits.
-Handling that requires a separately reviewed durable extension and generation
-model. Repeated collection or serialization of this result does not create an
-admission certificate. Opaque progress and baseline generation 1 remain unchanged.
+Handling that requires a separately reviewed trusted extension-cutoff model.
+The [admission implementation](2026-09-08-jj-native-admission.md) adds a separate durable
+generation while still requiring complete closure to the original cutoff. Repeated
+collection or serialization of this result does not create admission authority. Opaque progress and baseline generation 1 remain unchanged.
 
 ## Verification
 
@@ -192,5 +193,7 @@ cover changed bindings, missing ancestors, post-read garbage collection,
 post-sample head/checkout movement and failed final checks.
 
 These local results do not infer Linux or Windows runtime success. Platform CI
-and feedback are tracked on the draft PR. Native admission, observer wiring,
-checkpoint ordering and jj attribution remain unimplemented follow-up work.
+and feedback are tracked on the draft PR. [Native admission](2026-09-08-jj-native-admission.md)
+is now implemented and locally qualified on macOS; these collector results
+do not qualify it. Observer/CLI wiring, checkpoint ordering and jj attribution
+remain unimplemented follow-up work.

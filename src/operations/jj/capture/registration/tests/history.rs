@@ -22,8 +22,11 @@ mod fixtures {
     ));
 }
 
+mod borrowed;
 mod bounds;
 mod lifecycle;
 mod races;
 mod support;
 use support::*;
+
+mod coordinator;

@@ -9,6 +9,8 @@ use support::{
     assert_result, checked, collect, failure, history_fixture_case, install, op_path, opaque,
     rejected, view_path, write_records,
 };
+#[path = "jj_admission.rs"]
+mod admission;
 #[path = "jj_history_behavior.rs"]
 mod behavior;
 #[path = "jj_history_bounds.rs"]
@@ -191,6 +193,7 @@ pub(super) fn dispatch(case: &Case, config: &Config) {
         name if name.starts_with("row:") => faults::row(case, config),
         name if name.starts_with("binding:") => faults::binding(case, config),
         name if name.starts_with("bound:") => bounds::run(case, config),
+        name if name.starts_with("admission:") => admission::dispatch(case, config),
         other => panic!("unknown history fixture {other}"),
     }
 }

@@ -15,6 +15,8 @@ mod capture;
 mod codec;
 mod graph;
 mod lookup;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod native_admission;
 pub(crate) mod native_baseline;
 mod read_budget;
 mod records;

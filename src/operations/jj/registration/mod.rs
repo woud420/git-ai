@@ -10,7 +10,7 @@ use std::time::Instant;
 
 mod error;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-mod unix;
+pub(in crate::operations::jj) mod unix;
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 mod unsupported;
 
@@ -36,6 +36,20 @@ pub struct RegisteredJjCurrentState {
     baseline: DurableCurrentStateBaseline,
     checkout: DecodedJjCheckout,
     checkout_relation: JjRegisteredCheckoutRelation,
+}
+
+impl std::fmt::Debug for RegisteredJjCurrentState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RegisteredJjCurrentState")
+            .field("source_id", &self.source_id)
+            .field("initialization_receipt_id", &self.initialization_receipt_id)
+            .field("workspace_name", &self.workspace_name)
+            .field("attachment_id", &self.attachment_id)
+            .field("baseline", self.baseline.receipt())
+            .field("checkout_relation", &self.checkout_relation)
+            .finish_non_exhaustive()
+    }
 }
 
 impl RegisteredJjCurrentState {

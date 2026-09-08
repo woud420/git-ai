@@ -97,8 +97,9 @@ were fixed in the test builder/generator without changing any raw bytes or hashe
 and all 36 view tests passed again.
 
 The [checkout decoder](2026-09-07-jj-native-checkout-decoder.md) now decodes
-completed workspace context. Bounded integrated-head traversal, consistent
-checkout sampling and journal admission remain
-subsequent increments. Verifying an individual persisted record cannot certify
-opaque ancestors behind it; efficient resume requires an explicit validated
-admission boundary tied to journal generation.
+completed workspace context. [Registered history collection](2026-09-08-jj-native-history-collection.md)
+now composes sampled heads/checkout and bounded traversal. The separate
+[native admission](2026-09-08-jj-native-admission.md) adds a durable
+historical cursor; local qualification is recorded in that decision. An individual verified
+record, opaque ancestor or earlier admission never becomes a trusted extension
+cutoff. Traversal still closes on the original saved baseline or root.

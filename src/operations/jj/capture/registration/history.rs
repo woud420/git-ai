@@ -35,6 +35,31 @@ pub(super) struct HistoryDraft {
     reaches_root: bool,
 }
 
+pub(crate) struct BorrowedJjHistoryEvidence<'a> {
+    head_ids: &'a [String],
+    ordered_operations: Vec<&'a JjOperationEvidence>,
+    reached_baseline_ids: &'a [String],
+    reaches_root: bool,
+}
+
+impl<'a> BorrowedJjHistoryEvidence<'a> {
+    pub(crate) fn head_ids(&self) -> &[String] {
+        self.head_ids
+    }
+
+    pub(crate) fn ordered_operations(&self) -> &[&'a JjOperationEvidence] {
+        &self.ordered_operations
+    }
+
+    pub(crate) fn reached_baseline_ids(&self) -> &[String] {
+        self.reached_baseline_ids
+    }
+
+    pub(crate) fn reaches_root(&self) -> bool {
+        self.reaches_root
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Origin {
     Head(usize),
@@ -105,6 +130,43 @@ impl RetainedCapture<'_> {
         self.budget.check(hooks)?;
         self.history_state = HistoryState::Complete(draft);
         Ok(())
+    }
+
+    pub(crate) fn borrow_history(&self) -> Result<BorrowedJjHistoryEvidence<'_>, E> {
+        if !self.history_mode || self.final_checked {
+            return Err(E::invalid(
+                "history",
+                "session is not open for borrowing completed history",
+            ));
+        }
+        let HistoryState::Complete(draft) = &self.history_state else {
+            return Err(E::invalid("history", "successful collection is required"));
+        };
+        let captured = self
+            .captured
+            .as_ref()
+            .ok_or(E::invalid("history", "missing sampled evidence"))?;
+        if draft.order.len() > MAX_JJ_OBSERVATION_OPERATIONS {
+            return Err(E::invalid(
+                "history",
+                "operation reference count limit exceeded",
+            ));
+        }
+        let mut ordered_operations = Vec::with_capacity(draft.order.len());
+        for origin in &draft.order {
+            let evidence = match *origin {
+                Origin::Head(index) => captured.anchors().get(index),
+                Origin::Ancestor(index) => draft.ancestors.get(index),
+            }
+            .ok_or(E::invalid("history", "invalid verified evidence ordering"))?;
+            ordered_operations.push(evidence);
+        }
+        Ok(BorrowedJjHistoryEvidence {
+            head_ids: captured.head_ids(),
+            ordered_operations,
+            reached_baseline_ids: &draft.reached_baseline_ids,
+            reaches_root: draft.reaches_root,
+        })
     }
 
     pub(crate) fn into_history(mut self) -> Result<CapturedJjHistoryEvidence, E> {

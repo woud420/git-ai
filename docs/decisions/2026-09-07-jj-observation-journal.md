@@ -147,7 +147,10 @@ ancestor is still not a certified native boundary. [Registered history collectio
 is now implemented and locally qualified on macOS. It reads native parents to the
 original saved cutoff or root without consulting opaque lookups or writing
 progress. The additive [admission schema](2026-09-08-jj-native-admission-schema.md)
-now reserves two empty tables without rewriting previous receipts. Validated
-durable admission, attachment mutation, recovery, notifications, checkpoint
-ordering and attribution application remain separate work; ENG-415
+reserves two empty tables without rewriting previous receipts. The separate
+[native admission](2026-09-08-jj-native-admission.md) now records a checked
+historical cursor through retained capture and one SQL transaction; local
+qualification is recorded in that decision. It neither promotes opaque membership nor advances
+opaque/applied progress. Attachment mutation, recovery, observer notifications,
+CLI integration, checkpoint ordering and attribution remain separate work; ENG-415
 stays in progress.

@@ -15,7 +15,7 @@ pub(crate) use super::registration_records::types::{
 };
 
 mod prepared;
-mod read;
+pub(super) mod read;
 mod staged;
 
 pub(crate) use prepared::PreparedRegistrationInstall;

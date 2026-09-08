@@ -78,6 +78,15 @@ pub(super) fn snapshot(
     workspace: &str,
     budget: &mut ReadBudget,
 ) -> Result<Option<StoredRegistrationSnapshot>, JournalError> {
+    snapshot_selected(conn, source, Some(workspace), budget)
+}
+
+pub(in crate::model::repository::jj_observation_journal) fn snapshot_selected(
+    conn: &Connection,
+    source: &str,
+    workspace: Option<&str>,
+    budget: &mut ReadBudget,
+) -> Result<Option<StoredRegistrationSnapshot>, JournalError> {
     let Some(registration) = records::registration_stored(conn, source, budget)? else {
         if unregistered_rows_present(conn, source)? {
             return Err(invalid(
@@ -101,6 +110,7 @@ pub(super) fn snapshot(
             "native registration original workspace receipt mismatch",
         ));
     }
+    let workspace = workspace.unwrap_or(&original_workspace.record.workspace_name);
     let selected_workspace = if workspace == original_workspace.record.workspace_name {
         None
     } else {

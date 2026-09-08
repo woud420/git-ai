@@ -1,6 +1,6 @@
 # Current-state baseline for native jj admission (ENG-415)
 
-Status: proposed — preparation, persistence, capture, pure ancestry, explicit source registration and registered-history collection are implemented; the collector is locally qualified and native admission remains pending.
+Status: proposed — preparation, persistence, capture, pure ancestry, explicit source registration and registered-history collection are implemented; the collector is locally qualified and durable native admission is implemented and locally qualified on macOS.
 
 Start collection from a bounded capture of the current raw operation-head set.
 Prior history remains unverified. Historical verification is a later explicit mode.
@@ -187,7 +187,10 @@ only terminals; previous extension certificates remain a later design.
 [Registered history collection](2026-09-08-jj-native-history-collection.md) now supplies this bounded DAG through
 a fresh registration join and retained native filesystem reads. It preserves the
 original cutoff and exposes root closure without writing progress; local qualification
-is recorded in that decision. The separate workspace-join slice must include a real stale linked workspace C
+is recorded in that decision. The [native admission](2026-09-08-jj-native-admission.md)
+records a separate historical cursor while preserving this original cutoff; local qualification is
+recorded in that decision. It does not upgrade stale checkout readiness.
+The separate workspace-join slice must include a real stale linked workspace C
 outside H, prove it remains unavailable, and only make it ready after an admitted
 relation and stable checkout recheck establish the binding.
 
@@ -207,5 +210,6 @@ relation and stable checkout recheck establish the binding.
 
 The native [evidence verifier](2026-09-07-jj-native-evidence-verifier.md) and
 [checkout decoder](2026-09-07-jj-native-checkout-decoder.md) supply the existing
-per-record checks. Explicit persistence is available; extension admission and
-workspace readiness remain subsequent, separately testable gates.
+per-record checks. Explicit persistence is available. Durable admission to the
+original cutoff is a separate implementation; trusted extension cutoffs and workspace
+readiness remain subsequent, separately testable gates.

@@ -18,9 +18,10 @@ head presentation order is retained; traversal sorts roots and preserves each
 operation's native parent order.
 
 The verifier performs no filesystem, SQLite, Git or jj calls. It neither collects
-ancestors nor writes admission progress. A later writer must separately check
-registered source continuity, current capture consistency and live generation
-inside its transaction. Scope-label equality alone does not authenticate where
+ancestors nor writes admission progress. The separate
+[admission implementation](2026-09-08-jj-native-admission.md) checks registered source
+continuity, current capture consistency and live generation inside its transaction;
+its local qualification is recorded in that decision. Scope-label equality alone does not authenticate where
 supplied bytes came from.
 
 ## Permitted boundaries
@@ -129,5 +130,6 @@ now binds the first workspace and saved cutoff to a sampled source and seal.
 [Registered history collection](2026-09-08-jj-native-history-collection.md) now composes a fresh registration join, bounded
 filesystem parent reads and this verifier; local qualification is recorded in that decision. It stops only
 at the original saved baseline or root and never advances durable progress.
-Durable admission, workspace readiness and attribution remain separate steps;
-registration alone does not supply this ancestry proof.
+Durable admission now has a separate implementation; workspace readiness and
+attribution remain later steps. Registration alone does not supply this ancestry
+proof, and earlier admissions never become traversal terminals.

@@ -13,8 +13,9 @@ Native attribution remains disabled.
 The [registered history collector](2026-09-08-jj-native-history-collection.md)
 already returns complete historical evidence against the original baseline or
 virtual root. Its returned value has no live source lease or write authority.
-Durable admission will require a separate retained collection, checked SQL
-transaction and final source check; those operations are outside this migration.
+The [admission implementation](2026-09-08-jj-native-admission.md) now composes separate
+retained collection, a checked SQL transaction and final source validation. Its
+local qualification is recorded in that decision; those operations are outside this migration.
 
 ## Table contract
 
@@ -42,7 +43,7 @@ No row or trigger program runs for these binding checks.
 Schema validation certifies the storage shape, not record contents. Existing
 version-4 rows are left untouched even if their contents are opaque to this
 migration. Canonical codecs, checked generations and native evidence validation
-belong to the subsequent admission reader and writer.
+belong to the separate [admission reader and writer](2026-09-08-jj-native-admission.md).
 
 ## Upgrade and rollback
 
@@ -65,7 +66,7 @@ with foreign keys disabled must prevent that source ID being treated as unused.
 Other sources remain independent. These negative checks create no registration
 authority and do not inspect or certify admission payloads.
 
-No generation-zero record is introduced. The later admission reader may derive
+No generation-zero record is introduced. The admission reader derives
 generation zero only from a complete valid registration and absence of both
 admission row families for that source. Coherent erasure of both families remains
 indistinguishable from first use to a caller without a retained nonzero cursor.

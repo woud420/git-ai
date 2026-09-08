@@ -147,7 +147,8 @@ retained capture sessions with a published seal and the first workspace's durabl
 cutoff. [Registered history collection](2026-09-08-jj-native-history-collection.md) now reuses a retained session
 with a separate fixed history budget to read parents to the original saved cutoff
 or root; local qualification is recorded in that decision. Standalone current-state capture keeps the
-limits above and does not fetch ancestors. Attachment mutation, explicit recovery,
-native ancestry admission, observer integration, checkpoint ordering, rewrite
-attribution and shared command behavior
-remain later phases. Native jj attribution remains disabled.
+limits above and does not fetch ancestors. The [native admission](2026-09-08-jj-native-admission.md)
+now retains a history session through checked SQL staging and final source
+validation; local qualification is recorded in that decision. Attachment mutation, explicit
+recovery, observer/CLI integration, checkpoint ordering, rewrite attribution and
+shared command behavior remain later phases. Native jj attribution remains disabled.

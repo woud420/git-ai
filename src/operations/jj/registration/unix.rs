@@ -13,9 +13,9 @@ use std::time::Instant;
 #[path = "history.rs"]
 pub(super) mod history;
 #[path = "policy.rs"]
-mod policy;
+pub(in crate::operations::jj) mod policy;
 #[path = "saved.rs"]
-mod saved;
+pub(in crate::operations::jj) mod saved;
 
 use policy::{authorize, check_deadline, require_opt_in};
 
@@ -119,7 +119,7 @@ fn reopen_present(
     Ok(registered)
 }
 
-fn load_registered_context(
+pub(in crate::operations::jj) fn load_registered_context(
     journal: &JjObservationJournal,
     current: &RetainedCapture<'_>,
     deadline: Instant,

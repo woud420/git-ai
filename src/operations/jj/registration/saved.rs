@@ -10,7 +10,7 @@ use crate::operations::jj::capture::registration::RetainedCapture;
 use crate::operations::jj::checkout::decode_checkout;
 use crate::operations::jj::evidence::verify_evidence;
 
-pub(super) fn validate(
+pub(in crate::operations::jj) fn validate(
     current: &RetainedCapture<'_>,
     snapshot: &StoredRegistrationSnapshot,
 ) -> Result<(), E> {
@@ -34,6 +34,13 @@ pub(super) fn validate(
             "registration differs from the sampled source or workspace",
         ));
     }
+    validate_historical(snapshot)
+}
+
+pub(in crate::operations::jj) fn validate_historical(
+    snapshot: &StoredRegistrationSnapshot,
+) -> Result<(), E> {
+    let selected = &snapshot.selected_workspace().record;
     validate_historical_checkout(&snapshot.original_workspace.record, snapshot)?;
     if snapshot.original_workspace.record.workspace_name != selected.workspace_name {
         validate_historical_checkout(selected, snapshot)?;
@@ -89,7 +96,7 @@ fn validate_historical_checkout(
     Ok(())
 }
 
-pub(super) fn finish(
+pub(in crate::operations::jj) fn finish(
     snapshot: StoredRegistrationSnapshot,
     captured: &CapturedJjCurrentState,
 ) -> Result<RegisteredJjCurrentState, E> {

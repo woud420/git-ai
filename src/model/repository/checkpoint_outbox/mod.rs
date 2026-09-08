@@ -265,6 +265,77 @@ mod tests {
     use crate::model::working_log::CheckpointKind;
     use std::collections::HashMap;
 
+    #[allow(deprecated)]
+    fn assert_error_contract(error: &dyn std::error::Error, expected: &str) {
+        assert_eq!(error.to_string(), expected);
+        assert_eq!(format!("{error:*^120.3}"), expected);
+        assert_eq!(format!("{error:#}"), expected);
+        assert!(error.source().is_none());
+        assert_eq!(
+            error.description(),
+            "description() is deprecated; use Display"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::schema(CheckpointDeliveryError::UnsupportedSchema { found: 2, supported: 1 }, "schema 2 is newer than supported schema 1")]
+    #[case::empty(CheckpointDeliveryError::EmptyIdentifier { field: "trace_id" }, "trace_id must not be empty")]
+    #[case::unsafe_identifier(CheckpointDeliveryError::UnsafeIdentifier { field: "trace_id" }, "trace_id contains unsafe characters")]
+    #[case::relative_path(CheckpointDeliveryError::PathMustBeAbsolute { field: "trace_id" }, "trace_id must be absolute")]
+    #[case::path_encoding(CheckpointDeliveryError::NonUtf8Path { field: "trace_id" }, "trace_id uses an unsupported path encoding")]
+    #[case::limit(CheckpointDeliveryError::LimitExceeded { field: "trace_id", limit: 10, actual: 20 }, "trace_id exceeds limit 10 (actual 20)")]
+    fn delivery_error_display_clone_and_conversion_are_stable(
+        #[case] error: CheckpointDeliveryError,
+        #[case] suffix: &str,
+    ) {
+        let expected = format!("checkpoint delivery {suffix}");
+        assert_eq!(error.clone(), error);
+        assert_error_contract(&error, &expected);
+        let converted = CheckpointOutboxError::from(error.clone());
+        assert!(matches!(&converted, CheckpointOutboxError::Delivery(inner) if inner == &error));
+        assert_error_contract(&converted, &expected);
+    }
+
+    #[rstest::rstest]
+    #[case::encode(CheckpointOutboxError::Encode("bad\ndata".into()), "failed to encode checkpoint delivery: bad\ndata")]
+    #[case::decode(CheckpointOutboxError::Decode("bad data".into()), "failed to decode checkpoint delivery: bad data")]
+    #[case::relative_override(CheckpointOutboxError::OverrideMustBeAbsolute("relative".into()), "checkpoint outbox override must be absolute: relative")]
+    #[case::platform(
+        CheckpointOutboxError::UnsupportedPlatform,
+        "durable checkpoint outbox publication is unsupported"
+    )]
+    #[case::symlink(
+        CheckpointOutboxError::RootIsSymlink,
+        "checkpoint outbox root must not be a symlink"
+    )]
+    #[case::not_directory(
+        CheckpointOutboxError::RootIsNotDirectory,
+        "checkpoint outbox root must be a directory"
+    )]
+    #[case::owner(CheckpointOutboxError::RootOwnerMismatch { expected: 501, actual: 0 }, "checkpoint outbox root owner mismatch (expected uid 501, found 0)")]
+    #[case::mode(CheckpointOutboxError::RootModeMismatch { expected: 0o700, actual: 0o1777 }, "checkpoint outbox root mode mismatch (expected 0700, found 1777)")]
+    #[case::unsafe_record(
+        CheckpointOutboxError::UnsafeReadyRecord,
+        "checkpoint outbox contains an unsafe ready record"
+    )]
+    #[case::record_size(CheckpointOutboxError::RecordTooLarge { encoded_bytes: 20, max_bytes: 10 }, "checkpoint outbox record is too large (20 bytes, maximum 10)")]
+    #[case::capacity(CheckpointOutboxError::ReadyCapacityExceeded { ready_records: 3, max_records: 2, ready_bytes: 20, max_bytes: 10 }, "checkpoint outbox capacity exceeded (3 of 2 records, 20 of 10 bytes)")]
+    #[case::already_published(
+        CheckpointOutboxError::AlreadyPublished,
+        "checkpoint outbox delivery is already published"
+    )]
+    #[case::lock_busy(
+        CheckpointOutboxError::LockBusy,
+        "checkpoint outbox lock root failed (WouldBlock)"
+    )]
+    #[case::io(CheckpointOutboxError::Io { operation: "read", kind: io::ErrorKind::PermissionDenied }, "checkpoint outbox read failed (PermissionDenied)")]
+    fn outbox_error_display_and_sources_are_stable(
+        #[case] error: CheckpointOutboxError,
+        #[case] expected: &str,
+    ) {
+        assert_error_contract(&error, expected);
+    }
+
     fn delivery() -> CheckpointDelivery {
         let request = CheckpointRequest {
             trace_id: "trace-1".to_string(),

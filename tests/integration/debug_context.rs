@@ -260,7 +260,23 @@ fn debug_context_does_not_spawn_git_or_jj() {
     assert!(!marker.exists(), "context invoked Git or jj");
 }
 
-pub(super) fn jj(repo: &TestRepo, cwd: &Path, args: &[&str]) {
+pub(super) fn require_pinned_jj() {
+    let binary = std::env::var_os("GIT_AI_TEST_JJ_BINARY")
+        .expect("the explicit jj test lane requires GIT_AI_TEST_JJ_BINARY");
+    assert!(Path::new(&binary).is_file());
+    let output = Command::new(binary).arg("--version").output().unwrap();
+    assert!(output.status.success());
+    let version = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        matches!(
+            version.trim(),
+            "jj 0.45.1" | "jj 0.45.1-7c41cdeb16b6b321c64e789a966b6adf723816a5"
+        ),
+        "the native jj qualification lane requires pinned jj 0.45.1"
+    );
+}
+
+pub(super) fn jj(repo: &TestRepo, cwd: &Path, args: &[&str]) -> std::process::Output {
     let binary = std::env::var_os("GIT_AI_TEST_JJ_BINARY")
         .expect("the explicit jj test lane requires GIT_AI_TEST_JJ_BINARY");
     assert!(
@@ -287,6 +303,7 @@ pub(super) fn jj(repo: &TestRepo, cwd: &Path, args: &[&str]) {
         "jj {args:?}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    output
 }
 
 #[test]

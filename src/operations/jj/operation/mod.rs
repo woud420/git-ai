@@ -7,8 +7,9 @@
 
 mod hash;
 mod metadata;
-mod wire;
+use super::wire;
 
+use super::content_hash::hex;
 use crate::model::jj_observation::{
     JJ_OBSERVATION_SCHEMA_VERSION, is_root, validate_operation_id, validate_profile,
 };
@@ -46,6 +47,12 @@ impl fmt::Display for JjDecodeError {
 
 impl std::error::Error for JjDecodeError {}
 
+impl From<wire::WireError> for JjDecodeError {
+    fn from(error: wire::WireError) -> Self {
+        Self(error.0)
+    }
+}
+
 type Predecessors<'a> = BTreeMap<&'a [u8], Vec<&'a [u8]>>;
 
 struct RawOperation<'a> {
@@ -79,19 +86,14 @@ pub fn decode_operation(
     }
     Ok(DecodedJjOperation {
         operation_id,
-        view_id: hash::hex(operation.view_id),
-        parent_ids: operation.parent_ids.into_iter().map(hash::hex).collect(),
+        view_id: hex(operation.view_id),
+        parent_ids: operation.parent_ids.into_iter().map(hex).collect(),
         workspace_name: operation.metadata.workspace_name.map(str::to_owned),
         is_snapshot: operation.metadata.is_snapshot,
         commit_predecessors: operation.predecessors.map(|predecessors| {
             predecessors
                 .into_iter()
-                .map(|(commit, edges)| {
-                    (
-                        hash::hex(commit),
-                        edges.into_iter().map(hash::hex).collect(),
-                    )
-                })
+                .map(|(commit, edges)| (hex(commit), edges.into_iter().map(hex).collect()))
                 .collect()
         }),
     })

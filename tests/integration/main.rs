@@ -95,6 +95,7 @@ mod jetbrains_download;
 mod jetbrains_ide_types;
 mod jj_observation_journal;
 mod jj_operation;
+mod jj_view;
 mod layer_import_policy;
 mod log;
 mod merge_rebase;

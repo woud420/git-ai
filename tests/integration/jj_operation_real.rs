@@ -1,24 +1,6 @@
 use super::*;
-use crate::debug_context::{jj, snapshot};
+use crate::debug_context::{jj, require_pinned_jj, snapshot};
 use std::fs;
-use std::path::Path;
-use std::process::Command;
-
-fn require_pinned_jj() {
-    let binary = std::env::var_os("GIT_AI_TEST_JJ_BINARY")
-        .expect("the explicit jj test lane requires GIT_AI_TEST_JJ_BINARY");
-    assert!(Path::new(&binary).is_file());
-    let output = Command::new(binary).arg("--version").output().unwrap();
-    assert!(output.status.success());
-    let version = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        matches!(
-            version.trim(),
-            "jj 0.45.1" | "jj 0.45.1-7c41cdeb16b6b321c64e789a966b6adf723816a5"
-        ),
-        "the native operation qualification lane requires pinned jj 0.45.1"
-    );
-}
 
 fn qualify_operation_store(colocated: bool) {
     require_pinned_jj();

@@ -11,7 +11,7 @@ mod limits;
 #[path = "jj_operation_real.rs"]
 mod real;
 #[path = "jj_operation_support.rs"]
-mod support;
+pub(super) mod support;
 #[path = "jj_operation_vectors.rs"]
 mod vectors;
 

@@ -1,3 +1,4 @@
+use super::super::content_hash::{blob, count, hex, sequence};
 use super::RawOperation;
 use super::metadata::Timestamp;
 use blake2::{Blake2b512, Digest};
@@ -39,33 +40,7 @@ pub(super) fn operation_id(operation: &RawOperation<'_>) -> String {
     hex(&hash.finalize())
 }
 
-fn blob(hash: &mut Blake2b512, bytes: &[u8]) {
-    count(hash, bytes.len());
-    hash.update(bytes);
-}
-
-fn count(hash: &mut Blake2b512, count: usize) {
-    hash.update((count as u64).to_le_bytes());
-}
-
-fn sequence(hash: &mut Blake2b512, values: &[&[u8]]) {
-    count(hash, values.len());
-    for value in values {
-        blob(hash, value);
-    }
-}
-
 fn timestamp(hash: &mut Blake2b512, timestamp: &Timestamp) {
     hash.update(timestamp.millis.to_le_bytes());
     hash.update(timestamp.tz_offset.to_le_bytes());
-}
-
-pub(super) fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut value = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        value.push(char::from(DIGITS[usize::from(byte >> 4)]));
-        value.push(char::from(DIGITS[usize::from(byte & 15)]));
-    }
-    value
 }

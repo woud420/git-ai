@@ -87,6 +87,7 @@ the fresh build, Rust 1.93 all-target lint and format check passed, along with
 policy checks and all 33 fork workflow policy tests. The dependency lock was
 validated with `cargo metadata --locked`; existing package versions did not change.
 
-The next increment must verify the referenced view's semantic content address,
-then implement bounded integrated-head traversal and journal membership lookup.
+The [native view decoder](2026-09-07-jj-native-view-decoder.md) now verifies the
+referenced view format independently. Joining both hashes to journal envelopes,
+bounded integrated-head traversal and validated journal boundaries remain pending.
 Operation decoding alone does not make native jj checkpoint attribution usable.

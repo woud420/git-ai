@@ -136,9 +136,11 @@ schema changes, CLI behavior, or daemon work were added.
 
 ## Next increment
 
-The [native operation decoder](2026-09-07-jj-native-operation-decoder.md) now verifies
-individual operation content addresses. Port view decoding and bounded traversal
-to Rust, then use `lookup_observed` for durable membership queries. Qualify the adapter against real jj operations and
+The native [operation](2026-09-07-jj-native-operation-decoder.md) and
+[view](2026-09-07-jj-native-view-decoder.md) decoders now verify individual content
+addresses. Join them to the evidence envelope, then add bounded traversal and
+validated durable membership queries. A checksummed opaque ancestor is not a
+certified native boundary; resumed reads must preserve that distinction. Qualify the adapter against real jj operations and
 missing-history cases before connecting an observer or checkpoint ordering.
 Workspace registration, notifications, native capture and attribution application
 remain unimplemented; ENG-415 stays in progress.

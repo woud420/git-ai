@@ -1,8 +1,9 @@
 use crate::cli::print_machine_json;
-use crate::operations::jj::admission::NativeAdmissionExpectation;
 use serde_json::json;
 
 mod args;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod observe;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod shared;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -29,6 +30,13 @@ impl Error {
             message: message.to_string().chars().take(1024).collect(),
         }
     }
+
+    fn value(self) -> serde_json::Value {
+        json!({
+            "schema_version": 1, "backend": "jj", "attribution_enabled": false,
+            "error": {"code": self.code, "message": self.message}
+        })
+    }
 }
 
 pub(super) fn handle(input: &[String]) -> i32 {
@@ -39,15 +47,24 @@ pub(super) fn handle(input: &[String]) -> i32 {
              git-ai debug jj receipt --journal PATH --source ID --admission ID --json\n\
              git-ai debug jj initialize --journal PATH --json\n\
              git-ai debug jj capture --journal PATH --json --expect-source ID --expect-initialization-receipt ID --expect-baseline ID --expect-generation N --expect-head OPERATION_ID [--expect-head OPERATION_ID ...]\n\
+             git-ai debug jj observe --journal PATH --json --expect-source ID --expect-initialization-receipt ID --expect-baseline ID --expect-generation N --expect-head OPERATION_ID [--expect-head OPERATION_ID ...] --expect-workspace NAME --expect-attachment ID [--attempts N] [--interval-ms N]\n\
+             Observe performs finite foreground sampling; attempts default 1 (1-32), interval-ms defaults 1000 (250-60000).\n\
              Status and receipt require an existing current-schema journal and do not write observations.\n\
-             Initialize and capture can create or migrate the journal before full repository policy checks.\n\
+             Initialize, capture and observe can create or migrate the journal before full repository policy checks.\n\
              Initialize retains the original cutoff on retry; capture requires an explicit expected cursor.\n\
              Capture accepts 1-32 distinct nonroot heads and canonical generation 0 through i64::MAX-1.\n\
-             Initialization failure may leave an unavailable source seal. No automatic recovery or observer."
+             Initialization failure may leave an unavailable source seal. No automatic recovery or background observer."
         );
         return 0;
     }
-    let result = args::parse(input).and_then(|request| match request {
+    let request = match args::parse(input) {
+        Ok(request) => request,
+        Err(error) => {
+            print_machine_json(&error.value());
+            return 1;
+        }
+    };
+    let result = match request {
         args::Request::Status { journal } => read::status(journal),
         args::Request::Receipt {
             journal,
@@ -55,34 +72,27 @@ pub(super) fn handle(input: &[String]) -> i32 {
             admission,
         } => read::receipt(journal, source, admission),
         args::Request::Initialize { journal } => write::initialize(journal),
-        args::Request::Capture {
-            journal,
-            source,
-            initialization_receipt,
-            baseline,
-            generation,
-            heads,
-        } => write::capture(
-            journal,
-            NativeAdmissionExpectation {
-                source_id: source,
-                initialization_receipt_id: initialization_receipt,
-                baseline_id: baseline,
-                generation,
-                admitted_head_ids: &heads,
-            },
-        ),
-    });
+        args::Request::Capture { journal, expected } => {
+            write::capture(journal, expected.expectation())
+        }
+        args::Request::Observe(request) => {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                return observe::run(request);
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                read::observe(request)
+            }
+        }
+    };
     match result {
         Ok(value) => {
             print_machine_json(&value);
             0
         }
         Err(error) => {
-            print_machine_json(&json!({
-                "schema_version": 1, "backend": "jj", "attribution_enabled": false,
-                "error": {"code": error.code, "message": error.message}
-            }));
+            print_machine_json(&error.value());
             1
         }
     }

@@ -24,3 +24,16 @@ pub(super) fn capture(
 ) -> Result<Value, Error> {
     status(path)
 }
+
+pub(super) fn observe(request: super::args::ObserveArgs<'_>) -> Result<Value, Error> {
+    let super::args::ObserveArgs {
+        journal,
+        expected,
+        workspace,
+        attachment,
+        attempts,
+        interval_ms,
+    } = request;
+    let _ = (expected, workspace, attachment, attempts, interval_ms);
+    status(journal)
+}

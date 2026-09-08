@@ -1,0 +1,18 @@
+flowchart TD
+    input["Validated finite observe request<br/>Immutable source and workspace target"] --> fresh["Start attempt deadline<br/>Load fresh configuration; check opt-in"]
+    fresh --> first{"First attempt?"}
+    first -->|Yes| context["Discover and freeze workspace context"]
+    context --> open["Open writable journal once<br/>Creation or migration may remain"]
+    open --> reconcile["Reconcile original target and remembered cursor<br/>Full source/policy checks; one SQL budget"]
+    first -->|No| reconcile
+    reconcile --> result["Keep verified cursor and metadata<br/>Drop native evidence before output"]
+    result --> output["Write one JSON line and flush"]
+    output --> more{"More attempts?"}
+    more -->|No| done["Exit successfully<br/>No trailing wait or worker"]
+    more -->|Yes| wait["Wait after completed output<br/>No transaction or raw evidence retained"]
+    wait --> fresh
+    fresh -. Denied .-> fail["Emit terminal error and stop<br/>No refresh or implicit recovery"]
+    context -. Refusal before first journal open .-> fail
+    open -. Refusal after possible journal change .-> fail
+    reconcile -. Refusal .-> fail
+    output -. Write or flush failure .-> broken["Stop with nonzero status<br/>No further attempt; committed reply may be lost"]

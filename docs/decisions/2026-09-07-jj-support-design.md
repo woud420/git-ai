@@ -1,6 +1,6 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification, explicit source registration and bounded registered-history collection are implemented on the draft branch. The collector is locally qualified on macOS. Durable native admission is implemented and locally qualified on macOS; experimental read-only observation diagnostics are also implemented and locally qualified. Explicit initialization/capture commands and bounded reconciliation are also implemented and locally qualified; observer integration and attribution remain pending.
+Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification, explicit source registration and bounded registered-history collection are implemented on the draft branch. The collector is locally qualified on macOS. Durable native admission is implemented and locally qualified on macOS; experimental read-only observation diagnostics are also implemented and locally qualified. Explicit initialization/capture commands, bounded reconciliation and finite foreground observation are also implemented and locally qualified; unattended restart, scalable catch-up and attribution remain pending.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
@@ -317,7 +317,7 @@ is recorded in that decision. It returns evidence without advancing any journal 
 [Durable native admission](2026-09-08-jj-native-admission.md) now composes retained
 collection, transactional native revalidation and a separate generation cursor;
 local qualification is recorded in that decision. P2/ENG-415 stays in progress. Attachment
-mutation, explicit recovery and observer integration remain pending.
+mutation, explicit recovery and unattended observation remain pending.
 The [observation diagnostics decision](2026-09-08-jj-observation-diagnostics.md)
 records the implemented experimental status/receipt commands and exact-schema read-only opener.
 The [explicit capture decision](2026-09-08-jj-explicit-capture.md) records the
@@ -326,8 +326,12 @@ The [reconciliation decision](2026-09-08-jj-native-reconciliation.md) records th
 bounded backend attempt: remembered workspace and cursor checks, unchanged
 samples without admission writes, and changed samples through existing admission.
 Original-cutoff overflow still prevents complete observer catch-up; reconciliation
-adds no scheduler or automatic activation. Later phases remain tracked until
-their acceptance tests pass. These increments are
+adds no scheduler or automatic activation.
+The [finite observation decision](2026-09-08-jj-finite-observation.md) records the
+implemented foreground command: serial attempts, fresh collection policy,
+verified cursor carry and flushed JSON output. It retains the original target
+and stops on failure; durable restart and scalable closure remain pending.
+Later phases remain tracked until their acceptance tests pass. These increments are
 published on [draft PR #247](https://github.com/woud420/git-ai/pull/247) and do not
 enable native attribution. Work continues in scoped commits with human review
 before merge.

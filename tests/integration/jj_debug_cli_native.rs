@@ -12,6 +12,8 @@ use support::{checked, *};
 mod behavior;
 #[path = "jj_debug_cli_errors.rs"]
 mod errors;
+#[path = "jj_debug_observe_cli_native.rs"]
+mod observe;
 #[path = "jj_debug_write_cli_native.rs"]
 mod write;
 
@@ -105,6 +107,7 @@ fn jj_debug_cli_real_pinned_jj_status_and_baseline_receipt_are_read_only() {
 pub(super) fn dispatch(case: &Case, config: &Config) {
     match case.name.strip_prefix("history:admission:cli:").unwrap() {
         name if name.starts_with("write:") => write::dispatch(case, config),
+        name if name.starts_with("observe:") => observe::dispatch(case, config),
         "status" => behavior::status_case(case, config),
         "receipts" => behavior::receipts(case, config, false),
         "historical" => behavior::receipts(case, config, true),

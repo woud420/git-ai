@@ -1,6 +1,6 @@
 use crate::operations::jj::admission::{
     DurableNativeAdmission, NativeAdmissionCursor, NativeAdmissionOutcome, NativeAdmissionReceipt,
-    RegisteredNativeAdmissionState,
+    NativeReconciliationOutcome, RegisteredNativeAdmissionState,
 };
 use crate::operations::jj::registration::{
     JjRegisteredCheckoutRelation, JjRegistrationOutcome, RegisteredJjCurrentState,
@@ -101,4 +101,27 @@ pub(super) fn capture(value: &NativeAdmissionOutcome) -> Value {
         "cursor": cursor(value.current_cursor()),
         "admission": admission_value(value.admission())
     })
+}
+
+pub(super) fn observe(value: &NativeReconciliationOutcome, attempt: u64) -> Value {
+    let (mut result, registration) = match value {
+        NativeReconciliationOutcome::Unchanged(value) => {
+            let mut result = status(value);
+            result["outcome"] = json!("unchanged");
+            (result, value.registration())
+        }
+        NativeReconciliationOutcome::Admission(value) => {
+            let registration = match value {
+                NativeAdmissionOutcome::Admitted(value)
+                | NativeAdmissionOutcome::AlreadyAdmitted(value) => value.registration(),
+            };
+            (capture(value), registration)
+        }
+    };
+    result["action"] = json!("observe");
+    result["attempt"] = json!(attempt);
+    result["workspace"] = json!({
+        "name": registration.workspace_name(), "attachment_id": registration.attachment_id()
+    });
+    result
 }

@@ -27,6 +27,7 @@ pub const MAX_JJ_OBSERVATION_PENDING_LIMIT: usize = 128;
 pub const MAX_JJ_OBSERVATION_LOOKUP_LIMIT: usize = 128;
 pub use lookup::ObservedEvidence;
 pub use read_budget::ReadBudget;
+pub(crate) use registration_records::codec::validate_name as validate_workspace_name;
 const MAX_RECORD_BYTES: usize = 2 * MAX_JJ_OBSERVATION_OPERATION_BYTES + 64 * 1024;
 const MAX_METADATA_BYTES: usize = 128 * 1024;
 const DB_LABEL: &str = "jj observations";

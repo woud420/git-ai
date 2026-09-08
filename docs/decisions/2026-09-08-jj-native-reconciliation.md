@@ -4,7 +4,8 @@ Status: accepted — implemented and locally qualified on macOS for the pinned j
 
 Refs: [ENG-415](https://linear.app/polarcoordinates/issue/ENG-415),
 [durable admission](2026-09-08-jj-native-admission.md),
-[explicit capture](2026-09-08-jj-explicit-capture.md).
+[explicit capture](2026-09-08-jj-explicit-capture.md),
+[finite foreground observation](2026-09-08-jj-finite-observation.md).
 
 ## Decision
 

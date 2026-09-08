@@ -6,7 +6,8 @@ Refs: [ENG-415](https://linear.app/polarcoordinates/issue/ENG-415),
 [native registration](2026-09-08-jj-native-registration.md),
 [native admission](2026-09-08-jj-native-admission.md),
 [read-only diagnostics](2026-09-08-jj-observation-diagnostics.md),
-[reconciliation](2026-09-08-jj-native-reconciliation.md).
+[reconciliation](2026-09-08-jj-native-reconciliation.md),
+[finite foreground observation](2026-09-08-jj-finite-observation.md).
 
 ## Decision
 

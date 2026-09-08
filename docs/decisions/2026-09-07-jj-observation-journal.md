@@ -136,8 +136,9 @@ schema changes, CLI behavior, or daemon work were added.
 
 ## Next increment
 
-Port the qualified immutable reader to Rust and use `lookup_observed` for its
-bounded durable membership queries. Qualify the adapter against real jj operations and
+The [native operation decoder](2026-09-07-jj-native-operation-decoder.md) now verifies
+individual operation content addresses. Port view decoding and bounded traversal
+to Rust, then use `lookup_observed` for durable membership queries. Qualify the adapter against real jj operations and
 missing-history cases before connecting an observer or checkpoint ordering.
 Workspace registration, notifications, native capture and attribution application
 remain unimplemented; ENG-415 stays in progress.

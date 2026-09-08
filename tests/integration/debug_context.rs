@@ -39,7 +39,7 @@ fn jj_layout(root: &Path) {
     fs::write(root.join(".jj/repo/store/git_target"), "../../../.git").unwrap();
 }
 
-fn snapshot(path: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+pub(super) fn snapshot(path: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     fn visit(root: &Path, path: &Path, result: &mut BTreeMap<PathBuf, Vec<u8>>) {
         for entry in fs::read_dir(path).unwrap() {
             let entry = entry.unwrap();
@@ -260,7 +260,7 @@ fn debug_context_does_not_spawn_git_or_jj() {
     assert!(!marker.exists(), "context invoked Git or jj");
 }
 
-fn jj(repo: &TestRepo, cwd: &Path, args: &[&str]) {
+pub(super) fn jj(repo: &TestRepo, cwd: &Path, args: &[&str]) {
     let binary = std::env::var_os("GIT_AI_TEST_JJ_BINARY")
         .expect("the explicit jj test lane requires GIT_AI_TEST_JJ_BINARY");
     assert!(

@@ -94,6 +94,7 @@ mod issue_1204_multi_agent;
 mod jetbrains_download;
 mod jetbrains_ide_types;
 mod jj_observation_journal;
+mod jj_operation;
 mod layer_import_policy;
 mod log;
 mod merge_rebase;

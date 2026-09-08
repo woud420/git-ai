@@ -6,7 +6,7 @@ use crate::model::jj_observation::{
     validate_ids, validate_profile, validate_source,
 };
 use crate::model::repository::{error::PersistenceError, sqlite};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
@@ -15,12 +15,14 @@ mod capture;
 mod codec;
 mod graph;
 mod lookup;
+mod read_budget;
 mod records;
 mod schema;
 
 pub const MAX_JJ_OBSERVATION_PENDING_LIMIT: usize = 128;
 pub const MAX_JJ_OBSERVATION_LOOKUP_LIMIT: usize = 128;
 pub use lookup::ObservedEvidence;
+pub use read_budget::ReadBudget;
 const MAX_RECORD_BYTES: usize = 2 * MAX_JJ_OBSERVATION_OPERATION_BYTES + 64 * 1024;
 const MAX_METADATA_BYTES: usize = 128 * 1024;
 const DB_LABEL: &str = "jj observations";
@@ -195,14 +197,46 @@ impl JjObservationJournal {
 }
 
 fn load_state(conn: &Connection, source: &str) -> Result<StoredState, JournalError> {
-    let encoded = conn.query_row(
-        "SELECT length(state), substr(state, 1, ?2), substr(checksum, 1, 65) FROM jj_sources WHERE source_id = ?1",
-        params![source, MAX_METADATA_BYTES + 1],
-        |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Vec<u8>>(1)?, row.get::<_, String>(2)?)),
-    ).optional().map_err(|error| sql_error("read progress", error))?;
-    let Some((length, bytes, checksum)) = encoded else {
+    load_state_with_budget(conn, source, &mut ReadBudget::new(MAX_METADATA_BYTES))
+}
+
+fn load_state_with_budget(
+    conn: &Connection,
+    source: &str,
+    budget: &mut ReadBudget,
+) -> Result<StoredState, JournalError> {
+    let limit = MAX_METADATA_BYTES.min(budget.remaining());
+    let mut statement = conn
+        .prepare(
+            "SELECT CASE WHEN typeof(state) = 'blob' THEN length(state) ELSE NULL END,
+         CASE WHEN typeof(state) != 'blob' THEN NULL
+              WHEN length(state) <= ?2 THEN state ELSE NULL END,
+         substr(checksum, 1, 65) FROM jj_sources WHERE source_id = ?1",
+        )
+        .map_err(|error| sql_error("prepare progress read", error))?;
+    let mut rows = statement
+        .query(params![source, limit])
+        .map_err(|error| sql_error("read progress", error))?;
+    let Some(row) = rows
+        .next()
+        .map_err(|error| sql_error("read progress row", error))?
+    else {
         return Ok(StoredState::fresh(source));
     };
+    let length: u64 = row
+        .get::<_, Option<u64>>(0)
+        .map_err(|error| sql_error("read progress length", error))?
+        .ok_or_else(|| invalid("stored progress payload is not a blob"))?;
+    if length > limit as u64 {
+        return Err(invalid("stored payload read byte limit exceeded"));
+    }
+    budget.charge(length as usize)?;
+    let bytes: Vec<u8> = row
+        .get(1)
+        .map_err(|error| sql_error("read progress payload", error))?;
+    let checksum: String = row
+        .get(2)
+        .map_err(|error| sql_error("read progress checksum", error))?;
     let state: StoredState = codec::decode(&bytes, length, &checksum, MAX_METADATA_BYTES)?;
     state.validate(source)?;
     Ok(state)

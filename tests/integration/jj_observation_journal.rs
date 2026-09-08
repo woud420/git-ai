@@ -1485,3 +1485,6 @@ fn jj_journal_lookup_rejects_a_missing_requested_observed_head() {
         "gap",
     );
 }
+
+#[path = "jj_observation_read_budget.rs"]
+mod read_budget;

@@ -1,4 +1,4 @@
-use super::{JournalError, MAX_RECORD_BYTES, decode_operation_row, invalid, sql_error};
+use super::{JournalError, MAX_RECORD_BYTES, ReadBudget, decode_operation_row, invalid, sql_error};
 use crate::model::jj_observation::{JjOperationEvidence, MAX_JJ_OBSERVATION_BATCH_BYTES, is_root};
 use rusqlite::{Connection, params};
 use std::collections::{BTreeMap, BTreeSet};
@@ -8,7 +8,13 @@ pub(super) fn load_records(
     source: &str,
     ids: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, JjOperationEvidence>, JournalError> {
-    load_records_checked(conn, source, ids, None)
+    load_records_checked(
+        conn,
+        source,
+        ids,
+        None,
+        &mut ReadBudget::new(MAX_JJ_OBSERVATION_BATCH_BYTES),
+    )
 }
 
 pub(super) fn load_observed_records(
@@ -16,8 +22,9 @@ pub(super) fn load_observed_records(
     source: &str,
     ids: &BTreeSet<String>,
     pending_operations: u64,
+    budget: &mut ReadBudget,
 ) -> Result<BTreeMap<String, JjOperationEvidence>, JournalError> {
-    load_records_checked(conn, source, ids, Some(pending_operations))
+    load_records_checked(conn, source, ids, Some(pending_operations), budget)
 }
 
 fn load_records_checked(
@@ -25,11 +32,16 @@ fn load_records_checked(
     source: &str,
     ids: &BTreeSet<String>,
     maximum_sequence: Option<u64>,
+    budget: &mut ReadBudget,
 ) -> Result<BTreeMap<String, JjOperationEvidence>, JournalError> {
     let mut statement = conn
         .prepare(
-            "SELECT operation_id, length(payload),
-         CASE WHEN length(payload) <= ?3 THEN payload ELSE NULL END, substr(checksum, 1, 65), sequence
+            "SELECT operation_id,
+         CASE WHEN typeof(payload) = 'blob' THEN length(payload) ELSE NULL END,
+         CASE WHEN typeof(payload) != 'blob' THEN NULL
+              WHEN length(payload) <= ?3 THEN payload ELSE NULL END,
+         substr(checksum, 1, 65),
+         CASE WHEN typeof(sequence) = 'integer' THEN sequence ELSE NULL END
          FROM jj_operations WHERE source_id = ?1 AND operation_id = ?2",
         )
         .map_err(|error| sql_error("prepare evidence read", error))?;
@@ -39,7 +51,7 @@ fn load_records_checked(
         if is_root(id) {
             continue;
         }
-        let limit = remaining.min(MAX_RECORD_BYTES);
+        let limit = remaining.min(MAX_RECORD_BYTES).min(budget.remaining());
         let mut rows = statement
             .query(params![source, id, limit])
             .map_err(|error| sql_error("read evidence", error))?;
@@ -48,11 +60,15 @@ fn load_records_checked(
             .map_err(|error| sql_error("read evidence row", error))?
         {
             let length: u64 = row
-                .get(1)
-                .map_err(|error| sql_error("read evidence length", error))?;
+                .get::<_, Option<u64>>(1)
+                .map_err(|error| sql_error("read evidence length", error))?
+                .ok_or_else(|| invalid("stored evidence payload is not a blob"))?;
             if length > limit as u64 {
                 return Err(invalid("stored evidence read byte limit exceeded"));
             }
+            // Selection has already materialized this BLOB, even if metadata or decoding fails.
+            budget.charge(length as usize)?;
+            remaining -= length as usize;
             if let Some(maximum_sequence) = maximum_sequence {
                 let sequence: u64 = row
                     .get(4)
@@ -62,7 +78,6 @@ fn load_records_checked(
                 }
             }
             let record = decode_operation_row(row, source)?;
-            remaining -= length as usize;
             records.insert(id.clone(), record);
         }
     }

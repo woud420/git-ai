@@ -2,6 +2,7 @@ use super::*;
 use ciborium::value::Value as Cbor;
 use git_ai::model::repository::jj_observation_journal::ReadBudget;
 use sha2::{Digest, Sha256};
+use std::fs;
 
 #[path = "jj_registration_records_budgets.rs"]
 mod budgets;
@@ -231,4 +232,49 @@ fn jj_registration_records_unrelated_workspace_sibling_is_not_decoded() {
         Some(selected.raw.to_vec())
     );
     assert_charged_error(&journal, &conn, sibling, 1);
+}
+
+#[test]
+fn jj_registration_record_fixtures_survive_git_crlf_checkout_byte_exactly() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let fixture_dir = repo.path().join("records");
+    fs::create_dir(&fixture_dir).unwrap();
+    let attributes = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/jj-registration-records/.gitattributes");
+    match fs::read(attributes) {
+        Ok(raw) => fs::write(fixture_dir.join(".gitattributes"), raw).unwrap(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("cannot read fixture attributes: {error}"),
+    }
+    for record in RECORDS {
+        fs::write(
+            fixture_dir.join(format!("{}.cbor", record.label)),
+            record.raw,
+        )
+        .unwrap();
+    }
+    let exact_name = b"workspace\nwith\r\nline breaks";
+    fs::write(fixture_dir.join("checkout.name.txt"), exact_name).unwrap();
+    repo.git(&["-c", "core.autocrlf=false", "add", "--", "records"])
+        .unwrap();
+    for record in RECORDS {
+        fs::remove_file(fixture_dir.join(format!("{}.cbor", record.label))).unwrap();
+    }
+    fs::remove_file(fixture_dir.join("checkout.name.txt")).unwrap();
+    repo.git(&[
+        "-c",
+        "core.autocrlf=true",
+        "checkout-index",
+        "--all",
+        "--force",
+    ])
+    .unwrap();
+    for record in RECORDS {
+        let actual = fs::read(fixture_dir.join(format!("{}.cbor", record.label))).unwrap();
+        assert_eq!(digest(&actual), record.checksum, "{}", record.label);
+    }
+    assert_eq!(
+        fs::read(fixture_dir.join("checkout.name.txt")).unwrap(),
+        exact_name
+    );
 }

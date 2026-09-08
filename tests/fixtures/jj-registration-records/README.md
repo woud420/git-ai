@@ -22,3 +22,7 @@ key encoding so unrelated scalar mismatches do not hide the intended rejection.
 Workspace-name limits also have private codec tests that avoid SQL-name joins.
 The native baseline reference uses the existing independently frozen v2 fixture;
 opaque checkout and seal bytes are explicitly unauthenticated synthetic data.
+
+The directory attributes disable Git line-ending conversion for CBOR records and
+exact workspace-name fixtures. Their bytes must remain identical when checked
+out with `core.autocrlf=true`, including records whose first bytes look textual.

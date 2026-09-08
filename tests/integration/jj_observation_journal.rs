@@ -1000,3 +1000,488 @@ fn jj_journal_large_accepted_batch_can_always_be_retried_with_its_existing_bound
     );
     assert_eq!(reopened.status(&fixture.source).unwrap().generation, 2);
 }
+
+#[test]
+fn jj_journal_lookup_empty_source_returns_no_observed_evidence_or_progress() {
+    let fixture = Fixture::new();
+    let journal = fixture.open();
+    for ids in [vec![], vec![operation_id(1), operation_id(2)]] {
+        let observed = journal.lookup_observed(&fixture.source, &ids).unwrap();
+        assert!(observed.operations.is_empty());
+        assert_eq!(observed.status, journal.status(&fixture.source).unwrap());
+        assert_eq!(observed.status.generation, 0);
+        assert_eq!(observed.status.pending_operations, 0);
+        assert!(observed.status.observed_heads.is_empty());
+        assert!(observed.status.applied_heads.is_empty());
+    }
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    let count: u64 = conn
+        .query_row("SELECT count(*) FROM jj_sources", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn jj_journal_lookup_returns_only_requested_records_and_preserves_unknown_ids() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let expected_status = journal.status(&fixture.source).unwrap();
+    let observed = journal
+        .lookup_observed(&fixture.source, &[operation_id(999), operation_id(1)])
+        .unwrap();
+    assert_eq!(observed.status, expected_status);
+    assert_eq!(observed.operations.len(), 1);
+    assert_eq!(
+        observed.operations.get(&operation_id(1)),
+        Some(&evidence(1, &[0]))
+    );
+    assert!(!observed.operations.contains_key(&operation_id(999)));
+    let absent = journal
+        .lookup_observed(&fixture.source, &[operation_id(998)])
+        .unwrap();
+    assert_eq!(absent.status, expected_status);
+    assert!(absent.operations.is_empty());
+    fixture.assert_only_first(&journal);
+}
+
+#[test]
+fn jj_journal_lookup_recovers_an_old_ancestor_behind_divergent_heads_after_reopen() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    journal
+        .capture(&batch(
+            &fixture.source,
+            0,
+            &[],
+            &[2],
+            vec![evidence(1, &[0]), evidence(2, &[1])],
+        ))
+        .unwrap();
+    journal
+        .capture(&batch(
+            &fixture.source,
+            1,
+            &[2],
+            &[2, 3],
+            vec![evidence(3, &[1])],
+        ))
+        .unwrap();
+    drop(journal);
+    let journal = fixture.open();
+    let observed = journal
+        .lookup_observed(&fixture.source, &[operation_id(1)])
+        .unwrap();
+    assert_eq!(
+        observed.operations.get(&operation_id(1)),
+        Some(&evidence(1, &[0]))
+    );
+    assert_eq!(
+        observed.status.observed_heads,
+        vec![operation_id(2), operation_id(3)]
+    );
+    assert_eq!(observed.status.generation, 2);
+    assert_eq!(observed.status.pending_operations, 3);
+    assert!(observed.status.applied_heads.is_empty());
+}
+
+#[test]
+fn jj_journal_lookup_can_address_records_beyond_the_pending_prefix() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    let count = MAX_JJ_OBSERVATION_PENDING_LIMIT as u64 + 1;
+    journal
+        .capture(&batch(
+            &fixture.source,
+            0,
+            &[],
+            &[count],
+            (1..=count)
+                .map(|number| evidence(number, &[number - 1]))
+                .collect(),
+        ))
+        .unwrap();
+    let observed = journal
+        .lookup_observed(&fixture.source, &[operation_id(count), operation_id(1)])
+        .unwrap();
+    assert_eq!(observed.operations.len(), 2);
+    assert_eq!(
+        observed.operations.get(&operation_id(count)),
+        Some(&evidence(count, &[count - 1]))
+    );
+    assert_eq!(
+        observed.operations.get(&operation_id(1)),
+        Some(&evidence(1, &[0]))
+    );
+    assert_eq!(observed.status.pending_operations, count);
+}
+
+#[test]
+fn jj_journal_lookup_membership_and_payloads_are_scoped_to_the_source() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let other_source = source_id(2);
+    let mut other_evidence = evidence(1, &[0]);
+    other_evidence.operation_bytes = b"different source's opaque operation".to_vec();
+    other_evidence.view_bytes = b"different source's opaque view".to_vec();
+    journal
+        .capture(&batch(
+            &other_source,
+            0,
+            &[],
+            &[1],
+            vec![other_evidence.clone()],
+        ))
+        .unwrap();
+    for (source, expected) in [
+        (fixture.source.as_str(), evidence(1, &[0])),
+        (other_source.as_str(), other_evidence),
+    ] {
+        let observed = journal.lookup_observed(source, &[operation_id(1)]).unwrap();
+        assert_eq!(observed.operations.get(&operation_id(1)), Some(&expected));
+        assert_eq!(observed.status.generation, 1);
+    }
+    let absent = journal
+        .lookup_observed(&source_id(3), &[operation_id(1)])
+        .unwrap();
+    assert!(absent.operations.is_empty());
+    assert_eq!(absent.status.generation, 0);
+}
+
+#[test]
+fn jj_journal_lookup_bounds_requested_id_count_before_database_reads() {
+    use git_ai::model::repository::jj_observation_journal::MAX_JJ_OBSERVATION_LOOKUP_LIMIT;
+
+    let fixture = Fixture::new();
+    let journal = fixture.open();
+    let maximum: Vec<_> = (1..=MAX_JJ_OBSERVATION_LOOKUP_LIMIT as u64)
+        .map(operation_id)
+        .collect();
+    assert!(
+        journal
+            .lookup_observed(&fixture.source, &maximum)
+            .unwrap()
+            .operations
+            .is_empty()
+    );
+    let mut too_many = maximum;
+    too_many.push(operation_id(MAX_JJ_OBSERVATION_LOOKUP_LIMIT as u64 + 1));
+    rejected(journal.lookup_observed(&fixture.source, &too_many), "limit");
+}
+
+#[test]
+fn jj_journal_lookup_rejects_duplicate_malformed_and_synthetic_root_requests() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    rejected(
+        journal.lookup_observed(&fixture.source, &[operation_id(1), operation_id(1)]),
+        "duplicate",
+    );
+    for invalid in [
+        "".to_owned(),
+        "abcd".to_owned(),
+        "../operation".to_owned(),
+        "A".repeat(128),
+        "a".repeat(129),
+    ] {
+        rejected(
+            journal.lookup_observed(&fixture.source, &[invalid]),
+            "identity",
+        );
+    }
+    for invalid in [
+        "".to_owned(),
+        "../store".to_owned(),
+        "A".repeat(64),
+        "a".repeat(65),
+    ] {
+        rejected(
+            journal.lookup_observed(&invalid, &[operation_id(1)]),
+            "source",
+        );
+    }
+    rejected(
+        journal.lookup_observed(&fixture.source, &[operation_id(0)]),
+        "root",
+    );
+    fixture.assert_only_first(&journal);
+}
+
+#[test]
+fn jj_journal_lookup_verifies_requested_record_checksums_before_reporting_membership() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    conn.execute(
+        "UPDATE jj_operations SET payload = ?1 WHERE source_id = ?2",
+        params![b"broken evidence".as_slice(), fixture.source],
+    )
+    .unwrap();
+    rejected(
+        journal.lookup_observed(&fixture.source, &[operation_id(1)]),
+        "checksum",
+    );
+}
+
+#[test]
+fn jj_journal_lookup_rejects_oversized_records_before_decoding() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    conn.execute(
+        "UPDATE jj_operations SET payload = zeroblob(?1) WHERE source_id = ?2",
+        params![MAX_JJ_OBSERVATION_BATCH_BYTES + 1, fixture.source],
+    )
+    .unwrap();
+    rejected(
+        journal.lookup_observed(&fixture.source, &[operation_id(1)]),
+        "limit",
+    );
+}
+
+#[test]
+fn jj_journal_lookup_checks_source_state_even_when_requested_ids_are_absent() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    conn.execute(
+        "UPDATE jj_sources SET state = ?1 WHERE source_id = ?2",
+        params![b"broken progress".as_slice(), fixture.source],
+    )
+    .unwrap();
+    for ids in [vec![], vec![operation_id(999)]] {
+        rejected(journal.lookup_observed(&fixture.source, &ids), "checksum");
+    }
+}
+
+#[test]
+fn jj_journal_lookup_cannot_trust_an_operation_without_its_source_state() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    conn.pragma_update(None, "foreign_keys", false).unwrap();
+    conn.execute(
+        "DELETE FROM jj_sources WHERE source_id = ?1",
+        params![fixture.source],
+    )
+    .unwrap();
+    rejected(
+        journal.lookup_observed(&fixture.source, &[operation_id(1)]),
+        "gap",
+    );
+    let count: u64 = conn
+        .query_row(
+            "SELECT count(*) FROM jj_sources WHERE source_id = ?1",
+            params![fixture.source],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn jj_journal_lookup_distinguishes_fresh_sources_from_orphaned_unrequested_records() {
+    for orphan in ["operation", "receipt", "view"] {
+        let fixture = Fixture::new();
+        let mut journal = fixture.open();
+        fixture.capture_first(&mut journal);
+        let conn = open_with_memory_limits(&fixture.path).unwrap();
+        conn.pragma_update(None, "foreign_keys", false).unwrap();
+        conn.execute(
+            "DELETE FROM jj_sources WHERE source_id = ?1",
+            params![fixture.source],
+        )
+        .unwrap();
+        if orphan != "operation" {
+            conn.execute(
+                "DELETE FROM jj_operations WHERE source_id = ?1",
+                params![fixture.source],
+            )
+            .unwrap();
+        }
+        if orphan != "receipt" {
+            conn.execute(
+                "DELETE FROM jj_batches WHERE source_id = ?1",
+                params![fixture.source],
+            )
+            .unwrap();
+        }
+        if orphan != "view" {
+            conn.execute(
+                "DELETE FROM jj_views WHERE source_id = ?1",
+                params![fixture.source],
+            )
+            .unwrap();
+        }
+        for ids in [vec![], vec![operation_id(999)]] {
+            rejected(journal.lookup_observed(&fixture.source, &ids), "gap");
+        }
+    }
+}
+
+#[test]
+fn jj_journal_lookup_rejects_records_beyond_the_stored_progress_count() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    conn.execute(
+        "UPDATE jj_operations SET sequence = 2 WHERE source_id = ?1",
+        params![fixture.source],
+    )
+    .unwrap();
+    rejected(
+        journal.lookup_observed(&fixture.source, &[operation_id(1)]),
+        "gap",
+    );
+}
+
+#[test]
+fn jj_journal_lookup_aggregate_bytes_are_bounded_across_separate_captures() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    for number in 1..=4 {
+        let mut record = evidence(number, &[number - 1]);
+        record.operation_bytes = vec![255; MAX_JJ_OBSERVATION_OPERATION_BYTES];
+        record.view_bytes.clear();
+        let expected = if number == 1 {
+            vec![]
+        } else {
+            vec![number - 1]
+        };
+        journal
+            .capture(&batch(
+                &fixture.source,
+                number - 1,
+                &expected,
+                &[number],
+                vec![record],
+            ))
+            .unwrap();
+    }
+    let before = journal.status(&fixture.source).unwrap();
+    assert_eq!(
+        journal
+            .lookup_observed(
+                &fixture.source,
+                &[operation_id(1), operation_id(2), operation_id(3)]
+            )
+            .unwrap()
+            .operations
+            .len(),
+        3,
+    );
+    rejected(
+        journal.lookup_observed(
+            &fixture.source,
+            &[
+                operation_id(1),
+                operation_id(2),
+                operation_id(3),
+                operation_id(4),
+            ],
+        ),
+        "limit",
+    );
+    assert_eq!(journal.status(&fixture.source).unwrap(), before);
+}
+
+#[test]
+fn jj_journal_lookup_status_and_evidence_share_one_source_snapshot_during_capture() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Barrier};
+
+    const COUNT: u64 = 64;
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let path = fixture.path.clone();
+    let source = fixture.source.clone();
+    let barrier = Arc::new(Barrier::new(2));
+    let writer_barrier = Arc::clone(&barrier);
+    let finished = Arc::new(AtomicBool::new(false));
+    let writer_finished = Arc::clone(&finished);
+    std::thread::scope(|scope| {
+        let writer = scope.spawn(move || {
+            writer_barrier.wait();
+            let result = (|| -> Result<(), String> {
+                let mut journal =
+                    JjObservationJournal::open_at_path(&path).map_err(|error| error.to_string())?;
+                for number in 2..=COUNT {
+                    journal
+                        .capture(&batch(
+                            &source,
+                            number - 1,
+                            &[number - 1],
+                            &[number],
+                            vec![evidence(number, &[number - 1])],
+                        ))
+                        .map_err(|error| error.to_string())?;
+                    std::thread::yield_now();
+                }
+                Ok(())
+            })();
+            writer_finished.store(true, Ordering::Release);
+            result
+        });
+        let ids: Vec<_> = (1..=COUNT).map(operation_id).collect();
+        barrier.wait();
+        let started = std::time::Instant::now();
+        loop {
+            let observed = journal.lookup_observed(&fixture.source, &ids).unwrap();
+            let count = observed.status.pending_operations;
+            assert!((1..=COUNT).contains(&count));
+            assert_eq!(observed.status.generation, count);
+            assert_eq!(observed.status.observed_heads, vec![operation_id(count)]);
+            assert_eq!(observed.operations.len() as u64, count);
+            assert!(observed.status.applied_heads.is_empty());
+            for number in 1..=count {
+                assert_eq!(
+                    observed.operations.get(&operation_id(number)),
+                    Some(&evidence(number, &[number - 1]))
+                );
+            }
+            if finished.load(Ordering::Acquire) {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "capture writer did not finish"
+            );
+            std::thread::yield_now();
+        }
+        writer.join().unwrap().unwrap();
+        let observed = journal.lookup_observed(&fixture.source, &ids).unwrap();
+        assert_eq!(observed.status.pending_operations, COUNT);
+        assert_eq!(observed.operations.len() as u64, COUNT);
+    });
+}
+
+#[test]
+fn jj_journal_lookup_rejects_a_missing_requested_observed_head() {
+    let fixture = Fixture::new();
+    let mut journal = fixture.open();
+    fixture.capture_first(&mut journal);
+    let conn = open_with_memory_limits(&fixture.path).unwrap();
+    conn.pragma_update(None, "foreign_keys", false).unwrap();
+    conn.execute(
+        "DELETE FROM jj_operations WHERE source_id = ?1 AND operation_id = ?2",
+        params![fixture.source, operation_id(1)],
+    )
+    .unwrap();
+    let unknown = journal
+        .lookup_observed(&fixture.source, &[operation_id(999)])
+        .unwrap();
+    assert!(unknown.operations.is_empty());
+    assert_eq!(unknown.status.observed_heads, vec![operation_id(1)]);
+    rejected(
+        journal.lookup_observed(&fixture.source, &[operation_id(1)]),
+        "gap",
+    );
+}

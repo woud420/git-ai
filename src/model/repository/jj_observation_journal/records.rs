@@ -8,10 +8,28 @@ pub(super) fn load_records(
     source: &str,
     ids: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, JjOperationEvidence>, JournalError> {
+    load_records_checked(conn, source, ids, None)
+}
+
+pub(super) fn load_observed_records(
+    conn: &Connection,
+    source: &str,
+    ids: &BTreeSet<String>,
+    pending_operations: u64,
+) -> Result<BTreeMap<String, JjOperationEvidence>, JournalError> {
+    load_records_checked(conn, source, ids, Some(pending_operations))
+}
+
+fn load_records_checked(
+    conn: &Connection,
+    source: &str,
+    ids: &BTreeSet<String>,
+    maximum_sequence: Option<u64>,
+) -> Result<BTreeMap<String, JjOperationEvidence>, JournalError> {
     let mut statement = conn
         .prepare(
             "SELECT operation_id, length(payload),
-         CASE WHEN length(payload) <= ?3 THEN payload ELSE NULL END, substr(checksum, 1, 65)
+         CASE WHEN length(payload) <= ?3 THEN payload ELSE NULL END, substr(checksum, 1, 65), sequence
          FROM jj_operations WHERE source_id = ?1 AND operation_id = ?2",
         )
         .map_err(|error| sql_error("prepare evidence read", error))?;
@@ -34,6 +52,14 @@ pub(super) fn load_records(
                 .map_err(|error| sql_error("read evidence length", error))?;
             if length > limit as u64 {
                 return Err(invalid("stored evidence read byte limit exceeded"));
+            }
+            if let Some(maximum_sequence) = maximum_sequence {
+                let sequence: u64 = row
+                    .get(4)
+                    .map_err(|error| sql_error("read observed sequence", error))?;
+                if sequence == 0 || sequence > maximum_sequence {
+                    return Err(invalid("observed operation sequence gap"));
+                }
             }
             let record = decode_operation_row(row, source)?;
             remaining -= length as usize;

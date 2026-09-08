@@ -14,10 +14,13 @@ use std::path::Path;
 mod capture;
 mod codec;
 mod graph;
+mod lookup;
 mod records;
 mod schema;
 
 pub const MAX_JJ_OBSERVATION_PENDING_LIMIT: usize = 128;
+pub const MAX_JJ_OBSERVATION_LOOKUP_LIMIT: usize = 128;
+pub use lookup::ObservedEvidence;
 const MAX_RECORD_BYTES: usize = 2 * MAX_JJ_OBSERVATION_OPERATION_BYTES + 64 * 1024;
 const MAX_METADATA_BYTES: usize = 128 * 1024;
 const DB_LABEL: &str = "jj observations";
@@ -98,6 +101,15 @@ impl StoredState {
         }
     }
 
+    fn into_status(self) -> ObservationStatus {
+        ObservationStatus {
+            generation: self.generation,
+            observed_heads: self.observed_heads,
+            applied_heads: self.applied_heads,
+            pending_operations: self.pending_operations,
+        }
+    }
+
     fn validate(&self, source: &str) -> Result<(), JournalError> {
         validate_profile(self.schema_version, &self.reader_profile)?;
         if self.source_id != source {
@@ -152,13 +164,7 @@ impl JjObservationJournal {
 
     pub fn status(&self, source: &str) -> Result<ObservationStatus, JournalError> {
         validate_source(source)?;
-        let state = load_state(&self.conn, source)?;
-        Ok(ObservationStatus {
-            generation: state.generation,
-            observed_heads: state.observed_heads,
-            applied_heads: state.applied_heads,
-            pending_operations: state.pending_operations,
-        })
+        Ok(load_state(&self.conn, source)?.into_status())
     }
 
     pub fn pending(

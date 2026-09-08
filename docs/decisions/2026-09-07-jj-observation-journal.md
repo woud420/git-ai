@@ -96,7 +96,7 @@ rtk gmake test CARGO_TEST_ARGS=--lib TEST_FILTER=jj_observation_journal TEST_THR
 rtk gmake test CARGO_TEST_ARGS='--test integration' TEST_FILTER=jj_observation_journal TEST_THREADS=2
 ```
 
-Final checks passed: 37 journal integration tests, two journal unit tests,
+Initial increment checks passed: 37 journal integration tests, two journal unit tests,
 12 context diagnostic tests plus three explicit real-jj qualification tests, and
 12 repository policy checks. The policy run first caught direct SQLite opens in
 the fault-injection tests; those now use `open_with_memory_limits`, and both the
@@ -107,10 +107,37 @@ The full Git attribution suite and Windows cross-check are outside this isolated
 storage increment's verification scope. The real-jj context and reader suites
 remain separate from the synthetic evidence journal tests.
 
+## Bounded observed-evidence lookup
+
+The follow-up `lookup_observed(source, operation_ids)` API supplies the reader's
+resume boundary. It returns source progress and only the requested stored records
+from one SQLite read transaction. A reader can retrieve an old ancestor behind
+the current head set or beyond the bounded pending prefix without scanning history.
+The native decoder must still verify each returned operation's jj content address
+before treating it as a traversal boundary; a journal checksum establishes only
+capture integrity.
+
+Inputs are limited to 128 unique full operation IDs. Root, duplicate and malformed
+IDs are rejected. The existing record decoder enforces the same 8 MiB aggregate
+read budget; an oversized or corrupt request fails without a partial result.
+Ordinary unknown IDs are omitted. A requested ID named by the stored observed
+head set must exist. Returned record sequences must fall within the stored pending
+count. Empty lookups still validate state, and source-indexed existence queries
+reject orphan operation, receipt or view rows when the source state is missing.
+These checks do not audit unrequested history or assert that captured heads still
+match the live jj repository.
+
+Sixteen additional TestRepo tests were added before implementation, including
+concurrent captures, reopening an old ancestor, source isolation, count/byte
+limits, corrupt state, orphan rows, and the distinction between unknown IDs and
+missing observed heads. All 53 journal integration tests then passed, alongside
+12 source/storage policy checks and Rust 1.93 all-target lint. No dependencies,
+schema changes, CLI behavior, or daemon work were added.
+
 ## Next increment
 
-Port the qualified immutable reader to Rust and connect its bounded membership
-queries to this journal. Qualify the adapter against real jj operations and
+Port the qualified immutable reader to Rust and use `lookup_observed` for its
+bounded durable membership queries. Qualify the adapter against real jj operations and
 missing-history cases before connecting an observer or checkpoint ordering.
 Workspace registration, notifications, native capture and attribution application
 remain unimplemented; ENG-415 stays in progress.

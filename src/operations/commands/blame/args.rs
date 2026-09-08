@@ -309,3 +309,127 @@ pub(super) fn parse_line_range(range_str: &str) -> Option<(u32, u32)> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<(String, GitAiBlameOptions), GitAiError> {
+        parse_blame_args(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())
+    }
+
+    fn assert_error(args: &[&str], expected: &str) {
+        assert_eq!(
+            parse(args).unwrap_err().to_string(),
+            format!("Generic error: {expected}")
+        );
+    }
+
+    #[rstest::rstest]
+    fn missing_values_report_the_flag(
+        #[values(
+            "-L",
+            "--abbrev",
+            "--ignore-rev",
+            "--ignore-revs-file",
+            "--date",
+            "--contents",
+            "--reverse",
+            "--encoding",
+            "--since"
+        )]
+        flag: &str,
+    ) {
+        assert_error(&[flag], &format!("Missing argument for {flag}"));
+    }
+
+    #[rstest::rstest]
+    #[case(&[], "No file path specified")]
+    #[case(&["--abbrev", "--root", "file"], "Invalid number for --abbrev")]
+    #[case(&["-L", "--json", "file"], "Invalid line range: --json")]
+    #[case(&["--unknown", "--abbrev"], "Unknown option: --unknown")]
+    #[case(&["file", "other", "--abbrev"], "Multiple file paths specified")]
+    #[case(&["--help"], "Unknown option: --help")]
+    #[case(&["--abbrev=7"], "Unknown option: --abbrev=7")]
+    #[case(&["-fn"], "Unknown option: -fn")]
+    #[case(&["--"], "Unknown option: --")]
+    fn errors_follow_argument_order(#[case] args: &[&str], #[case] expected: &str) {
+        assert_error(args, expected);
+    }
+
+    #[test]
+    fn required_string_values_consume_options_and_repeats_keep_the_last_value() {
+        let (_, options) = parse(&[
+            "--ignore-rev",
+            "--json",
+            "--ignore-rev",
+            "",
+            "--ignore-revs-file",
+            "--json",
+            "--date",
+            "--root",
+            "--date",
+            "last",
+            "--encoding",
+            "--help",
+            "--reverse",
+            "-x",
+            "--abbrev",
+            "1",
+            "--abbrev",
+            "7",
+            "file",
+        ])
+        .unwrap();
+        assert_eq!(options.ignore_revs, ["--json", ""]);
+        assert_eq!(options.ignore_revs_file.as_deref(), Some("--json"));
+        assert_eq!(options.date_format.as_deref(), Some("last"));
+        assert_eq!(options.encoding.as_deref(), Some("--help"));
+        assert_eq!(options.reverse.as_deref(), Some("-x"));
+        assert_eq!(options.abbrev, Some(7));
+        assert!(!options.json && !options.show_root);
+    }
+
+    #[test]
+    fn movement_thresholds_only_consume_numbers_and_ranges_keep_order() {
+        for flag in ["-M", "-C"] {
+            for file in ["file", "4294967296"] {
+                let (path, options) = parse(&[flag, file]).unwrap();
+                assert_eq!(path, file);
+                assert_eq!(options.move_threshold, None);
+            }
+        }
+        let (_, options) = parse(&[
+            "-C", "1", "-C", "2", "-C", "3", "-C", "-M", "4", "-L", "3,2", "-L", "1", "file",
+        ])
+        .unwrap();
+        assert_eq!(options.detect_copies, 3);
+        assert!(options.detect_moves);
+        assert_eq!(options.move_threshold, Some(4));
+        assert_eq!(options.line_ranges, [(3, 2), (1, 1)]);
+    }
+
+    #[test]
+    fn contents_are_read_during_parsing_before_later_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("contents");
+        fs::write(&path, b"\0\xff\n").unwrap();
+        let (_, options) = parse(&["--contents", path.to_str().unwrap(), "file"]).unwrap();
+        assert_eq!(
+            options.contents_data.as_deref(),
+            Some(b"\0\xff\n".as_slice())
+        );
+        assert_eq!(options.contents_file.as_deref(), path.to_str());
+        let missing = temp.path().join("missing");
+        let missing = missing.to_str().unwrap();
+        let expected = format!(
+            "Failed to read contents file '{missing}': {}",
+            fs::read(missing).unwrap_err()
+        );
+        assert_error(&["--contents", missing, "--unknown"], &expected);
+        assert_error(
+            &["--unknown", "--contents", missing],
+            "Unknown option: --unknown",
+        );
+    }
+}

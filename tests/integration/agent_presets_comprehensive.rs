@@ -6,6 +6,6 @@ use serde_json::json;
 use std::fs;
 
 mod claude;
-mod continue_and_codex;
+mod continue_and_codex_presets;
 mod editor_agents;
-mod gemini;
+mod gemini_presets;

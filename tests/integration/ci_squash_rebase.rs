@@ -67,4 +67,4 @@ mod linear_main;
 mod local_rebase_merge;
 mod local_sync_and_open_pr;
 mod rebase_merge;
-mod squash_merge;
+mod squash_merge_attribution;

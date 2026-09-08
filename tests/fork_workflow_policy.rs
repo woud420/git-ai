@@ -364,3 +364,6 @@ mod editor_integrations;
 mod privacy_and_evidence;
 #[path = "fork_workflow_policy/workflow_tools.rs"]
 mod workflow_tools;
+
+#[path = "fork_workflow_policy/integration_sharding.rs"]
+mod integration_sharding;

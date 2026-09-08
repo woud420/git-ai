@@ -495,12 +495,12 @@ fn create_external_diff_helper_script(repo: &TestRepo, marker: &str) -> std::pat
 mod blank_lines_and_sessions;
 mod deletion_origins;
 mod deletion_segments;
-mod deletion_stats;
+mod deletion_statistics;
 mod formatting;
 mod hostile_config;
 mod human_identity;
 mod line_attribution;
-mod prompt_stats;
+mod prompt_statistics;
 mod ranges;
 mod reindentation;
-mod rename_stats;
+mod rename_statistics;

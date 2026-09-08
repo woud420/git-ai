@@ -16,4 +16,4 @@ fn add_self_origin(repo: &TestRepo) {
 
 mod merge_commit;
 mod notes_filtering;
-mod squash_merge;
+mod squash_merge_notes;

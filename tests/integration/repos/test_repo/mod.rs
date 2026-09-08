@@ -2,7 +2,7 @@
 
 mod cleanup;
 mod command_runner;
-mod completion_log;
+mod completion_records;
 mod daemon_process;
 mod daemon_sync;
 mod environment;
@@ -16,8 +16,8 @@ mod worktree;
 
 use command_runner::*;
 pub(crate) use command_runner::{RawGitCommand, run_command_output, run_raw_git_plumbing};
-pub(crate) use completion_log::DaemonTestCompletionLogEntry;
-use completion_log::*;
+pub(crate) use completion_records::DaemonTestCompletionLogEntry;
+use completion_records::*;
 use daemon_process::*;
 pub(crate) use daemon_process::{
     DAEMON_SPAWN_LOADER_RETRY_ATTEMPTS, is_windows_loader_init_failure,

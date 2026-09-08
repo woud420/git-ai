@@ -171,3 +171,6 @@ fn jj_journal_readonly_refuses_a_valid_capture_that_the_writable_opener_accepts(
     let reopened = JjObservationJournal::open_read_only_at_path(&fixture.path).unwrap();
     assert_eq!(reopened.status(&fixture.source).unwrap().generation, 2);
 }
+
+#[path = "jj_journal_existing.rs"]
+mod existing;

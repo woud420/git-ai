@@ -67,6 +67,37 @@ filesystem provenance. The selected readers retain their own bounded native and
 checksum validation. A read-only handle cannot be used to commit journal writes.
 Existing writable opening and migration behavior remain unchanged.
 
+### Existing-only writable opening
+
+`open_existing_at_path` is a separate writable prerequisite for a future daemon
+consumer. It uses SQLite READ_WRITE without CREATE, rejects special filenames,
+and verifies the resulting connection is actually writable: SQLite can otherwise
+fall back to read-only access. It requires preexisting WAL mode and exact current
+schema; it never creates directories/databases, migrates schemas or converts the
+journal mode. Connection settings retain FULL synchronous durability, the existing
+memory limit, foreign keys, 250-ms busy timeout and temporary storage in memory.
+
+Opening performs no application SQL/schema mutation. Normal SQLite recovery or
+checkpointing may change physical database/sidecar bytes without changing logical
+contents. Source authorization, identity and native evidence verification remain
+with the caller. Existing read-only and explicit creating/migrating APIs retain
+their behavior; no CLI or background worker is switched to this opener yet.
+
+Tests preceded implementation: missing-API failures, followed by six failures
+against a temporary control using the creating opener. That control passed two
+other groups; grouped failures stop at their first assertion. A separate Unix
+permission regression then reproduced SQLite's actual read-only fallback against
+the first candidate before the explicit guard was added. The guarded candidate
+passed all nine public groups and the private connection-settings case on macOS.
+The fallback fixture reports unavailable only when effective uid zero actually
+bypasses file permissions. Logical SQL, live committed WAL, no creation/migration,
+mode preservation and actual existing capture writes are covered separately.
+
+Final local qualification passed a fresh build, 203 jj unit tests, 459 jj
+integration cases (28 opt-in cases excluded), 24 integration policy cases,
+formatting and Rust 1.93 all-target Clippy. Other-platform qualification is
+tracked separately in CI.
+
 ## Output and budgets
 
 JSON identifies schema version 1, backend `jj`, action, evidence scope and

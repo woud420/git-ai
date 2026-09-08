@@ -199,3 +199,6 @@ fn jj_admission_schema_concurrent_v3_initializers_publish_complete_v4() {
     });
     assert_eq!(registered_payload_snapshot(&conn), before);
 }
+
+#[path = "jj_journal_readonly.rs"]
+mod readonly;

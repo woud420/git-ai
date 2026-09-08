@@ -168,6 +168,33 @@ impl JjObservationJournal {
         Ok(Self { conn })
     }
 
+    /// Opens an existing current-schema journal without creating or migrating it.
+    /// SQLite may maintain WAL/SHM sidecars; committed live WAL remains visible.
+    pub fn open_read_only_at_path(path: &Path) -> Result<Self, JournalError> {
+        // Bundled SQLite enables URI filenames even without SQLITE_OPEN_URI.
+        if path.as_os_str().is_empty()
+            || path == Path::new(":memory:")
+            || path.as_os_str().as_encoded_bytes().starts_with(b"file:")
+        {
+            return Err(invalid(
+                "read-only journal requires an ordinary filesystem path",
+            ));
+        }
+        let mut conn = sqlite::open_with_flags_and_memory_limits(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|error| sql_error("open read-only", error))?;
+        conn.busy_timeout(std::time::Duration::from_millis(250))
+            .map_err(|error| sql_error("configure busy timeout", error))?;
+        conn.pragma_update(None, "foreign_keys", true)
+            .map_err(|error| sql_error("configure foreign keys", error))?;
+        conn.pragma_update(None, "temp_store", "MEMORY")
+            .map_err(|error| sql_error("configure temporary storage", error))?;
+        schema::verify_current(&mut conn)?;
+        Ok(Self { conn })
+    }
+
     pub fn status(&self, source: &str) -> Result<ObservationStatus, JournalError> {
         validate_source(source)?;
         Ok(load_state(&self.conn, source)?.into_status())
@@ -273,3 +300,6 @@ fn decode_operation_row(
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) mod registration;
+
+#[cfg(test)]
+mod readonly_connection_tests;

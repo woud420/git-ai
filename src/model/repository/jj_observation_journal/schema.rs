@@ -79,6 +79,21 @@ pub(super) fn initialize(conn: &mut Connection) -> Result<(), JournalError> {
         .map_err(|error| sql_error("commit schema initialization", error))
 }
 
+pub(super) fn verify_current(conn: &mut Connection) -> Result<(), JournalError> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(|error| sql_error("begin read-only schema verification", error))?;
+    if read_version(&tx)? != 4 {
+        return Err(unsupported_schema());
+    }
+    verify_opaque_schema(&tx)?;
+    native::verify(&tx)?;
+    registration::verify(&tx)?;
+    admission::verify(&tx)?;
+    tx.rollback()
+        .map_err(|error| sql_error("finish read-only schema verification", error))
+}
+
 fn advance_version(
     conn: &Connection,
     version: u8,

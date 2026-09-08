@@ -1,6 +1,6 @@
 # Native jj view decoder (ENG-415)
 
-Status: accepted — maintained immutable view decoder contract; integrated reader and attribution remain pending.
+Status: accepted — maintained immutable view decoder contract; attribution integration remains pending.
 
 `decode_view(profile, expected_id, bytes)` verifies one immutable view under the
 explicit `jj-simple-op-store/0.45.1` profile. It returns the verified view ID,

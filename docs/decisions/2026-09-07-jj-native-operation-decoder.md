@@ -1,6 +1,6 @@
 # Native jj operation decoder (ENG-415)
 
-Status: accepted — maintained operation-file decoder contract; view decoding and observer integration remain pending.
+Status: accepted — maintained operation-file decoder contract; observer integration remains pending.
 
 `decode_operation(profile, expected_id, bytes)` in `src/operations/jj/operation/`
 verifies one immutable jj operation against the explicit

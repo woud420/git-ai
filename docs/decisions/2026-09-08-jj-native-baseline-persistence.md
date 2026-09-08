@@ -1,6 +1,6 @@
 # Durable current-state jj baseline
 
-Status: accepted — maintained explicit persistence API; automatic registration and capture remain pending.
+Status: accepted — maintained explicit persistence API; source registration remains separate.
 
 The selected baseline remains a cutoff: operation and view bytes verify, while
 ancestry before those anchors remains unverified. Persistence must not turn an

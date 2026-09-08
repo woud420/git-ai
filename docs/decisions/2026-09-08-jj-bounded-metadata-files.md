@@ -1,6 +1,6 @@
 # Bounded metadata file reads for native jj (ENG-415)
 
-Status: accepted — maintained Unix file-read primitive; integrated native capture remains pending.
+Status: accepted — maintained Unix file-read primitive used by native capture.
 
 `regular_file::read_regular_at(parent, basename, per_file_maximum, &mut budget)`
 reads one regular file relative to an already-open Unix directory. It returns

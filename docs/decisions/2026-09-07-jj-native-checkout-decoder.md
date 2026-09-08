@@ -1,6 +1,6 @@
 # Native jj completed-checkout context (ENG-415)
 
-Status: accepted — maintained checkout decoder contract; consistent sampling and admission remain pending.
+Status: accepted — maintained checkout decoder contract; ancestry admission remains separate.
 
 `decode_checkout(profile, bytes)` decodes the workspace name and operation ID in
 jj's mutable checkout record. Under the explicit `jj-simple-op-store/0.45.1`

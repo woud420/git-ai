@@ -1,6 +1,6 @@
 # Shared Unix directory primitives for native jj (ENG-415)
 
-Status: accepted — maintained low-level primitives; bounded native capture remains pending.
+Status: accepted — maintained low-level directory primitives used by native capture.
 
 `unix_directory` exposes crate-private descriptor-relative directory opening and
 an owned raw directory stream. It moves the existing outbox opener unchanged,

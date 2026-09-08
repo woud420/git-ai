@@ -1,5 +1,7 @@
 # Bounded current-state jj capture (ENG-415)
 
+Status: accepted — maintained bounded capture API; registration and ancestry admission remain separate.
+
 ## Boundary
 
 `operations::jj::capture::capture_current_state(&WorkspaceContext, Instant)`

@@ -1,6 +1,6 @@
 # Shared Git/jj workspace path discovery (ENG-414, ENG-415)
 
-Status: accepted — maintained discovery API; native source binding remains pending.
+Status: accepted — maintained paths-only discovery API; locators require capture revalidation.
 
 `operations::workspace_context::discover(&Path)` exposes the existing Git/jj
 path discovery for explicit callers. The diagnostic command retains argument

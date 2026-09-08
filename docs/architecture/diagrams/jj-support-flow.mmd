@@ -2,9 +2,9 @@ flowchart TD
     S["jj operation heads change or checkpoint arrives"]:::external --> V{"Compatible reader and authorized workspace?"}
     V -- No --> D["Report unsupported; preserve pending evidence"]:::service
     V -- Yes --> I["Capture immutable operation IDs and workspace context"]:::job
-    I --> B{"Complete bounded DAG segment available?"}
+    I --> B{"Bounded DAG reaches durably observed operations?"}
     B -- No --> D
-    B -- Yes --> P["Persist validated events and replay cursor"]:::storage
+    B -- Yes --> P["Atomically persist evidence, receipt and generation/head state"]:::storage
     P --> Q["Order with checkpoint journal in repository family"]:::queue
     Q --> M{"Exact lineage and content mapping proven?"}
     M -- No --> U["Mark unknown/degraded; retain replay evidence"]:::service

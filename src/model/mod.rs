@@ -22,6 +22,7 @@ pub mod diff_json;
 pub mod domain;
 pub mod hunk_shift;
 pub mod imara_diff_utils;
+pub mod jj_observation;
 pub mod metrics;
 pub mod move_detection;
 pub mod repository;

@@ -1,11 +1,13 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; P1 context discovery is locally implemented, and P0 has selected and qualified a bounded direct-store reader prototype.
+Status: proposed native-attribution architecture; P1 context discovery and the first P2 durable journal increment are locally implemented. P0 has selected and qualified a bounded direct-store reader prototype. Native capture and attribution remain pending.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
 
 Reader decision: [ENG-413 proof and replay contract](2026-09-07-jj-reader-proof.md). The prototype validates operation/view domain hashes without Git object access. Resumption requires durable operation membership; raw head sets alone do not cover late concurrency. Recorded import predecessors may be synthetic, so they do not by themselves prove attribution.
+
+Journal contract: [ENG-415 local storage increment](2026-09-07-jj-observation-journal.md). Atomic evidence capture and observed progress are implemented independently of the daemon. Applied attribution remains empty until later replay work.
 
 ## Problem and recommendation
 
@@ -104,13 +106,14 @@ only; durable immutable operation traversal is authoritative. Missed notificatio
 are recovered using a persisted cursor. Opt-in workspace registration and bounded
 polling/reconciliation discover new work without adding per-frame filesystem reads.
 
-First prove a batched CLI adapter using pinned operation IDs and evolog predecessor
-templates. Operation-log JSON alone is insufficient. Compare a pinned jj-lib-based
-reader or narrowly scoped helper if CLI evidence is incomplete or too expensive.
-Any reader must load immutable operation/view/store data without starting a transaction,
-snapshotting a working copy, reconciling heads, or changing repository metadata.
-The reader's package shape and compatibility window are undecided until P0 proves
-these properties. No jj-lib dependency is added by the discovery slice.
+The P0 comparison selected a narrowly scoped direct-store reader for the explicit
+`jj-simple-op-store/0.45.1` profile. Pinned CLI evolution reads can miss recorded
+predecessors and can rebuild a disposable index. The research reader validates
+immutable operation/view domain hashes and bounded ancestry without starting a
+transaction, snapshotting a working copy, reconciling heads, or changing metadata.
+Its Python proof must still be ported and qualified as a native adapter. No jj-lib
+dependency is added by discovery or the first journal increment; future store
+profiles require separate qualification.
 
 ## Identity and event contract
 
@@ -209,9 +212,9 @@ flowchart TD
     S["jj operation heads change or checkpoint arrives"]:::external --> V{"Compatible reader and authorized workspace?"}
     V -- No --> D["Report unsupported; preserve pending evidence"]:::service
     V -- Yes --> I["Capture immutable operation IDs and workspace context"]:::job
-    I --> B{"Complete bounded DAG segment available?"}
+    I --> B{"Bounded DAG reaches durably observed operations?"}
     B -- No --> D
-    B -- Yes --> P["Persist validated events and replay cursor"]:::storage
+    B -- Yes --> P["Atomically persist evidence, receipt and generation/head state"]:::storage
     P --> Q["Order with checkpoint journal in repository family"]:::queue
     Q --> M{"Exact lineage and content mapping proven?"}
     M -- No --> U["Mark unknown/degraded; retain replay evidence"]:::service
@@ -277,10 +280,11 @@ baseline measurement, not invented in the proposal.
 | P9 | Backend-aware sync and colocated Git/jj interoperability | P6, P8 |
 | P10 | Cross-platform qualification, performance gates, packaging and docs | P7, P8, P9 |
 
-P0 and P1 can proceed independently. P1 starts in this session. All other phases
-remain tracked until their acceptance tests pass; this proposal is not a claim
-that native attribution already works. Use ordinary branches and focused PRs into
-`woud420/git-ai`; human review precedes merge.
+P0's reader proof and P1's diagnostic are committed locally. P2 now has a durable
+observation journal; the native adapter and observer remain pending. Later phases
+remain tracked until their acceptance tests pass. These increments do not enable
+native attribution. Work continues as local commits at the user's request; future
+focused PRs target `woud420/git-ai`, with human review before merge.
 
 ## Validation and rollout
 

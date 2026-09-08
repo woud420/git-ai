@@ -18,6 +18,7 @@ pub mod bash_history_db;
 pub mod checkpoint_outbox;
 pub mod error;
 pub mod internal_db;
+pub mod jj_observation_journal;
 pub mod lock_file;
 pub mod metrics_db;
 pub mod notes_db;

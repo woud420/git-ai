@@ -15,6 +15,7 @@ mod capture;
 mod codec;
 mod graph;
 mod lookup;
+pub(crate) mod native_baseline;
 mod read_budget;
 mod records;
 mod schema;

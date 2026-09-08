@@ -290,8 +290,9 @@ baseline measurement, not invented in the proposal.
 
 P0's reader proof and P1's diagnostic are committed. P2 has a durable observation
 journal, bounded lookup, native operation/view hashing, captured-envelope joins
-and completed-checkout decoding. Bounded filesystem sampling, explicit baseline
-persistence, native ancestry admission and the observer remain pending. Later
+and completed-checkout decoding, plus explicit baseline persistence and verified
+reopening. Bounded filesystem sampling, native ancestry admission and the observer
+remain pending. Later
 phases remain tracked until their acceptance tests pass. These increments are
 published on [draft PR #247](https://github.com/woud420/git-ai/pull/247) and do not
 enable native attribution. Work continues in scoped commits with human review

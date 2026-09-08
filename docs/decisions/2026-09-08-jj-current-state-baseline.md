@@ -1,6 +1,6 @@
 # Current-state baseline for native jj admission (ENG-415)
 
-Status: proposed — pure baseline preparation is implemented; durable native admission remains pending.
+Status: proposed — pure preparation and explicit persistence are implemented; native extension admission remains pending.
 
 Start collection from a bounded capture of the current raw operation-head set.
 Prior history remains unverified. Historical verification is a later explicit mode.
@@ -171,9 +171,9 @@ A fresh build, Rust 1.93 all-target lint, formatting and 238 focused tests passe
 helper remains ignored in ordinary collection and is exercised by its recovery
 test. The updated flowchart was rendered and visually inspected.
 
-Next independent slice: explicit baseline persistence and reopening, with
-generation CAS, two-writer winner, receipt replay, corruption and rollback tests.
-Only then add native extension admission and tests for N→H, late D→B, mixed-parent
+Explicit [baseline persistence and reopening](2026-09-08-jj-native-baseline-persistence.md)
+now provide generation checks, two-writer winner, receipt replay, corruption and
+rollback coverage. Next add native extension admission and tests for N→H, late D→B, mixed-parent
 joins, opaque-known-parent rejection, source/epoch mismatch, and bounded gaps.
 The separate workspace-join slice must include a real stale linked workspace C
 outside H, prove it remains unavailable, and only make it ready after an admitted
@@ -189,11 +189,11 @@ relation and stable checkout recheck establish the binding.
   records. Baseline anchors need a separate representation.
 - `StoredState::validate` and `lookup_observed` require observed heads to have
   matching stored evidence. Setting those heads without rows would create a gap.
-- Database schema v1 rejects unknown versions strictly. A future native-baseline
-  table/state migration must be explicit and atomic; the pure TDD slice needs
-  no schema change.
+- The [atomic schema-v2 migration](2026-09-08-jj-native-baseline-schema.md)
+  adds separate native tables while preserving all opaque version-1 records.
+  It does not backfill native evidence or weaken ordinary capture closure.
 
 The native [evidence verifier](2026-09-07-jj-native-evidence-verifier.md) and
 [checkout decoder](2026-09-07-jj-native-checkout-decoder.md) supply the existing
-per-record checks. Baseline persistence, extension admission and workspace
-readiness are subsequent, separately testable gates.
+per-record checks. Explicit persistence is available; extension admission and
+workspace readiness remain subsequent, separately testable gates.

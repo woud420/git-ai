@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) struct Fixture {
+pub(in crate::operations::jj::capture) struct Fixture {
     _temp: tempfile::TempDir,
     pub ancestor: PathBuf,
     pub root: PathBuf,

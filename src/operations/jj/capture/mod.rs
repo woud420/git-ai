@@ -26,6 +26,8 @@ mod heads;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod metadata;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod registration;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod source;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod unix;

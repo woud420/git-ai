@@ -8,6 +8,8 @@ use crate::operations::workspace_context::WorkspaceContext;
 use std::os::unix::ffi::OsStrExt;
 
 pub(super) struct BoundSource {
+    pub(super) repository: usize,
+    pub(super) policy_directories: [usize; 3],
     pub(super) operations: usize,
     pub(super) views: usize,
     pub(super) heads: usize,
@@ -125,6 +127,8 @@ pub(super) fn bind(
     ]
     .map(|index| binder.directories.identity(index));
     Ok(BoundSource {
+        repository: repo,
+        policy_directories: [workspace, git, common],
         operations,
         views,
         heads,

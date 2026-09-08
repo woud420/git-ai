@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 mod isolated;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod retained;
 
 struct Fixture {
     root: tempfile::TempDir,

@@ -3,10 +3,29 @@
 use super::{JjObservationJournal, JournalError, ReadBudget, sql_error};
 use crate::model::jj_observation::validate_source;
 
-mod bounded;
-mod codec;
-mod read;
-mod types;
+pub(super) mod bounded;
+pub(super) mod codec;
+pub(super) mod read;
+pub(super) mod types;
+
+pub(crate) struct StoredRecord<T> {
+    pub record: T,
+    pub raw: Vec<u8>,
+    pub checksum: String,
+}
+
+impl<T> StoredRecord<T> {
+    fn into_raw(self) -> Vec<u8> {
+        let Self {
+            record,
+            raw,
+            checksum,
+        } = self;
+        drop(record);
+        drop(checksum);
+        raw
+    }
+}
 
 impl JjObservationJournal {
     /// Returns one canonical structural record; absence is only a missing row.

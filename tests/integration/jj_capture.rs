@@ -243,3 +243,7 @@ fn jj_capture_unqualified_platform_returns_unsupported_before_path_access() {
     };
     assert!(error.to_string().contains("unsupported"));
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "jj_registration.rs"]
+mod registration;

@@ -15,7 +15,7 @@ pub(crate) const MAX_BASELINE_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024;
 
 #[derive(Serialize)]
-pub(super) struct Request<'a> {
+pub(in crate::model::repository::jj_observation_journal) struct Request<'a> {
     record_version: u16,
     domain: &'static str,
     pub source_id: &'a str,
@@ -54,7 +54,7 @@ pub(crate) struct NativeBaselineState {
 }
 
 impl<'a> Request<'a> {
-    pub(super) fn new(
+    pub(in crate::model::repository::jj_observation_journal) fn new(
         source: &'a str,
         expected: u64,
         profile: &'a str,
@@ -98,7 +98,10 @@ impl<'a> Request<'a> {
         }
     }
 
-    pub(super) fn matches(&self, stored: &StoredBaseline) -> bool {
+    pub(in crate::model::repository::jj_observation_journal) fn matches(
+        &self,
+        stored: &StoredBaseline,
+    ) -> bool {
         stored.record_version == self.record_version
             && stored.domain == self.domain
             && stored.source_id == self.source_id

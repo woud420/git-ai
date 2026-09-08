@@ -268,3 +268,6 @@ fn decode_operation_row(
     record.evidence.validate()?;
     Ok(record.evidence)
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod registration;

@@ -6,12 +6,13 @@ use rusqlite::TransactionBehavior;
 
 mod bounded;
 mod prepared;
-mod read;
+pub(super) mod read;
 mod types;
 
-use prepared::PreparedBaseline;
+pub(super) use prepared::PreparedBaseline;
 pub(crate) use types::NativeBaselineState;
-use types::{MAX_BASELINE_BYTES, MAX_STATE_BYTES, Request, StoredBaseline};
+pub(super) use types::Request;
+use types::{MAX_BASELINE_BYTES, MAX_STATE_BYTES, StoredBaseline};
 
 pub(crate) struct NativeBaselineSnapshot {
     pub state: NativeBaselineState,

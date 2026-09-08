@@ -2,15 +2,17 @@ use super::super::{JournalError, codec, invalid, sql_error};
 use super::types::{MAX_BASELINE_BYTES, MAX_STATE_BYTES, NativeBaselineState, Request};
 use rusqlite::{Transaction, params};
 
-pub(super) struct PreparedBaseline<'a> {
-    pub(super) request: Request<'a>,
-    pub(super) state: NativeBaselineState,
+pub(in crate::model::repository::jj_observation_journal) struct PreparedBaseline<'a> {
+    pub(in crate::model::repository::jj_observation_journal) request: Request<'a>,
+    pub(in crate::model::repository::jj_observation_journal) state: NativeBaselineState,
     record_bytes: Vec<u8>,
     state_bytes: Vec<u8>,
 }
 
 impl<'a> PreparedBaseline<'a> {
-    pub(super) fn new(request: Request<'a>) -> Result<Self, JournalError> {
+    pub(in crate::model::repository::jj_observation_journal) fn new(
+        request: Request<'a>,
+    ) -> Result<Self, JournalError> {
         // Only bounded vectors of references are canonicalized; raw evidence is not cloned.
         let record_bytes = codec::encode(&request, MAX_BASELINE_BYTES)?;
         let baseline_id = codec::checksum(&record_bytes);
@@ -24,7 +26,7 @@ impl<'a> PreparedBaseline<'a> {
         })
     }
 
-    pub(super) fn insert_into(
+    pub(in crate::model::repository::jj_observation_journal) fn insert_into(
         self,
         tx: &Transaction<'_>,
     ) -> Result<(Request<'a>, NativeBaselineState), JournalError> {

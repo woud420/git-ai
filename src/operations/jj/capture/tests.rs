@@ -23,4 +23,5 @@ mod budgets;
 mod failed_open;
 mod mutations;
 mod support;
-use support::{Fixture, Hooks, attempt, deadline, no_hooks, require_error};
+pub(super) use support::Fixture;
+use support::{Hooks, attempt, deadline, no_hooks, require_error};

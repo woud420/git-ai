@@ -1,0 +1,19 @@
+flowchart TD
+    S["Require nonempty collection allowlist before capture"]:::service --> A
+    A["C0: retain source and workspace capture"]:::job --> B["Full policy and canonical descriptor join"]:::service
+    B --> C["Require absent namespace and clear negative guards"]:::db
+    C --> D["Publish no-replace seal through C0; sync and retain created File"]:::storage
+    D --> E["Close C0 directories; C1 captures same source and seal"]:::job
+    E --> F["Recheck policy; prepare C1 historical cutoff"]:::service
+    F --> G["Stage four rows; bounded exact readback"]:::db
+    G --> H["Reverify native hashes and saved scope"]:::job
+    H --> I["Final retained metadata, edge and seal check"]:::storage
+    I --> J["Sole SQL commit"]:::db
+    J --> K["Installed receipt and sampled checkout relation"]:::service
+    G -. "Failure before commit" .-> L["Roll back SQL; retain published seal; unavailable"]:::external
+    I -. "Failure" .-> L
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30
+    classDef job fill:#E8EAF6,stroke:#3949AB,color:#111A55
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16
+    classDef db fill:#FFF3E0,stroke:#EF6C00,color:#4A2500

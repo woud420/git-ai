@@ -45,6 +45,16 @@ pub(super) fn read_with(
     budget: &mut MetadataReadBudget,
     reader: &mut impl FileRead,
 ) -> Result<Vec<u8>, E> {
+    read_retained_with(parent, name, per_file_maximum, budget, reader).map(|(_file, bytes)| bytes)
+}
+
+pub(super) fn read_retained_with(
+    parent: &File,
+    name: &OsStr,
+    per_file_maximum: usize,
+    budget: &mut MetadataReadBudget,
+    reader: &mut impl FileRead,
+) -> Result<(File, Vec<u8>), E> {
     let name = basename(name)?;
     budget.begin_attempt()?;
     let parent_metadata = parent.metadata();
@@ -98,7 +108,7 @@ pub(super) fn read_with(
         return Err(E::Changed);
     }
     budget.check_deadline()?;
-    Ok(bytes)
+    Ok((file, bytes))
 }
 
 fn basename(name: &OsStr) -> Result<CString, E> {

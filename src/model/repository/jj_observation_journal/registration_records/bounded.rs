@@ -1,7 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::fmt;
 
-pub(super) struct ByteString<const MAX: usize>(pub(super) Vec<u8>);
+#[derive(PartialEq, Eq)]
+pub(crate) struct ByteString<const MAX: usize>(pub(crate) Vec<u8>);
 
 impl<const MAX: usize> Serialize for ByteString<MAX> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

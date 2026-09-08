@@ -19,3 +19,8 @@ pub mod uuid;
 
 #[cfg(unix)]
 pub(crate) mod unix_directory;
+
+#[cfg(target_os = "macos")]
+pub(crate) mod unix_acl;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod unix_publication;

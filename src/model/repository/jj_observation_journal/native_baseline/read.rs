@@ -4,7 +4,7 @@ use super::types::{MAX_BASELINE_BYTES, MAX_STATE_BYTES, NativeBaselineState, Sto
 use rusqlite::{Connection, Row, params};
 use serde::de::DeserializeOwned;
 
-pub(super) fn snapshot(
+pub(in crate::model::repository::jj_observation_journal) fn snapshot(
     conn: &Connection,
     source: &str,
     budget: &mut ReadBudget,

@@ -7,7 +7,7 @@ use super::baseline::{
 };
 use crate::model::jj_observation::JjOperationEvidence;
 use crate::model::repository::jj_observation_journal::native_baseline::{
-    NativeBaselineState, NativeInstallOutcome,
+    NativeBaselineSnapshot, NativeBaselineState, NativeInstallOutcome,
 };
 use crate::model::repository::jj_observation_journal::{
     JjObservationJournal, JournalError, ReadBudget,
@@ -134,16 +134,22 @@ pub fn reopen_current_state_baseline(
     else {
         return Ok(None);
     };
+    verify_native_baseline_snapshot(snapshot).map(Some)
+}
+
+pub(crate) fn verify_native_baseline_snapshot(
+    snapshot: NativeBaselineSnapshot,
+) -> Result<DurableCurrentStateBaseline, JjBaselinePersistenceError> {
     prepare_current_state_baseline(
         &snapshot.record.reader_profile,
         &snapshot.record.captured_head_ids,
         &snapshot.record.anchors,
     )
     .map_err(JjBaselinePersistenceError::Baseline)?;
-    Ok(Some(DurableCurrentStateBaseline {
+    Ok(DurableCurrentStateBaseline {
         receipt: BaselineReceipt {
             state: snapshot.state,
         },
         anchors: snapshot.record.anchors,
-    }))
+    })
 }

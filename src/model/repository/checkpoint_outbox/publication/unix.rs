@@ -8,7 +8,7 @@ use CheckpointOutboxError as E;
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::{self, File, Metadata};
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -338,26 +338,23 @@ fn create_temporary_record(
 ) -> Result<(File, TemporaryRecord), CheckpointOutboxError> {
     for _ in 0..TEMP_CREATE_ATTEMPTS {
         let name = c_filename(&format!(".{}.tmp", crate::uuid::generate_v4()))?;
-        let descriptor = unsafe {
-            libc::openat(
-                directory.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                RECORD_MODE as libc::c_uint,
-            )
+        let error = match crate::unix_publication::create_new_file_at(
+            directory.as_raw_fd(),
+            &name,
+            RECORD_MODE,
+        ) {
+            Ok(file) => {
+                return Ok((
+                    file,
+                    TemporaryRecord {
+                        directory_fd: directory.as_raw_fd(),
+                        name,
+                        published: false,
+                    },
+                ));
+            }
+            Err(error) => error,
         };
-        if descriptor >= 0 {
-            let file = unsafe { File::from_raw_fd(descriptor) };
-            return Ok((
-                file,
-                TemporaryRecord {
-                    directory_fd: directory.as_raw_fd(),
-                    name,
-                    published: false,
-                },
-            ));
-        }
-        let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::AlreadyExists {
             return Err(E::from_io("create temporary record", error));
         }
@@ -442,42 +439,7 @@ pub(super) fn rename_replace(
     syscall_result(result)
 }
 
-#[cfg(target_os = "macos")]
-fn rename_no_replace(
-    directory_fd: RawFd,
-    source: &std::ffi::CStr,
-    destination: &std::ffi::CStr,
-) -> io::Result<()> {
-    let result = unsafe {
-        libc::renameatx_np(
-            directory_fd,
-            source.as_ptr(),
-            directory_fd,
-            destination.as_ptr(),
-            libc::RENAME_EXCL,
-        )
-    };
-    syscall_result(result)
-}
-
-#[cfg(target_os = "linux")]
-fn rename_no_replace(
-    directory_fd: RawFd,
-    source: &std::ffi::CStr,
-    destination: &std::ffi::CStr,
-) -> io::Result<()> {
-    let result = unsafe {
-        libc::syscall(
-            libc::SYS_renameat2,
-            directory_fd,
-            source.as_ptr(),
-            directory_fd,
-            destination.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    syscall_result(result as libc::c_int)
-}
+use crate::unix_publication::rename_no_replace;
 
 fn syscall_result(result: libc::c_int) -> io::Result<()> {
     if result == 0 {

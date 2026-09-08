@@ -94,6 +94,21 @@ impl CaptureBudget {
         Ok(())
     }
 
+    pub(super) fn check_namespace_capacity(&self, hooks: &mut impl CaptureHooks) -> Result<(), E> {
+        self.check(hooks)?;
+        self.check_edge_capacity()?;
+        if self.counters.directory_components >= self.limits.directory_components {
+            return Err(E::invalid("directory", "component count limit exceeded"));
+        }
+        if self.counters.directory_open_attempts >= self.limits.directory_open_attempts {
+            return Err(E::invalid("directory", "open attempt limit exceeded"));
+        }
+        if self.counters.live_directory_descriptors >= self.limits.live_directory_descriptors {
+            return Err(E::invalid("directory", "live descriptor limit exceeded"));
+        }
+        Ok(())
+    }
+
     pub(super) fn retain_edge(&mut self) {
         self.counters.retained_edges += 1;
     }

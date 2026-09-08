@@ -236,7 +236,7 @@ pub(super) fn kind_at(
     }
 }
 
-fn stat_at(parent: RawFd, name: &CStr) -> io::Result<libc::stat> {
+pub(super) fn stat_at(parent: RawFd, name: &CStr) -> io::Result<libc::stat> {
     let mut stat = MaybeUninit::uninit();
     if unsafe {
         libc::fstatat(

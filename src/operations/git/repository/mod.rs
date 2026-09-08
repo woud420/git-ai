@@ -39,6 +39,10 @@ pub use identity::{
     current_git_committer_identity_resolution, global_git_config_committer_identity,
     global_git_config_identity_resolution, parse_git_var_identity, resolve_api_author_identity,
 };
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) use policy::{
+    canonicalize_repository_policy_path, load_repository_policy_context_for_paths,
+};
 pub(crate) use policy::{
     discover_repository_policy_location_no_git_exec, load_repository_policy_context_no_git_exec,
 };

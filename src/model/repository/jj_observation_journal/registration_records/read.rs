@@ -1,9 +1,10 @@
 use super::super::{JournalError, ReadBudget, invalid, sql_error};
+use super::StoredRecord;
 use super::codec;
-use super::types::MAX_RECORD_BYTES;
+use super::types::{MAX_RECORD_BYTES, RegistrationRecord, WorkspaceRecord};
 use rusqlite::{Connection, Params, Row, params};
 
-const REGISTRATION_COUNT_SQL: &str =
+pub(in crate::model::repository::jj_observation_journal) const REGISTRATION_COUNT_SQL: &str =
     "SELECT 1 FROM jj_native_registrations WHERE source_id COLLATE BINARY = ?1 LIMIT 2";
 const WORKSPACE_COUNT_SQL: &str =
     "SELECT 1 FROM jj_native_workspaces WHERE source_id COLLATE BINARY = ?1
@@ -34,6 +35,14 @@ pub(super) fn registration(
     source: &str,
     budget: &mut ReadBudget,
 ) -> Result<Option<Vec<u8>>, JournalError> {
+    Ok(registration_stored(conn, source, budget)?.map(StoredRecord::into_raw))
+}
+
+pub(in crate::model::repository::jj_observation_journal) fn registration_stored(
+    conn: &Connection,
+    source: &str,
+    budget: &mut ReadBudget,
+) -> Result<Option<StoredRecord<RegistrationRecord>>, JournalError> {
     if !has_one(conn, REGISTRATION_COUNT_SQL, [source])? {
         return Ok(None);
     }
@@ -62,7 +71,11 @@ pub(super) fn registration(
             "native registration record scalar identity mismatch",
         ));
     }
-    Ok(Some(raw))
+    Ok(Some(StoredRecord {
+        record,
+        raw,
+        checksum,
+    }))
 }
 
 pub(super) fn workspace(
@@ -71,6 +84,15 @@ pub(super) fn workspace(
     name: &str,
     budget: &mut ReadBudget,
 ) -> Result<Option<Vec<u8>>, JournalError> {
+    Ok(workspace_stored(conn, source, name, budget)?.map(StoredRecord::into_raw))
+}
+
+pub(in crate::model::repository::jj_observation_journal) fn workspace_stored(
+    conn: &Connection,
+    source: &str,
+    name: &str,
+    budget: &mut ReadBudget,
+) -> Result<Option<StoredRecord<WorkspaceRecord>>, JournalError> {
     if !has_one(conn, WORKSPACE_COUNT_SQL, [source, name])? {
         return Ok(None);
     }
@@ -100,10 +122,18 @@ pub(super) fn workspace(
     {
         return Err(invalid("native workspace record scalar identity mismatch"));
     }
-    Ok(Some(raw))
+    Ok(Some(StoredRecord {
+        record,
+        raw,
+        checksum,
+    }))
 }
 
-fn has_one(conn: &Connection, sql: &str, parameters: impl Params) -> Result<bool, JournalError> {
+pub(in crate::model::repository::jj_observation_journal) fn has_one(
+    conn: &Connection,
+    sql: &str,
+    parameters: impl Params,
+) -> Result<bool, JournalError> {
     let mut statement = conn
         .prepare(sql)
         .map_err(|error| sql_error("prepare native registration cardinality read", error))?;

@@ -41,88 +41,98 @@ impl<H: CaptureHooks> Capture<'_, H> {
             self.budget,
             self.hooks,
         )?;
-        let head_ids = heads::scan(&self.directories, source.heads, 0, self.budget, self.hooks)?;
-        let checkout_bytes = evidence::checkout_bytes(
+        let mut captured = sample_source(
+            source,
             &self.directories,
-            source.working_copy,
+            &self.metadata,
             self.budget,
             self.hooks,
         )?;
-        let checkout = evidence::checkout(&checkout_bytes, self.budget, self.hooks)?;
-        self.phase(CapturePhase::InitialSamplesRead)?;
-
-        let mut anchors = Vec::with_capacity(head_ids.len());
-        for id in &head_ids {
-            anchors.push(evidence::operation_pair(
-                id,
-                &source,
-                &self.directories,
-                true,
-                self.budget,
-                self.hooks,
-            )?);
-        }
+        captured._metadata = std::mem::take(&mut self.metadata).into_captured(&self.directories);
         self.budget.check(self.hooks)?;
-        let prepared =
-            prepare_current_state_baseline(JJ_OBSERVATION_READER_PROFILE, &head_ids, &anchors);
-        self.budget.check(self.hooks)?;
-        prepared.map_err(|error| E::caused("evidence", error))?;
+        Ok(captured)
+    }
+}
 
-        let checkout_evidence = if let Some(index) = anchors
-            .iter()
-            .position(|anchor| anchor.operation_id == checkout.operation_id)
-        {
-            evidence::require_workspace(&anchors[index], &checkout, self.budget, self.hooks)?;
-            CheckoutEvidence::Anchor(index)
-        } else {
-            let own = evidence::operation_pair(
-                &checkout.operation_id,
-                &source,
-                &self.directories,
-                false,
-                self.budget,
-                self.hooks,
-            )?;
-            evidence::require_workspace(&own, &checkout, self.budget, self.hooks)?;
-            CheckoutEvidence::Outside(own)
-        };
-        self.phase(CapturePhase::EvidenceVerified)?;
+pub(super) fn sample_source(
+    source: source::BoundSource,
+    directories: &DirectoryRegistry,
+    metadata: &MetadataSamples,
+    budget: &mut CaptureBudget,
+    hooks: &mut impl CaptureHooks,
+) -> Result<CapturedJjCurrentState, E> {
+    let head_ids = heads::scan(directories, source.heads, 0, budget, hooks)?;
+    let checkout_bytes = evidence::checkout_bytes(directories, source.working_copy, budget, hooks)?;
+    let checkout = evidence::checkout(&checkout_bytes, budget, hooks)?;
+    phase(CapturePhase::InitialSamplesRead, budget, hooks)?;
 
-        let final_checkout = evidence::checkout_bytes(
-            &self.directories,
-            source.working_copy,
-            self.budget,
-            self.hooks,
+    let mut anchors = Vec::with_capacity(head_ids.len());
+    for id in &head_ids {
+        anchors.push(evidence::operation_pair(
+            id,
+            &source,
+            directories,
+            true,
+            budget,
+            hooks,
+        )?);
+    }
+    budget.check(hooks)?;
+    let prepared =
+        prepare_current_state_baseline(JJ_OBSERVATION_READER_PROFILE, &head_ids, &anchors);
+    budget.check(hooks)?;
+    prepared.map_err(|error| E::caused("evidence", error))?;
+
+    let checkout_evidence = if let Some(index) = anchors
+        .iter()
+        .position(|anchor| anchor.operation_id == checkout.operation_id)
+    {
+        evidence::require_workspace(&anchors[index], &checkout, budget, hooks)?;
+        CheckoutEvidence::Anchor(index)
+    } else {
+        let own = evidence::operation_pair(
+            &checkout.operation_id,
+            &source,
+            directories,
+            false,
+            budget,
+            hooks,
         )?;
-        if final_checkout != checkout_bytes {
-            return Err(E::invalid("checkout", "changed checkout bytes"));
-        }
-        let final_heads = heads::scan(&self.directories, source.heads, 1, self.budget, self.hooks)?;
-        if final_heads != head_ids {
-            return Err(E::invalid("heads", "changed raw head set"));
-        }
-        self.metadata
-            .recheck(&self.directories, self.budget, self.hooks)?;
-        self.phase(CapturePhase::FinalSamplesRead)?;
-        self.directories.recheck(self.budget, self.hooks)?;
-        let metadata = std::mem::take(&mut self.metadata).into_captured(&self.directories);
-        self.budget.check(self.hooks)?;
-        Ok(CapturedJjCurrentState {
-            source_binding: source.binding,
-            head_ids,
-            anchors,
-            checkout_bytes,
-            checkout,
-            checkout_evidence,
-            _workspace_directories: source.workspace_directories,
-            _metadata: metadata,
-        })
-    }
+        evidence::require_workspace(&own, &checkout, budget, hooks)?;
+        CheckoutEvidence::Outside(own)
+    };
+    phase(CapturePhase::EvidenceVerified, budget, hooks)?;
 
-    fn phase(&mut self, phase: CapturePhase) -> Result<(), E> {
-        self.hooks.phase(phase);
-        self.budget.check(self.hooks)
+    let final_checkout = evidence::checkout_bytes(directories, source.working_copy, budget, hooks)?;
+    if final_checkout != checkout_bytes {
+        return Err(E::invalid("checkout", "changed checkout bytes"));
     }
+    let final_heads = heads::scan(directories, source.heads, 1, budget, hooks)?;
+    if final_heads != head_ids {
+        return Err(E::invalid("heads", "changed raw head set"));
+    }
+    metadata.recheck(directories, budget, hooks)?;
+    phase(CapturePhase::FinalSamplesRead, budget, hooks)?;
+    directories.recheck(budget, hooks)?;
+    Ok(CapturedJjCurrentState {
+        source_binding: source.binding,
+        head_ids,
+        anchors,
+        checkout_bytes,
+        checkout,
+        checkout_evidence,
+        _workspace_directories: source.workspace_directories,
+        _metadata: Vec::new(),
+    })
+}
+
+fn phase(
+    phase: CapturePhase,
+    budget: &CaptureBudget,
+    hooks: &mut impl CaptureHooks,
+) -> Result<(), E> {
+    hooks.phase(phase);
+    budget.check(hooks)
 }
 
 impl<H> Drop for Capture<'_, H> {

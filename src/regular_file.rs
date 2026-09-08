@@ -143,3 +143,19 @@ pub fn read_regular_at(
 ) -> Result<Vec<u8>, MetadataReadError> {
     Err(MetadataReadError::UnsupportedPlatform)
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn read_regular_at_retained(
+    parent: &File,
+    name: &OsStr,
+    per_file_maximum: usize,
+    budget: &mut MetadataReadBudget,
+) -> Result<(File, Vec<u8>), MetadataReadError> {
+    unix::read_retained_with(
+        parent,
+        name,
+        per_file_maximum,
+        budget,
+        &mut unix::DirectRead,
+    )
+}

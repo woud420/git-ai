@@ -67,6 +67,8 @@ impl FileRead for FdFailure<'_> {
 #[test]
 #[ignore = "child helper invoked by the bounded watchdog test"]
 fn isolated_fifo_and_descriptor_child() {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    super::retained::isolated_descriptor_checks();
     let fixture = Fixture::new();
     let name = CString::new("fifo").unwrap();
     assert_eq!(

@@ -16,3 +16,6 @@ pub mod regular_file;
 pub mod repo_url;
 pub mod tokio_runtime;
 pub mod uuid;
+
+#[cfg(unix)]
+pub(crate) mod unix_directory;

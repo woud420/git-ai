@@ -158,58 +158,29 @@ impl FileIdentity {
 }
 
 pub(super) struct DirectoryEntries {
-    stream: *mut libc::DIR,
+    inner: crate::unix_directory::DirectoryEntries,
 }
 
 impl DirectoryEntries {
     pub(super) fn open(directory_fd: RawFd) -> Result<Self, CheckpointOutboxError> {
-        let dot = c".";
-        let descriptor = unsafe {
-            libc::openat(
-                directory_fd,
-                dot.as_ptr(),
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )
-        };
-        if descriptor < 0 {
-            return Err(E::from_io("scan root", io::Error::last_os_error()));
-        }
-        let stream = unsafe { libc::fdopendir(descriptor) };
-        if stream.is_null() {
-            let error = io::Error::last_os_error();
-            unsafe {
-                libc::close(descriptor);
-            }
-            return Err(E::from_io("scan root", error));
-        }
-        Ok(Self { stream })
+        let inner = crate::unix_directory::DirectoryEntries::open(directory_fd)
+            .map_err(|error| E::from_io("scan root", error))?;
+        Ok(Self { inner })
     }
 
     pub(super) fn next_name(&mut self) -> Result<Option<CString>, CheckpointOutboxError> {
         loop {
-            clear_errno();
-            let entry = unsafe { libc::readdir(self.stream) };
-            if entry.is_null() {
-                let errno = current_errno();
-                return if errno == 0 {
-                    Ok(None)
-                } else {
-                    Err(E::from_io("scan root", io::Error::from_raw_os_error(errno)))
-                };
-            }
-            let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+            let Some(name) = self
+                .inner
+                .next_raw_name()
+                .map_err(|error| E::from_io("scan root", error))?
+            else {
+                return Ok(None);
+            };
             if name.to_bytes() == b"." || name.to_bytes() == b".." {
                 continue;
             }
-            return Ok(Some(name.to_owned()));
-        }
-    }
-}
-
-impl Drop for DirectoryEntries {
-    fn drop(&mut self) {
-        unsafe {
-            libc::closedir(self.stream);
+            return Ok(Some(name));
         }
     }
 }
@@ -336,30 +307,6 @@ pub(in crate::model::repository::checkpoint_outbox) fn open_private_record_at(
         .map_err(|_| CheckpointOutboxError::UnsafeReadyRecord)?;
     validate_record_file(&record)?;
     Ok(record)
-}
-
-#[cfg(target_os = "macos")]
-fn clear_errno() {
-    unsafe {
-        *libc::__error() = 0;
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn current_errno() -> libc::c_int {
-    unsafe { *libc::__error() }
-}
-
-#[cfg(target_os = "linux")]
-fn clear_errno() {
-    unsafe {
-        *libc::__errno_location() = 0;
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn current_errno() -> libc::c_int {
-    unsafe { *libc::__errno_location() }
 }
 
 #[cfg(test)]
@@ -560,3 +507,7 @@ mod tests {
         drop(duplicate);
     }
 }
+
+#[cfg(test)]
+#[path = "outbox_directory_compatibility.rs"]
+mod directory_compatibility;

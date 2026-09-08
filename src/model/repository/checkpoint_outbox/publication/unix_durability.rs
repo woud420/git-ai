@@ -1,10 +1,11 @@
 use super::platform_acl;
 use crate::model::repository::checkpoint_outbox::CheckpointOutboxError;
+use crate::unix_directory::open_directory_at;
 use CheckpointOutboxError as E;
 use std::ffi::CString;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path};
@@ -213,21 +214,6 @@ pub(super) fn open_directory_path(path: &Path) -> io::Result<File> {
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(path)
-}
-
-fn open_directory_at(directory_fd: RawFd, name: &std::ffi::CStr) -> io::Result<File> {
-    let descriptor = unsafe {
-        libc::openat(
-            directory_fd,
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        )
-    };
-    if descriptor < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(unsafe { File::from_raw_fd(descriptor) })
-    }
 }
 
 #[cfg(test)]

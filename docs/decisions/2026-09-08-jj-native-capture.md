@@ -142,6 +142,8 @@ other-platform unsupported behavior run through CI; no local Windows claim is
 made. Logs are retained with the `git-ai-jj-capture-` prefix. The capture flowchart
 was rendered and visually inspected.
 
-The remaining phases cover durable source registration, native ancestry admission,
-observer integration, checkpoint ordering, rewrite attribution and shared command
-behavior. Native jj attribution remains disabled.
+[Explicit source registration](2026-09-08-jj-native-registration.md) now composes
+retained capture sessions with a published seal and the first workspace's durable
+cutoff. Attachment mutation, explicit recovery, native ancestry admission, observer
+integration, checkpoint ordering, rewrite attribution and shared command behavior
+remain later phases. Native jj attribution remains disabled.

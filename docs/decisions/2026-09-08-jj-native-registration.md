@@ -1,6 +1,6 @@
 # Explicit native jj source registration (ENG-415)
 
-Status: implemented and locally qualified on macOS; Linux/Windows CI is tracked separately.
+Status: accepted — implemented and locally qualified on macOS; Linux/Windows CI is tracked separately.
 
 ## Scope
 

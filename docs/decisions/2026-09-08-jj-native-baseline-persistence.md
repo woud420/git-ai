@@ -50,8 +50,8 @@ Commit acknowledgment is not a universal power-loss guarantee.
 A private `PreparedBaseline` now owns canonical encoding and the two inserts.
 Its consuming insertion method borrows the caller transaction and releases both
 encoded buffers before returning the request and state for bounded readback.
-The existing persistence path remains the immediate consumer and owns the sole
-commit. This permits later atomic registration composition without changing the
+The standalone persistence path owns its sole commit. [Explicit source registration](2026-09-08-jj-native-registration.md)
+now reuses the helper inside its four-row SQL transaction without changing the
 namespace-only API, wire format, retry order or read allowance.
 
 A missing state with a retained receipt is a gap. A missing active receipt,
@@ -85,8 +85,8 @@ re-verifies native operation/view hashes and exact envelopes on every reopen.
 `source_id` is a caller-supplied namespace, not a physical store certificate.
 The durable result does not prove current heads, continuous source identity,
 ancestry through an anchor, future admission, workspace readiness, or attribution.
-No production caller is added before filesystem capture and registration have
-their own qualified contracts.
+The separate [registration coordinator](2026-09-08-jj-native-registration.md)
+adds fresh capture and seal checks; this standalone API retains its narrower contract.
 
 Complete deletion of all native records is indistinguishable from a new source
 inside this database alone. Automatic bootstrap therefore needs a separate
@@ -123,5 +123,6 @@ visibility on a separate connection, caller rollback, and caller commit. The
 pinned real-jj case passed again, as did all 303 default jj integration cases
 (with 14 explicit/child lanes ignored by that command). Independent comparison
 confirmed the moved SQL, error text, retry ordering and final readback behavior.
-The extraction changes transaction composition only; no registration install or
-filesystem seal is enabled.
+That extraction alone changed transaction composition; the later
+[registration increment](2026-09-08-jj-native-registration.md) adds initial source
+installation and filesystem seal publication.

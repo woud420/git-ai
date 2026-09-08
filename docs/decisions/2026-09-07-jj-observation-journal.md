@@ -134,14 +134,16 @@ missing observed heads. All 53 journal integration tests then passed, alongside
 12 source/storage policy checks and Rust 1.93 all-target lint. No dependencies,
 schema changes, CLI behavior, or daemon work were added.
 
-## Next increment
+## Remaining integration
 
 The native [operation](2026-09-07-jj-native-operation-decoder.md) and
 [view](2026-09-07-jj-native-view-decoder.md) decoders now verify individual content
 addresses. The [evidence verifier](2026-09-07-jj-native-evidence-verifier.md) now
-checks their exact envelope join. Bounded traversal and validated durable
-membership queries remain pending. A checksummed opaque ancestor is not a
-certified native boundary; resumed reads must preserve that distinction. Qualify the adapter against real jj operations and
-missing-history cases before connecting an observer or checkpoint ordering.
-Workspace registration, notifications, native capture and attribution application
-remain unimplemented; ENG-415 stays in progress.
+checks their exact envelope join. [Bounded native capture](2026-09-08-jj-native-capture.md),
+[pure ancestry verification](2026-09-08-jj-native-ancestry.md) and
+[explicit source registration](2026-09-08-jj-native-registration.md) are now
+implemented, including the first workspace and saved cutoff. A checksummed opaque
+ancestor is still not a certified native boundary. Bounded ancestor collection,
+validated durable admission, attachment mutation, recovery, notifications,
+checkpoint ordering and attribution application remain separate work; ENG-415
+stays in progress.

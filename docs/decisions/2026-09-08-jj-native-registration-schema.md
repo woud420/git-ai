@@ -42,8 +42,8 @@ queries must explicitly use binary comparison. Metadata queries bound returned
 rows and string sizes. They do not bound SQLite's internal schema parsing or
 page I/O.
 
-The keys permit bounded negative conflict checks before later initialization or
-attachment. They never authorize a source or workspace. The proposed root guards
+The keys permit bounded negative conflict checks before initialization or
+attachment. They never authorize a source or workspace. The root guards
 hash platform plus the sampled repository/workspace root device and inode under
 separate fixed domains. They exclude other mutable directory identities. This
 allows retained local records to reject a missing-marker reinitialization after
@@ -53,10 +53,11 @@ Locator identity, device/inode equality and absence of a matching row cannot pro
 that a repository has never been registered.
 
 [Bounded record inspection](2026-09-08-jj-native-registration-records.md) now
-provides canonical codecs and individual reads. Writers remain subsequent work. The migration
-does not introduce publicly constructible registration proofs or a model-layer
-dependency on capture code. The later coordinator must join a fresh source witness,
-complete checked records and native baseline evidence before returning a proof.
+provides canonical codecs and individual reads. [Explicit source registration](2026-09-08-jj-native-registration.md)
+now joins a fresh source capture and seal with complete checked records and native
+baseline evidence, installing the four initial SQL rows in one transaction. The
+migration itself does not introduce publicly constructible registration proofs
+or a model-layer dependency on capture code.
 
 ## Upgrade and rollback
 
@@ -73,7 +74,7 @@ including v2 changes made earlier in a v1-to-v3 attempt. No `IF NOT EXISTS`,
 upserts, compensating deletes or data backfill are used.
 
 A valid namespace-only v2 baseline remains readable by the existing baseline
-and pure ancestry APIs after upgrade. It remains unregistered. Later registration
+and pure ancestry APIs after upgrade. It remains unregistered. Explicit registration
 cannot infer physical identity from that baseline or silently adopt it. A source
 marker with missing local registration/native state is unavailable, including
 crash-before-SQL and erased-journal cases; migration never repairs that ambiguity.
@@ -102,6 +103,7 @@ schema, not registration record contents or source continuity.
 
 The broader design also preserves saved initialization receipts when heads advance,
 keeps historical checkout IDs separate from fresh readiness evidence, and counts
-publisher plus capture descriptors under one coordinator bound. Filesystem marker
-publication, record codecs, atomic installation, attachment, explicit recovery and
-CLI integration retain their own tests-first boundaries.
+publisher plus capture descriptors under one coordinator bound. Record codecs,
+seal publication and atomic SQL installation are implemented in their linked
+contracts. Attachment mutation, explicit recovery and CLI integration remain
+separate tests-first boundaries; filesystem publication and SQL commit are not atomic together.

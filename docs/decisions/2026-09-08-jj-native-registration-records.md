@@ -88,6 +88,8 @@ explicit BINARY primary key. Public behavior tests separately distinguish
 case and Unicode spellings. Logical schema/row preservation is checked around
 reads; it does not imply byte-identical WAL files or a power-loss simulation.
 
-Complete registration later requires a checked source/original-workspace/native
-join in one snapshot, fresh source-seal and capture evidence, and native baseline
-reverification. These record readers cannot substitute for that authority.
+[Explicit source registration](2026-09-08-jj-native-registration.md) now performs
+the checked source/original-workspace/native join in one snapshot, with fresh
+source-seal and capture evidence and native baseline reverification. These
+individual record readers retain their inspection-only contract and cannot
+substitute for that authority.

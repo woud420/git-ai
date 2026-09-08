@@ -1,6 +1,6 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; context discovery, durable observation storage and native metadata verification are implemented on the draft branch. Integrated observation and attribution remain pending.
+Status: proposed native-attribution architecture; context discovery, durable observation storage, native metadata verification and explicit source registration are implemented on the draft branch. Integrated observation and attribution remain pending.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
@@ -171,8 +171,10 @@ supplied DAG on the reopened baseline or virtual root. The additive
 [registration schema](2026-09-08-jj-native-registration-schema.md) now reserves
 source and workspace records without backfill.
 [Bounded individual record inspection](2026-09-08-jj-native-registration-records.md)
-validates canonical bytes and exact keys. Durable registration and ancestry
-admission remain separate gates.
+validates canonical bytes and exact keys. [Explicit source registration](2026-09-08-jj-native-registration.md)
+now joins the first workspace, published seal and saved cutoff, with all four SQL
+rows installed atomically. Filesystem publication and SQL commit remain separate
+steps. Attachment mutation, recovery and durable ancestry admission remain gates.
 Baseline anchors receive no retrospective attribution and do not enter the pending
 application queue. Ordinary checksummed observations are not native ancestry
 boundaries; subsequent traversal must close on the permitted baseline or verified
@@ -303,8 +305,11 @@ and completed-checkout decoding, plus explicit baseline persistence and verified
 reopening. Bounded current-state capture and pure ancestry verification are also
 implemented. Schema v3 adds empty source/workspace registration tables while
 preserving existing baseline receipts. Bounded individual registration-record
-reads are implemented. Atomic installation, durable source registration, native
-admission and the observer remain pending. Later phases
+reads are implemented. [Explicit source registration](2026-09-08-jj-native-registration.md)
+now publishes a seal and atomically installs the first workspace and saved native
+cutoff in SQL; reopen and retry retain that cutoff after heads or checkout advance.
+Attachment mutation, explicit recovery, native admission and the observer remain
+pending. Later phases
 remain tracked until their acceptance tests pass. These increments are
 published on [draft PR #247](https://github.com/woud420/git-ai/pull/247) and do not
 enable native attribution. Work continues in scoped commits with human review

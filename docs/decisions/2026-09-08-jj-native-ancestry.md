@@ -124,5 +124,7 @@ CI provides the other platform lanes.
 Efficient durable extensions still require a justified certificate/dependency
 model. This API accepts a bounded complete supplied DAG to the original cut;
 it cannot use a previous extension ID as a terminal. Larger input fails visibly
-rather than widening the cutoff. Source registration, bounded ancestor collection,
-durable admission, workspace readiness and attribution remain separate steps.
+rather than widening the cutoff. [Explicit source registration](2026-09-08-jj-native-registration.md)
+now binds the first workspace and saved cutoff to a sampled source and seal.
+Bounded ancestor collection, durable admission, workspace readiness and attribution
+remain separate steps; registration does not supply this ancestry proof.

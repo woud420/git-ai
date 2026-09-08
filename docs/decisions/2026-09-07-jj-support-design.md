@@ -1,9 +1,11 @@
 # Native jj support for the personal git-ai fork
 
-Status: proposed native-attribution architecture; P1 read-only context discovery is locally implemented and verified.
+Status: proposed native-attribution architecture; P1 context discovery is locally implemented, and P0 has selected and qualified a bounded direct-store reader prototype.
 Date: 2026-09-07.
 Baseline: `woud420/git-ai` at `dc04a6b6aeccc1efa5d544fed21fbdc2130e1872`.
 Research baseline: jj v0.45.1. Future jj releases require compatibility qualification.
+
+Reader decision: [ENG-413 proof and replay contract](2026-09-07-jj-reader-proof.md). The prototype validates operation/view domain hashes without Git object access. Resumption requires durable operation membership; raw head sets alone do not cover late concurrency. Recorded import predecessors may be synthetic, so they do not by themselves prove attribution.
 
 ## Problem and recommendation
 

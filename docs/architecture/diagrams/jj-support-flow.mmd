@@ -1,0 +1,18 @@
+flowchart TD
+    S["jj operation heads change or checkpoint arrives"]:::external --> V{"Compatible reader and authorized workspace?"}
+    V -- No --> D["Report unsupported; preserve pending evidence"]:::service
+    V -- Yes --> I["Capture immutable operation IDs and workspace context"]:::job
+    I --> B{"Complete bounded DAG segment available?"}
+    B -- No --> D
+    B -- Yes --> P["Persist validated events and replay cursor"]:::storage
+    P --> Q["Order with checkpoint journal in repository family"]:::queue
+    Q --> M{"Exact lineage and content mapping proven?"}
+    M -- No --> U["Mark unknown/degraded; retain replay evidence"]:::service
+    M -- Yes --> A["Apply idempotent attribution to commit OIDs"]:::service
+    A --> R["Expose status, blame, stats and sync"]:::ui
+    classDef ui fill:#E0F7FA,stroke:#00838F,color:#00363A
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16
+    classDef queue fill:#F3E5F5,stroke:#7B1FA2,color:#2D0A3D
+    classDef job fill:#E8EAF6,stroke:#3949AB,color:#111A55
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30

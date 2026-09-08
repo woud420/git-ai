@@ -1,0 +1,19 @@
+flowchart TD
+    G["Git commands"]:::external --> T["Existing Git Trace2 ingestion"]:::service
+    J["jj commands"]:::external --> O[("jj operation DAG and immutable views")]:::storage
+    O --> W["Proposed jj observer and versioned reader"]:::job
+    W --> E["Validate immutable evidence and ownership"]:::service
+    T --> Q["Existing repository-family ordering"]:::queue
+    E --> Q
+    A["Same agent pre/post hooks"]:::external --> C["Checkpoint with captured workspace identity"]:::service
+    C --> Q
+    Q --> R["Shared attribution and rewrite engine"]:::service
+    R --> N[("Configured authorship backend")]:::db
+    N --> U["Same git-ai read commands"]:::ui
+    classDef ui fill:#E0F7FA,stroke:#00838F,color:#00363A
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16
+    classDef db fill:#FFF3E0,stroke:#EF6C00,color:#4A2500
+    classDef queue fill:#F3E5F5,stroke:#7B1FA2,color:#2D0A3D
+    classDef job fill:#E8EAF6,stroke:#3949AB,color:#111A55
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30

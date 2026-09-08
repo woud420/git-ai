@@ -195,3 +195,5 @@ fn topology_enforces_fixed_node_head_cut_and_parent_limits() {
     parents.nodes[0].1.push(labels[31].clone());
     parents.rejects("limit");
 }
+
+mod head_closures;

@@ -4,7 +4,9 @@ use super::*;
 use crate::model::jj_observation::{
     JjOperationEvidence, MAX_JJ_OBSERVATION_OPERATION_BYTES, MAX_JJ_OBSERVATION_OPERATIONS, is_root,
 };
-use crate::operations::jj::ancestry::{JjAncestryInput, verify_ancestry_to_baseline};
+use crate::operations::jj::ancestry::{
+    JjAncestryInput, JjHeadClosure, verify_ancestry_to_baseline,
+};
 use crate::operations::jj::baseline_persistence::DurableCurrentStateBaseline;
 use std::collections::BTreeMap;
 
@@ -31,6 +33,7 @@ pub(super) enum HistoryState {
 pub(super) struct HistoryDraft {
     ancestors: Vec<JjOperationEvidence>,
     order: Vec<Origin>,
+    head_closures: Vec<JjHeadClosure>,
     reached_baseline_ids: Vec<String>,
     reaches_root: bool,
 }
@@ -38,6 +41,7 @@ pub(super) struct HistoryDraft {
 pub(crate) struct BorrowedJjHistoryEvidence<'a> {
     head_ids: &'a [String],
     ordered_operations: Vec<&'a JjOperationEvidence>,
+    head_closures: &'a [JjHeadClosure],
     reached_baseline_ids: &'a [String],
     reaches_root: bool,
 }
@@ -49,6 +53,10 @@ impl<'a> BorrowedJjHistoryEvidence<'a> {
 
     pub(crate) fn ordered_operations(&self) -> &[&'a JjOperationEvidence] {
         &self.ordered_operations
+    }
+
+    pub(crate) fn head_closures(&self) -> &[JjHeadClosure] {
+        self.head_closures
     }
 
     pub(crate) fn reached_baseline_ids(&self) -> &[String] {
@@ -164,6 +172,7 @@ impl RetainedCapture<'_> {
         Ok(BorrowedJjHistoryEvidence {
             head_ids: captured.head_ids(),
             ordered_operations,
+            head_closures: &draft.head_closures,
             reached_baseline_ids: &draft.reached_baseline_ids,
             reaches_root: draft.reaches_root,
         })
@@ -206,6 +215,7 @@ impl RetainedCapture<'_> {
         Ok(CapturedJjHistoryEvidence {
             head_ids,
             ordered_operations,
+            head_closures: draft.head_closures,
             reached_baseline_ids: draft.reached_baseline_ids,
             reaches_root: draft.reaches_root,
         })
@@ -319,6 +329,7 @@ fn walk(
                 ))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let head_closures = proof.head_closures().to_vec();
     let reached_baseline_ids = proof.reached_baseline_ids().to_vec();
     let reaches_root = proof.reaches_root();
     drop(proof);
@@ -326,6 +337,7 @@ fn walk(
     Ok(HistoryDraft {
         ancestors,
         order,
+        head_closures,
         reached_baseline_ids,
         reaches_root,
     })

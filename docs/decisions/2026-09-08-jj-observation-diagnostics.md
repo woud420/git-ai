@@ -144,5 +144,22 @@ Earlier native admission/history/registration real-jj qualification remains
 recorded in its decisions; those six lanes were not rerun for this increment.
 These macOS results do not establish Linux or Windows runtime qualification.
 The later [explicit capture increment](2026-09-08-jj-explicit-capture.md) implements
-initialization/capture commands. Automatic observation and native attribution
-remain separate follow-ups.
+initialization/capture commands. [Finite observation](2026-09-08-jj-finite-observation.md)
+and the [daemon observer](2026-09-08-jj-daemon-observation.md) are now implemented.
+Native attribution remains a separate follow-up.
+
+## Per-head admission metadata
+
+Historical receipt, explicit capture and changed finite-observation results now
+include `admission.head_closures`: sorted entries with `head_id`,
+`reached_baseline_ids` and `reaches_root`. These are recomputed from verified native
+evidence; existing aggregate fields, schema version 1, packet bytes and receipt
+identities retain their meanings. Status, initialization, cursor and receipt
+identity objects, unchanged observations and daemon control replies are unchanged.
+
+The maximum 32-head by 32-anchor summary can exceed 128 KiB. Successful debug-output
+test helpers allow 256 KiB per value; the finite-stream helper allows 8 MiB across
+32 attempts. A native fixture covers every head reaching all 32 anchors together
+with a 16,000-byte workspace requiring JSON escaping. These are bounded test-reader
+allowances, not a new production output-size enforcement. Error and daemon-control
+reply test caps remain 32 KiB.

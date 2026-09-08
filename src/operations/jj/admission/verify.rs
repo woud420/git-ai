@@ -6,7 +6,7 @@ use crate::model::jj_observation::{is_root, validate_ids, validate_source};
 use crate::model::repository::jj_observation_journal::native_admission::{
     NativeAdmissionCursor as StoredCursor, StoredAdmissionSnapshot, StoredNativeAdmission,
 };
-use crate::operations::jj::ancestry::{JjAncestryInput, verify_ancestry_to_receipt};
+use crate::operations::jj::ancestry::{JjAncestryInput, JjHeadClosure, verify_ancestry_to_receipt};
 use crate::operations::jj::baseline::MAX_JJ_BASELINE_HEADS;
 use crate::operations::jj::baseline_persistence::{
     BaselineReceipt, verify_native_baseline_snapshot_ref,
@@ -14,6 +14,7 @@ use crate::operations::jj::baseline_persistence::{
 use crate::operations::jj::registration::{RegisteredJjCurrentState, unix::saved};
 
 pub(super) struct Closure {
+    head_closures: Vec<JjHeadClosure>,
     reached_baseline_ids: Vec<String>,
     reaches_root: bool,
 }
@@ -104,6 +105,7 @@ fn packet(baseline: &BaselineReceipt, stored: &StoredNativeAdmission) -> Result<
         ));
     }
     Ok(Closure {
+        head_closures: proof.head_closures().to_vec(),
         reached_baseline_ids: proof.reached_baseline_ids().to_vec(),
         reaches_root: proof.reaches_root(),
     })
@@ -147,6 +149,7 @@ pub(super) fn finish(stored: StoredNativeAdmission, closure: Closure) -> Durable
     DurableNativeAdmission {
         receipt: receipt(&stored),
         ordered_operations: stored.record.operations,
+        head_closures: closure.head_closures,
         reached_baseline_ids: closure.reached_baseline_ids,
         reaches_root: closure.reaches_root,
     }

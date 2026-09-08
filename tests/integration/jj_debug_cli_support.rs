@@ -101,7 +101,11 @@ pub fn receipt_json(value: Option<&DurableNativeAdmission>) -> Json {
         "action":"receipt","scope":"historical_saved_evidence",
         "admission":value.map(|value| json!({
             "receipt":receipt(value.receipt()),"operation_count":value.ordered_operations().len(),
-            "reached_baseline_ids":value.reached_baseline_ids(),"reaches_root":value.reaches_root()
+            "reached_baseline_ids":value.reached_baseline_ids(),"reaches_root":value.reaches_root(),
+            "head_closures":value.head_closures().iter().map(|head| json!({
+                "head_id":head.head_id(),"reached_baseline_ids":head.reached_baseline_ids(),
+                "reaches_root":head.reaches_root()
+            })).collect::<Vec<_>>()
         }))
     })
 }

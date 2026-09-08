@@ -14,6 +14,11 @@ use git_ai::operations::jj::baseline_persistence::DurableCurrentStateBaseline;
 mod bounds;
 #[path = "jj_ancestry_errors.rs"]
 mod errors;
+#[path = "jj_head_closures.rs"]
+pub(crate) mod head_closures;
+#[allow(dead_code, unused_imports)]
+#[path = "fixtures/jj-history/helpers.rs"]
+pub(crate) mod native;
 #[path = "jj_ancestry_opaque.rs"]
 mod opaque;
 #[path = "jj_ancestry_real.rs"]

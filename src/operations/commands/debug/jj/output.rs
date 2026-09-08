@@ -55,6 +55,11 @@ fn admission_value(value: &DurableNativeAdmission) -> Value {
     json!({
         "receipt": receipt(value.receipt()),
         "operation_count": value.ordered_operations().len(),
+        "head_closures": value.head_closures().iter().map(|closure| json!({
+            "head_id": closure.head_id(),
+            "reached_baseline_ids": closure.reached_baseline_ids(),
+            "reaches_root": closure.reaches_root()
+        })).collect::<Vec<_>>(),
         "reached_baseline_ids": value.reached_baseline_ids(),
         "reaches_root": value.reaches_root()
     })

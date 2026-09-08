@@ -3,7 +3,10 @@
 //! post-baseline newness, admission, or attribution eligibility.
 
 mod graph;
+mod head_closure;
 mod preflight;
+
+pub use head_closure::JjHeadClosure;
 
 use super::baseline_persistence::{BaselineReceipt, DurableCurrentStateBaseline};
 use super::evidence::{JjEvidenceError, VerifiedJjEvidence, verify_evidence};
@@ -28,6 +31,7 @@ pub struct VerifiedJjAncestry<'a> {
     baseline: &'a BaselineReceipt,
     head_ids: &'a [String],
     ordered_operations: Vec<VerifiedJjEvidence<'a>>,
+    head_closures: Vec<JjHeadClosure>,
     reached_baseline_ids: Vec<String>,
     reaches_root: bool,
 }
@@ -43,6 +47,11 @@ impl<'a> VerifiedJjAncestry<'a> {
 
     pub fn ordered_operations(&self) -> &[VerifiedJjEvidence<'a>] {
         &self.ordered_operations
+    }
+
+    /// One exact closure per input head, sorted by head ID.
+    pub fn head_closures(&self) -> &[JjHeadClosure] {
+        &self.head_closures
     }
 
     pub fn reached_baseline_ids(&self) -> &[String] {
@@ -148,6 +157,7 @@ pub(crate) fn verify_ancestry_to_receipt<'a>(
         baseline,
         head_ids: input.head_ids,
         ordered_operations,
+        head_closures: order.head_closures,
         reached_baseline_ids: order.reached_baseline_ids,
         reaches_root: order.reaches_root,
     })

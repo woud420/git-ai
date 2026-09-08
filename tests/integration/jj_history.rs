@@ -17,10 +17,7 @@ mod behavior;
 mod bounds;
 #[path = "jj_history_faults.rs"]
 mod faults;
-// Public and private collector suites share independently generated fixtures.
-#[allow(dead_code, unused_imports)]
-#[path = "fixtures/jj-history/helpers.rs"]
-mod native;
+use crate::jj_ancestry::native;
 #[path = "jj_history_policy.rs"]
 mod policy;
 #[path = "jj_history_real.rs"]

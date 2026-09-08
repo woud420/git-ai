@@ -5,7 +5,7 @@ use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 const WATCHDOG: Duration = Duration::from_secs(20);
-const LINE_LIMIT: usize = 128 * 1024;
+const LINE_LIMIT: usize = 256 * 1024;
 
 pub(super) struct Stream {
     child: Child,
@@ -184,7 +184,7 @@ impl Stream {
                 continue;
             }
             self.bytes += count;
-            assert!(self.bytes <= 4 * 1024 * 1024);
+            assert!(self.bytes <= 8 * 1024 * 1024);
             for byte in &bytes[..count] {
                 if *byte == b'\n' {
                     self.records += 1;

@@ -1,4 +1,4 @@
-use super::JjAncestryError as E;
+use super::{JjAncestryError as E, JjHeadClosure};
 use crate::model::jj_observation::{MAX_JJ_OBSERVATION_OPERATIONS, is_root};
 use crate::operations::jj::baseline::MAX_JJ_BASELINE_HEADS;
 use crate::operations::jj::operation::MAX_OPERATION_PARENTS;
@@ -11,6 +11,7 @@ pub(super) struct TopologyNode<'a> {
 
 pub(super) struct GraphOrder {
     pub(super) operation_indices: Vec<usize>,
+    pub(super) head_closures: Vec<JjHeadClosure>,
     pub(super) reached_baseline_ids: Vec<String>,
     pub(super) reaches_root: bool,
 }
@@ -27,23 +28,28 @@ struct Frame {
     next_parent: usize,
 }
 
+const ROOT_MASK: u64 = 1 << MAX_JJ_BASELINE_HEADS;
+const _: () = assert!(MAX_JJ_BASELINE_HEADS < u64::BITS as usize);
+
 struct Terminals<'a> {
-    baseline: BTreeSet<&'a str>,
-    reached: BTreeSet<&'a str>,
-    root: bool,
+    baseline: BTreeMap<&'a str, u64>,
 }
 
 impl Terminals<'_> {
-    fn stop(&mut self, id: &str) -> bool {
+    fn mask(&self, id: &str) -> Option<u64> {
         if is_root(id) {
-            self.root = true;
-            true
-        } else if let Some(boundary) = self.baseline.get(id).copied() {
-            self.reached.insert(boundary);
-            true
+            Some(ROOT_MASK)
         } else {
-            false
+            self.baseline.get(id).copied()
         }
+    }
+
+    fn reached(&self, mask: u64) -> Vec<String> {
+        self.baseline
+            .iter()
+            .filter(|(_, bit)| mask & **bit != 0)
+            .map(|(id, _)| (*id).to_owned())
+            .collect()
     }
 }
 
@@ -73,10 +79,15 @@ pub(super) fn order_to_baseline(
         .enumerate()
         .map(|(index, node)| (node.id, index))
         .collect();
-    let mut terminals = Terminals {
-        baseline: baseline_heads.iter().map(String::as_str).collect(),
-        reached: BTreeSet::new(),
-        root: false,
+    let terminals = Terminals {
+        baseline: baseline_heads
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| (id, 1u64 << index))
+            .collect(),
     };
     let mut roots: Vec<_> = heads.iter().map(String::as_str).collect();
     roots.sort_unstable();
@@ -84,8 +95,8 @@ pub(super) fn order_to_baseline(
     let mut stack: Vec<Frame> = Vec::with_capacity(nodes.len());
     let mut ordered = Vec::with_capacity(nodes.len());
 
-    for root in roots {
-        if terminals.stop(root) {
+    for &root in &roots {
+        if terminals.mask(root).is_some() {
             continue;
         }
         let start = *index
@@ -109,7 +120,7 @@ pub(super) fn order_to_baseline(
                 continue;
             };
             frame.next_parent += 1;
-            if terminals.stop(parent) {
+            if terminals.mask(parent).is_some() {
                 continue;
             }
             let parent = *index
@@ -135,11 +146,45 @@ pub(super) fn order_to_baseline(
     if ordered.len() != nodes.len() {
         return Err(E::Input("detached ancestry operation"));
     }
+    // Shared ancestors contribute once, without repeating native verification
+    // or a traversal for every head. Each node retains only one provenance word.
+    let mut masks = vec![0u64; nodes.len()];
+    for &current in &ordered {
+        let mut mask = 0;
+        for parent in nodes[current].parents {
+            mask |= provenance(parent, &terminals, &index, &masks)?;
+        }
+        masks[current] = mask;
+    }
+    let mut reached = 0;
+    let mut head_closures = Vec::with_capacity(roots.len());
+    for head in roots {
+        let mask = provenance(head, &terminals, &index, &masks)?;
+        reached |= mask;
+        head_closures.push(JjHeadClosure {
+            head_id: head.to_owned(),
+            reached_baseline_ids: terminals.reached(mask),
+            reaches_root: mask & ROOT_MASK != 0,
+        });
+    }
     Ok(GraphOrder {
         operation_indices: ordered,
-        reached_baseline_ids: terminals.reached.into_iter().map(str::to_owned).collect(),
-        reaches_root: terminals.root,
+        head_closures,
+        reached_baseline_ids: terminals.reached(reached),
+        reaches_root: reached & ROOT_MASK != 0,
     })
+}
+
+fn provenance(
+    id: &str,
+    terminals: &Terminals<'_>,
+    index: &BTreeMap<&str, usize>,
+    masks: &[u64],
+) -> Result<u64, E> {
+    terminals
+        .mask(id)
+        .or_else(|| index.get(id).and_then(|index| masks.get(*index)).copied())
+        .ok_or(E::Input("invalid ancestry ordering"))
 }
 
 #[cfg(test)]

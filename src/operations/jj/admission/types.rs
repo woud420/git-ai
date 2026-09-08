@@ -1,5 +1,6 @@
 use super::NativeAdmissionExpectation;
 use crate::model::jj_observation::JjOperationEvidence;
+use crate::operations::jj::ancestry::JjHeadClosure;
 use crate::operations::jj::registration::RegisteredJjCurrentState;
 use std::fmt;
 
@@ -110,6 +111,7 @@ impl RegisteredNativeAdmissionState {
 pub struct DurableNativeAdmission {
     pub(super) receipt: NativeAdmissionReceipt,
     pub(super) ordered_operations: Vec<JjOperationEvidence>,
+    pub(super) head_closures: Vec<JjHeadClosure>,
     pub(super) reached_baseline_ids: Vec<String>,
     pub(super) reaches_root: bool,
 }
@@ -121,6 +123,10 @@ impl DurableNativeAdmission {
     pub fn ordered_operations(&self) -> &[JjOperationEvidence] {
         &self.ordered_operations
     }
+    pub fn head_closures(&self) -> &[JjHeadClosure] {
+        &self.head_closures
+    }
+
     pub fn reached_baseline_ids(&self) -> &[String] {
         &self.reached_baseline_ids
     }
@@ -135,6 +141,7 @@ impl fmt::Debug for DurableNativeAdmission {
             .debug_struct("DurableNativeAdmission")
             .field("receipt", &self.receipt)
             .field("operation_count", &self.ordered_operations.len())
+            .field("head_closures", &self.head_closures)
             .field("reached_baseline_ids", &self.reached_baseline_ids)
             .field("reaches_root", &self.reaches_root)
             .finish_non_exhaustive()

@@ -133,3 +133,22 @@ at the original saved baseline or root and never advances durable progress.
 Durable admission now has a separate implementation; workspace readiness and
 attribution remain later steps. Registration alone does not supply this ancestry
 proof, and earlier admissions never become traversal terminals.
+
+## Per-head original-cutoff lineage
+
+The proof, collected history and durable admission now expose `head_closures()`: one
+entry per head, sorted by head ID, with the exact sorted original baseline IDs and
+root bit reached by that head. A head that is itself a baseline anchor reaches only
+that anchor, regardless of its unexpanded parents. Existing aggregate fields remain
+the union of these entries, and raw evidence order and borrowing stay unchanged.
+
+After the same bounded DAG validation, one parent-first pass propagates a 33-bit
+mask per node. Shared ancestors require no repeated native decoding or per-head
+walk. Only the final head summaries and aggregate closure materialize anchor strings. Historical
+receipt reads rederive the summaries from stored native bytes; admission compares
+them with the retained capture before final source checks and its sole commit.
+They are metadata derived from this complete proof, not standalone authority.
+
+[Incremental catch-up](2026-09-08-jj-incremental-catchup.md) describes the planned
+composition of such per-head evidence. This increment changes no v1 packet bytes,
+receipt identities, retry semantics, baseline, cursor or collection limit.

@@ -10,6 +10,8 @@ use support::*;
 mod behavior;
 #[path = "jj_debug_observe_cli_errors.rs"]
 mod errors;
+#[path = "jj_debug_observe_cli_output_limit.rs"]
+mod output_limit;
 #[path = "jj_debug_observe_cli_real.rs"]
 mod real;
 
@@ -84,6 +86,7 @@ pub(super) fn dispatch(case: &Case, config: &Config) {
         .strip_prefix("history:admission:cli:observe:")
         .unwrap()
     {
+        "head_closure_output" => output_limit::run(case, config),
         "unchanged" => behavior::unchanged(case, config),
         "changed" => behavior::changed(case, config),
         "retry" => behavior::retry(case, config),

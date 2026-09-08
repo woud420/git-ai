@@ -2,6 +2,7 @@
 //! Returned evidence describes sampled history, not current-at-return state or
 //! durable admission. Collection never advances a journal cursor or attribution.
 
+use super::ancestry::JjHeadClosure;
 use super::capture::{CapturedJjHistoryEvidence, JjCaptureError};
 use super::registration::{JjRegistrationError, RegisteredJjCurrentState};
 use crate::config::Config;
@@ -30,6 +31,10 @@ impl CollectedJjHistory {
 
     pub fn ordered_operations(&self) -> &[JjOperationEvidence] {
         self.evidence.ordered_operations()
+    }
+
+    pub fn head_closures(&self) -> &[JjHeadClosure] {
+        self.evidence.head_closures()
     }
 
     pub fn reached_baseline_ids(&self) -> &[String] {

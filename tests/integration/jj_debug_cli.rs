@@ -10,7 +10,7 @@ pub(super) fn success(output: Output) -> Value {
         "CLI failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.len() <= 32 * 1024);
+    assert!(output.stdout.len() <= 256 * 1024);
     serde_json::from_slice(&output.stdout).expect("success must be exactly one JSON value")
 }
 

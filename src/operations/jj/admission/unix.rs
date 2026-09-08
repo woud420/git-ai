@@ -224,6 +224,7 @@ fn admit_captured(
     let admission = verify::finish(requested, closure);
     if admission.receipt().admission_id() != admission_id
         || admission.receipt().captured_head_ids() != history.head_ids()
+        || admission.head_closures() != history.head_closures()
         || admission.reached_baseline_ids() != history.reached_baseline_ids()
         || admission.reaches_root() != history.reaches_root()
     {

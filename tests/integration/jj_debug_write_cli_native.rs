@@ -8,6 +8,8 @@ use support::*;
 mod behavior;
 #[path = "jj_debug_write_cli_errors.rs"]
 mod errors;
+#[path = "jj_head_closure_consumers.rs"]
+mod head_closures;
 #[path = "jj_debug_write_cli_real.rs"]
 mod real;
 
@@ -71,6 +73,7 @@ pub(super) fn dispatch(case: &Case, config: &Config) {
         .strip_prefix("history:admission:cli:write:")
         .unwrap()
     {
+        name if name.starts_with("head_closures:") => head_closures::dispatch(case, config),
         "initialize" => behavior::initialize_case(case, config),
         "capture" => behavior::capture_case(case, config),
         "head_order" => behavior::head_order(case, config),

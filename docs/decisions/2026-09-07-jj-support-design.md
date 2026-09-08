@@ -9,6 +9,8 @@ Reader decision: [ENG-413 proof and replay contract](2026-09-07-jj-reader-proof.
 
 Journal contract: [ENG-415 local storage increment](2026-09-07-jj-observation-journal.md). Atomic evidence capture and observed progress are implemented. The experimental [daemon observer](2026-09-08-jj-daemon-observation.md) consumes the native admission journal; applied attribution remains empty until later replay work.
 
+Per-head original-cutoff lineage is now retained across proofs, collection and admission. The [incremental catch-up proposal](2026-09-08-jj-incremental-catchup.md) separates this prerequisite from planned linked packets and resumable replay; the current history limits remain unchanged.
+
 ## Problem and recommendation
 
 jj stores Git-compatible commits, but its local history operations do not run Git

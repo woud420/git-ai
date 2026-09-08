@@ -1,6 +1,7 @@
 mod content_hash;
 mod wire;
 
+pub mod ancestry;
 pub mod baseline;
 pub mod baseline_persistence;
 pub mod capture;

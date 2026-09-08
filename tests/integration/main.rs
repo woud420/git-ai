@@ -93,6 +93,7 @@ mod internal_spawn_safety;
 mod issue_1204_multi_agent;
 mod jetbrains_download;
 mod jetbrains_ide_types;
+mod jj_ancestry;
 mod jj_baseline;
 mod jj_baseline_persistence;
 mod jj_capture;

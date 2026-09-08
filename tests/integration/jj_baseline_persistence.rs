@@ -23,7 +23,7 @@ mod limits;
 #[path = "jj_baseline_persistence_real.rs"]
 mod real;
 #[path = "jj_baseline_persistence_support.rs"]
-mod support;
+pub(super) mod support;
 #[path = "jj_baseline_persistence_writers.rs"]
 mod writers;
 

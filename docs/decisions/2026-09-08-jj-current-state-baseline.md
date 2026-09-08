@@ -1,6 +1,6 @@
 # Current-state baseline for native jj admission (ENG-415)
 
-Status: proposed — pure preparation and explicit persistence are implemented; native extension admission remains pending.
+Status: proposed — preparation, persistence, capture and pure ancestry are implemented; native admission remains pending.
 
 Start collection from a bounded capture of the current raw operation-head set.
 Prior history remains unverified. Historical verification is a later explicit mode.
@@ -176,9 +176,12 @@ now provide generation checks, two-writer winner, receipt replay, corruption and
 rollback coverage. [Bounded native capture](2026-09-08-jj-native-capture.md) now
 revalidates source locators, samples heads/checkout and joins the checkout
 workspace to its own verified view. The captured source identity is sampled;
-durable registration and workspace readiness remain separate. Next add native
-extension admission and tests for N→H, late D→B, mixed-parent joins, opaque-known-
-parent rejection, source/epoch mismatch, and bounded gaps.
+durable registration and workspace readiness remain separate.
+[Pure ancestry verification](2026-09-08-jj-native-ancestry.md) now covers N→H,
+late D→B, mixed-parent joins, opaque-known-parent rejection, declared scope mismatch
+and bounded gaps. Its borrowed snapshot proof does not establish source residency,
+post-baseline newness or durable admission. Exact baseline IDs and root are its
+only terminals; previous extension certificates remain a later design.
 The separate workspace-join slice must include a real stale linked workspace C
 outside H, prove it remains unavailable, and only make it ready after an admitted
 relation and stable checkout recheck establish the binding.

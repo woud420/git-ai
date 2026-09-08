@@ -1,7 +1,10 @@
 use super::{DB_LABEL, JournalError, PersistenceError, sql_error};
 use rusqlite::{Connection, TransactionBehavior};
 
+mod indexes;
+mod metadata;
 mod native;
+mod registration;
 
 const SCHEMA: &str = "
 CREATE TABLE schema_metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -50,25 +53,40 @@ pub(super) fn initialize(conn: &mut Connection) -> Result<(), JournalError> {
         tx.execute_batch(SCHEMA)
             .map_err(|error| sql_error("create schema", error))?;
     }
-    let version = read_version(&tx)?;
+    let mut version = read_version(&tx)?;
     verify_opaque_schema(&tx)?;
     if version == 1 {
         // Unconditional creation rejects even correctly shaped partial native
         // tables. The version and all DDL remain in this same transaction.
         native::create(&tx)?;
-        let updated = tx
-            .execute(
-                "UPDATE schema_metadata SET value = '2' WHERE key = 'version'",
-                [],
-            )
-            .map_err(|error| sql_error("record native schema version", error))?;
-        if updated != 1 || read_version(&tx)? != 2 {
-            return Err(unsupported_schema());
-        }
+        advance_version(&tx, 2, "record native schema version")?;
+        version = 2;
     }
     native::verify(&tx)?;
+    if version == 2 {
+        registration::create(&tx)?;
+        advance_version(&tx, 3, "record registration schema version")?;
+    }
+    registration::verify(&tx)?;
     tx.commit()
         .map_err(|error| sql_error("commit schema initialization", error))
+}
+
+fn advance_version(
+    conn: &Connection,
+    version: u8,
+    operation: &'static str,
+) -> Result<(), JournalError> {
+    let updated = conn
+        .execute(
+            "UPDATE schema_metadata SET value = ?1 WHERE key = 'version'",
+            [version.to_string()],
+        )
+        .map_err(|error| sql_error(operation, error))?;
+    if updated != 1 || read_version(conn)? != version {
+        return Err(unsupported_schema());
+    }
+    Ok(())
 }
 
 fn read_version(conn: &Connection) -> Result<u8, JournalError> {
@@ -77,7 +95,7 @@ fn read_version(conn: &Connection) -> Result<u8, JournalError> {
     let mut statement = conn
         .prepare(
             "SELECT CASE WHEN typeof(value) = 'text' THEN
-                 CASE CAST(value AS BLOB) WHEN X'31' THEN 1 WHEN X'32' THEN 2 END
+                 CASE CAST(value AS BLOB) WHEN X'31' THEN 1 WHEN X'32' THEN 2 WHEN X'33' THEN 3 END
              END FROM schema_metadata WHERE key = 'version' LIMIT 2",
         )
         .map_err(|error| sql_error("read schema version", error))?;
@@ -120,7 +138,7 @@ fn unsupported_schema() -> JournalError {
     PersistenceError::Migration {
         db: DB_LABEL,
         found: "unsupported or malformed".to_owned(),
-        supported: "2".to_owned(),
+        supported: "3".to_owned(),
     }
     .into()
 }

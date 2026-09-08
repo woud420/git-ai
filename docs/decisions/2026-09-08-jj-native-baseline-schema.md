@@ -2,9 +2,13 @@
 
 Status: accepted — maintained schema migration; baseline installation is a separate API.
 
-The observation database advances from schema version 1 to exact text version
-2. Existing opaque operation, view, source-state and receipt bytes retain their
-version-1 serialization. Two empty native tables add a separate namespace for
+This decision records the version-1-to-2 migration. The maintained initializer
+now also applies the [additive version-3 registration schema](2026-09-08-jj-native-registration-schema.md)
+in the same transaction, preserving these native and opaque records.
+
+The version-2 step advances the database from schema version 1 to exact text
+version 2. Existing opaque operation, view, source-state and receipt bytes retain
+their version-1 serialization. Two empty native tables add a separate namespace for
 an immutable baseline record and its source progress pointer. Their composite
 foreign key keeps the source and baseline identity together; neither table
 references the opaque observation queue.

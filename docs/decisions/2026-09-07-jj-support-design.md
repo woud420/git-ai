@@ -167,8 +167,10 @@ The selected head bytes are verified, while their earlier history remains unveri
 [Bounded current-state capture](2026-09-08-jj-native-capture.md) now supplies
 source-bound sampled head evidence and the workspace checkout's own verified view.
 [Pure ancestry verification](2026-09-08-jj-native-ancestry.md) now closes a bounded
-supplied DAG on the reopened baseline or virtual root. Durable registration and
-ancestry admission remain separate gates.
+supplied DAG on the reopened baseline or virtual root. The additive
+[registration schema](2026-09-08-jj-native-registration-schema.md) now reserves
+source and workspace records without backfill. Durable registration and ancestry
+admission remain separate gates.
 Baseline anchors receive no retrospective attribution and do not enter the pending
 application queue. Ordinary checksummed observations are not native ancestry
 boundaries; subsequent traversal must close on the permitted baseline or verified
@@ -297,9 +299,10 @@ P0's reader proof and P1's diagnostic are committed. P2 has a durable observatio
 journal, bounded lookup, native operation/view hashing, captured-envelope joins
 and completed-checkout decoding, plus explicit baseline persistence and verified
 reopening. Bounded current-state capture and pure ancestry verification are also
-implemented. Durable source registration, native admission and the observer remain
-pending. Later phases remain tracked until their acceptance tests pass. These
-increments are
+implemented. Schema v3 adds empty source/workspace registration tables while
+preserving existing baseline receipts. Registration record APIs, durable source
+registration, native admission and the observer remain pending. Later phases
+remain tracked until their acceptance tests pass. These increments are
 published on [draft PR #247](https://github.com/woud420/git-ai/pull/247) and do not
 enable native attribution. Work continues in scoped commits with human review
 before merge.

@@ -12,6 +12,7 @@ pub mod observability;
 pub mod operations;
 pub mod process_spawn;
 pub mod process_timeout;
+pub mod regular_file;
 pub mod repo_url;
 pub mod tokio_runtime;
 pub mod uuid;

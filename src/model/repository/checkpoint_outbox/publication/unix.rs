@@ -3,6 +3,7 @@ pub(super) use super::unix_durability::validate_root_metadata;
 use super::unix_durability::{open_directory_path, open_secure_root_directory};
 use super::{OutboxLimits, PublishedRecord};
 use crate::model::repository::checkpoint_outbox::CheckpointOutboxError;
+pub(super) use crate::regular_file::open_record_at;
 use CheckpointOutboxError as E;
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::{self, File, Metadata};
@@ -323,21 +324,6 @@ fn validate_acknowledged_record(
     }
 
     Ok(root.join(OsStr::from_bytes(ready_name.to_bytes())))
-}
-
-pub(super) fn open_record_at(directory_fd: RawFd, name: &CStr) -> io::Result<File> {
-    let descriptor = unsafe {
-        libc::openat(
-            directory_fd,
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        )
-    };
-    if descriptor < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(unsafe { File::from_raw_fd(descriptor) })
-    }
 }
 
 pub(in crate::model::repository::checkpoint_outbox) fn open_private_record_at(

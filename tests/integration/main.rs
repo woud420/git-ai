@@ -131,6 +131,7 @@ mod rebase_merge_commit_note_leak;
 mod rebase_note_integrity;
 mod rebase_realworld;
 mod refs_unit;
+mod regular_file;
 mod repo_storage_unit;
 mod repository_unit;
 mod reset;

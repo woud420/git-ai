@@ -1,5 +1,5 @@
 use super::*;
-use crate::debug_context::{jj, require_pinned_jj, snapshot};
+use crate::debug_context::{jj, read_jj_fixture, require_pinned_jj, snapshot};
 use git_ai::operations::jj::operation::{MAX_OPERATION_BYTES, decode_operation};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,13 +14,6 @@ fn bounded_files(directory: &Path, maximum: usize) -> Vec<PathBuf> {
     }
     files.sort();
     files
-}
-
-fn immutable_bytes(path: &Path, maximum: usize) -> Vec<u8> {
-    let metadata = fs::symlink_metadata(path).unwrap();
-    assert!(metadata.is_file());
-    assert!(metadata.len() <= maximum as u64);
-    fs::read(path).unwrap()
 }
 
 fn operation_head(root: &Path) -> String {
@@ -170,14 +163,14 @@ fn qualify_view_store(colocated: bool) {
         let operation = decode_operation(
             JJ_OBSERVATION_READER_PROFILE,
             operation_id,
-            &immutable_bytes(&path, MAX_OPERATION_BYTES),
+            &read_jj_fixture(&path, MAX_OPERATION_BYTES),
         )
         .unwrap();
         let view_path = store.join("views").join(&operation.view_id);
         let view = decode_view(
             JJ_OBSERVATION_READER_PROFILE,
             &operation.view_id,
-            &immutable_bytes(&view_path, MAX_VIEW_BYTES),
+            &read_jj_fixture(&view_path, MAX_VIEW_BYTES),
         )
         .unwrap();
         assert_eq!(view.view_id, operation.view_id);

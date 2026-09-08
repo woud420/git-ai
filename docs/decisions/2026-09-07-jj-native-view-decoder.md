@@ -96,7 +96,9 @@ policy checks. Lint first found fixture-only clone/concatenation warnings; these
 were fixed in the test builder/generator without changing any raw bytes or hashes,
 and all 36 view tests passed again.
 
-Bounded integrated-head traversal, checkout evidence and journal admission remain
+The [checkout decoder](2026-09-07-jj-native-checkout-decoder.md) now decodes
+completed workspace context. Bounded integrated-head traversal, consistent
+checkout sampling and journal admission remain
 subsequent increments. Verifying an individual persisted record cannot certify
 opaque ancestors behind it; efficient resume requires an explicit validated
 admission boundary tied to journal generation.

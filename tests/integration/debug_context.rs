@@ -260,6 +260,13 @@ fn debug_context_does_not_spawn_git_or_jj() {
     assert!(!marker.exists(), "context invoked Git or jj");
 }
 
+pub(super) fn read_jj_fixture(path: &Path, maximum: usize) -> Vec<u8> {
+    let metadata = fs::symlink_metadata(path).unwrap();
+    assert!(metadata.is_file());
+    assert!(metadata.len() <= maximum as u64);
+    fs::read(path).unwrap()
+}
+
 pub(super) fn require_pinned_jj() {
     let binary = std::env::var_os("GIT_AI_TEST_JJ_BINARY")
         .expect("the explicit jj test lane requires GIT_AI_TEST_JJ_BINARY");

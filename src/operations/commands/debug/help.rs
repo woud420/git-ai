@@ -6,6 +6,8 @@ pub(super) fn print_debug_help() {
     eprintln!("Usage:");
     eprintln!("  git-ai debug [--skip-trace2-checks]");
     eprintln!("  git-ai debug context --json");
+    eprintln!("  git-ai debug jj status --journal PATH --json");
+    eprintln!("  git-ai debug jj receipt --journal PATH --source ID --admission ID --json");
     eprintln!("  git-ai debug --help");
     eprintln!();
     eprintln!("Options:");

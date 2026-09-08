@@ -23,6 +23,7 @@ use std::time::Duration;
 
 mod context;
 mod help;
+mod jj;
 use help::print_debug_help;
 
 const MIN_GIT_VERSION: GitVersion = GitVersion {
@@ -41,6 +42,9 @@ struct DebugOptions {
 }
 
 pub fn handle_debug(args: &[String]) {
+    if args.first().is_some_and(|arg| arg == "jj") {
+        std::process::exit(jj::handle(&args[1..]));
+    }
     if args.first().is_some_and(|arg| arg == "context") {
         std::process::exit(context::handle(&args[1..]));
     }

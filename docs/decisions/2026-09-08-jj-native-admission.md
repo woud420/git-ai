@@ -183,3 +183,7 @@ CLI command or Trace2 ingestion work. Complete paths to the original cutoff may
 eventually exceed bounds; this version neither widens that cutoff nor silently
 resumes partial history. Power-loss simulation and tamper-proof storage are not
 claimed by transaction rollback tests.
+
+The later [observation diagnostics increment](2026-09-08-jj-observation-diagnostics.md)
+adds experimental read-only status and historical receipt commands. Explicit
+initialization/capture commands and automatic observation remain follow-ups.

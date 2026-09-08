@@ -8,4 +8,5 @@ pub mod git_ai_handlers;
 pub mod git_handlers;
 mod hook_input;
 mod machine_json;
+pub(crate) use machine_json::print_machine_json;
 pub(crate) mod style;

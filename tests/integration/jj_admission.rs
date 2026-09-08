@@ -7,6 +7,9 @@ use git_ai::operations::jj::admission::{
     read_native_admission, read_registered_admission_state,
 };
 
+#[path = "jj_debug_cli_native.rs"]
+mod debug_cli;
+
 #[path = "jj_admission_support.rs"]
 mod support;
 use support::{
@@ -226,6 +229,7 @@ pub(super) fn dispatch(case: &Case, config: &Config) {
         "policy_denied" | "canonical_denied" => policy::denied(case, config),
         "real_install" => real::install(case, config),
         "real_admit" => real::admit(case, config),
+        name if name.starts_with("cli:") => debug_cli::dispatch(case, config),
         name if name.starts_with("corrupt:") => storage::corrupt(case, config),
         name if name.starts_with("gap:") => storage::gap(case, config),
         name if name.starts_with("duplicate:") => storage::duplicate(case, config),

@@ -1,6 +1,6 @@
 use super::{JournalError, invalid};
 
-/// Bounds encoded state and operation BLOBs selected by journal lookups.
+/// Bounds encoded BLOBs selected by journal lookups and record inspection.
 /// Bounded metadata columns and SQLite's internal/page I/O are not measured.
 #[derive(Debug)]
 pub struct ReadBudget {

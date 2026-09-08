@@ -175,3 +175,6 @@ fn jj_registration_schema_concurrent_v2_openers_observe_complete_v3_only() {
     assert_eq!(native_snapshot(&conn), before_native);
     assert_eq!(opaque_snapshot(&conn), before_opaque);
 }
+
+#[path = "jj_registration_records.rs"]
+mod records;

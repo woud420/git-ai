@@ -18,6 +18,7 @@ mod lookup;
 pub(crate) mod native_baseline;
 mod read_budget;
 mod records;
+mod registration_records;
 mod schema;
 
 pub const MAX_JJ_OBSERVATION_PENDING_LIMIT: usize = 128;

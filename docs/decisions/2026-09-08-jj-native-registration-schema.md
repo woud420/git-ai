@@ -52,7 +52,8 @@ immutable first-version policy. A hash collision is a conflict requiring recover
 Locator identity, device/inode equality and absence of a matching row cannot prove
 that a repository has never been registered.
 
-Record codecs, guarded queries and writers are subsequent changes. The migration
+[Bounded record inspection](2026-09-08-jj-native-registration-records.md) now
+provides canonical codecs and individual reads. Writers remain subsequent work. The migration
 does not introduce publicly constructible registration proofs or a model-layer
 dependency on capture code. The later coordinator must join a fresh source witness,
 complete checked records and native baseline evidence before returning a proof.

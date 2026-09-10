@@ -48,10 +48,27 @@ pub(crate) fn discover_repository_policy_location_no_git_exec(
 pub(crate) fn load_repository_policy_context_no_git_exec(
     location: &RepositoryPolicyLocation,
 ) -> Result<RepositoryPolicyContext, GitAiError> {
-    let config = git_config_file_for_repo_paths(&location.git_dir, &location.git_common_dir)?;
+    load_repository_policy_context_for_paths(
+        &location.canonical_workdir,
+        &location.git_dir,
+        &location.git_common_dir,
+    )
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn canonicalize_repository_policy_path(path: &Path) -> Result<PathBuf, GitAiError> {
+    canonicalize_workdir(path)
+}
+
+pub(crate) fn load_repository_policy_context_for_paths(
+    canonical_workdir: &Path,
+    git_dir: &Path,
+    git_common_dir: &Path,
+) -> Result<RepositoryPolicyContext, GitAiError> {
+    let config = git_config_file_for_repo_paths(git_dir, git_common_dir)?;
     let remotes = remotes_with_urls_from_config(&config);
     Ok(RepositoryPolicyContext {
-        canonical_workdir: location.canonical_workdir.clone(),
+        canonical_workdir: canonical_workdir.to_owned(),
         remotes,
     })
 }

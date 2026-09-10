@@ -1,0 +1,18 @@
+flowchart TD
+    A["Platform, expected shape and opt-in<br/>Retained sample, policy and canonical binding"]:::service --> B["Verify saved registration<br/>Collect bounded history to original cutoff or root"]:::job
+    B --> C["Begin IMMEDIATE<br/>Complete saved/current/requested SQL snapshot"]:::db
+    C --> D["Verify native baseline, latest and distinct request<br/>Reject gaps, duplicates and surviving later packets"]:::job
+    D --> E{"Exact historical request?"}:::service
+    E -- "Yes: preserve current cursor" --> G["Use verified historical snapshot<br/>No write or SQL readback pass"]:::db
+    E -- "No" --> F["Exact generation and head-set CAS<br/>Insert packet; insert or update state"]:::db
+    F --> H["Drop encoded buffers; complete readback<br/>Require exact intent and native verification"]:::job
+    G --> I["Build owned result before commit<br/>Requested receipt and current cursor stay separate"]:::service
+    H --> I
+    I --> J["Release capture borrows<br/>Final retained seal, metadata, edges and deadline"]:::storage
+    J --> K["Sole SQL commit; return historical observation<br/>No attribution or applied progress"]:::db
+    D -. "Any failed stage before commit" .-> L["Rollback or refuse<br/>No admission result or repair"]:::external
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30
+    classDef job fill:#E8EAF6,stroke:#3949AB,color:#111A55
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16
+    classDef db fill:#FFF3E0,stroke:#EF6C00,color:#4A2500

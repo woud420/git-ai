@@ -1,0 +1,18 @@
+flowchart TD
+    S["Require nonempty collection allowlist before capture"]:::service --> A
+    A["Retained native capture and exact seal sample"]:::job --> B["Full policy and canonical descriptor join"]:::service
+    B --> C{"Namespace and seal state?"}
+    C -- "Absent" --> D["Require clear guards; recheck absence and retained edges"]:::db
+    D --> E["Reopen returns None; no initialization authority"]:::service
+    C -- "Valid seal" --> F["Read source, original, selected and native snapshot"]:::db
+    C -- "Incomplete or malformed" --> L["Unavailable; no adoption, cleanup or rebaseline"]:::external
+    F --> G["Join fresh bindings; verify saved checkout and native baseline"]:::job
+    G --> H["Final retained metadata, edge and seal check"]:::storage
+    H --> I["Return original receipt and fresh checkout relation"]:::service
+    F -. "Missing or conflicting state" .-> L
+    G -. "Mismatch" .-> L
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30
+    classDef job fill:#E8EAF6,stroke:#3949AB,color:#111A55
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16
+    classDef db fill:#FFF3E0,stroke:#EF6C00,color:#4A2500

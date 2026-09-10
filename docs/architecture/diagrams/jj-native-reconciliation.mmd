@@ -1,0 +1,27 @@
+flowchart TD
+    start["One reconciliation attempt<br/>Caller pins workspace, scope and cursor"] --> capture["Validate expectation and opt-in<br/>Retain source; apply policy<br/>Verify saved registration and target"]
+    capture --> heads{"Fresh sampled heads<br/>equal expected set?"}
+    heads -->|Yes| begin["Begin IMMEDIATE<br/>No requested packet ID"]
+    begin --> verify["Verify complete SQL/native snapshot<br/>Pin registration and expected target<br/>Require exact cursor"]
+    verify --> unchangedResult["Construct owned registered state<br/>No raw evidence clones"]
+    unchangedResult --> finalU["Final retained-source and deadline checks<br/>Reservation remains held"]
+    finalU --> rollback["Drop unstaged transaction"]
+    rollback --> unchanged["Return Unchanged<br/>No parent walk or admission write"]
+    heads -->|No| collect["Collect bounded closure<br/>Original cutoff or root"]
+    collect --> prepare["Prepare canonical request<br/>Borrow retained history"]
+    prepare --> transaction["Begin IMMEDIATE<br/>Verify SQL/native snapshot and target"]
+    transaction --> retry{"Exact historical<br/>request exists?"}
+    retry -->|Yes| prior["Retain original receipt<br/>Preserve current cursor"]
+    retry -->|No| cas["Require exact cursor<br/>Stage packet and state<br/>Verify intended readback"]
+    prior --> result["Construct owned admission result<br/>Recheck expected workspace target"]
+    cas --> result
+    result --> finalA["Final retained-source and deadline checks"]
+    finalA --> commit["Sole SQL commit"]
+    commit --> admission["Return Admission<br/>Native attribution remains disabled"]
+    capture -. Failure .-> refuse["Refuse whole attempt<br/>No refresh, adoption or partial progress"]
+    verify -. Failure .-> refuse
+    finalU -. Failure .-> refuse
+    collect -. Failure .-> refuse
+    transaction -. Failure .-> refuse
+    cas -. Failure .-> refuse
+    finalA -. Failure .-> refuse

@@ -22,6 +22,8 @@ pub mod diff_json;
 pub mod domain;
 pub mod hunk_shift;
 pub mod imara_diff_utils;
+pub mod jj_observation;
+pub mod jj_observer;
 pub mod metrics;
 pub mod move_detection;
 pub mod repository;
@@ -32,3 +34,6 @@ pub mod stream_watermark;
 pub mod telemetry;
 pub mod transcript;
 pub mod working_log;
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod jj_observer_paths_tests;

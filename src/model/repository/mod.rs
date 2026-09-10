@@ -18,8 +18,12 @@ pub mod bash_history_db;
 pub mod checkpoint_outbox;
 pub mod error;
 pub mod internal_db;
+pub mod jj_observation_journal;
 pub mod lock_file;
 pub mod metrics_db;
 pub mod notes_db;
 pub mod sqlite;
 pub mod streams_db;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) mod jj_observer_intent;

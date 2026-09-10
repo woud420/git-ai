@@ -19,6 +19,17 @@ use std::collections::HashMap;
 pub enum ControlRequest {
     #[serde(rename = "ping")]
     Ping,
+    #[serde(rename = "jj.observer.enable.v1")]
+    JjObserverEnable {
+        journal_path_hex: String,
+        workspace_path_hex: String,
+    },
+    #[serde(rename = "jj.observer.status.v1")]
+    JjObserverStatus,
+    #[serde(rename = "jj.observer.disable.v1")]
+    JjObserverDisable,
+    #[serde(rename = "jj.observer.resume.v1")]
+    JjObserverResume,
     #[serde(rename = "checkpoint.run")]
     CheckpointRun { request: Box<CheckpointRequest> },
     #[serde(rename = "checkpoint.deliver")]

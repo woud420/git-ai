@@ -3,11 +3,12 @@ pub(super) use super::unix_durability::validate_root_metadata;
 use super::unix_durability::{open_directory_path, open_secure_root_directory};
 use super::{OutboxLimits, PublishedRecord};
 use crate::model::repository::checkpoint_outbox::CheckpointOutboxError;
+pub(super) use crate::regular_file::open_record_at;
 use CheckpointOutboxError as E;
 use std::ffi::{CStr, CString, OsStr};
 use std::fs::{self, File, Metadata};
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -157,58 +158,29 @@ impl FileIdentity {
 }
 
 pub(super) struct DirectoryEntries {
-    stream: *mut libc::DIR,
+    inner: crate::unix_directory::DirectoryEntries,
 }
 
 impl DirectoryEntries {
     pub(super) fn open(directory_fd: RawFd) -> Result<Self, CheckpointOutboxError> {
-        let dot = c".";
-        let descriptor = unsafe {
-            libc::openat(
-                directory_fd,
-                dot.as_ptr(),
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )
-        };
-        if descriptor < 0 {
-            return Err(E::from_io("scan root", io::Error::last_os_error()));
-        }
-        let stream = unsafe { libc::fdopendir(descriptor) };
-        if stream.is_null() {
-            let error = io::Error::last_os_error();
-            unsafe {
-                libc::close(descriptor);
-            }
-            return Err(E::from_io("scan root", error));
-        }
-        Ok(Self { stream })
+        let inner = crate::unix_directory::DirectoryEntries::open(directory_fd)
+            .map_err(|error| E::from_io("scan root", error))?;
+        Ok(Self { inner })
     }
 
     pub(super) fn next_name(&mut self) -> Result<Option<CString>, CheckpointOutboxError> {
         loop {
-            clear_errno();
-            let entry = unsafe { libc::readdir(self.stream) };
-            if entry.is_null() {
-                let errno = current_errno();
-                return if errno == 0 {
-                    Ok(None)
-                } else {
-                    Err(E::from_io("scan root", io::Error::from_raw_os_error(errno)))
-                };
-            }
-            let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+            let Some(name) = self
+                .inner
+                .next_raw_name()
+                .map_err(|error| E::from_io("scan root", error))?
+            else {
+                return Ok(None);
+            };
             if name.to_bytes() == b"." || name.to_bytes() == b".." {
                 continue;
             }
-            return Ok(Some(name.to_owned()));
-        }
-    }
-}
-
-impl Drop for DirectoryEntries {
-    fn drop(&mut self) {
-        unsafe {
-            libc::closedir(self.stream);
+            return Ok(Some(name));
         }
     }
 }
@@ -325,21 +297,6 @@ fn validate_acknowledged_record(
     Ok(root.join(OsStr::from_bytes(ready_name.to_bytes())))
 }
 
-pub(super) fn open_record_at(directory_fd: RawFd, name: &CStr) -> io::Result<File> {
-    let descriptor = unsafe {
-        libc::openat(
-            directory_fd,
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        )
-    };
-    if descriptor < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(unsafe { File::from_raw_fd(descriptor) })
-    }
-}
-
 pub(in crate::model::repository::checkpoint_outbox) fn open_private_record_at(
     directory: &File,
     name: &OsStr,
@@ -350,30 +307,6 @@ pub(in crate::model::repository::checkpoint_outbox) fn open_private_record_at(
         .map_err(|_| CheckpointOutboxError::UnsafeReadyRecord)?;
     validate_record_file(&record)?;
     Ok(record)
-}
-
-#[cfg(target_os = "macos")]
-fn clear_errno() {
-    unsafe {
-        *libc::__error() = 0;
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn current_errno() -> libc::c_int {
-    unsafe { *libc::__error() }
-}
-
-#[cfg(target_os = "linux")]
-fn clear_errno() {
-    unsafe {
-        *libc::__errno_location() = 0;
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn current_errno() -> libc::c_int {
-    unsafe { *libc::__errno_location() }
 }
 
 #[cfg(test)]
@@ -405,26 +338,23 @@ fn create_temporary_record(
 ) -> Result<(File, TemporaryRecord), CheckpointOutboxError> {
     for _ in 0..TEMP_CREATE_ATTEMPTS {
         let name = c_filename(&format!(".{}.tmp", crate::uuid::generate_v4()))?;
-        let descriptor = unsafe {
-            libc::openat(
-                directory.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                RECORD_MODE as libc::c_uint,
-            )
+        let error = match crate::unix_publication::create_new_file_at(
+            directory.as_raw_fd(),
+            &name,
+            RECORD_MODE,
+        ) {
+            Ok(file) => {
+                return Ok((
+                    file,
+                    TemporaryRecord {
+                        directory_fd: directory.as_raw_fd(),
+                        name,
+                        published: false,
+                    },
+                ));
+            }
+            Err(error) => error,
         };
-        if descriptor >= 0 {
-            let file = unsafe { File::from_raw_fd(descriptor) };
-            return Ok((
-                file,
-                TemporaryRecord {
-                    directory_fd: directory.as_raw_fd(),
-                    name,
-                    published: false,
-                },
-            ));
-        }
-        let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::AlreadyExists {
             return Err(E::from_io("create temporary record", error));
         }
@@ -509,42 +439,7 @@ pub(super) fn rename_replace(
     syscall_result(result)
 }
 
-#[cfg(target_os = "macos")]
-fn rename_no_replace(
-    directory_fd: RawFd,
-    source: &std::ffi::CStr,
-    destination: &std::ffi::CStr,
-) -> io::Result<()> {
-    let result = unsafe {
-        libc::renameatx_np(
-            directory_fd,
-            source.as_ptr(),
-            directory_fd,
-            destination.as_ptr(),
-            libc::RENAME_EXCL,
-        )
-    };
-    syscall_result(result)
-}
-
-#[cfg(target_os = "linux")]
-fn rename_no_replace(
-    directory_fd: RawFd,
-    source: &std::ffi::CStr,
-    destination: &std::ffi::CStr,
-) -> io::Result<()> {
-    let result = unsafe {
-        libc::syscall(
-            libc::SYS_renameat2,
-            directory_fd,
-            source.as_ptr(),
-            directory_fd,
-            destination.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    syscall_result(result as libc::c_int)
-}
+use crate::unix_publication::rename_no_replace;
 
 fn syscall_result(result: libc::c_int) -> io::Result<()> {
     if result == 0 {
@@ -574,3 +469,7 @@ mod tests {
         drop(duplicate);
     }
 }
+
+#[cfg(test)]
+#[path = "outbox_directory_compatibility.rs"]
+mod directory_compatibility;

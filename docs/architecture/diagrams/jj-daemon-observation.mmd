@@ -1,0 +1,43 @@
+---
+config:
+  layout: elk
+---
+flowchart TD
+    boot["Startup: load saved intent"]
+    start["Enabled, unblocked startup<br/>Fresh policy and native validation"]
+    control["Eligible new enable or stopped resume<br/>Fresh policy and native validation"]
+    publish["Publish enabled intent<br/>Recheck under mutation gate"]
+    active["Active session<br/>Pinned target and verified cursor"]
+    tick["Reconcile with fresh policy<br/>Original cutoff and bounded evidence"]
+    block["Native failure: stop session<br/>Attempt durable block"]
+    stopped["Disabled or blocked<br/>No new native job"]
+    disable["Disable: stop scheduling and cancel<br/>Publish disabled intent; drain job"]
+    unknown["Intent unavailable: stop and drain<br/>Clear cached authority<br/>Restart reloads the store"]
+
+    boot -->|Enabled and unblocked| start
+    boot -->|Missing, disabled or blocked| stopped
+    boot -->|Invalid or unreadable| unknown
+    start -->|Success: no intent write| active
+    start -->|Failure| block
+    control -->|Validated| publish
+    control -->|Failure: retain prior stopped state| stopped
+    publish -->|Committed| active
+    publish -->|Publication error| unknown
+    active -->|First tick promptly| tick
+    tick -->|Success: carry cursor; drop evidence; wait 5 s| active
+    tick -->|Failure| block
+    block -->|Published block or local terminal stop| stopped
+    block -->|Publication error| unknown
+    disable -->|Disabled intent known; job drained| stopped
+    disable -->|Publication error| unknown
+
+    classDef ui fill:#E0F7FA,stroke:#00838F,color:#00363A
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#123D16
+    classDef job fill:#E8EAF6,stroke:#3949AB,color:#111A55
+    classDef storage fill:#FCE4EC,stroke:#C2185B,color:#4A1028
+    classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30
+    class control,disable ui
+    class active,stopped service
+    class start,tick job
+    class boot,publish,block storage
+    class unknown external

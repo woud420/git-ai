@@ -1,0 +1,18 @@
+flowchart TD
+    A[Reopened baseline and supplied heads / evidence] --> B{Scope and fixed input limits match?}
+    B -- No --> X[Reject entire proof]
+    B -- Yes --> C[Verify every operation / view and charge semantic limits]
+    C -- Failure --> X
+    C -- Success --> D[Walk sorted roots with bounded explicit stack]
+    D --> E{Next ID}
+    E -- Exact saved anchor --> F[Record reached baseline ID]
+    E -- Virtual root --> G[Record root closure]
+    E -- Supplied operation --> H[Visit original ordered parents]
+    E -- Missing or cyclic --> X
+    F --> I{All paths complete?}
+    G --> I
+    H --> E
+    I -- No --> D
+    I -- Yes --> J{Every supplied record reached?}
+    J -- No --> X
+    J -- Yes --> K[Return borrowed ancestry proof]

@@ -1,19 +1,16 @@
+pub(super) use super::models::GitConfigDump;
+pub(super) use super::models::HardwareInfo;
+pub(super) use super::models::PlatformInfo;
+pub(super) use super::models::RepositoryInfo;
+
 use super::capture::{run_command_capture, run_git_command_capture};
 use super::formatting::append_indented_block;
 use crate::config;
 use crate::operations::git::find_repository_in_path;
-use crate::operations::git::repository::GitIdentityResolution;
 use std::env;
 use std::fmt::Write as _;
 #[cfg(all(unix, not(target_os = "macos")))]
 use std::fs;
-
-#[derive(Default)]
-
-pub(super) struct PlatformInfo {
-    pub(super) kernel: Option<String>,
-    pub(super) hostname: Option<String>,
-}
 
 pub(super) fn collect_platform_info() -> PlatformInfo {
     PlatformInfo {
@@ -47,14 +44,6 @@ pub(super) fn collect_hostname() -> Option<String> {
     }
 
     run_command_capture("hostname", &[]).ok()
-}
-
-#[derive(Default)]
-pub(super) struct HardwareInfo {
-    pub(super) cpu_model: Option<String>,
-    pub(super) physical_cores: Option<usize>,
-    pub(super) logical_cores: Option<usize>,
-    pub(super) total_memory_bytes: Option<u64>,
 }
 
 pub(super) fn collect_hardware_info() -> HardwareInfo {
@@ -164,19 +153,6 @@ pub(super) fn format_bytes(bytes: u64) -> String {
     format!("{:.2} {} ({} bytes)", value, UNITS[unit], bytes)
 }
 
-pub(super) struct RepositoryInfo {
-    pub(super) in_repository: bool,
-    pub(super) error: Option<String>,
-    pub(super) workdir: Option<String>,
-    pub(super) git_dir: Option<String>,
-    pub(super) common_dir: Option<String>,
-    pub(super) branch: Option<String>,
-    pub(super) head: Option<String>,
-    pub(super) hooks_path: Option<String>,
-    pub(super) remotes: Vec<(String, String)>,
-    pub(super) committer_identity: Option<GitIdentityResolution>,
-}
-
 pub(super) fn collect_repository_info() -> RepositoryInfo {
     let cwd = env::current_dir()
         .map(|p| p.display().to_string())
@@ -215,11 +191,6 @@ pub(super) fn collect_repository_info() -> RepositoryInfo {
         remotes: repo.remotes_with_urls().unwrap_or_default(),
         committer_identity: Some(committer_identity),
     }
-}
-
-pub(super) struct GitConfigDump {
-    pub(super) command: String,
-    pub(super) output: Result<String, String>,
 }
 
 pub(super) fn collect_git_config_dump(git_cmd: &str) -> GitConfigDump {

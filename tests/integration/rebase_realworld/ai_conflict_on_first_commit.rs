@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, HumanContextAttribution, TestRepo, assert_blame_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, get_commit_chain,
-};
+use super::*;
 
 /// Test 4: version.py — conflict is on C1 (the VERY FIRST feature commit).
 /// Feature changes VERSION to "2.0", main changes it to "1.5".

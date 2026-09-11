@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_sample_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, get_commit_chain,
-};
+use super::*;
 
 /// Test 9: Large function blocks with 20-line license header prepended.
 /// Feature adds 15-AI-line functions to processor.rs per commit.

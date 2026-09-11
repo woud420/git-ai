@@ -1,3 +1,5 @@
+pub(super) use super::types::PreviousFileState;
+
 use super::metrics::{FileLineStats, compute_file_line_stats};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::{
@@ -12,13 +14,6 @@ use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-
-/// Latest checkpoint state needed to process a file in the next checkpoint.
-#[derive(Debug, Clone)]
-pub(super) struct PreviousFileState {
-    blob_sha: String,
-    attributions: Vec<Attribution>,
-}
 
 pub(super) fn checkpoint_error(kind: std::io::ErrorKind, message: String) -> GitAiError {
     PersistenceError::Io {

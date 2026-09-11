@@ -33,7 +33,6 @@ mod startup_lock_tests;
 #[cfg(any(windows, not(any(test, feature = "test-support"))))]
 #[path = "daemon_spawn.rs"]
 mod detached;
-#[cfg(any(windows, not(any(test, feature = "test-support"))))]
 
 pub fn handle_daemon(args: &[String]) {
     if args.is_empty() || is_help(args[0].as_str()) {

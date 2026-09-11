@@ -1,3 +1,5 @@
+pub(super) use super::models::InstallConfig;
+
 use super::cli::InstallOptions;
 use super::{
     TRACE2_EVENT_NESTING_KEY, TRACE2_EVENT_NESTING_VALUE, TRACE2_EVENT_TARGET_KEY,
@@ -129,12 +131,6 @@ pub(super) fn ensure_daemon(dry_run: bool) {
 
 pub(super) fn should_include_installer(id: &str, options: &InstallOptions) -> bool {
     options.include_visual_studio_extension || id != VISUAL_STUDIO_INSTALLER_ID
-}
-
-#[derive(Default)]
-pub(super) struct InstallConfig {
-    pub(super) api_base: Option<String>,
-    pub(super) api_key: Option<String>,
 }
 
 pub(super) fn persist_install_config_with_values(

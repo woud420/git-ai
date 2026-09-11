@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_note_base_commit_matches, assert_note_files_exact, fs,
-    get_commit_chain,
-};
+use super::*;
 
 /// Test 10: Rust 7-commit chain — feature adds AI functions across multiple
 /// files; main edits shared.rs causing conflict on C4 (middle of a 7-commit

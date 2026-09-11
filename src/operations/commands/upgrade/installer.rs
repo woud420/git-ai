@@ -1,4 +1,11 @@
 #[cfg(windows)]
+pub(super) use super::models::ProcessEntry32W;
+#[cfg(windows)]
+pub(super) use super::models::WINDOWS_MAX_PATH;
+#[cfg(windows)]
+pub(super) use super::models::WindowsHandle;
+
+#[cfg(windows)]
 use super::{ENV_BACKGROUND_UPGRADE_WORKER, GIT_AI_RESTART_DAEMON_AFTER_INSTALL_ENV};
 use super::{GIT_AI_DAEMON_UPGRADE_ENV, GIT_AI_RELEASE_ENV};
 use std::fs;
@@ -9,28 +16,9 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 #[cfg(windows)]
-pub(super) type WindowsHandle = *mut std::ffi::c_void;
-#[cfg(windows)]
 pub(super) const TH32CS_SNAPPROCESS: u32 = 0x00000002;
 #[cfg(windows)]
 pub(super) const INVALID_HANDLE_VALUE: WindowsHandle = (-1isize) as WindowsHandle;
-#[cfg(windows)]
-pub(super) const WINDOWS_MAX_PATH: usize = 260;
-
-#[cfg(windows)]
-#[repr(C)]
-pub(super) struct ProcessEntry32W {
-    pub(super) dw_size: u32,
-    pub(super) cnt_usage: u32,
-    pub(super) th32_process_id: u32,
-    pub(super) th32_default_heap_id: usize,
-    pub(super) th32_module_id: u32,
-    pub(super) cnt_threads: u32,
-    pub(super) th32_parent_process_id: u32,
-    pub(super) pc_pri_class_base: i32,
-    pub(super) dw_flags: u32,
-    pub(super) sz_exe_file: [u16; WINDOWS_MAX_PATH],
-}
 
 #[cfg(windows)]
 unsafe extern "system" {

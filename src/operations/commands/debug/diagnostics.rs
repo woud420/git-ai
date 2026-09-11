@@ -1,3 +1,8 @@
+pub(super) use super::models::GitCommitterIdentityInfo;
+pub(super) use super::models::GitDebugDiagnostics;
+pub(super) use super::models::GitVersion;
+pub(super) use super::models::RepositoryCommitterIdentity;
+
 use super::formatting::{append_indented_block_with_prefix, debug_progress};
 use super::system::RepositoryInfo;
 use super::{DebugOptions, SKIP_TRACE2_CHECKS_FLAG};
@@ -7,31 +12,12 @@ use crate::operations::daemon::self_check::{
     DiagnosticCheckResult, DiagnosticStatus, GitDiagnosticTarget,
 };
 use crate::operations::git::repository::{
-    GitAuthorIdentity, GitConfigIdentityResolution, GitIdentityResolution,
-    global_git_config_identity_resolution,
+    GitAuthorIdentity, GitConfigIdentityResolution, global_git_config_identity_resolution,
 };
 use crate::operations::git::trace2_validation::{
     check_trace2_global_config, run_trace2_file_self_check,
 };
 use std::fmt::Write as _;
-
-pub(super) struct GitDebugDiagnostics {
-    pub(super) target: GitDiagnosticTarget,
-    pub(super) trace2_config: DiagnosticCheckResult,
-    pub(super) attribution: DiagnosticCheckResult,
-    pub(super) trace2: DiagnosticCheckResult,
-}
-
-pub(super) struct GitCommitterIdentityInfo {
-    pub(super) global_config: Result<GitConfigIdentityResolution, String>,
-    pub(super) repository: RepositoryCommitterIdentity,
-    pub(super) author_config: config::AuthorConfig,
-}
-
-pub(super) enum RepositoryCommitterIdentity {
-    InRepository(GitIdentityResolution),
-    NotInRepository(String),
-}
 
 pub(super) fn collect_git_committer_identity_info(
     repository_info: &RepositoryInfo,
@@ -332,13 +318,6 @@ pub(super) fn append_diagnostic_check(
             }
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct GitVersion {
-    pub(super) major: u32,
-    pub(super) minor: u32,
-    pub(super) patch: u32,
 }
 
 impl std::fmt::Display for GitVersion {

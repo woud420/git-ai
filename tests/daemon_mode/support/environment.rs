@@ -1,6 +1,4 @@
-#[cfg(unix)]
-use super::fs;
-use super::{Command, DaemonConfig, Path, PathBuf, TestRepo};
+use super::*;
 
 pub(super) fn daemon_control_socket_path(repo: &TestRepo) -> PathBuf {
     repo.daemon_control_socket_path()

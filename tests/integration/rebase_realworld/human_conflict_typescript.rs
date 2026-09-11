@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_note_base_commit_matches, assert_note_files_exact, fs,
-    get_commit_chain,
-};
+use super::*;
 
 /// Test 3: TypeScript api.ts — feature adds AI REST handlers, main adds an
 /// import at the top that conflicts with feature's C3.  C1'–C2' accumulate

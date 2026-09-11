@@ -1,3 +1,10 @@
+mod models;
+use models::ChannelRelease;
+pub use models::DaemonUpdateCheckResult;
+use models::ReleasesResponse;
+use models::UpdateCache;
+use models::UpgradeAction;
+
 mod installer;
 mod release;
 use crate::config::{self, UpdateChannel};
@@ -8,8 +15,6 @@ use installer::run_install_script;
 use release::{
     fetch_and_verify_checksums, fetch_and_verify_install_script, fetch_release_for_channel,
 };
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -26,14 +31,6 @@ const ENV_BACKGROUND_UPGRADE_WORKER: &str = "GIT_AI_BACKGROUND_UPGRADE_WORKER";
 static UPDATE_NOTICE_EMITTED: AtomicBool = AtomicBool::new(false);
 static LAST_BACKGROUND_SPAWN: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, PartialEq)]
-enum UpgradeAction {
-    UpgradeAvailable,
-    AlreadyLatest,
-    RunningNewerVersion,
-    ForceReinstall,
-}
-
 impl UpgradeAction {
     fn to_string(&self) -> &str {
         match self {
@@ -43,21 +40,6 @@ impl UpgradeAction {
             UpgradeAction::ForceReinstall => "force_reinstall",
         }
     }
-}
-
-#[derive(Debug, Clone)]
-struct ChannelRelease {
-    tag: String,
-    semver: String,
-    checksum: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UpdateCache {
-    last_checked_at: u64,
-    available_tag: Option<String>,
-    available_semver: Option<String>,
-    channel: String,
 }
 
 impl UpdateCache {
@@ -77,17 +59,6 @@ impl UpdateCache {
     fn matches_channel(&self, channel: UpdateChannel) -> bool {
         self.channel == channel.as_str()
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct ChannelInfo {
-    version: String,
-    checksum: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReleasesResponse {
-    channels: HashMap<String, ChannelInfo>,
 }
 
 fn get_update_check_cache_path() -> Option<PathBuf> {
@@ -402,15 +373,6 @@ fn spawn_background_upgrade_process() -> bool {
         ENV_BACKGROUND_UPGRADE_WORKER,
         &[],
     )
-}
-
-/// Result of checking whether a daemon-initiated update is available.
-#[derive(Debug, PartialEq)]
-pub enum DaemonUpdateCheckResult {
-    /// No update is needed (already latest, checks disabled, or not yet time to check).
-    NoUpdate,
-    /// An update is available and auto-updates are enabled.
-    UpdateReady,
 }
 
 /// Install a previously-detected update.

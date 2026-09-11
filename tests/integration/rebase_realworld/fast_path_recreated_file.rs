@@ -1,8 +1,32 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, assert_note_no_forbidden_files,
-    assert_note_no_forbidden_files_if_present, get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "temp_module.py",
+        "temp_module.py",
+        ["class TempProcessor:", "def process(self, data):"],
+    ),
+    (
+        "util_a.py",
+        "util_a.py",
+        ["def parse_csv(path):", "def write_csv(path, rows, fields):"],
+    ),
+    (
+        "util_b.py",
+        "util_b.py",
+        ["def load_json(path):", "def save_json(path, data"],
+    ),
+    (
+        "util_c.py",
+        "util_c.py",
+        ["def md5(data):", "def sha256(data):"],
+    ),
+    (
+        "util_d.py",
+        "util_d.py",
+        ["def retry(fn: Callable", "def memoize(fn: Callable"],
+    ),
+];
 
 #[test]
 fn test_fast_path_feature_deletes_file_then_recreates() {
@@ -183,26 +207,7 @@ fn test_fast_path_feature_deletes_file_then_recreates() {
         "sha1_no_future",
         &["util_c.py", "util_d.py", "util_e.py"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "temp_module.py",
-        "chain1_prior_temp_module.py",
-        &[
-            ("class TempProcessor:", true),
-            ("def process(self, data):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "util_a.py",
-        "chain1_prior_util_a.py",
-        &[
-            ("def parse_csv(path):", true),
-            ("def write_csv(path, rows, fields):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[1], 1, &PRIOR_SAMPLES[0..2]);
 
     // sha2 = C3_rm': human deletion commit — no AI content so no note expected.
     assert_note_no_forbidden_files_if_present(
@@ -217,26 +222,7 @@ fn test_fast_path_feature_deletes_file_then_recreates() {
         "sha2_no_future",
         &["util_c.py", "util_d.py", "util_e.py"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "util_a.py",
-        "chain2_prior_util_a.py",
-        &[
-            ("def parse_csv(path):", true),
-            ("def write_csv(path, rows, fields):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "util_b.py",
-        "chain2_prior_util_b.py",
-        &[
-            ("def load_json(path):", true),
-            ("def save_json(path, data", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[1..3]);
 
     // sha3 = C3_util_c': util_c.py
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
@@ -247,58 +233,13 @@ fn test_fast_path_feature_deletes_file_then_recreates() {
         "sha3_no_temp_or_future",
         &["temp_module.py", "util_d.py", "util_e.py"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "util_a.py",
-        "chain3_prior_util_a.py",
-        &[
-            ("def parse_csv(path):", true),
-            ("def write_csv(path, rows, fields):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "util_b.py",
-        "chain3_prior_util_b.py",
-        &[
-            ("def load_json(path):", true),
-            ("def save_json(path, data", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[1..3]);
 
     // sha4 = C4': util_d.py
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");
     assert_note_files_exact(&repo, &chain[4], "sha4_files", &["util_d.py"]);
     assert_note_no_forbidden_files(&repo, &chain[4], "sha4_no_future", &["util_e.py"]);
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "util_a.py",
-        "chain4_prior_util_a.py",
-        &[
-            ("def parse_csv(path):", true),
-            ("def write_csv(path, rows, fields):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "util_b.py",
-        "chain4_prior_util_b.py",
-        &[
-            ("def load_json(path):", true),
-            ("def save_json(path, data", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "util_c.py",
-        "chain4_prior_util_c.py",
-        &[("def md5(data):", true), ("def sha256(data):", true)],
-    );
+    assert_prior_blame_samples(&repo, &chain[4], 4, &PRIOR_SAMPLES[1..4]);
 
     // sha5 = C5': util_e.py
     assert_note_base_commit_matches(&repo, &chain[5], "sha5");
@@ -332,33 +273,8 @@ fn test_fast_path_feature_deletes_file_then_recreates() {
             ("def merge_json_files(paths):", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[5],
-        "util_a.py",
-        "chain5_prior_util_a.py",
-        &[
-            ("def parse_csv(path):", true),
-            ("def write_csv(path, rows, fields):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[5],
-        "util_c.py",
-        "chain5_prior_util_c.py",
-        &[("def md5(data):", true), ("def sha256(data):", true)],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[5],
-        "util_d.py",
-        "chain5_prior_util_d.py",
-        &[
-            ("def retry(fn: Callable", true),
-            ("def memoize(fn: Callable", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[5], 5, &PRIOR_SAMPLES[1..2]);
+    assert_prior_blame_samples(&repo, &chain[5], 5, &PRIOR_SAMPLES[3..5]);
 
     // Note: accepted_lines is NOT monotonic here because chain[2] is a human deletion commit
     // (removes temp_module.py) which has 0 accepted lines, breaking the monotonic property.

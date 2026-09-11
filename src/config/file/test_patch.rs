@@ -1,6 +1,6 @@
-use super::{
-    CodexHooksFormat, Config, ConfigPatch, compile_glob_field, normalize_daemon_memory_limit_mb,
-};
+use super::values::{compile_glob_field, normalize_daemon_memory_limit_mb};
+use super::{CodexHooksFormat, ConfigPatch};
+use crate::config::Config;
 use std::env;
 
 /// Apply test config patch from environment variable (test-only)

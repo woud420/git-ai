@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, commit_tree_rewrite_current_branch, head_sha, open_repo, read_note,
-    setup_initial_commit,
-};
+use super::*;
 
 #[test]
 fn test_commit_tree_update_ref_preserves_authorship_notes_on_reparent() {

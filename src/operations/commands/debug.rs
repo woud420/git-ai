@@ -1,3 +1,8 @@
+mod models;
+use models::DebugOptions;
+use models::SKIP_TRACE2_CHECKS_FLAG;
+use models::ShellGitLookup;
+
 use crate::operations::daemon::self_check::prepare_daemon_for_debug_self_checks;
 use diagnostics::MIN_GIT_VERSION_DISPLAY;
 mod capture;
@@ -24,13 +29,6 @@ use system::{
     collect_git_ai_config_dump, collect_git_config_dump, collect_git_environment,
     collect_hardware_info, collect_platform_info, collect_repository_info, format_bytes,
 };
-
-const SKIP_TRACE2_CHECKS_FLAG: &str = "--skip-trace2-checks";
-
-#[derive(Debug, Clone, Copy, Default)]
-struct DebugOptions {
-    skip_trace2_checks: bool,
-}
 
 pub fn handle_debug(args: &[String]) {
     if args.first().is_some_and(|arg| arg == "jj") {
@@ -384,11 +382,6 @@ fn build_debug_report(options: DebugOptions) -> String {
     }
 
     out
-}
-
-struct ShellGitLookup {
-    command: String,
-    path: Result<String, String>,
 }
 
 fn collect_shell_git_lookup() -> ShellGitLookup {

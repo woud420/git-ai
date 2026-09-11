@@ -1,7 +1,4 @@
-use super::{
-    BTreeMap, BTreeSet, ExpectedLineExt, HashMap, HumanRecord, LineAttribution, SessionRecord,
-    TestRepo, current_checkpoint_files, fs, single_stash_v2_initial, test_agent, test_prompt,
-};
+use super::*;
 
 #[test]
 fn test_stash_push_with_pathspec_single_file() {

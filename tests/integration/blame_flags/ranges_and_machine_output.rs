@@ -1,6 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_multiple_range_blame_matches_git, normalize_for_snapshot,
-};
+use super::*;
 
 #[test]
 fn test_blame_line_range() {

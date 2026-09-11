@@ -1,6 +1,7 @@
 use super::*;
 
 #[cfg(test)]
+#[path = "completion_log/checkpoint_wait_tests.rs"]
 mod checkpoint_wait_tests;
 
 type Progress = (u64, usize);

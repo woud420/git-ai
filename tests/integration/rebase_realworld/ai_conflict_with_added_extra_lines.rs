@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, get_commit_chain,
-};
+use super::*;
 
 /// Test 2: compute.rs function body — feature (C2) implements a function with
 /// 10 AI lines, main also implements it differently (conflict).  AI resolution

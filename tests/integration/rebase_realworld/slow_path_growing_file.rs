@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_sample_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, get_commit_chain,
-};
+use super::*;
 
 /// Test 5: 10-commit feature branch, all appending to src/engine.rs.
 /// Upstream prepends a 3-line license header. Verifies ALL 10 SHAs.

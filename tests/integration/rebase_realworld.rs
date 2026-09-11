@@ -32,6 +32,25 @@ use git_ai::operations::git::repository as GitAiRepository;
 // Shared helpers — ALL note/blame reads go through TestRepo helpers
 // ============================================================================
 
+type PriorBlameSample = (&'static str, &'static str, [&'static str; 2]);
+
+fn assert_prior_blame_samples(
+    repo: &TestRepo,
+    sha: &str,
+    chain_index: usize,
+    prior_samples: &[PriorBlameSample],
+) {
+    for (file, context_suffix, samples) in prior_samples {
+        assert_blame_sample_at_commit(
+            repo,
+            sha,
+            file,
+            &format!("chain{chain_index}_prior_{context_suffix}"),
+            &samples.map(|line| (line, true)),
+        );
+    }
+}
+
 /// Parse the authorship note for `sha`.  Panics if the note is absent.
 /// Uses the shared TestRepo helper for daemon-safe access and deserialization.
 fn parse_note(repo: &TestRepo, sha: &str) -> AuthorshipLog {

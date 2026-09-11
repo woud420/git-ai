@@ -1,3 +1,7 @@
+mod models;
+pub use models::InstallResult;
+pub use models::InstallStatus;
+
 mod cli;
 mod configuration;
 mod execution;
@@ -24,19 +28,6 @@ pub(crate) const TRACE2_EVENT_NESTING_KEY: &str = "trace2.eventNesting";
 const TRACE2_EVENT_NESTING_VALUE: &str = "0";
 const VISUAL_STUDIO_INSTALLER_ID: &str = "visual-studio";
 
-/// Installation status for a tool
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InstallStatus {
-    /// Tool was not detected on the machine
-    NotFound,
-    /// Hooks/extensions were successfully installed or updated
-    Installed,
-    /// Hooks/extensions were already up to date
-    AlreadyInstalled,
-    /// Installation attempted but failed
-    Failed,
-}
-
 impl InstallStatus {
     /// Convert status to string representation
     pub fn as_str(&self) -> &'static str {
@@ -47,14 +38,6 @@ impl InstallStatus {
             InstallStatus::Failed => "failed",
         }
     }
-}
-
-/// Detailed install result for metrics tracking
-#[derive(Debug, Clone)]
-pub struct InstallResult {
-    pub status: InstallStatus,
-    pub error: Option<String>,
-    pub warnings: Vec<String>,
 }
 
 impl InstallResult {

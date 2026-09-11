@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_sample_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, get_commit_chain,
-};
+use super::*;
 
 /// Test 4: TOML config file — upstream prepends production header, feature
 /// appends new TOML sections per commit. Each commit adds 8+ AI lines.

@@ -152,8 +152,700 @@ fn assert_read_only_command<T>(
 }
 
 mod bulk_changes;
-mod file_operations;
-mod filesystem_edges;
+
 mod precommit_hooks;
-mod read_only;
+
 mod status_fallback;
+
+// ===========================================================================
+// Category 1: File creation commands
+// ===========================================================================
+
+#[test]
+fn test_bash_provenance_echo_redirect_creates_file() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "echo-sess", "echo-t1");
+
+    run_bash(&repo, "sh", &["-c", "echo 'hello world' > created.txt"]);
+
+    let post_action = post_hook(&root, "echo-sess", "echo-t1");
+    assert_checkpoint_contains(&post_action, "created.txt");
+}
+
+#[test]
+fn test_bash_provenance_printf_redirect_creates_file() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "printf-sess", "printf-t1");
+
+    run_bash(
+        &repo,
+        "sh",
+        &["-c", "printf 'formatted content' > printf_out.txt"],
+    );
+
+    let post_action = post_hook(&root, "printf-sess", "printf-t1");
+    assert_checkpoint_contains(&post_action, "printf_out.txt");
+}
+
+#[test]
+fn test_bash_provenance_heredoc_creates_file() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "heredoc-sess", "heredoc-t1");
+
+    run_bash(
+        &repo,
+        "sh",
+        &[
+            "-c",
+            "cat > heredoc.txt <<'EOF'\nheredoc content\nline two\nEOF",
+        ],
+    );
+
+    let post_action = post_hook(&root, "heredoc-sess", "heredoc-t1");
+    assert_checkpoint_contains(&post_action, "heredoc.txt");
+}
+
+#[test]
+fn test_bash_provenance_touch_creates_empty_file() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "touch-sess", "touch-t1");
+
+    run_bash(&repo, "touch", &["newfile.txt"]);
+
+    let post_action = post_hook(&root, "touch-sess", "touch-t1");
+    assert_checkpoint_contains(&post_action, "newfile.txt");
+}
+
+#[test]
+fn test_bash_provenance_cp_creates_copy() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "existing.txt", "original content", "initial commit");
+
+    pre_hook(&root, "cp-sess", "cp-t1");
+
+    run_bash(&repo, "cp", &["existing.txt", "copy.txt"]);
+
+    let post_action = post_hook(&root, "cp-sess", "cp-t1");
+    assert_checkpoint_contains(&post_action, "copy.txt");
+    assert_checkpoint_excludes(&post_action, "existing.txt");
+}
+
+#[test]
+fn test_bash_provenance_tee_creates_file() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "tee-sess", "tee-t1");
+
+    run_bash(
+        &repo,
+        "sh",
+        &["-c", "echo content | tee output.txt > /dev/null"],
+    );
+
+    let post_action = post_hook(&root, "tee-sess", "tee-t1");
+    assert_checkpoint_contains(&post_action, "output.txt");
+}
+
+#[test]
+fn test_bash_provenance_nested_directory_creation() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "nested-sess", "nested-t1");
+
+    run_bash(
+        &repo,
+        "sh",
+        &[
+            "-c",
+            "mkdir -p src/deep/nested && touch src/deep/nested/mod.rs",
+        ],
+    );
+
+    let post_action = post_hook(&root, "nested-sess", "nested-t1");
+    assert_checkpoint_contains(&post_action, "mod.rs");
+}
+
+// ===========================================================================
+// Category 2: File modification commands
+// ===========================================================================
+
+#[test]
+fn test_bash_provenance_sed_in_place_edit() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "target.txt", "old value here", "initial commit");
+
+    pre_hook(&root, "sed-sess", "sed-t1");
+
+    thread::sleep(Duration::from_millis(50));
+    run_bash(
+        &repo,
+        "sh",
+        &[
+            "-c",
+            "sed -i.bak 's/old/new/g' target.txt && rm -f target.txt.bak",
+        ],
+    );
+
+    let post_action = post_hook(&root, "sed-sess", "sed-t1");
+    assert_checkpoint_contains(&post_action, "target.txt");
+}
+
+#[test]
+fn test_bash_provenance_append_with_redirect() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "log.txt", "line one\n", "initial commit");
+
+    pre_hook(&root, "append-sess", "append-t1");
+
+    thread::sleep(Duration::from_millis(50));
+    run_bash(&repo, "sh", &["-c", "echo 'appended line' >> log.txt"]);
+
+    let post_action = post_hook(&root, "append-sess", "append-t1");
+    assert_checkpoint_contains(&post_action, "log.txt");
+}
+
+#[test]
+fn test_bash_provenance_truncate_to_zero() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(
+        &repo,
+        "data.txt",
+        "lots of data here that will be erased",
+        "initial commit",
+    );
+
+    pre_hook(&root, "trunc-sess", "trunc-t1");
+
+    thread::sleep(Duration::from_millis(50));
+    run_bash(&repo, "sh", &["-c", ": > data.txt"]);
+
+    let post_action = post_hook(&root, "trunc-sess", "trunc-t1");
+    assert_checkpoint_contains(&post_action, "data.txt");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_bash_provenance_chmod_permission_change() {
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "script.sh", "#!/bin/bash\necho hi", "initial commit");
+
+    let pre = snapshot(&root, "chmod-sess", "chmod-t1", None).unwrap();
+
+    run_bash(&repo, "chmod", &["+x", "script.sh"]);
+
+    let post = snapshot(&root, "chmod-sess", "chmod-t2", None).unwrap();
+    let result = diff(&pre, &post);
+    assert!(
+        result
+            .modified
+            .iter()
+            .any(|p| p.display().to_string().contains("script.sh")),
+        "chmod should be detected via stat-tuple diff; got created={:?} modified={:?}",
+        result.created,
+        result.modified,
+    );
+}
+
+#[test]
+fn test_bash_provenance_mv_rename() {
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "old_name.txt", "rename me", "initial commit");
+
+    let pre = snapshot(&root, "mv-sess", "mv-t1", None).unwrap();
+
+    run_bash(&repo, "mv", &["old_name.txt", "new_name.txt"]);
+
+    let post = snapshot(&root, "mv-sess", "mv-t2", None).unwrap();
+    let result = diff(&pre, &post);
+    assert!(
+        result
+            .created
+            .iter()
+            .any(|p| p.display().to_string().contains("new_name.txt")),
+        "new_name.txt should appear as created after rename; got created={:?}",
+        result.created,
+    );
+}
+
+// ===========================================================================
+// Category 5: Git commands (that modify working tree)
+// ===========================================================================
+
+#[test]
+fn test_bash_provenance_git_checkout_restore() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(
+        &repo,
+        "restorable.txt",
+        "original content",
+        "initial commit",
+    );
+
+    // Modify the file so git checkout -- will revert it
+    thread::sleep(Duration::from_millis(50));
+    repo.write_file("restorable.txt", "modified content");
+
+    pre_hook(&root, "checkout-sess", "checkout-t1");
+
+    thread::sleep(Duration::from_millis(50));
+    // Use git_og to bypass hooks, simulating what a bash command would do
+    repo.git_og(&["checkout", "--", "restorable.txt"])
+        .expect("git checkout should succeed");
+
+    let post_action = post_hook(&root, "checkout-sess", "checkout-t1");
+    assert_checkpoint_contains(&post_action, "restorable.txt");
+}
+
+#[test]
+fn test_bash_provenance_git_stash_pop() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "stashed.txt", "original", "initial commit");
+
+    // Modify and stash
+    thread::sleep(Duration::from_millis(50));
+    repo.write_file("stashed.txt", "modified for stash");
+    repo.git_og(&["add", "stashed.txt"])
+        .expect("git add should succeed");
+    repo.git_og(&["stash", "push", "-m", "test stash"])
+        .expect("git stash should succeed");
+
+    pre_hook(&root, "stash-sess", "stash-t1");
+
+    thread::sleep(Duration::from_millis(50));
+    repo.git_og(&["stash", "pop"])
+        .expect("git stash pop should succeed");
+
+    let post_action = post_hook(&root, "stash-sess", "stash-t1");
+    assert_checkpoint_contains(&post_action, "stashed.txt");
+}
+
+#[test]
+fn test_bash_provenance_git_apply_patch() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(
+        &repo,
+        "patchme.txt",
+        "line one\nline two\nline three\n",
+        "initial",
+    );
+
+    // Create a patch file
+    let patch_content = "\
+--- a/patchme.txt
++++ b/patchme.txt
+@@ -1,3 +1,3 @@
+ line one
+-line two
++line TWO PATCHED
+ line three
+";
+    repo.write_file("fix.patch", patch_content);
+
+    pre_hook(&root, "patch-sess", "patch-t1");
+
+    thread::sleep(Duration::from_millis(50));
+    repo.git_og(&["apply", "fix.patch"])
+        .expect("git apply should succeed");
+
+    let post_action = post_hook(&root, "patch-sess", "patch-t1");
+    assert_checkpoint_contains(&post_action, "patchme.txt");
+}
+
+#[test]
+fn test_bash_provenance_grep_sed_pipeline() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "file1.txt", "old pattern here", "add file1");
+    add_and_commit(&repo, "file2.txt", "old pattern there", "add file2");
+    add_and_commit(&repo, "file3.txt", "no match", "add file3");
+
+    pre_hook(&root, "pipeline-sess", "pipeline-t1");
+
+    thread::sleep(Duration::from_millis(50));
+    run_bash(
+        &repo,
+        "sh",
+        &[
+            "-c",
+            "grep -rl 'old' --include='*.txt' . | xargs sed -i.bak 's/old/new/g' && find . -name '*.bak' -delete",
+        ],
+    );
+
+    let post_action = post_hook(&root, "pipeline-sess", "pipeline-t1");
+    assert_checkpoint_contains(&post_action, "file1.txt");
+    assert_checkpoint_contains(&post_action, "file2.txt");
+    assert_checkpoint_excludes(&post_action, "file3.txt");
+}
+
+#[test]
+fn test_bash_provenance_touch_then_write_shows_created() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "touchwrite-sess", "touchwrite-t1");
+
+    run_bash(
+        &repo,
+        "sh",
+        &[
+            "-c",
+            "touch empty.txt && echo 'now has content' > empty.txt",
+        ],
+    );
+
+    let post_action = post_hook(&root, "touchwrite-sess", "touchwrite-t1");
+    assert_checkpoint_contains(&post_action, "empty.txt");
+}
+
+// ===========================================================================
+// Category 8: Symlink operations (unix only)
+// ===========================================================================
+
+#[cfg(unix)]
+#[test]
+fn test_bash_provenance_symlink_creation() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "target.txt", "symlink target", "initial commit");
+
+    pre_hook(&root, "symlink-sess", "symlink-t1");
+
+    run_bash(&repo, "ln", &["-s", "target.txt", "link.txt"]);
+
+    let post_action = post_hook(&root, "symlink-sess", "symlink-t1");
+    assert_checkpoint_contains(&post_action, "link.txt");
+}
+
+#[cfg(unix)]
+#[test]
+fn test_bash_provenance_symlink_target_change() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "target_a.txt", "target a", "add target a");
+    add_and_commit(&repo, "target_b.txt", "target b", "add target b");
+
+    // Create the symlink pointing to target_a
+    run_bash(&repo, "ln", &["-s", "target_a.txt", "mylink.txt"]);
+    // Commit the symlink so it is tracked
+    repo.git_og(&["add", "mylink.txt"])
+        .expect("git add symlink should succeed");
+    repo.git_og(&["commit", "-m", "add symlink"])
+        .expect("git commit symlink should succeed");
+
+    pre_hook(&root, "symtgt-sess", "symtgt-t1");
+
+    // Re-point the symlink to target_b
+    run_bash(
+        &repo,
+        "sh",
+        &["-c", "rm mylink.txt && ln -s target_b.txt mylink.txt"],
+    );
+
+    let post_action = post_hook(&root, "symtgt-sess", "symtgt-t1");
+    assert_checkpoint_contains(&post_action, "mylink.txt");
+}
+
+// ===========================================================================
+// Category 10: Edge cases
+// ===========================================================================
+
+#[test]
+fn test_bash_provenance_failed_command_with_partial_output() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "fail-sess", "fail-t1");
+
+    // Command that creates a file then fails. We use || true so run_bash
+    // does not panic, but the file is still created.
+    run_bash(
+        &repo,
+        "sh",
+        &["-c", "echo 'partial' > partial.txt && false || true"],
+    );
+
+    let post_action = post_hook(&root, "fail-sess", "fail-t1");
+    assert_checkpoint_contains(&post_action, "partial.txt");
+}
+
+#[test]
+fn test_bash_provenance_file_with_spaces_in_name() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "spaces-sess", "spaces-t1");
+
+    run_bash(&repo, "sh", &["-c", "echo 'x' > 'file with spaces.txt'"]);
+
+    let post_action = post_hook(&root, "spaces-sess", "spaces-t1");
+    assert_checkpoint_contains(&post_action, "file with spaces.txt");
+}
+
+#[test]
+fn test_bash_provenance_file_with_special_characters() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "special-sess", "special-t1");
+
+    run_bash(
+        &repo,
+        "sh",
+        &["-c", "echo 'x' > 'file-with-dashes_and_underscores.txt'"],
+    );
+
+    let post_action = post_hook(&root, "special-sess", "special-t1");
+    assert_checkpoint_contains(&post_action, "file-with-dashes_and_underscores.txt");
+}
+
+#[test]
+fn test_bash_provenance_hidden_file_creation() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    pre_hook(&root, "hidden-sess", "hidden-t1");
+
+    run_bash(
+        &repo,
+        "sh",
+        &["-c", "echo 'secret config' > .hidden_config"],
+    );
+
+    let post_action = post_hook(&root, "hidden-sess", "hidden-t1");
+    assert_checkpoint_contains(&post_action, ".hidden_config");
+}
+
+#[test]
+fn test_bash_provenance_overwrite_identical_content_detects_mtime_change() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "same.txt", "identical", "initial commit");
+
+    pre_hook(&root, "identical-sess", "identical-t1");
+
+    // Wait so mtime advances even though content is the same
+    thread::sleep(Duration::from_millis(50));
+    // Write exact same content but file metadata (mtime) will change
+    run_bash(&repo, "sh", &["-c", "echo 'identical' > same.txt"]);
+
+    let post_action = post_hook(&root, "identical-sess", "identical-t1");
+    // The stat tuple should differ because mtime changed, even if content is the same.
+    // Note: echo adds a trailing newline, so content actually differs from "identical"
+    // to "identical\n". Regardless, the stat-tuple approach detects this.
+    assert_checkpoint_contains(&post_action, "same.txt");
+}
+
+#[test]
+fn test_bash_provenance_sequential_tool_uses_same_session() {
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+    add_and_commit(&repo, "init.txt", "seed", "initial commit");
+
+    // --- First cycle: create alpha.txt ---
+    pre_hook(&root, "seq-sess", "seq-use1");
+
+    run_bash(&repo, "sh", &["-c", "echo 'alpha' > alpha.txt"]);
+
+    let post1 = post_hook(&root, "seq-sess", "seq-use1");
+    assert_checkpoint_contains(&post1, "alpha.txt");
+    assert_checkpoint_excludes(&post1, "beta.txt");
+
+    // --- Second cycle: create beta.txt ---
+    pre_hook(&root, "seq-sess", "seq-use2");
+
+    run_bash(&repo, "sh", &["-c", "echo 'beta' > beta.txt"]);
+
+    let post2 = post_hook(&root, "seq-sess", "seq-use2");
+    assert_checkpoint_contains(&post2, "beta.txt");
+    // alpha.txt was created in the first cycle; it should NOT appear in the second
+    // cycle since the second pre-snapshot includes it.
+    assert_checkpoint_excludes(&post2, "alpha.txt");
+}
+
+#[test]
+fn test_bash_provenance_mv_directory_rename() {
+    use git_ai::operations::commands::checkpoint_agent::bash_tool::diff;
+    let repo = TestRepo::new();
+    let root = repo_root(&repo);
+
+    // Create files in a subdirectory and track them
+    add_and_commit(&repo, "src/lib.rs", "fn main() {}", "add src");
+    add_and_commit(&repo, "src/utils.rs", "fn helper() {}", "add utils");
+
+    let pre = snapshot(&root, "mvdir-sess", "mvdir-t1", None).unwrap();
+
+    std::fs::rename(root.join("src"), root.join("lib")).unwrap();
+
+    let post = snapshot(&root, "mvdir-sess", "mvdir-t2", None).unwrap();
+    let result = diff(&pre, &post);
+    assert!(
+        result.created.iter().any(|p| p
+            .to_string_lossy()
+            .replace('\\', "/")
+            .contains("lib/lib.rs")),
+        "lib/lib.rs should appear as created after directory rename; got created={:?}",
+        result.created,
+    );
+}
+
+// ===========================================================================
+// Category 7: Read-only commands (should produce NoChanges)
+// ===========================================================================
+
+#[test]
+fn test_bash_provenance_cat_is_readonly() {
+    assert_read_only_command(
+        ("cat-sess", "cat-t1"),
+        |repo| add_and_commit(repo, "readable.txt", "read me", "initial commit"),
+        |repo| run_bash(repo, "cat", &["readable.txt"]),
+    );
+}
+
+#[test]
+fn test_bash_provenance_ls_is_readonly() {
+    assert_read_only_command(
+        ("ls-sess", "ls-t1"),
+        |repo| add_and_commit(repo, "visible.txt", "content", "initial commit"),
+        |repo| run_bash(repo, "ls", &["-la"]),
+    );
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))] // Windows `find` is not POSIX find
+fn test_bash_provenance_find_is_readonly() {
+    assert_read_only_command(
+        ("find-sess", "find-t1"),
+        |repo| add_and_commit(repo, "src/main.rs", "fn main() {}", "initial commit"),
+        |repo| run_bash(repo, "find", &[".", "-name", "*.rs"]),
+    );
+}
+
+#[test]
+fn test_bash_provenance_grep_is_readonly() {
+    assert_read_only_command(
+        ("grep-sess", "grep-t1"),
+        |repo| {
+            add_and_commit(
+                repo,
+                "searchable.txt",
+                "pattern match here",
+                "initial commit",
+            )
+        },
+        |repo| {
+            // grep may exit non-zero if no match, so use sh -c with || true
+            run_bash(repo, "sh", &["-c", "grep 'pattern' searchable.txt || true"])
+        },
+    );
+}
+
+#[test]
+fn test_bash_provenance_wc_is_readonly() {
+    assert_read_only_command(
+        ("wc-sess", "wc-t1"),
+        |repo| add_and_commit(repo, "countme.txt", "one\ntwo\nthree\n", "initial commit"),
+        |repo| run_bash(repo, "wc", &["-l", "countme.txt"]),
+    );
+}
+
+#[test]
+fn test_bash_provenance_head_is_readonly() {
+    assert_read_only_command(
+        ("head-sess", "head-t1"),
+        |repo| {
+            add_and_commit(
+                repo,
+                "longfile.txt",
+                "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n",
+                "initial commit",
+            )
+        },
+        |repo| run_bash(repo, "head", &["-5", "longfile.txt"]),
+    );
+}
+
+#[test]
+fn test_bash_provenance_diff_is_readonly() {
+    assert_read_only_command(
+        ("diff-sess", "diff-t1"),
+        |repo| {
+            add_and_commit(repo, "file1.txt", "alpha\nbeta\n", "add file1");
+            add_and_commit(repo, "file2.txt", "alpha\ngamma\n", "add file2")
+        },
+        |repo| {
+            // diff returns non-zero when files differ, so use || true
+            run_bash(repo, "sh", &["-c", "diff file1.txt file2.txt || true"])
+        },
+    );
+}
+
+#[test]
+fn test_bash_provenance_git_log_is_readonly() {
+    assert_read_only_command(
+        ("gitlog-sess", "gitlog-t1"),
+        |repo| add_and_commit(repo, "init.txt", "seed", "initial commit"),
+        |repo| {
+            repo.git_og(&["log", "--oneline"])
+                .expect("git log should succeed")
+        },
+    );
+}
+
+#[test]
+fn test_bash_provenance_git_diff_is_readonly() {
+    assert_read_only_command(
+        ("gitdiff-sess", "gitdiff-t1"),
+        |repo| add_and_commit(repo, "init.txt", "seed", "initial commit"),
+        |repo| repo.git_og(&["diff"]).expect("git diff should succeed"),
+    );
+}
+
+#[test]
+fn test_bash_provenance_git_status_is_readonly() {
+    assert_read_only_command(
+        ("gitstatus-sess", "gitstatus-t1"),
+        |repo| add_and_commit(repo, "init.txt", "seed", "initial commit"),
+        |repo| repo.git_og(&["status"]).expect("git status should succeed"),
+    );
+}
+
+#[test]
+fn test_bash_provenance_compound_readonly() {
+    assert_read_only_command(
+        ("compound-sess", "compound-t1"),
+        |repo| add_and_commit(repo, "init.txt", "seed", "initial commit"),
+        |repo| run_bash(repo, "sh", &["-c", "pwd && ls"]),
+    );
+}

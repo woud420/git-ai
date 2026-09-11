@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_accepted_lines_exact, assert_blame_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, fs, get_commit_chain,
-};
+use super::*;
 
 /// Test 10: Two conflicts — C2 (AI resolved) and C4 (human resolved).
 /// Verifies that after two sequential conflicts in the same rebase,

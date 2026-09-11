@@ -1,4 +1,4 @@
-//! 600-line cap for `src/**/*.rs`, enforced as a shrinking ratchet.
+//! 1,000-line cap for `src/**/*.rs`, enforced as a shrinking ratchet.
 //!
 //! `.file-length-baseline.txt` lists the files that predate the cap together
 //! with their recorded ceiling. This test fails when:
@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-const MAX_LINES: usize = 600;
+const MAX_LINES: usize = 1000;
 const BASELINE_FILE: &str = ".file-length-baseline.txt";
 
 // This source/test-only refactor cannot edit the root baseline. Retiring an

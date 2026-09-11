@@ -1,94 +1,45 @@
 use std::fs;
 use std::path::Path;
 
-fn module_names(source: &str) -> Vec<&str> {
-    let bytes = source.as_bytes();
-    let mut tokens = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        let raw_start =
-            i + usize::from(matches!(bytes[i], b'b' | b'c') && bytes.get(i + 1) == Some(&b'r'));
-        if bytes[i..].starts_with(b"//") {
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
-            }
-        } else if bytes[i..].starts_with(b"/*") {
-            i += 2;
-            let mut depth = 1;
-            while i < bytes.len() && depth > 0 {
-                if bytes[i..].starts_with(b"/*") {
-                    depth += 1;
-                    i += 2;
-                } else if bytes[i..].starts_with(b"*/") {
-                    depth -= 1;
-                    i += 2;
-                } else {
-                    i += 1;
+fn module_names(source: &str) -> Vec<String> {
+    fn flatten(stream: proc_macro2::TokenStream, tokens: &mut Vec<String>) {
+        use proc_macro2::{Delimiter, TokenTree};
+        for token in stream {
+            match token {
+                TokenTree::Group(group) => {
+                    let delimiters = match group.delimiter() {
+                        Delimiter::Brace => Some(("{", "}")),
+                        Delimiter::Parenthesis => Some(("(", ")")),
+                        _ => None,
+                    };
+                    if let Some((open, _)) = delimiters {
+                        tokens.push(open.to_string());
+                    }
+                    flatten(group.stream(), tokens);
+                    if let Some((_, close)) = delimiters {
+                        tokens.push(close.to_string());
+                    }
                 }
-            }
-        } else if bytes[raw_start] == b'r'
-            && bytes
-                .get(raw_start + 1)
-                .is_some_and(|b| matches!(b, b'#' | b'"'))
-        {
-            let mut quote = raw_start + 1;
-            while bytes.get(quote) == Some(&b'#') {
-                quote += 1;
-            }
-            if bytes.get(quote) == Some(&b'"') {
-                let terminator = format!("\"{}", "#".repeat(quote - raw_start - 1));
-                i = source[quote + 1..]
-                    .find(&terminator)
-                    .map_or(bytes.len(), |end| quote + 1 + end + terminator.len());
-                tokens.push("");
-            } else {
-                // Raw identifiers use the same module name in libtest filters.
-                i += 2;
-            }
-        } else if bytes[i] == b'\''
-            && (bytes.get(i + 1) == Some(&b'\\') || source[i + 1..].chars().nth(1) == Some('\''))
-        {
-            i += 1;
-            while i < bytes.len() {
-                let current = bytes[i];
-                i += 1;
-                if current == b'\\' {
-                    i = (i + 1).min(bytes.len());
-                } else if current == b'\'' {
-                    break;
+                TokenTree::Ident(ident) => {
+                    tokens.push(ident.to_string().trim_start_matches("r#").to_string());
                 }
-            }
-            tokens.push("");
-        } else if bytes[i] == b'"' {
-            i += 1;
-            while i < bytes.len() {
-                let current = bytes[i];
-                i += 1;
-                if current == b'\\' {
-                    i = (i + 1).min(bytes.len());
-                } else if current == b'"' {
-                    break;
+                TokenTree::Punct(punct) if ";!".contains(punct.as_char()) => {
+                    tokens.push(punct.to_string());
                 }
+                TokenTree::Literal(_) => tokens.push(String::new()),
+                TokenTree::Punct(_) => {}
             }
-            tokens.push("");
-        } else if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
-            let start = i;
-            i += 1;
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                i += 1;
-            }
-            tokens.push(&source[start..i]);
-        } else {
-            if matches!(bytes[i], b';' | b'{' | b'}' | b'!' | b'(' | b')') {
-                tokens.push(&source[i..i + 1]);
-            }
-            i += 1;
         }
     }
+    let mut tokens = Vec::new();
+    flatten(
+        source.parse().expect("valid Rust source tokens"),
+        &mut tokens,
+    );
     tokens
         .windows(3)
-        .filter(|tokens| tokens[0] == "mod" && matches!(tokens[2], ";" | "{"))
-        .map(|tokens| tokens[1])
+        .filter(|tokens| tokens[0] == "mod" && matches!(tokens[2].as_str(), ";" | "{"))
+        .map(|tokens| tokens[1].clone())
         .collect()
 }
 
@@ -112,7 +63,7 @@ fn collect_module_collisions(directory: &Path, top_level: &[&str], collisions: &
         {
             let source = fs::read_to_string(&path).unwrap();
             for child in module_names(&source) {
-                for skipped in skip_collisions(child, top_level) {
+                for skipped in skip_collisions(&child, top_level) {
                     collisions.push(format!(
                         "{}: nested mod {child} matches --skip {skipped}::",
                         path.display()
@@ -127,7 +78,8 @@ fn collect_module_collisions(directory: &Path, top_level: &[&str], collisions: &
 fn nested_integration_modules_cannot_match_top_level_shard_skips() {
     let integration = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/integration");
     let main = fs::read_to_string(integration.join("main.rs")).unwrap();
-    let top_level = module_names(&main);
+    let names = module_names(&main);
+    let top_level: Vec<_> = names.iter().map(String::as_str).collect();
     assert!(
         !top_level.is_empty(),
         "integration module inventory is empty"

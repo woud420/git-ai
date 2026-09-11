@@ -1,8 +1,36 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, assert_note_no_forbidden_files,
-    get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "users.py",
+        "users_py",
+        ["class UserService:", "def get_user(self, user_id):"],
+    ),
+    (
+        "products.py",
+        "products_py",
+        [
+            "class ProductService:",
+            "def list_products(self, category=None):",
+        ],
+    ),
+    (
+        "orders.py",
+        "orders_py",
+        [
+            "class OrderService:",
+            "def create_order(self, user_id, items):",
+        ],
+    ),
+    (
+        "payments.py",
+        "payments_py",
+        [
+            "class PaymentService:",
+            "def charge(self, order_id, amount_cents, card_token):",
+        ],
+    ),
+];
 
 // ============================================================================
 // Category 1: Fast Path rebase tests
@@ -198,16 +226,7 @@ fn test_fast_path_python_microservice_5_endpoints() {
             ("SELECT * FROM products", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "users.py",
-        "chain1_prior_users_py",
-        &[
-            ("class UserService:", true),
-            ("def get_user(self, user_id):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[1], 1, &PRIOR_SAMPLES[0..1]);
 
     // sha2 = C3': orders.py
     assert_note_base_commit_matches(&repo, &chain[2], "sha2");
@@ -236,26 +255,7 @@ fn test_fast_path_python_microservice_5_endpoints() {
             ("def get_order(self, order_id):", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "users.py",
-        "chain2_prior_users_py",
-        &[
-            ("class UserService:", true),
-            ("def get_user(self, user_id):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "products.py",
-        "chain2_prior_products_py",
-        &[
-            ("class ProductService:", true),
-            ("def list_products(self, category=None):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[0..2]);
 
     // sha3 = C4': payments.py
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
@@ -282,36 +282,7 @@ fn test_fast_path_python_microservice_5_endpoints() {
             ("stripe.refund.create", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "users.py",
-        "chain3_prior_users_py",
-        &[
-            ("class UserService:", true),
-            ("def get_user(self, user_id):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "products.py",
-        "chain3_prior_products_py",
-        &[
-            ("class ProductService:", true),
-            ("def list_products(self, category=None):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "orders.py",
-        "chain3_prior_orders_py",
-        &[
-            ("class OrderService:", true),
-            ("def create_order(self, user_id, items):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[0..3]);
 
     // sha4 = C5': webhooks.py
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");
@@ -346,39 +317,7 @@ fn test_fast_path_python_microservice_5_endpoints() {
             ("def create_user(self, name, email):", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "products.py",
-        "chain4_prior_products_py",
-        &[
-            ("class ProductService:", true),
-            ("def list_products(self, category=None):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "orders.py",
-        "chain4_prior_orders_py",
-        &[
-            ("class OrderService:", true),
-            ("def create_order(self, user_id, items):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "payments.py",
-        "chain4_prior_payments_py",
-        &[
-            ("class PaymentService:", true),
-            (
-                "def charge(self, order_id, amount_cents, card_token):",
-                true,
-            ),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[4], 4, &PRIOR_SAMPLES[1..4]);
 }
 
 crate::reuse_tests_in_worktree!(test_fast_path_python_microservice_5_endpoints,);

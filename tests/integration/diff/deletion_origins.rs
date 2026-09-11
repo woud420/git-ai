@@ -1,7 +1,4 @@
-use super::{
-    BTreeSet, ExpectedLineExt, JsonHunk, TestRepo, Value, commit_keys, parse_diff_output,
-    parse_json_hunks, sha256_hex, single_prompt_id,
-};
+use super::*;
 
 #[test]
 fn test_diff_blame_deletions_terminal_annotations() {

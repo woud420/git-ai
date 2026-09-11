@@ -492,7 +492,6 @@ fn create_external_diff_helper_script(repo: &TestRepo, marker: &str) -> std::pat
     helper_path
 }
 
-mod blank_lines_and_sessions;
 mod deletion_origins;
 mod deletion_segments;
 mod deletion_statistics;
@@ -501,6 +500,452 @@ mod hostile_config;
 mod human_identity;
 mod line_attribution;
 mod prompt_statistics;
-mod ranges;
+
 mod reindentation;
 mod rename_statistics;
+
+/// Regression test: AI inserts comments and a blank line into an existing AI-written file.
+/// The blank line is byte-identical to existing blank lines, so imara-diff matches it as
+/// Equal. Git diff treats it as inserted. Without gap-filling, it shows as [no-data].
+/// Reproduces exact scenario from user bug report with calcb.py.
+#[test]
+fn test_diff_ai_inserted_blank_line_with_comments_attributed_to_ai() {
+    let repo = TestRepo::new();
+
+    // Step 1: AI writes the initial file (first Claude session)
+    let file_path = "calcb.py";
+    let initial_content = "\
+import sys
+
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+def main():
+    if len(sys.argv) != 3:
+        print(\"Usage: python calcb.py <int1> <int2>\")
+        sys.exit(1)
+    a = int(sys.argv[1])
+    b = int(sys.argv[2])
+    result = add(a, b)
+    print(f\"{a} + {b} = {result}\")
+
+
+if __name__ == \"__main__\":
+    main()
+";
+
+    let full_path = repo.path().join(file_path);
+    fs::write(&full_path, initial_content).expect("write initial content");
+    repo.git_ai(&["checkpoint", "mock_ai", file_path])
+        .expect("checkpoint initial write");
+    repo.git(&["add", file_path]).expect("git add");
+    repo.commit("initial").expect("initial commit");
+
+    // Step 2: AI adds comments and a blank line (second Claude session edit)
+    let edited_content = "\
+import sys
+
+# Simple integer addition calculator
+# Accepts two integers as command-line arguments
+
+
+def add(a: int, b: int) -> int:
+    \"\"\"Return the sum of two integers.\"\"\"
+    return a + b
+
+
+def main():
+    # Validate that exactly two arguments are provided
+    if len(sys.argv) != 3:
+        print(\"Usage: python calcb.py <int1> <int2>\")
+        sys.exit(1)
+    a = int(sys.argv[1])
+    b = int(sys.argv[2])
+    result = add(a, b)
+    # Display the result in a readable format
+    print(f\"{a} + {b} = {result}\")
+
+
+if __name__ == \"__main__\":
+    main()
+";
+
+    fs::write(&full_path, edited_content).expect("write edited content");
+    repo.git_ai(&["checkpoint", "mock_ai", file_path])
+        .expect("checkpoint edit");
+    repo.git(&["add", file_path]).expect("git add");
+    let commit = repo.commit("add comments").expect("commit");
+
+    // Step 3: verify no [no-data] lines in the diff
+    let diff_output = repo
+        .git_ai(&["diff", &commit.commit_sha])
+        .expect("git ai diff should succeed");
+
+    let diff_lines = parse_diff_output(&diff_output);
+    let added_lines: Vec<&DiffLine> = diff_lines.iter().filter(|l| l.prefix == "+").collect();
+
+    assert!(
+        !added_lines.is_empty(),
+        "Expected added lines in diff output.\nFull diff:\n{}",
+        diff_output
+    );
+
+    let no_data_lines: Vec<&&DiffLine> = added_lines
+        .iter()
+        .filter(|l| l.attribution.as_deref() == Some("no-data"))
+        .collect();
+
+    assert!(
+        no_data_lines.is_empty(),
+        "Found {} added lines with [no-data] that should be attributed to AI:\n{}\nFull diff:\n{}",
+        no_data_lines.len(),
+        no_data_lines
+            .iter()
+            .map(|l| format!("  +{} [no-data]", l.content))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        diff_output
+    );
+}
+
+#[test]
+fn test_diff_json_sessions_use_session_id_not_combined_id() {
+    let repo = TestRepo::new();
+
+    write_lines(&repo, "example.txt", &["base"]);
+    checkpoint_human(&repo);
+    let _base = commit_after_staging_all(&repo, "base");
+
+    write_lines(&repo, "example.txt", &["base", "claude line"]);
+    checkpoint_agent_v1(
+        &repo,
+        "example.txt",
+        "claude",
+        "opus-4-6",
+        "conv-123",
+        "add line",
+    );
+
+    let commit = commit_after_staging_all(&repo, "add AI line");
+    let diff = diff_json(&repo, &["diff", &commit.commit_sha, "--json"]);
+
+    let sessions = diff["sessions"]
+        .as_object()
+        .expect("sessions should be an object");
+
+    let annotations = diff["files"]["example.txt"]["annotations"]
+        .as_object()
+        .expect("annotations should be an object");
+
+    let hunks = diff["hunks"].as_array().expect("hunks should be an array");
+
+    // Bug: sessions object uses combined ID (s_xxx::t_yyy) as key
+    // Expected: sessions object should use session ID (s_xxx) as key
+    let session_keys: Vec<String> = sessions.keys().cloned().collect();
+    assert_eq!(session_keys.len(), 1, "should have exactly one session");
+
+    let session_key = &session_keys[0];
+    assert!(
+        !session_key.contains("::"),
+        "session key should be session ID only (s_xxx), not combined ID (s_xxx::t_yyy). Found: {}",
+        session_key
+    );
+    assert!(
+        session_key.starts_with("s_"),
+        "session key should start with s_. Found: {}",
+        session_key
+    );
+
+    // Annotations should still use combined ID for line attribution
+    let annotation_keys: Vec<String> = annotations.keys().cloned().collect();
+    assert_eq!(
+        annotation_keys.len(),
+        1,
+        "should have exactly one annotation"
+    );
+    let annotation_key = &annotation_keys[0];
+    assert!(
+        annotation_key.contains("::"),
+        "annotation key should be combined ID (s_xxx::t_yyy). Found: {}",
+        annotation_key
+    );
+
+    // Hunks should use combined ID in prompt_id field
+    let addition_hunk = hunks
+        .iter()
+        .find(|h| h["hunk_kind"] == "addition")
+        .expect("should have addition hunk");
+    let prompt_id = addition_hunk["prompt_id"]
+        .as_str()
+        .expect("prompt_id should be string");
+    assert!(
+        prompt_id.contains("::"),
+        "hunk prompt_id should be combined ID (s_xxx::t_yyy). Found: {}",
+        prompt_id
+    );
+
+    // Session key and annotation/hunk prefix should match
+    assert!(
+        annotation_key.starts_with(session_key),
+        "annotation key {} should start with session key {}",
+        annotation_key,
+        session_key
+    );
+    assert!(
+        prompt_id.starts_with(session_key),
+        "prompt_id {} should start with session key {}",
+        prompt_id,
+        session_key
+    );
+}
+
+#[test]
+fn test_diff_commit_range() {
+    let repo = TestRepo::new();
+
+    // First commit
+    let mut file = repo.filename("range.txt");
+    file.set_contents(crate::lines!["Line 1".human()]);
+    let first = repo.stage_all_and_commit("First commit").unwrap();
+
+    // Second commit
+    file.set_contents(crate::lines!["Line 1".human(), "Line 2".ai()]);
+    repo.stage_all_and_commit("Second commit").unwrap();
+
+    // Third commit
+    file.set_contents(crate::lines![
+        "Line 1".human(),
+        "Line 2".ai(),
+        "Line 3".human()
+    ]);
+    let third = repo.stage_all_and_commit("Third commit").unwrap();
+
+    // Run git-ai diff with range
+    let range = format!("{}..{}", first.commit_sha, third.commit_sha);
+    let output = repo
+        .git_ai(&["diff", &range])
+        .expect("git-ai diff range should succeed");
+
+    // Verify output
+    assert!(output.contains("diff --git"), "Should contain diff header");
+    assert!(output.contains("range.txt"), "Should mention the file");
+    assert!(
+        output.contains("+Line 2") || output.contains("Line 2"),
+        "Should show added line"
+    );
+    assert!(
+        output.contains("+Line 3") || output.contains("Line 3"),
+        "Should show added line"
+    );
+}
+
+#[test]
+fn test_diff_two_positional_revisions_uses_git_range_semantics() {
+    let repo = TestRepo::new();
+
+    // Ensure the "from" commit has a parent so the regression catches accidental from^..from behavior.
+    repo.git(&["commit", "--allow-empty", "-m", "Empty initial"])
+        .expect("empty commit should succeed");
+
+    let mut file = repo.filename("range_positional.txt");
+    file.set_contents(crate::lines!["BASE".human()]);
+    let from = repo.stage_all_and_commit("Base commit").unwrap();
+
+    file.set_contents(crate::lines![
+        "BASE".human(),
+        "AI line 1".ai(),
+        "AI line 2".ai()
+    ]);
+    let to = repo.stage_all_and_commit("Append lines").unwrap();
+
+    let plain_git_diff = repo
+        .git_og(&["--no-pager", "diff", &from.commit_sha, &to.commit_sha])
+        .expect("plain git diff should succeed");
+    assert!(
+        plain_git_diff.contains("+AI line 1") && plain_git_diff.contains("+AI line 2"),
+        "plain git diff sanity check failed:\n{}",
+        plain_git_diff
+    );
+    assert!(
+        !plain_git_diff.contains("new file mode"),
+        "plain git diff should not treat this as a new file:\n{}",
+        plain_git_diff
+    );
+
+    let git_ai_diff = repo
+        .git_ai(&["diff", &from.commit_sha, &to.commit_sha])
+        .expect("git-ai diff should support two positional revisions");
+
+    assert!(
+        git_ai_diff.contains("+AI line 1") && git_ai_diff.contains("+AI line 2"),
+        "git-ai diff should include net additions between from/to commits:\n{}",
+        git_ai_diff
+    );
+    assert!(
+        !git_ai_diff.contains("new file mode") && !git_ai_diff.contains("--- /dev/null"),
+        "git-ai diff should not fallback to from^..from behavior:\n{}",
+        git_ai_diff
+    );
+}
+
+#[test]
+fn test_diff_multiple_files() {
+    let repo = TestRepo::new();
+
+    // Initial commit
+    let mut file1 = repo.filename("file1.txt");
+    let mut file2 = repo.filename("file2.txt");
+    file1.set_contents(crate::lines!["File 1 line 1".human()]);
+    file2.set_contents(crate::lines!["File 2 line 1".human()]);
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Modify both files
+    file1.set_contents(crate::lines!["File 1 line 1".human(), "File 1 line 2".ai()]);
+    file2.set_contents(crate::lines![
+        "File 2 line 1".human(),
+        "File 2 line 2".human()
+    ]);
+    let commit = repo.stage_all_and_commit("Modify both files").unwrap();
+
+    // Run diff
+    let output = repo
+        .git_ai(&["diff", &commit.commit_sha])
+        .expect("git-ai diff should succeed");
+
+    // Should show both files
+    assert!(output.contains("file1.txt"), "Should mention file1");
+    assert!(output.contains("file2.txt"), "Should mention file2");
+
+    // Should have multiple diff sections
+    let diff_count = output.matches("diff --git").count();
+    assert_eq!(diff_count, 2, "Should have 2 diff sections");
+}
+
+#[test]
+fn test_diff_initial_commit() {
+    let repo = TestRepo::new();
+
+    // Create initial commit
+    let mut file = repo.filename("initial.txt");
+    file.set_contents(crate::lines!["Initial line".ai()]);
+    let commit = repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Run diff on initial commit (should compare to empty tree)
+    let output = repo
+        .git_ai(&["diff", &commit.commit_sha])
+        .expect("git-ai diff on initial commit should succeed");
+
+    // Parse and verify exact sequence
+    let lines = parse_diff_output(&output);
+
+    // Should have exactly 1 addition, no deletions
+    assert_diff_lines_exact(
+        &lines,
+        &[
+            ("+", "Initial line", Some("ai")), // Only addition with AI attribution
+        ],
+    );
+}
+
+#[test]
+fn test_diff_with_head_ref() {
+    let repo = TestRepo::new();
+
+    // Initial commit
+    let mut file = repo.filename("head_test.txt");
+    file.set_contents(crate::lines!["Line 1".human()]);
+    repo.stage_all_and_commit("Initial").unwrap();
+
+    // Second commit
+    file.set_contents(crate::lines!["Line 1".human(), "Line 2".ai()]);
+    repo.stage_all_and_commit("Add line").unwrap();
+
+    // Run diff using HEAD
+    let output = repo
+        .git_ai(&["diff", "HEAD"])
+        .expect("git-ai diff HEAD should succeed");
+
+    // Should work with HEAD reference
+    assert!(output.contains("diff --git"), "Should contain diff header");
+    assert!(output.contains("head_test.txt"), "Should mention the file");
+}
+
+#[test]
+fn test_diff_json_include_stats_rejects_commit_ranges() {
+    let repo = TestRepo::new();
+
+    let mut file = repo.filename("range_stats.txt");
+    file.set_contents(crate::lines!["line 1".human()]);
+    let first = repo.stage_all_and_commit("Commit 1").unwrap();
+
+    file.set_contents(crate::lines!["line 1".human(), "line 2".ai()]);
+    let second = repo.stage_all_and_commit("Commit 2").unwrap();
+
+    let range = format!("{}..{}", first.commit_sha, second.commit_sha);
+    let result = repo.git_ai(&["diff", &range, "--json", "--include-stats"]);
+    assert!(
+        result.is_err(),
+        "--include-stats should be rejected for commit ranges"
+    );
+}
+
+#[test]
+fn test_diff_range_multiple_commits() {
+    let repo = TestRepo::new();
+
+    // First commit
+    let mut file = repo.filename("multi.txt");
+    file.set_contents(crate::lines!["Line 1".human()]);
+    let first = repo.stage_all_and_commit("First").unwrap();
+
+    // Second commit
+    file.set_contents(crate::lines!["Line 1".human(), "Line 2".ai()]);
+    repo.stage_all_and_commit("Second").unwrap();
+
+    // Third commit
+    file.set_contents(crate::lines![
+        "Line 1".human(),
+        "Line 2".ai(),
+        "Line 3".human()
+    ]);
+    repo.stage_all_and_commit("Third").unwrap();
+
+    // Fourth commit
+    file.set_contents(crate::lines![
+        "Line 1".human(),
+        "Line 2".ai(),
+        "Line 3".human(),
+        "Line 4".ai()
+    ]);
+    let fourth = repo.stage_all_and_commit("Fourth").unwrap();
+
+    // Run diff across multiple commits
+    let range = format!("{}..{}", first.commit_sha, fourth.commit_sha);
+    let output = repo
+        .git_ai(&["diff", &range])
+        .expect("git-ai diff multi-commit range should succeed");
+
+    // Should show cumulative changes
+    assert!(output.contains("+Line 2"), "Should show Line 2 addition");
+    assert!(output.contains("+Line 3"), "Should show Line 3 addition");
+    assert!(output.contains("+Line 4"), "Should show Line 4 addition");
+
+    // Should have attribution markers
+    assert!(
+        output.contains("🤖") || output.contains("👤"),
+        "Should have attribution markers"
+    );
+}
+
+crate::reuse_tests_in_worktree!(
+    test_diff_ai_inserted_blank_line_with_comments_attributed_to_ai,
+    test_diff_json_sessions_use_session_id_not_combined_id,
+    test_diff_commit_range,
+    test_diff_multiple_files,
+    test_diff_initial_commit,
+    test_diff_with_head_ref,
+    test_diff_json_include_stats_rejects_commit_ranges,
+    test_diff_range_multiple_commits,
+);

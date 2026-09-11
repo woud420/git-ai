@@ -1,3 +1,6 @@
+mod types;
+pub use types::ResolvedCheckpointExecution;
+
 use crate::error::GitAiError;
 #[cfg(not(any(test, feature = "test-support")))]
 use crate::model::authorship_log_serialization::generate_short_hash;
@@ -6,8 +9,6 @@ pub use crate::model::checkpoint_request::PreparedPathRole;
 use crate::model::working_log::{Checkpoint, CheckpointKind};
 use crate::operations::git::repository::Repository;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 
 mod entries;
@@ -34,14 +35,6 @@ pub(crate) fn should_emit_agent_usage(agent_id: &AgentId) -> bool {
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) fn should_emit_agent_usage(_agent_id: &AgentId) -> bool {
     false
-}
-
-#[derive(Debug, Clone)]
-pub struct ResolvedCheckpointExecution {
-    pub base_commit: String,
-    pub ts: u128,
-    pub files: Vec<String>,
-    pub dirty_files: HashMap<String, Arc<str>>,
 }
 
 pub fn execute_resolved_checkpoint_from_daemon(

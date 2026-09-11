@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_sample_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, assert_note_no_forbidden_files, get_commit_chain,
-};
+use super::*;
 
 /// Test 7: Mixed — core.rs is shared (slow path), plus unique files in C2 and C4.
 /// Critical: no future unique files leak into earlier notes.

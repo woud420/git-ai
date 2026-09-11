@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_sample_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, assert_note_no_forbidden_files, get_commit_chain,
-};
+use super::*;
 
 /// Test 2: Rust lib.rs — upstream prepends crate-level doc and deny(warnings),
 /// feature appends impl blocks per commit AND adds a unique module file.

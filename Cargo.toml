@@ -59,6 +59,7 @@ test-support = ["dep:tempfile"]
 keyring = ["dep:keyring"]
 
 [dev-dependencies]
+proc-macro2 = "1.0"
 git-ai = { path = ".", features = ["test-support"] }
 tempfile = "3.27"
 insta = "1.47"

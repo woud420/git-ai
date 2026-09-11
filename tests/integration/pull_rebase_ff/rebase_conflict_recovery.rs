@@ -1,7 +1,4 @@
-use super::{
-    AuthorshipLog, ExpectedLineExt, TestRepo, checkpoint_claude_file_edit,
-    setup_regular_rebase_conflict,
-};
+use super::*;
 
 #[test]
 fn test_regular_rebase_with_conflict_preserves_ai_notes() {

@@ -1,4 +1,5 @@
 use super::arguments::has_flag;
+#[cfg(any(windows, not(any(test, feature = "test-support"))))]
 use super::detached::spawn_daemon_run_detached;
 use crate::model::repository::lock_file::LockFile;
 use crate::operations::commands::daemon_start_policy::{

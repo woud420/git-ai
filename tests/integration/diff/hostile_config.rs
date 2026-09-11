@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, Value, configure_hostile_diff_settings,
-    configure_repo_external_diff_helper, create_external_diff_helper_script, fs,
-};
+use super::*;
 
 #[test]
 fn test_diff_ignores_repo_external_diff_helper_but_proxy_uses_it() {

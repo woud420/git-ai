@@ -1,6 +1,4 @@
-#[cfg(not(target_os = "windows"))]
-use super::write_executable_script;
-use super::{TestRepo, assert_stats, assert_tool_model, commit_stats, fs, head_stats};
+use super::*;
 
 // ---------------------------------------------------------------------------
 // Test 12: AI refactors its own code (SKIPPED — issue #162)

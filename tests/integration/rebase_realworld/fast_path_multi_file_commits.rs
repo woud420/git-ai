@@ -1,8 +1,56 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, assert_note_no_forbidden_files,
-    get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "models.py",
+        "models.py",
+        ["class Product(models.Model):", "name = models.CharField"],
+    ),
+    (
+        "schemas.py",
+        "schemas.py",
+        ["class ProductSchema(BaseModel):", "price: condecimal"],
+    ),
+    (
+        "views.py",
+        "views.py",
+        ["@api_view(['GET'])", "def product_list(request):"],
+    ),
+    (
+        "serializers.py",
+        "serializers.py",
+        [
+            "class ProductSerializer(serializers.ModelSerializer):",
+            "model = Product",
+        ],
+    ),
+    (
+        "urls.py",
+        "urls.py",
+        ["app_name = 'shop'", "urlpatterns = ["],
+    ),
+    (
+        "permissions.py",
+        "permissions.py",
+        [
+            "class IsOwnerOrReadOnly(BasePermission):",
+            "class IsStaff(BasePermission):",
+        ],
+    ),
+    (
+        "signals.py",
+        "signals.py",
+        [
+            "@receiver(post_save, sender=Product)",
+            "@receiver(pre_delete, sender=Product)",
+        ],
+    ),
+    (
+        "tasks.py",
+        "tasks.py",
+        ["@shared_task", "def sync_inventory(product_id):"],
+    ),
+];
 
 #[test]
 fn test_fast_path_multi_file_commits_2_files_each() {
@@ -260,26 +308,7 @@ fn test_fast_path_multi_file_commits_2_files_each() {
             "decorators.py",
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "models.py",
-        "chain1_prior_models.py",
-        &[
-            ("class Product(models.Model):", true),
-            ("name = models.CharField", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "schemas.py",
-        "chain1_prior_schemas.py",
-        &[
-            ("class ProductSchema(BaseModel):", true),
-            ("price: condecimal", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[1], 1, &PRIOR_SAMPLES[0..2]);
 
     // sha2 = C3': urls.py + permissions.py
     assert_note_base_commit_matches(&repo, &chain[2], "sha2");
@@ -295,49 +324,7 @@ fn test_fast_path_multi_file_commits_2_files_each() {
         "sha2_no_future",
         &["signals.py", "tasks.py", "middleware.py", "decorators.py"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "models.py",
-        "chain2_prior_models.py",
-        &[
-            ("class Product(models.Model):", true),
-            ("name = models.CharField", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "schemas.py",
-        "chain2_prior_schemas.py",
-        &[
-            ("class ProductSchema(BaseModel):", true),
-            ("price: condecimal", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "views.py",
-        "chain2_prior_views.py",
-        &[
-            ("@api_view(['GET'])", true),
-            ("def product_list(request):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "serializers.py",
-        "chain2_prior_serializers.py",
-        &[
-            (
-                "class ProductSerializer(serializers.ModelSerializer):",
-                true,
-            ),
-            ("model = Product", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[0..4]);
 
     // sha3 = C4': signals.py + tasks.py
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
@@ -348,66 +335,7 @@ fn test_fast_path_multi_file_commits_2_files_each() {
         "sha3_no_future",
         &["middleware.py", "decorators.py"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "models.py",
-        "chain3_prior_models.py",
-        &[
-            ("class Product(models.Model):", true),
-            ("name = models.CharField", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "schemas.py",
-        "chain3_prior_schemas.py",
-        &[
-            ("class ProductSchema(BaseModel):", true),
-            ("price: condecimal", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "views.py",
-        "chain3_prior_views.py",
-        &[
-            ("@api_view(['GET'])", true),
-            ("def product_list(request):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "serializers.py",
-        "chain3_prior_serializers.py",
-        &[
-            (
-                "class ProductSerializer(serializers.ModelSerializer):",
-                true,
-            ),
-            ("model = Product", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "urls.py",
-        "chain3_prior_urls.py",
-        &[("app_name = 'shop'", true), ("urlpatterns = [", true)],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "permissions.py",
-        "chain3_prior_permissions.py",
-        &[
-            ("class IsOwnerOrReadOnly(BasePermission):", true),
-            ("class IsStaff(BasePermission):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[0..6]);
 
     // sha4 = C5': middleware.py + decorators.py
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");
@@ -475,66 +403,7 @@ fn test_fast_path_multi_file_commits_2_files_each() {
             ("class Config: from_attributes = True", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "views.py",
-        "chain4_prior_views.py",
-        &[
-            ("@api_view(['GET'])", true),
-            ("def product_list(request):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "serializers.py",
-        "chain4_prior_serializers.py",
-        &[
-            (
-                "class ProductSerializer(serializers.ModelSerializer):",
-                true,
-            ),
-            ("model = Product", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "urls.py",
-        "chain4_prior_urls.py",
-        &[("app_name = 'shop'", true), ("urlpatterns = [", true)],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "permissions.py",
-        "chain4_prior_permissions.py",
-        &[
-            ("class IsOwnerOrReadOnly(BasePermission):", true),
-            ("class IsStaff(BasePermission):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "signals.py",
-        "chain4_prior_signals.py",
-        &[
-            ("@receiver(post_save, sender=Product)", true),
-            ("@receiver(pre_delete, sender=Product)", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "tasks.py",
-        "chain4_prior_tasks.py",
-        &[
-            ("@shared_task", true),
-            ("def sync_inventory(product_id):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[4], 4, &PRIOR_SAMPLES[2..8]);
 }
 
 crate::reuse_tests_in_worktree!(test_fast_path_multi_file_commits_2_files_each,);

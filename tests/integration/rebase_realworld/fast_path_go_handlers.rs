@@ -1,8 +1,33 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, assert_note_no_forbidden_files,
-    get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "handlers/user.go",
+        "user_go",
+        ["type UserHandler struct", "func (h *UserHandler) GetUser"],
+    ),
+    (
+        "handlers/product.go",
+        "product_go",
+        [
+            "type ProductHandler struct",
+            "func (h *ProductHandler) ListProducts",
+        ],
+    ),
+    (
+        "handlers/order.go",
+        "order_go",
+        [
+            "type OrderHandler struct",
+            "func (h *OrderHandler) CreateOrder",
+        ],
+    ),
+    (
+        "handlers/auth.go",
+        "auth_go",
+        ["type AuthHandler struct", "func (h *AuthHandler) Login"],
+    ),
+];
 
 #[test]
 fn test_fast_path_go_service_5_handlers() {
@@ -201,16 +226,7 @@ fn test_fast_path_go_service_5_handlers() {
             "handlers/health.go",
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "handlers/user.go",
-        "chain1_prior_user_go",
-        &[
-            ("type UserHandler struct", true),
-            ("func (h *UserHandler) GetUser", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[1], 1, &PRIOR_SAMPLES[0..1]);
 
     // sha2 = C3': order
     assert_note_base_commit_matches(&repo, &chain[2], "sha2");
@@ -221,61 +237,13 @@ fn test_fast_path_go_service_5_handlers() {
         "sha2_no_future",
         &["handlers/auth.go", "handlers/health.go"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "handlers/user.go",
-        "chain2_prior_user_go",
-        &[
-            ("type UserHandler struct", true),
-            ("func (h *UserHandler) GetUser", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "handlers/product.go",
-        "chain2_prior_product_go",
-        &[
-            ("type ProductHandler struct", true),
-            ("func (h *ProductHandler) ListProducts", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[0..2]);
 
     // sha3 = C4': auth
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
     assert_note_files_exact(&repo, &chain[3], "sha3_files", &["handlers/auth.go"]);
     assert_note_no_forbidden_files(&repo, &chain[3], "sha3_no_future", &["handlers/health.go"]);
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "handlers/user.go",
-        "chain3_prior_user_go",
-        &[
-            ("type UserHandler struct", true),
-            ("func (h *UserHandler) GetUser", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "handlers/product.go",
-        "chain3_prior_product_go",
-        &[
-            ("type ProductHandler struct", true),
-            ("func (h *ProductHandler) ListProducts", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "handlers/order.go",
-        "chain3_prior_order_go",
-        &[
-            ("type OrderHandler struct", true),
-            ("func (h *OrderHandler) CreateOrder", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[0..3]);
 
     // sha4 = C5': health
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");
@@ -311,36 +279,7 @@ fn test_fast_path_go_service_5_handlers() {
             ("func (h *UserHandler) GetUser", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "handlers/product.go",
-        "chain4_prior_product_go",
-        &[
-            ("type ProductHandler struct", true),
-            ("func (h *ProductHandler) ListProducts", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "handlers/order.go",
-        "chain4_prior_order_go",
-        &[
-            ("type OrderHandler struct", true),
-            ("func (h *OrderHandler) CreateOrder", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "handlers/auth.go",
-        "chain4_prior_auth_go",
-        &[
-            ("type AuthHandler struct", true),
-            ("func (h *AuthHandler) Login", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[4], 4, &PRIOR_SAMPLES[1..4]);
 }
 
 crate::reuse_tests_in_worktree!(test_fast_path_go_service_5_handlers,);

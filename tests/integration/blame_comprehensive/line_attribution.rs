@@ -1,7 +1,4 @@
-use super::{
-    AgentId, AttestationEntry, AuthorshipLog, ExpectedLineExt, FileAttestation, GitAiBlameOptions,
-    GitAiRepository, LineRange, PromptRecord, TestRepo, write_note,
-};
+use super::*;
 
 // =============================================================================
 // Happy Path Tests - Successful blame operations with AI authorship

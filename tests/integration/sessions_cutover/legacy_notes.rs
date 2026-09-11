@@ -1,7 +1,4 @@
-use super::{
-    AuthorshipLog, ExpectedLineExt, TestRepo, Value, fs, rewrite_checkpoint_journal_as_legacy,
-    write_note,
-};
+use super::*;
 
 // Test 1: Old format note can be read and deserializes correctly
 #[test]

@@ -1,4 +1,4 @@
-use super::constants::AI_AUTHORSHIP_FULL_REF;
+use super::AI_AUTHORSHIP_FULL_REF;
 use super::note_fanout::{write_blob_stanza, write_note_entry, write_notes_commit_header};
 use crate::clients::git_cli::{exec_git, exec_git_with_stdin_writer};
 use crate::error::GitAiError;

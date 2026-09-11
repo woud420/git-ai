@@ -1,18 +1,9 @@
+use super::types::FileLineStats;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::imara_diff_utils::{LineChangeTag, compute_line_changes};
 use crate::model::working_log::AgentId;
 use crate::operations::git::repository::Repository;
-
-/// Per-file line statistics (in-memory only, not persisted)
-#[derive(Debug, Clone, Default)]
-#[doc(hidden)]
-pub struct FileLineStats {
-    pub additions: u32,
-    pub deletions: u32,
-    pub additions_sloc: u32,
-    pub deletions_sloc: u32,
-}
 
 /// Build EventAttributes for AgentUsage events.
 /// When repo is available, includes repo_url and branch. Always includes tool, model,

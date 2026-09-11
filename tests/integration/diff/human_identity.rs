@@ -1,7 +1,4 @@
-use super::{
-    TestRepo, Value, checkpoint_human, checkpoint_known_human, commit_after_staging_all, diff_json,
-    parse_diff_output, write_lines,
-};
+use super::*;
 
 #[test]
 fn test_diff_visual_output_shows_human_author_name_not_id() {

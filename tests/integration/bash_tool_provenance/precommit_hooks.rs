@@ -1,8 +1,5 @@
 #[cfg(unix)]
-use super::{
-    Duration, TestRepo, add_and_commit, assert_checkpoint_contains, fs, install_pre_commit_hook,
-    post_hook, pre_hook, repo_root, run_git_with_hooks, thread,
-};
+use super::*;
 
 #[cfg(unix)]
 #[test]

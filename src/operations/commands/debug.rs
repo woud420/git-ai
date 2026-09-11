@@ -1,36 +1,27 @@
 use crate::operations::daemon::self_check::prepare_daemon_for_debug_self_checks;
 use diagnostics::MIN_GIT_VERSION_DISPLAY;
-mod capture;
 mod context;
 mod diagnostics;
-mod formatting;
 mod help;
 mod jj;
-mod system;
+mod models;
 use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
-use capture::{run_command_capture, run_git_command_capture};
 use diagnostics::{
     append_git_committer_identity, append_git_diagnostics, append_git_version_check,
-    collect_git_committer_identity_info, collect_git_diagnostics,
+    append_indented_block, collect_git_committer_identity_info, collect_git_diagnostics,
+    debug_progress, run_command_capture, run_git_command_capture,
 };
-use formatting::{append_indented_block, debug_progress};
+use diagnostics::{
+    collect_git_ai_config_dump, collect_git_config_dump, collect_git_environment,
+    collect_hardware_info, collect_platform_info, collect_repository_info, format_bytes,
+};
 use help::print_debug_help;
+use models::{DebugOptions, SKIP_TRACE2_CHECKS_FLAG, ShellGitLookup};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
-use system::{
-    collect_git_ai_config_dump, collect_git_config_dump, collect_git_environment,
-    collect_hardware_info, collect_platform_info, collect_repository_info, format_bytes,
-};
-
-const SKIP_TRACE2_CHECKS_FLAG: &str = "--skip-trace2-checks";
-
-#[derive(Debug, Clone, Copy, Default)]
-struct DebugOptions {
-    skip_trace2_checks: bool,
-}
 
 pub fn handle_debug(args: &[String]) {
     if args.first().is_some_and(|arg| arg == "jj") {
@@ -384,11 +375,6 @@ fn build_debug_report(options: DebugOptions) -> String {
     }
 
     out
-}
-
-struct ShellGitLookup {
-    command: String,
-    path: Result<String, String>,
 }
 
 fn collect_shell_git_lookup() -> ShellGitLookup {

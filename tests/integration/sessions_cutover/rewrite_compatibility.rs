@@ -1,7 +1,4 @@
-use super::{
-    AuthorshipLog, ExpectedLineExt, TestRepo, Value, fs, rewrite_checkpoint_journal_as_legacy,
-    write_note,
-};
+use super::*;
 
 // Test 3: Rebase chain with old and new format notes
 #[test]

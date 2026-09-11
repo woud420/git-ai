@@ -1,8 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo,
-    delayed_checkout_switch_merge_trace_replay_does_not_attribute_later_uncheckpointed_edit, fs,
-    raw_git_trace_to_file, replay_trace_file_to_daemon, setup_initial_commit,
-};
+use super::*;
 
 #[test]
 fn test_delayed_stash_apply_trace_replay_preserves_named_stash_attribution() {

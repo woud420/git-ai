@@ -1,7 +1,4 @@
-use super::{
-    DiffLine, ExpectedLineExt, TestRepo, assert_diff_line, assert_diff_lines_exact, fs,
-    parse_diff_output,
-};
+use super::*;
 
 #[test]
 fn test_diff_shows_ai_attribution() {

@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_note_base_commit_matches, assert_note_files_exact, fs,
-    get_commit_chain,
-};
+use super::*;
 
 /// Test 2: Rust lib.rs — feature adds AI parser functions, main edits the same
 /// mod declaration at the top → conflict on C2 (middle of chain).

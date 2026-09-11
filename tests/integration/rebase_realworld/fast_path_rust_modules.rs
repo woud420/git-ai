@@ -1,8 +1,39 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, assert_note_no_forbidden_files,
-    get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "src/parser.rs",
+        "parser_rs",
+        [
+            "pub struct Parser {",
+            "pub fn parse_token(&mut self) -> Option<&str> {",
+        ],
+    ),
+    (
+        "src/validator.rs",
+        "validator_rs",
+        [
+            "pub struct Validator {",
+            "pub fn validate(&self, input: &str) -> bool {",
+        ],
+    ),
+    (
+        "src/formatter.rs",
+        "formatter_rs",
+        [
+            "pub struct Formatter {",
+            "pub fn format(&self, tokens: &[&str]) -> String {",
+        ],
+    ),
+    (
+        "src/encoder.rs",
+        "encoder_rs",
+        [
+            "pub struct Encoder {",
+            "pub fn encode_str(&mut self, s: &str) {",
+        ],
+    ),
+];
 
 #[test]
 fn test_fast_path_rust_library_5_modules() {
@@ -228,16 +259,7 @@ fn test_fast_path_rust_library_5_modules() {
             ("}", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "src/parser.rs",
-        "chain1_prior_parser_rs",
-        &[
-            ("pub struct Parser {", true),
-            ("pub fn parse_token(&mut self) -> Option<&str> {", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[1], 1, &PRIOR_SAMPLES[0..1]);
 
     // sha2 = C3': formatter
     assert_note_base_commit_matches(&repo, &chain[2], "sha2");
@@ -248,61 +270,13 @@ fn test_fast_path_rust_library_5_modules() {
         "sha2_no_future",
         &["src/encoder.rs", "src/decoder.rs"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "src/parser.rs",
-        "chain2_prior_parser_rs",
-        &[
-            ("pub struct Parser {", true),
-            ("pub fn parse_token(&mut self) -> Option<&str> {", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "src/validator.rs",
-        "chain2_prior_validator_rs",
-        &[
-            ("pub struct Validator {", true),
-            ("pub fn validate(&self, input: &str) -> bool {", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[0..2]);
 
     // sha3 = C4': encoder
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
     assert_note_files_exact(&repo, &chain[3], "sha3_files", &["src/encoder.rs"]);
     assert_note_no_forbidden_files(&repo, &chain[3], "sha3_no_future", &["src/decoder.rs"]);
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "src/parser.rs",
-        "chain3_prior_parser_rs",
-        &[
-            ("pub struct Parser {", true),
-            ("pub fn parse_token(&mut self) -> Option<&str> {", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "src/validator.rs",
-        "chain3_prior_validator_rs",
-        &[
-            ("pub struct Validator {", true),
-            ("pub fn validate(&self, input: &str) -> bool {", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "src/formatter.rs",
-        "chain3_prior_formatter_rs",
-        &[
-            ("pub struct Formatter {", true),
-            ("pub fn format(&self, tokens: &[&str]) -> String {", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[0..3]);
 
     // sha4 = C5': decoder
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");
@@ -342,36 +316,7 @@ fn test_fast_path_rust_library_5_modules() {
             ("pub fn parse_token(&mut self)", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "src/validator.rs",
-        "chain4_prior_validator_rs",
-        &[
-            ("pub struct Validator {", true),
-            ("pub fn validate(&self, input: &str) -> bool {", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "src/formatter.rs",
-        "chain4_prior_formatter_rs",
-        &[
-            ("pub struct Formatter {", true),
-            ("pub fn format(&self, tokens: &[&str]) -> String {", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "src/encoder.rs",
-        "chain4_prior_encoder_rs",
-        &[
-            ("pub struct Encoder {", true),
-            ("pub fn encode_str(&mut self, s: &str) {", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[4], 4, &PRIOR_SAMPLES[1..4]);
 }
 
 crate::reuse_tests_in_worktree!(test_fast_path_rust_library_5_modules,);

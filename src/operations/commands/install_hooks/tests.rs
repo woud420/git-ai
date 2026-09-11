@@ -1,10 +1,5 @@
-use super::configuration::*;
-use super::execution::MIN_GIT_VERSION;
-#[cfg(unix)]
-use super::{run, run_uninstall};
+use super::*;
 use serial_test::serial;
-use std::fs;
-use std::path::Path;
 use std::path::PathBuf;
 use tempfile::tempdir;
 

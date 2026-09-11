@@ -1,6 +1,4 @@
-use super::{
-    Path, TASK_RETIRED_FRAGMENTS, assert_live_architecture_references, collect_markdown_files, fs,
-};
+use super::*;
 
 #[test]
 fn eng_382_current_architecture_source_paths_resolve() {

@@ -1,19 +1,37 @@
-mod installer;
-mod release;
+mod models;
+use crate::clients::api::client::ApiContext;
 use crate::config::{self, UpdateChannel};
 use crate::observability::log_message;
+use crate::operations::git::repository::resolve_api_author_identity;
+pub use models::DaemonUpdateCheckResult;
+use models::{ChannelRelease, ReleasesResponse, UpdateCache, UpgradeAction};
 #[cfg(windows)]
-use installer::exit_if_invoked_via_git_extension;
-use installer::run_install_script;
-use release::{
-    fetch_and_verify_checksums, fetch_and_verify_install_script, fetch_release_for_channel,
-};
-use serde::{Deserialize, Serialize};
+use models::{ProcessEntry32W, WINDOWS_MAX_PATH, WindowsHandle};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+use std::time::Duration;
+
+#[cfg(windows)]
+const TH32CS_SNAPPROCESS: u32 = 0x00000002;
+#[cfg(windows)]
+const INVALID_HANDLE_VALUE: WindowsHandle = (-1isize) as WindowsHandle;
+
+#[cfg(windows)]
+unsafe extern "system" {
+    fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> WindowsHandle;
+    fn Process32FirstW(snapshot: WindowsHandle, entry: *mut ProcessEntry32W) -> i32;
+    fn Process32NextW(snapshot: WindowsHandle, entry: *mut ProcessEntry32W) -> i32;
+    fn CloseHandle(handle: WindowsHandle) -> i32;
+}
 
 const UPDATE_CHECK_INTERVAL_HOURS: u64 = 24;
 const GIT_AI_RELEASE_ENV: &str = "GIT_AI_RELEASE_TAG";
@@ -26,14 +44,6 @@ const ENV_BACKGROUND_UPGRADE_WORKER: &str = "GIT_AI_BACKGROUND_UPGRADE_WORKER";
 static UPDATE_NOTICE_EMITTED: AtomicBool = AtomicBool::new(false);
 static LAST_BACKGROUND_SPAWN: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, PartialEq)]
-enum UpgradeAction {
-    UpgradeAvailable,
-    AlreadyLatest,
-    RunningNewerVersion,
-    ForceReinstall,
-}
-
 impl UpgradeAction {
     fn to_string(&self) -> &str {
         match self {
@@ -43,21 +53,6 @@ impl UpgradeAction {
             UpgradeAction::ForceReinstall => "force_reinstall",
         }
     }
-}
-
-#[derive(Debug, Clone)]
-struct ChannelRelease {
-    tag: String,
-    semver: String,
-    checksum: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UpdateCache {
-    last_checked_at: u64,
-    available_tag: Option<String>,
-    available_semver: Option<String>,
-    channel: String,
 }
 
 impl UpdateCache {
@@ -77,17 +72,6 @@ impl UpdateCache {
     fn matches_channel(&self, channel: UpdateChannel) -> bool {
         self.channel == channel.as_str()
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct ChannelInfo {
-    version: String,
-    checksum: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReleasesResponse {
-    channels: HashMap<String, ChannelInfo>,
 }
 
 fn get_update_check_cache_path() -> Option<PathBuf> {
@@ -122,6 +106,115 @@ fn current_timestamp() -> u64 {
     crate::model::clock::now_secs()
 }
 
+#[cfg(windows)]
+fn exit_if_invoked_via_git_extension() {
+    if should_block_git_extension_upgrade(
+        parent_process_name().as_deref(),
+        std::env::var(ENV_BACKGROUND_UPGRADE_WORKER).as_deref() == Ok("1"),
+    ) {
+        eprintln!(
+            "error: `git ai upgrade` is not supported on Windows. Run `git-ai upgrade` instead."
+        );
+        std::process::exit(1);
+    }
+}
+
+#[cfg(windows)]
+fn should_block_git_extension_upgrade(
+    parent_process_name: Option<&str>,
+    is_background_worker: bool,
+) -> bool {
+    !is_background_worker && parent_process_name.is_some_and(is_git_process_name)
+}
+
+#[cfg(windows)]
+fn is_git_process_name(name: &str) -> bool {
+    std::path::Path::new(name)
+        .file_name()
+        .and_then(|file_name| file_name.to_str())
+        .is_some_and(|file_name| {
+            file_name.eq_ignore_ascii_case("git") || file_name.eq_ignore_ascii_case("git.exe")
+        })
+}
+
+#[cfg(windows)]
+fn parent_process_name() -> Option<String> {
+    struct SnapshotGuard(WindowsHandle);
+
+    impl Drop for SnapshotGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    let _snapshot_guard = SnapshotGuard(snapshot);
+
+    let current_pid = std::process::id();
+    let parent_pid = find_parent_pid(snapshot, current_pid)?;
+    process_name_for_pid(snapshot, parent_pid)
+}
+
+#[cfg(windows)]
+fn find_parent_pid(snapshot: WindowsHandle, current_pid: u32) -> Option<u32> {
+    let mut entry = windows_process_entry_template();
+    if unsafe { Process32FirstW(snapshot, &mut entry) } == 0 {
+        return None;
+    }
+
+    loop {
+        if entry.th32_process_id == current_pid {
+            return Some(entry.th32_parent_process_id);
+        }
+        if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
+            return None;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn process_name_for_pid(snapshot: WindowsHandle, pid: u32) -> Option<String> {
+    let mut entry = windows_process_entry_template();
+    if unsafe { Process32FirstW(snapshot, &mut entry) } == 0 {
+        return None;
+    }
+
+    loop {
+        if entry.th32_process_id == pid {
+            let len = entry
+                .sz_exe_file
+                .iter()
+                .position(|&ch| ch == 0)
+                .unwrap_or(entry.sz_exe_file.len());
+            return Some(String::from_utf16_lossy(&entry.sz_exe_file[..len]));
+        }
+        if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
+            return None;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn windows_process_entry_template() -> ProcessEntry32W {
+    ProcessEntry32W {
+        dw_size: std::mem::size_of::<ProcessEntry32W>() as u32,
+        cnt_usage: 0,
+        th32_process_id: 0,
+        th32_default_heap_id: 0,
+        th32_module_id: 0,
+        cnt_threads: 0,
+        th32_parent_process_id: 0,
+        pc_pri_class_base: 0,
+        dw_flags: 0,
+        sz_exe_file: [0; WINDOWS_MAX_PATH],
+    }
+}
+
 fn should_check_for_updates(channel: UpdateChannel, cache: Option<&UpdateCache>) -> bool {
     let now = current_timestamp();
     match cache {
@@ -135,6 +228,14 @@ fn should_check_for_updates(channel: UpdateChannel, cache: Option<&UpdateCache>)
         }
         _ => true,
     }
+}
+
+fn semver_from_tag(tag: &str) -> String {
+    let trimmed = tag
+        .trim()
+        .trim_start_matches("enterprise-")
+        .trim_start_matches('v');
+    trimmed.split(['-', '+']).next().unwrap_or("").to_string()
 }
 
 fn determine_action(force: bool, release: &ChannelRelease, current_version: &str) -> UpgradeAction {
@@ -164,6 +265,344 @@ fn persist_update_state(channel: UpdateChannel, release: Option<&ChannelRelease>
 pub(crate) fn clear_cached_update_state() {
     let channel = config::Config::fresh().update_channel();
     persist_update_state(channel, None);
+}
+
+fn releases_endpoint() -> &'static str {
+    "/worker/releases"
+}
+
+fn verify_sha256(content: &[u8], expected_hash: &str) -> Result<(), String> {
+    let mut hasher = Sha256::new();
+    hasher.update(content);
+    let actual_hash = format!("{:x}", hasher.finalize());
+
+    if actual_hash.eq_ignore_ascii_case(expected_hash) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Checksum mismatch: expected {}, got {}",
+            expected_hash, actual_hash
+        ))
+    }
+}
+
+/// Parse SHA256SUMS file content into a map of filename → hash.
+/// Format: `<hash>  <filename>` (two spaces between hash and filename)
+fn parse_checksums(content: &str) -> HashMap<String, String> {
+    let mut checksums = HashMap::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        // Format: "<hash>  <filename>" (two spaces)
+        if let Some((hash, filename)) = line.split_once("  ") {
+            checksums.insert(filename.to_string(), hash.to_string());
+        }
+    }
+
+    checksums
+}
+
+/// Fetch SHA256SUMS from the releases API and verify against expected checksum.
+fn fetch_and_verify_checksums(
+    api_base_url: &str,
+    channel: &str,
+    expected_checksum: &str,
+) -> Result<HashMap<String, String>, String> {
+    let endpoint = format!("/worker/releases/{}/download/SHA256SUMS", channel);
+
+    let (_agent, request) =
+        ApiContext::http_get(&format!("{}{}", api_base_url, endpoint), Some(30));
+    let response = crate::clients::http::send(request)
+        .map_err(|e| format!("Failed to fetch SHA256SUMS: {}", e))?;
+
+    if response.status_code != 200 {
+        return Err(format!(
+            "Failed to fetch SHA256SUMS: HTTP {}",
+            response.status_code
+        ));
+    }
+
+    let content = response.as_bytes();
+
+    verify_sha256(content, expected_checksum)
+        .map_err(|e| format!("SHA256SUMS verification failed: {}", e))?;
+
+    let content_str = std::str::from_utf8(content)
+        .map_err(|e| format!("SHA256SUMS is not valid UTF-8: {}", e))?;
+
+    Ok(parse_checksums(content_str))
+}
+
+/// Fetch install script from the releases API and verify against checksums.
+fn fetch_and_verify_install_script(
+    api_base_url: &str,
+    channel: &str,
+    checksums: &HashMap<String, String>,
+) -> Result<String, String> {
+    #[cfg(windows)]
+    let script_name = "install.ps1";
+    #[cfg(not(windows))]
+    let script_name = "install.sh";
+
+    let expected_checksum = checksums
+        .get(script_name)
+        .ok_or_else(|| format!("Checksum for {} not found in SHA256SUMS", script_name))?;
+
+    let endpoint = format!("/worker/releases/{}/download/{}", channel, script_name);
+
+    let (_agent, request) =
+        ApiContext::http_get(&format!("{}{}", api_base_url, endpoint), Some(30));
+    let response = crate::clients::http::send(request)
+        .map_err(|e| format!("Failed to fetch {}: {}", script_name, e))?;
+
+    if response.status_code != 200 {
+        return Err(format!(
+            "Failed to fetch {}: HTTP {}",
+            script_name, response.status_code
+        ));
+    }
+
+    let content = response.as_bytes();
+
+    verify_sha256(content, expected_checksum)
+        .map_err(|e| format!("{} verification failed: {}", script_name, e))?;
+
+    let script = std::str::from_utf8(content)
+        .map_err(|e| format!("{} is not valid UTF-8: {}", script_name, e))?;
+
+    Ok(script.to_string())
+}
+
+fn fetch_release_for_channel(
+    api_base_url: &str,
+    channel: UpdateChannel,
+) -> Result<ChannelRelease, String> {
+    #[cfg(test)]
+    if let Some(result) = try_mock_releases(api_base_url, channel) {
+        return result;
+    }
+    let url = Some(api_base_url.to_string());
+    let context = ApiContext::new(url, resolve_api_author_identity).with_timeout(5);
+    let response = context
+        .get(releases_endpoint())
+        .map_err(|e| format!("Failed to check for updates: {}", e))?;
+
+    let body = response
+        .as_str()
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+    let releases: ReleasesResponse = serde_json::from_str(body)
+        .map_err(|e| format!("Failed to parse release response: {}", e))?;
+
+    release_from_response(releases, channel)
+}
+
+fn release_from_response(
+    releases: ReleasesResponse,
+    channel: UpdateChannel,
+) -> Result<ChannelRelease, String> {
+    let channel_name = channel.as_str();
+
+    let channel_info = releases
+        .channels
+        .get(channel_name)
+        .ok_or_else(|| format!("Channel '{}' not found in releases", channel_name))?;
+
+    let tag = channel_info.version.trim().to_string();
+    if tag.is_empty() {
+        return Err("Release tag not found in response".to_string());
+    }
+
+    let semver = semver_from_tag(&tag);
+    if semver.is_empty() {
+        return Err(format!("Unable to parse semver from tag '{}'", tag));
+    }
+
+    let checksum = channel_info.checksum.trim().to_string();
+    if checksum.is_empty() {
+        return Err("Checksum not found in response".to_string());
+    }
+
+    Ok(ChannelRelease {
+        tag,
+        semver,
+        checksum,
+    })
+}
+
+#[cfg(test)]
+fn try_mock_releases(base: &str, channel: UpdateChannel) -> Option<Result<ChannelRelease, String>> {
+    let json = base.strip_prefix("mock://")?;
+    Some(
+        serde_json::from_str::<ReleasesResponse>(json)
+            .map_err(|e| format!("Invalid mock releases payload: {}", e))
+            .and_then(|releases| release_from_response(releases, channel)),
+    )
+}
+
+fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        if let Ok(daemon_config) =
+            crate::operations::daemon::DaemonConfig::from_env_or_default_paths()
+        {
+            // Best effort: stop the daemon before we hand off to the detached installer.
+            // The install script also has a fallback kill path so old released binaries
+            // can still recover, but stopping here makes upgrades complete sooner.
+            let _ = crate::operations::commands::daemon::stop_daemon(
+                &daemon_config,
+                Duration::from_secs(10),
+            );
+        }
+
+        // On Windows, we need to run the installer detached because the current git-ai
+        // binary and shims are in use and need to be replaced. The installer will wait
+        // for the files to be released before proceeding.
+        let pid = std::process::id();
+        let log_dir = dirs::home_dir()
+            .ok_or_else(|| "Could not determine home directory".to_string())?
+            .join(".git-ai")
+            .join("upgrade-logs");
+
+        // Ensure the log directory exists
+        fs::create_dir_all(&log_dir)
+            .map_err(|e| format!("Failed to create log directory: {}", e))?;
+
+        let log_file = log_dir.join(format!("upgrade-{}.log", pid));
+        let log_path_str = log_file.to_string_lossy().to_string();
+
+        // Write the install script to a temp file
+        let script_path = log_dir.join(format!("install-{}.ps1", pid));
+        fs::write(&script_path, script_content)
+            .map_err(|e| format!("Failed to write install script: {}", e))?;
+        let script_path_str = script_path.to_string_lossy().to_string();
+
+        // Create log file with initial message
+        fs::write(&log_file, format!("Starting upgrade at PID {}\n", pid))
+            .map_err(|e| format!("Failed to create log file: {}", e))?;
+
+        // PowerShell wrapper that executes the script file with logging
+        let ps_wrapper = format!(
+            "$logFile = '{}'; \
+             Start-Transcript -Path $logFile -Append -Force | Out-Null; \
+             Write-Host 'Running verified install script...'; \
+             try {{ \
+                  $ErrorActionPreference = 'Continue'; \
+                  & '{}'; \
+                  Write-Host 'Install script completed'; \
+              }} catch {{ \
+                  Write-Host \"Error: $_\"; \
+                  Write-Host \"Stack trace: $($_.ScriptStackTrace)\"; \
+              }} finally {{ \
+                  if ($env:{} -eq '1') {{ \
+                      $daemonExe = Join-Path $HOME '.git-ai\\bin\\git-ai.exe'; \
+                      if (Test-Path $daemonExe) {{ try {{ & $daemonExe bg start *> $null }} catch {{ }} }} \
+                  }}; \
+                  Stop-Transcript | Out-Null; \
+                  Remove-Item -Path '{}' -Force -ErrorAction SilentlyContinue; \
+              }}",
+            log_path_str, script_path_str, GIT_AI_RESTART_DAEMON_AFTER_INSTALL_ENV, script_path_str
+        );
+
+        let spawn_powershell = |exe: &str| -> std::io::Result<std::process::Child> {
+            let mut cmd = Command::new(exe);
+            cmd.arg("-NoProfile")
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-Command")
+                .arg(&ps_wrapper)
+                .env(GIT_AI_RELEASE_ENV, tag);
+
+            // Hide the spawned console to prevent any host/UI bleed-through
+            cmd.creation_flags(crate::process_spawn::CREATE_NO_WINDOW);
+
+            if silent {
+                cmd.env(GIT_AI_RESTART_DAEMON_AFTER_INSTALL_ENV, "1");
+                cmd.env(GIT_AI_DAEMON_UPGRADE_ENV, "1");
+                cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            }
+
+            cmd.spawn()
+        };
+
+        let spawn_result = spawn_powershell("pwsh").or_else(|_| spawn_powershell("powershell"));
+
+        match spawn_result {
+            Ok(_) => {
+                if !silent {
+                    println!(
+                        "\x1b[1;33mNote: The installation is running in the background on Windows.\x1b[0m"
+                    );
+                    println!(
+                        "This allows the current git-ai process to exit and release file locks."
+                    );
+                    println!("Check the log file for progress: {}", log_path_str);
+                    println!(
+                        "The installer will stop lingering git-ai background processes if needed, but active git commands can still delay completion."
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to run installation script: {}", e)),
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Write script to ~/.git-ai/tmp/ to avoid /tmp noexec or permission issues.
+        // Fall back to the system temp dir if the home-based path is unavailable.
+        let temp_dir = crate::config::git_ai_dir_path()
+            .map(|p| p.join("tmp"))
+            .unwrap_or_else(std::env::temp_dir);
+        fs::create_dir_all(&temp_dir)
+            .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+        let script_path = temp_dir.join(format!("git-ai-install-{}.sh", std::process::id()));
+
+        // Write and make executable
+        let mut file = fs::File::create(&script_path)
+            .map_err(|e| format!("Failed to create temp script file: {}", e))?;
+        file.write_all(script_content.as_bytes())
+            .map_err(|e| format!("Failed to write install script: {}", e))?;
+        drop(file);
+
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("Failed to make script executable: {}", e))?;
+
+        let script_path_str = script_path.to_string_lossy().to_string();
+
+        let mut cmd = Command::new("bash");
+        cmd.arg(&script_path_str).env(GIT_AI_RELEASE_ENV, tag);
+
+        if silent {
+            cmd.env(GIT_AI_DAEMON_UPGRADE_ENV, "1");
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+
+        let result = match cmd.status() {
+            Ok(status) => {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Installation script failed with exit code: {:?}",
+                        status.code()
+                    ))
+                }
+            }
+            Err(e) => Err(format!("Failed to run installation script: {}", e)),
+        };
+
+        // Clean up temp script
+        let _ = fs::remove_file(&script_path);
+
+        result
+    }
 }
 
 pub fn run_with_args(args: &[String]) {
@@ -402,15 +841,6 @@ fn spawn_background_upgrade_process() -> bool {
         ENV_BACKGROUND_UPGRADE_WORKER,
         &[],
     )
-}
-
-/// Result of checking whether a daemon-initiated update is available.
-#[derive(Debug, PartialEq)]
-pub enum DaemonUpdateCheckResult {
-    /// No update is needed (already latest, checks disabled, or not yet time to check).
-    NoUpdate,
-    /// An update is available and auto-updates are enabled.
-    UpdateReady,
 }
 
 /// Install a previously-detected update.

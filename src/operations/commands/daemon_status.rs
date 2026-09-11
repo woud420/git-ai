@@ -1,5 +1,4 @@
-use super::startup::{daemon_config_from_env_or_default_paths, daemon_is_up};
-use crate::operations::daemon::{ControlRequest, DaemonConfig, send_control_request};
+use super::*;
 
 pub(super) fn handle_status(repo_working_dir: String) -> Result<(), String> {
     let config = daemon_config_from_env_or_default_paths()?;

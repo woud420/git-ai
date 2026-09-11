@@ -1,17 +1,12 @@
 mod assembly;
-mod git_path;
-#[cfg(any(test, feature = "test-support"))]
-mod patch;
-mod storage;
-mod values;
 pub(crate) use assembly::build_config;
-pub use git_path::is_real_git_candidate;
+pub use assembly::is_real_git_candidate;
 #[cfg(all(test, unix))]
-pub(crate) use git_path::path_is_git_ai_binary;
-pub(crate) use storage::strip_utf8_bom;
-pub use storage::{config_file_path, load_file_config_public, save_file_config};
+pub(crate) use assembly::path_is_git_ai_binary;
+pub(crate) use assembly::strip_utf8_bom;
+pub use assembly::{config_file_path, load_file_config_public, save_file_config};
 #[cfg(test)]
-pub(crate) use storage::{parse_file_config_bytes, resolve_telemetry_enabled};
+pub(crate) use assembly::{parse_file_config_bytes, resolve_telemetry_enabled};
 
 const TRACING_TARGET: &str = module_path!();
 

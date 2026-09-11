@@ -1,7 +1,4 @@
-use super::{
-    Duration, TestRepo, add_and_commit, diff, git_status_fallback, repo_root, run_bash, snapshot,
-    thread,
-};
+use super::*;
 
 // ===========================================================================
 // Additional: Direct snapshot/diff API tests with real commands

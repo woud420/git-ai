@@ -23,6 +23,403 @@ fn get_json_with_env(repo: &TestRepo, key: &str, envs: &[(&str, &str)]) -> Value
         .unwrap_or_else(|e| panic!("config get {key} returned non-JSON {out:?}: {e}"))
 }
 
+#[test]
+fn eng_374_nix_documented_updates_preserve_other_settings_and_replace_lists() {
+    let readme = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README-nix.md"),
+    )
+    .unwrap();
+    let ownership = readme
+        .split("## Configuration ownership")
+        .nth(1)
+        .expect("Nix guide must explain existing-file ownership")
+        .split("\n## ")
+        .next()
+        .unwrap();
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let config_path = repo.test_home_path().join(".git-ai/config.json");
+    let mut config: Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let object = config.as_object_mut().unwrap();
+    object.remove("allowed_repositories");
+    object.insert("allow_repositories".into(), serde_json::json!(["old-repo"]));
+    object.insert(
+        "custom_attributes".into(),
+        serde_json::json!({"owner": "kept"}),
+    );
+    let notes_backend = object.get("notes_backend").cloned();
+    std::fs::write(&config_path, serde_json::to_string(&config).unwrap()).unwrap();
+    assert_eq!(
+        get_json(&repo, "allowed_repositories"),
+        serde_json::json!(["old-repo"])
+    );
+
+    let mut updated_keys = std::collections::HashSet::new();
+    for command in ownership
+        .lines()
+        .filter_map(|line| line.strip_prefix("git-ai config set "))
+    {
+        let (key, quoted_json) = command.split_once(' ').unwrap();
+        assert!(matches!(
+            key,
+            "allowed_repositories" | "exclude_repositories"
+        ));
+        let json = quoted_json
+            .strip_prefix('\'')
+            .unwrap()
+            .strip_suffix('\'')
+            .unwrap();
+        let expected: Value = serde_json::from_str(json).unwrap();
+        repo.git_ai(&["config", "set", key, json]).unwrap();
+        assert_eq!(get_json(&repo, key), expected);
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            saved[key], expected,
+            "set must replace, not append to the list"
+        );
+        assert_eq!(saved["custom_attributes"], config["custom_attributes"]);
+        assert_eq!(saved.get("notes_backend"), notes_backend.as_ref());
+        updated_keys.insert(key);
+    }
+    assert!(updated_keys.contains("allowed_repositories"));
+    assert!(updated_keys.contains("exclude_repositories"));
+    assert_eq!(
+        get_json(&repo, "allowed_repositories"),
+        serde_json::json!([]),
+        "document revoking collection too"
+    );
+}
+
+#[test]
+fn test_config_allow_superuser_set_get_unset() {
+    let repo = TestRepo::new();
+
+    // Default is false.
+    assert_eq!(get_json(&repo, "allow_superuser"), Value::Bool(false));
+
+    repo.git_ai(&["config", "set", "allow_superuser", "true"])
+        .expect("set allow_superuser");
+    assert_eq!(get_json(&repo, "allow_superuser"), Value::Bool(true));
+
+    repo.git_ai(&["config", "unset", "allow_superuser"])
+        .expect("unset allow_superuser");
+    assert_eq!(get_json(&repo, "allow_superuser"), Value::Bool(false));
+}
+
+#[test]
+fn test_config_transcript_streaming_lookback_days_set_get_unset() {
+    let repo = TestRepo::new();
+
+    // Default is 7 days.
+    assert_eq!(
+        get_json(&repo, "transcript_streaming_lookback_days"),
+        Value::Number(7.into())
+    );
+
+    repo.git_ai(&["config", "set", "transcript_streaming_lookback_days", "1"])
+        .expect("set lookback to 1");
+    assert_eq!(
+        get_json(&repo, "transcript_streaming_lookback_days"),
+        Value::Number(1.into())
+    );
+
+    // 0 means unlimited; runtime normalizes to None and we surface it as 0.
+    repo.git_ai(&["config", "set", "transcript_streaming_lookback_days", "0"])
+        .expect("set lookback to 0");
+    assert_eq!(
+        get_json(&repo, "transcript_streaming_lookback_days"),
+        Value::Number(0.into())
+    );
+
+    // Non-numeric input is rejected.
+    assert!(
+        repo.git_ai(&["config", "set", "transcript_streaming_lookback_days", "abc"])
+            .is_err()
+    );
+
+    repo.git_ai(&["config", "unset", "transcript_streaming_lookback_days"])
+        .expect("unset lookback");
+    assert_eq!(
+        get_json(&repo, "transcript_streaming_lookback_days"),
+        Value::Number(7.into())
+    );
+}
+
+#[test]
+fn test_config_checkpoint_budget_set_get_unset() {
+    let repo = TestRepo::new();
+
+    repo.git_ai(&[
+        "config",
+        "set",
+        "max_checkpoint_total_size_bytes",
+        "1048576",
+    ])
+    .expect("set max_checkpoint_total_size_bytes");
+    assert_eq!(
+        get_json(&repo, "max_checkpoint_total_size_bytes"),
+        Value::Number(1_048_576.into())
+    );
+
+    repo.git_ai(&["config", "set", "max_checkpoint_total_lines", "4096"])
+        .expect("set max_checkpoint_total_lines");
+    assert_eq!(
+        get_json(&repo, "max_checkpoint_total_lines"),
+        Value::Number(4096.into())
+    );
+
+    repo.git_ai(&["config", "unset", "max_checkpoint_total_size_bytes"])
+        .expect("unset max_checkpoint_total_size_bytes");
+    assert_eq!(
+        get_json(&repo, "max_checkpoint_total_size_bytes"),
+        Value::Number((32 * 1024 * 1024).into())
+    );
+
+    repo.git_ai(&["config", "unset", "max_checkpoint_total_lines"])
+        .expect("unset max_checkpoint_total_lines");
+    assert_eq!(
+        get_json(&repo, "max_checkpoint_total_lines"),
+        Value::Number(500_000.into())
+    );
+}
+
+#[test]
+fn test_config_daemon_memory_limit_set_get_unset() {
+    let repo = TestRepo::new();
+
+    assert_eq!(
+        get_json(&repo, "daemon_memory_limit_mb"),
+        Value::Null,
+        "daemon memory monitoring should be disabled by default"
+    );
+
+    repo.git_ai(&["config", "set", "daemon_memory_limit_mb", "1024"])
+        .expect("set daemon_memory_limit_mb");
+    assert_eq!(
+        get_json(&repo, "daemon_memory_limit_mb"),
+        Value::Number(1024.into())
+    );
+
+    assert!(
+        repo.git_ai(&["config", "set", "daemon_memory_limit_mb", "0"])
+            .is_err(),
+        "zero must be rejected; unset disables the limit"
+    );
+    assert!(
+        repo.git_ai(&["config", "set", "daemon_memory_limit_mb", "-1"])
+            .is_err(),
+        "negative limits must be rejected"
+    );
+
+    repo.git_ai(&["config", "unset", "daemon_memory_limit_mb"])
+        .expect("unset daemon_memory_limit_mb");
+    assert_eq!(get_json(&repo, "daemon_memory_limit_mb"), Value::Null);
+}
+
+#[test]
+fn test_config_custom_attributes_object_set_get_unset() {
+    let repo = TestRepo::new();
+
+    // Default is an empty object.
+    assert_eq!(
+        get_json(&repo, "custom_attributes"),
+        Value::Object(serde_json::Map::new())
+    );
+
+    repo.git_ai(&[
+        "config",
+        "set",
+        "custom_attributes",
+        r#"{"team":"platform","env":"prod"}"#,
+    ])
+    .expect("set custom_attributes object");
+
+    let value = get_json(&repo, "custom_attributes");
+    assert_eq!(value["team"], Value::String("platform".to_string()));
+    assert_eq!(value["env"], Value::String("prod".to_string()));
+
+    repo.git_ai(&["config", "unset", "custom_attributes"])
+        .expect("unset custom_attributes");
+    assert_eq!(
+        get_json(&repo, "custom_attributes"),
+        Value::Object(serde_json::Map::new())
+    );
+}
+
+#[test]
+fn test_config_custom_attributes_nested_set_get_unset() {
+    let repo = TestRepo::new();
+
+    // Set a single attribute via dot notation.
+    repo.git_ai(&["config", "set", "custom_attributes.team", "platform"])
+        .expect("set custom_attributes.team");
+    assert_eq!(
+        get_json(&repo, "custom_attributes.team"),
+        Value::String("platform".to_string())
+    );
+
+    // --add upserts another attribute without clobbering the first.
+    repo.git_ai(&["config", "--add", "custom_attributes.env", "prod"])
+        .expect("add custom_attributes.env");
+    let value = get_json(&repo, "custom_attributes");
+    assert_eq!(value["team"], Value::String("platform".to_string()));
+    assert_eq!(value["env"], Value::String("prod".to_string()));
+
+    // Unknown nested attribute reads back as null.
+    assert_eq!(get_json(&repo, "custom_attributes.missing"), Value::Null);
+
+    // Unset one attribute leaves the other intact.
+    repo.git_ai(&["config", "unset", "custom_attributes.team"])
+        .expect("unset custom_attributes.team");
+    let value = get_json(&repo, "custom_attributes");
+    assert!(value.get("team").is_none());
+    assert_eq!(value["env"], Value::String("prod".to_string()));
+
+    // Unsetting a missing attribute is an error.
+    assert!(
+        repo.git_ai(&["config", "unset", "custom_attributes.team"])
+            .is_err()
+    );
+}
+
+#[test]
+fn test_config_custom_attributes_set_empty_object_is_omitted() {
+    let repo = TestRepo::new();
+
+    // Setting an empty object should normalize to "unset" (mirrors `author`),
+    // not persist a redundant `{}`.
+    repo.git_ai(&["config", "set", "custom_attributes", "{}"])
+        .expect("set empty custom_attributes");
+    assert_eq!(
+        get_json(&repo, "custom_attributes"),
+        Value::Object(serde_json::Map::new())
+    );
+
+    // The config file should not carry a `custom_attributes` key at all.
+    let config_path = repo.test_home_path().join(".git-ai").join("config.json");
+    if let Ok(contents) = std::fs::read_to_string(&config_path) {
+        let parsed: Value = serde_json::from_str(&contents).unwrap_or(Value::Null);
+        assert!(
+            parsed.get("custom_attributes").is_none(),
+            "empty custom_attributes should be omitted from config file, got: {contents}"
+        );
+    }
+}
+
+#[test]
+fn test_config_custom_attributes_nested_unset_trims_name() {
+    let repo = TestRepo::new();
+
+    // Set with a leading space in the attribute name; the set path trims it.
+    repo.git_ai(&["config", "set", "custom_attributes. team", "platform"])
+        .expect("set custom_attributes. team");
+    assert_eq!(
+        get_json(&repo, "custom_attributes.team"),
+        Value::String("platform".to_string())
+    );
+
+    // Get with the same (untrimmed) dotted key must return the stored value.
+    assert_eq!(
+        get_json(&repo, "custom_attributes. team"),
+        Value::String("platform".to_string())
+    );
+
+    // Unset with the same (untrimmed) dotted key must succeed symmetrically.
+    repo.git_ai(&["config", "unset", "custom_attributes. team"])
+        .expect("unset custom_attributes. team should match trimmed name");
+    assert_eq!(get_json(&repo, "custom_attributes.team"), Value::Null);
+}
+
+#[test]
+fn test_config_show_all_includes_new_keys() {
+    let repo = TestRepo::new();
+    let out = repo.git_ai(&["config"]).expect("show all config");
+    let value: Value =
+        serde_json::from_str(out.trim()).expect("config show-all should emit valid JSON");
+
+    assert!(value.get("allow_superuser").is_some());
+    assert!(value.get("transcript_streaming_lookback_days").is_some());
+    assert!(value.get("max_checkpoint_total_size_bytes").is_some());
+    assert!(value.get("max_checkpoint_total_lines").is_some());
+    assert!(value.get("daemon_memory_limit_mb").is_some());
+    assert!(value.get("custom_attributes").is_some());
+}
+
+#[test]
+fn test_config_patch_preserves_unpatched_fields() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let base_git_path = get_json(&repo, "git_path");
+    let base_api_url = get_json(&repo, "api_base_url");
+    let base_hooks = get_json(&repo, "git_ai_hooks");
+
+    let patch = serde_json::json!({
+        "prompt_storage": "local",
+        "custom_attributes": { "team": "config-test" },
+        "max_checkpoint_total_lines": 1234
+    })
+    .to_string();
+    let envs = [("GIT_AI_TEST_CONFIG_PATCH", patch.as_str())];
+
+    assert_eq!(get_json_with_env(&repo, "git_path", &envs), base_git_path);
+    assert_eq!(
+        get_json_with_env(&repo, "api_base_url", &envs),
+        base_api_url
+    );
+    assert_eq!(get_json_with_env(&repo, "git_ai_hooks", &envs), base_hooks);
+    assert_eq!(get_json_with_env(&repo, "prompt_storage", &envs), "local");
+    assert_eq!(
+        get_json_with_env(&repo, "custom_attributes.team", &envs),
+        "config-test"
+    );
+    assert_eq!(
+        get_json_with_env(&repo, "max_checkpoint_total_lines", &envs),
+        1234
+    );
+}
+
+#[test]
+fn test_config_registry_preserves_sensitive_alias_and_help_behavior() {
+    let repo = TestRepo::new();
+    let secret = "api-key-registry-test-secret";
+
+    let set_output = repo
+        .git_ai(&["config", "set", "api_key", secret])
+        .expect("setting api_key should succeed");
+    assert!(set_output.contains("api-...cret"));
+    assert!(!set_output.contains(secret));
+
+    let get_output = repo
+        .git_ai(&["config", "api_key"])
+        .expect("reading api_key should succeed");
+    assert!(get_output.contains("api-...cret"));
+    assert!(!get_output.contains(secret));
+
+    repo.git_ai(&["config", "set", "telemetry_oss", "off"])
+        .expect("setting the legacy telemetry key should succeed");
+    assert_eq!(get_json(&repo, "telemetry_oss"), Value::Bool(true));
+    assert_eq!(get_json(&repo, "telemetry_oss_disabled"), Value::Bool(true));
+
+    let help = repo
+        .git_ai(&["config", "--help"])
+        .expect("config help should succeed");
+    assert!(help.contains("telemetry_oss                Legacy OSS telemetry setting"));
+    assert!(help.contains("author.name                  git-ai author display name override"));
+    assert!(help.contains("notes_backend.kind           Notes backend kind"));
+}
+
+#[test]
+fn test_config_registry_rejects_unknown_key() {
+    let repo = TestRepo::new();
+    let error = repo
+        .git_ai(&["config", "not_a_real_config_key"])
+        .expect_err("unknown config key should fail");
+    assert!(
+        error.contains("Unknown config key"),
+        "unexpected error: {error}"
+    );
+}
+
 /// Map a `FileConfig` field name to the CLI key used to read it back, when the
 /// two differ. Most fields share a name with their CLI key; the exceptions are
 /// enumerated here so the divergence stays explicit and reviewed.
@@ -102,6 +499,87 @@ fn file_config_field_names() -> Vec<String> {
         .collect()
 }
 
+/// Regression guard: every persisted `FileConfig` field must be reachable through
+/// the `git-ai config` CLI read path (`config <key>`).
+///
+/// The field list is derived from a fully-populated `FileConfig` via serde rather
+/// than hardcoded, so adding a new persisted field WILL break this test until the
+/// CLI handlers (and this guard's expectations) are updated. That is the point:
+/// CLI read coverage cannot silently regress.
+///
+/// `get_config_value` has a top-level match arm for every field plus a catch-all
+/// that returns "Unknown config key", making it the canonical completeness check:
+/// it is the one read path that must handle every field as a bare key (show-all
+/// hides unset optionals; mutation handlers are nested-only for some fields).
+#[test]
+fn test_every_file_config_field_has_cli_get_coverage() {
+    let fields = file_config_field_names();
+
+    // Sanity: serde actually emitted every field (none silently skipped).
+    assert!(
+        fields.len() >= 23,
+        "expected all FileConfig fields to serialize, got {}: {:?}",
+        fields.len(),
+        fields
+    );
+
+    let repo = TestRepo::new();
+    let mut unknown_to_get = Vec::new();
+
+    for field in &fields {
+        let get_key = cli_key_for_field(field);
+        // We tolerate any success output; we only fail on the explicit
+        // "Unknown config key" rejection produced by the get catch-all.
+        match repo.git_ai(&["config", get_key]) {
+            Ok(_) => {}
+            Err(e) if e.contains("Unknown config key") => {
+                unknown_to_get.push(format!("{field} (cli key: {get_key}): {e}"));
+            }
+            // Other errors (e.g. environment-specific) are not coverage gaps.
+            Err(_) => {}
+        }
+    }
+
+    assert!(
+        unknown_to_get.is_empty(),
+        "FileConfig fields rejected by `git-ai config <key>` as unknown \
+         (add them to get_config_value): {unknown_to_get:?}"
+    );
+}
+
+/// Regression guard: every persisted `FileConfig` field must be mutable through
+/// the `git-ai config unset <key>` write path, except fields documented as
+/// nested-only (see `is_nested_only_for_mutation`).
+///
+/// `unset` needs no value and is non-destructive against the isolated test
+/// config, so it cleanly exercises the write handler's top-level coverage. A new
+/// field added without a `set`/`unset` arm trips the catch-all here.
+#[test]
+fn test_every_file_config_field_has_cli_unset_coverage() {
+    let repo = TestRepo::new();
+    let mut unknown_to_unset = Vec::new();
+
+    for field in &file_config_field_names() {
+        if is_nested_only_for_mutation(field) {
+            continue;
+        }
+        match repo.git_ai(&["config", "unset", field]) {
+            Ok(_) => {}
+            Err(e) if e.contains("Unknown config key") => {
+                unknown_to_unset.push(format!("{field}: {e}"));
+            }
+            Err(_) => {}
+        }
+    }
+
+    assert!(
+        unknown_to_unset.is_empty(),
+        "FileConfig fields rejected by `git-ai config unset <key>` as unknown \
+         (add them to set_config_value and unset_config_value, or document them \
+         in is_nested_only_for_mutation): {unknown_to_unset:?}"
+    );
+}
+
 fn run_config(repo: &TestRepo, args: &[&str]) -> std::process::Output {
     // CI=true suppresses the root-superuser stderr warning so the
     // stderr-is-empty assertion holds in containerized runs too.
@@ -110,5 +588,38 @@ fn run_config(repo: &TestRepo, args: &[&str]) -> std::process::Output {
         .unwrap_or_else(|e| panic!("git-ai {args:?} failed to run: {e}"))
 }
 
-mod configuration_values;
-mod registry_coverage;
+#[test]
+fn test_config_notes_backend_normal_output_uses_stdout() {
+    let repo = TestRepo::new();
+
+    for args in [
+        ["config", "set", "notes_backend.kind", "http"].as_slice(),
+        [
+            "config",
+            "set",
+            "notes_backend.backend_url",
+            "https://example.com",
+        ]
+        .as_slice(),
+        ["config", "notes_backend.kind"].as_slice(),
+        ["config", "notes_backend.backend_url"].as_slice(),
+        ["config", "unset", "notes_backend.kind"].as_slice(),
+        ["config", "unset", "notes_backend.backend_url"].as_slice(),
+    ] {
+        let output = run_config(&repo, args);
+        assert!(
+            output.status.success(),
+            "git-ai {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !output.stdout.is_empty(),
+            "git-ai {args:?} should write normal output to stdout"
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "git-ai {args:?} wrote normal output to stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

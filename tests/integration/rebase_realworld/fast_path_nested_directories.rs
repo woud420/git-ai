@@ -1,8 +1,30 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, assert_note_no_forbidden_files,
-    get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "src/api/endpoints.py",
+        "endpoints.py",
+        ["bp = Blueprint('api', __name__)", "def list_items():"],
+    ),
+    (
+        "src/models/user.py",
+        "user.py",
+        ["class User:", "email: str"],
+    ),
+    (
+        "src/services/auth.py",
+        "auth.py",
+        ["def create_token(user_id: int", "SECRET_KEY = 'dev-secret'"],
+    ),
+    (
+        "src/repositories/user_repo.py",
+        "user_repo.py",
+        [
+            "class UserRepository:",
+            "def find_by_id(self, user_id: int)",
+        ],
+    ),
+];
 
 #[test]
 fn test_fast_path_nested_directory_structure() {
@@ -209,16 +231,7 @@ fn test_fast_path_nested_directory_structure() {
             ("role: str = 'user'", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "src/api/endpoints.py",
-        "chain1_prior_endpoints.py",
-        &[
-            ("bp = Blueprint('api', __name__)", true),
-            ("def list_items():", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[1], 1, &PRIOR_SAMPLES[0..1]);
 
     // sha2 = C3': src/services/auth.py
     assert_note_base_commit_matches(&repo, &chain[2], "sha2");
@@ -229,23 +242,7 @@ fn test_fast_path_nested_directory_structure() {
         "sha2_no_future",
         &["src/repositories/user_repo.py", "src/middleware/logging.py"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "src/api/endpoints.py",
-        "chain2_prior_endpoints.py",
-        &[
-            ("bp = Blueprint('api', __name__)", true),
-            ("def list_items():", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "src/models/user.py",
-        "chain2_prior_user.py",
-        &[("class User:", true), ("email: str", true)],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[0..2]);
 
     // sha3 = C4': src/repositories/user_repo.py
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
@@ -261,33 +258,7 @@ fn test_fast_path_nested_directory_structure() {
         "sha3_no_future",
         &["src/middleware/logging.py"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "src/api/endpoints.py",
-        "chain3_prior_endpoints.py",
-        &[
-            ("bp = Blueprint('api', __name__)", true),
-            ("def list_items():", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "src/models/user.py",
-        "chain3_prior_user.py",
-        &[("class User:", true), ("email: str", true)],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "src/services/auth.py",
-        "chain3_prior_auth.py",
-        &[
-            ("def create_token(user_id: int", true),
-            ("SECRET_KEY = 'dev-secret'", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[0..3]);
 
     // sha4 = C5': src/middleware/logging.py
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");
@@ -331,33 +302,7 @@ fn test_fast_path_nested_directory_structure() {
             ("return jsonify", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "src/models/user.py",
-        "chain4_prior_user.py",
-        &[("class User:", true), ("email: str", true)],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "src/services/auth.py",
-        "chain4_prior_auth.py",
-        &[
-            ("def create_token(user_id: int", true),
-            ("SECRET_KEY = 'dev-secret'", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "src/repositories/user_repo.py",
-        "chain4_prior_user_repo.py",
-        &[
-            ("class UserRepository:", true),
-            ("def find_by_id(self, user_id: int)", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[4], 4, &PRIOR_SAMPLES[1..4]);
 }
 
 crate::reuse_tests_in_worktree!(test_fast_path_nested_directory_structure,);

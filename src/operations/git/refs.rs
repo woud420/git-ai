@@ -1,7 +1,5 @@
 mod batch_read;
 mod batch_write;
-mod constants;
-mod ref_queries;
 
 pub use batch_read::{
     copy_missing_notes_for_commits_from_ref, note_blob_oids_for_commits_from_ref,
@@ -11,12 +9,6 @@ pub(in crate::operations::git) use batch_read::{note_blob_oids_for_commits, note
 #[cfg(feature = "test-support")]
 pub(in crate::operations::git) use batch_write::notes_add_blob_batch;
 pub(in crate::operations::git) use batch_write::{fast_import_args, notes_add, notes_add_batch};
-pub use constants::{
-    AI_AUTHORSHIP_FORK_TRACKING_REF, AI_AUTHORSHIP_FULL_REF, AI_AUTHORSHIP_PUSH_REFSPEC,
-    AI_AUTHORSHIP_REFNAME,
-};
-use ref_queries::parse_output_error;
-pub use ref_queries::ref_exists;
 
 use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin};
 use crate::error::GitAiError;
@@ -529,3 +521,24 @@ pub mod git_backend_for_tests {
 #[path = "refs_tests.rs"]
 #[cfg(test)]
 mod tests;
+
+// Modern refspecs without force to enable proper merging
+pub const AI_AUTHORSHIP_REFNAME: &str = "ai";
+pub const AI_AUTHORSHIP_FULL_REF: &str = "refs/notes/ai";
+pub const AI_AUTHORSHIP_FORK_TRACKING_REF: &str = "refs/notes/ai-remote/fork";
+pub const AI_AUTHORSHIP_PUSH_REFSPEC: &str = "refs/notes/ai:refs/notes/ai";
+
+fn parse_output_error(what: &str) -> GitAiError {
+    GitAiError::Generic(format!("Failed to parse {} output", what))
+}
+
+/// Check if a ref exists in the repository
+pub fn ref_exists(repo: &Repository, ref_name: &str) -> bool {
+    let mut args = repo.global_args_for_exec();
+    args.push("show-ref".to_string());
+    args.push("--verify".to_string());
+    args.push("--quiet".to_string());
+    args.push(ref_name.to_string());
+
+    exec_git(&args).is_ok()
+}

@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_sample_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, get_commit_chain,
-};
+use super::*;
 
 /// Test 6: Two shared files (models.py + services.py), both prepended by main.
 /// Feature appends AI lines to both in each commit. Checks cumulative lines

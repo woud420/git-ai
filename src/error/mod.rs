@@ -1,3 +1,5 @@
+use std::fmt;
+
 /// Whether an operation that produced an error is worth retrying.
 ///
 /// Grounded in `StreamError::Transient` (src/model/stream_types.rs) and the
@@ -14,51 +16,58 @@ pub enum Retryability {
     Terminal,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum GitAiError {
-    #[error("IO error: {0}")]
     IoError(std::io::Error),
     /// Errors from invoking the git CLI that exited with a non-zero status
-    #[error("{}", std::fmt::from_fn(|f| match code {
-        Some(code) => write!(
-            f,
-            "Git CLI ({}) failed with exit code {}: {}",
-            args.join(" "),
-            code,
-            stderr
-        ),
-        None => write!(f, "Git CLI ({}) failed: {}", args.join(" "), stderr),
-    }))]
     GitCliError {
         code: Option<i32>,
         stderr: String,
         args: Vec<String>,
     },
     /// Errors from  Gix
-    #[error("Gix error: {0}")]
     GixError(String),
-    #[error("JSON error: {0}")]
     JsonError(serde_json::Error),
-    #[error("UTF-8 error: {0}")]
     Utf8Error(std::str::Utf8Error),
-    #[error("From UTF-8 error: {0}")]
     FromUtf8Error(std::string::FromUtf8Error),
-    #[error("{0}")]
     PresetError(String),
-    #[error("SQLite error: {0}")]
     SqliteError(rusqlite::Error),
-    #[error("Generic error: {0}")]
     Generic(String),
     /// Structured persistence-layer error. Display delegates to the inner
     /// type with no added prefix, so the observable message text is
     /// controlled by `PersistenceError::fmt`.
-    #[error("{0}")]
     Persistence(crate::model::repository::error::PersistenceError),
     /// Structured API-layer error produced by `clients/api`. Display delegates
     /// to the inner type; callers that need retryability semantics can
     /// match on this variant and call `ApiError::retryability()`.
-    #[error("{0}")]
     Api(crate::clients::api::error::ApiError),
+}
+
+impl fmt::Display for GitAiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GitAiError::IoError(e) => write!(f, "IO error: {}", e),
+            GitAiError::GitCliError { code, stderr, args } => match code {
+                Some(c) => write!(
+                    f,
+                    "Git CLI ({}) failed with exit code {}: {}",
+                    args.join(" "),
+                    c,
+                    stderr
+                ),
+                None => write!(f, "Git CLI ({}) failed: {}", args.join(" "), stderr),
+            },
+            GitAiError::JsonError(e) => write!(f, "JSON error: {}", e),
+            GitAiError::Utf8Error(e) => write!(f, "UTF-8 error: {}", e),
+            GitAiError::FromUtf8Error(e) => write!(f, "From UTF-8 error: {}", e),
+            GitAiError::PresetError(e) => write!(f, "{}", e),
+            GitAiError::SqliteError(e) => write!(f, "SQLite error: {}", e),
+            GitAiError::Generic(e) => write!(f, "Generic error: {}", e),
+            GitAiError::GixError(e) => write!(f, "Gix error: {}", e),
+            GitAiError::Persistence(e) => write!(f, "{}", e),
+            GitAiError::Api(e) => write!(f, "{}", e),
+        }
+    }
 }
 
 impl GitAiError {
@@ -71,7 +80,8 @@ impl GitAiError {
     }
 }
 
-// Automatic #[from] conversions would expose source chains that these errors never had.
+impl std::error::Error for GitAiError {}
+
 impl From<std::io::Error> for GitAiError {
     fn from(err: std::io::Error) -> Self {
         GitAiError::IoError(err)

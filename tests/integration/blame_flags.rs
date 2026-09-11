@@ -145,8 +145,816 @@ fn assert_multiple_range_blame_matches_git(args: &[&str], message: &str) {
     );
 }
 
-mod author_display;
-mod formatting;
 mod ignore_revisions;
 mod ranges_and_machine_output;
-mod unknown_attribution;
+
+#[test]
+fn test_blame_show_email() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "-e", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "-e", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both contain email addresses
+    assert!(git_output.contains("@"), "Git output should contain email");
+    assert!(
+        git_ai_output.contains("@"),
+        "Git-ai output should contain email"
+    );
+}
+
+#[test]
+fn test_blame_show_name() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "-f", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "-f", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both contain filename information
+    assert!(
+        git_output.contains("test.txt"),
+        "Git output should contain filename"
+    );
+    assert!(
+        git_ai_output.contains("test.txt"),
+        "Git-ai output should contain filename"
+    );
+}
+
+#[test]
+fn test_blame_show_number() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "-n", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "-n", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+}
+
+#[test]
+fn test_blame_suppress_author() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "-s", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "-s", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both suppress author information (should not contain "Test User")
+    assert!(
+        !git_output.contains("Test User"),
+        "Git output should suppress author"
+    );
+    assert!(
+        !git_ai_output.contains("Test User"),
+        "Git-ai output should suppress author"
+    );
+}
+
+#[test]
+fn test_blame_with_ai_authorship() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2", "Line 3".ai(), "Line 4"]);
+
+    repo.stage_all_and_commit("Mixed authorship commit")
+        .unwrap();
+
+    let git_output = repo.git(&["blame", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Extract authors from both outputs
+    let git_authors = extract_authors(&git_output);
+    let git_ai_authors = extract_authors(&git_ai_output);
+
+    // Git should show the same author for all lines (the committer)
+    // Git-ai should show different authors based on AI authorship
+    assert_ne!(
+        git_authors, git_ai_authors,
+        "AI authorship should change the output"
+    );
+
+    // Verify git-ai shows AI authors where appropriate
+    assert!(
+        git_ai_authors
+            .iter()
+            .any(|a| a.contains("mock_ai") || a.contains("mock_ai")),
+        "Should show AI as author. Got: {:?}",
+        git_ai_authors
+    );
+}
+
+#[test]
+fn test_blame_ai_human_author() {
+    let repo = TestRepo::new();
+
+    let mut file = repo.filename("test.txt");
+
+    // Create initial commit
+    file.set_contents(crate::lines!["first line", "second line", "third line"]);
+
+    let initial_sha = repo
+        .stage_all_and_commit("Initial commit")
+        .unwrap()
+        .commit_sha;
+
+    // Create authorship log with two prompts - one for line 1, one for line 2
+    let mut authorship_log = AuthorshipLog::new();
+    authorship_log.metadata.base_commit_sha = initial_sha.clone();
+
+    // First prompt for line 1
+    let prompt_hash_1 = "abc12345".to_string();
+    let agent_id_1 = AgentId {
+        tool: "cursor".to_string(),
+        id: "session_line1".to_string(),
+        model: "claude-3-sonnet".to_string(),
+    };
+    authorship_log.metadata.prompts.insert(
+        prompt_hash_1.clone(),
+        PromptRecord {
+            agent_id: agent_id_1,
+            human_author: Some("First <first@example.com>".to_string()),
+            total_additions: 1,
+            total_deletions: 0,
+            accepted_lines: 1,
+            overriden_lines: 0,
+            custom_attributes: None,
+            messages_url: None,
+        },
+    );
+
+    // Second prompt for line 2
+    let prompt_hash_2 = "xyz67890".to_string();
+    let agent_id_2 = AgentId {
+        tool: "cursor".to_string(),
+        id: "session_line2".to_string(),
+        model: "claude-3-sonnet".to_string(),
+    };
+    authorship_log.metadata.prompts.insert(
+        prompt_hash_2.clone(),
+        PromptRecord {
+            agent_id: agent_id_2,
+            human_author: Some("Second <second@example.com>".to_string()),
+            total_additions: 1,
+            total_deletions: 0,
+            accepted_lines: 1,
+            overriden_lines: 0,
+            custom_attributes: None,
+            messages_url: None,
+        },
+    );
+
+    // Add attestations - line 1 attributed to first prompt, line 2 to second
+    let mut file_attestation = FileAttestation::new("test.txt".to_string());
+    file_attestation.add_entry(AttestationEntry::new(
+        prompt_hash_1,
+        vec![LineRange::Single(1)],
+    ));
+    file_attestation.add_entry(AttestationEntry::new(
+        prompt_hash_2,
+        vec![LineRange::Single(2)],
+    ));
+    authorship_log.attestations.push(file_attestation);
+
+    // Serialize and add the note
+    let note_content = authorship_log.serialize_to_string().unwrap();
+    let gitai_repo = GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap())
+        .expect("Failed to find repository");
+    write_note(&gitai_repo, &initial_sha, &note_content).unwrap();
+
+    // Call blame_hunks on the file
+    let options = GitAiBlameOptions::default();
+    let hunks = gitai_repo
+        .blame_hunks("test.txt", 1, 2, &options)
+        .expect("Failed to get blame hunks");
+
+    let ai_human_authors = hunks
+        .iter()
+        .map(|hunk| hunk.ai_human_author.clone())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ai_human_authors,
+        vec![
+            Some("First <first@example.com>".to_string()),
+            Some("Second <second@example.com>".to_string())
+        ]
+    );
+
+    let args = ["blame", "--line-porcelain", "-L", "1,2", "test.txt"];
+    assert_eq!(
+        normalize_for_snapshot(&repo.git(&args).unwrap()),
+        normalize_for_snapshot(&repo.git_ai(&args).unwrap()),
+        "renderer preparation must preserve Git's unsplit porcelain hunks"
+    );
+}
+
+#[test]
+fn test_blame_basic_format() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines![
+        "Line 1",
+        "Line 2",
+        "Line 3".ai(),
+        "Line 4".ai()
+    ]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Run git blame and git-ai blame
+    let git_output = repo.git(&["blame", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "test.txt"]).unwrap();
+
+    // Compare normalized outputs
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+}
+
+#[test]
+fn test_blame_porcelain_format() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "--porcelain", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "--porcelain", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+}
+
+#[test]
+fn test_blame_long_rev() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "-l", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "-l", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both show long revision hashes
+    let git_sha_len = git_output
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .len();
+    let git_ai_sha_len = git_ai_output
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .len();
+
+    assert!(git_sha_len > 8, "Git should show long revision");
+    assert!(git_ai_sha_len > 8, "Git-ai should show long revision");
+}
+
+#[test]
+fn test_blame_raw_timestamp() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "-t", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "-t", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both contain raw timestamps (Unix timestamps)
+    assert!(
+        git_output.chars().any(|c| c.is_numeric()),
+        "Git output should contain timestamps"
+    );
+    assert!(
+        git_ai_output.chars().any(|c| c.is_numeric()),
+        "Git-ai output should contain timestamps"
+    );
+}
+
+#[test]
+fn test_blame_abbrev() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Note: git requires --abbrev=4 format, git-ai accepts --abbrev 4
+    let git_output = repo.git(&["blame", "--abbrev=4", "test.txt"]).unwrap();
+    let git_ai_output = repo
+        .git_ai(&["blame", "--abbrev", "4", "test.txt"])
+        .unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+}
+
+#[test]
+fn test_blame_blank_boundary() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "-b", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "-b", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+}
+
+#[test]
+fn test_blame_show_root() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "--root", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "--root", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both handle root commits
+    assert!(
+        git_output.lines().count() > 0,
+        "Git should handle root commits"
+    );
+    assert!(
+        git_ai_output.lines().count() > 0,
+        "Git-ai should handle root commits"
+    );
+}
+
+// #[test]
+// fn test_blame_show_stats() {
+//     let tmp_dir = tempdir().unwrap();
+//     let repo_path = tmp_dir.path().to_path_buf();
+
+//     let tmp_repo = TmpRepo::new().unwrap();
+//     let mut file = tmp_repo.write_file("test.txt", "Line 1\n", true).unwrap();
+
+//     tmp_repo
+//         .trigger_checkpoint_with_author("test_user")
+//         .unwrap();
+//     file.append("Line 2\n").unwrap();
+//     tmp_repo.trigger_checkpoint_with_ai("Claude", Some("claude-3-sonnet"), Some("cursor")).unwrap();
+//     tmp_repo.commit_with_message("Initial commit").unwrap();
+
+//     let git_output = run_git_blame(tmp_repo.path(), "test.txt", &["--show-stats"]);
+//     let git_ai_output = run_git_ai_blame(tmp_repo.path(), "test.txt", &["--show-stats"]);
+
+//     let _comparison = create_blame_comparison(&git_output, &git_ai_output, "show_stats");
+//     let git_norm = normalize_for_snapshot(&git_output);
+//     let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+//     println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+//     println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+//     assert_eq!(
+//         git_norm, git_ai_norm,
+//         "Normalized blame outputs should match exactly"
+//     );
+
+//     // Verify both show statistics
+//     assert!(
+//         git_output.contains("%"),
+//         "Git output should contain statistics"
+//     );
+//     assert!(
+//         git_ai_output.contains("%"),
+//         "Git-ai output should contain statistics"
+//     );
+// }
+#[test]
+fn test_blame_date_format() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Note: git requires --date=short format, git-ai accepts --date short
+    let git_output = repo.git(&["blame", "--date=short", "test.txt"]).unwrap();
+    let git_ai_output = repo
+        .git_ai(&["blame", "--date", "short", "test.txt"])
+        .unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both use short date format
+    assert!(git_output.contains("-"), "Git output should contain date");
+    assert!(
+        git_ai_output.contains("-"),
+        "Git-ai output should contain date"
+    );
+}
+
+#[test]
+fn test_blame_multiple_flags() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines![
+        "Line 1",
+        "Line 2",
+        "Line 3",
+        "Line 4".ai(),
+        "Line 5".ai()
+    ]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Test multiple flags together
+    let git_output = repo
+        .git(&["blame", "-L", "2,4", "-e", "-n", "test.txt"])
+        .unwrap();
+    let git_ai_output = repo
+        .git_ai(&["blame", "-L", "2,4", "-e", "-n", "test.txt"])
+        .unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+
+    // Verify both handle multiple flags
+    assert!(
+        git_output.lines().count() > 0,
+        "Git should handle multiple flags"
+    );
+    assert!(
+        git_ai_output.lines().count() > 0,
+        "Git-ai should handle multiple flags"
+    );
+
+    // Verify both contain email and line numbers
+    assert!(git_output.contains("@"), "Git output should contain email");
+    assert!(
+        git_ai_output.contains("@"),
+        "Git-ai output should contain email"
+    );
+}
+
+#[test]
+fn test_blame_incremental_format() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo.git(&["blame", "--incremental", "test.txt"]).unwrap();
+    let git_ai_output = repo
+        .git_ai(&["blame", "--incremental", "test.txt"])
+        .unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+}
+
+#[test]
+fn test_blame_line_porcelain() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai()]);
+
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let git_output = repo
+        .git(&["blame", "--line-porcelain", "test.txt"])
+        .unwrap();
+    let git_ai_output = repo
+        .git_ai(&["blame", "--line-porcelain", "test.txt"])
+        .unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+    println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
+    println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Normalized blame outputs should match exactly"
+    );
+}
+
+#[test]
+fn test_blame_contents_from_stdin() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    // Create initial file and commit
+    file.set_contents(crate::lines!["Line 1", "Line 2".ai(), "Line 3", " "]);
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Now simulate uncommitted changes that would be passed via stdin
+    // This is what an IDE would do - pass the buffer contents that haven't been saved yet
+    let modified_content = "Changed\nLine 2\nLine 3\nLine 4 NEW\n";
+
+    // Run git-ai blame with --contents - (read from stdin)
+    let git_ai_output = repo
+        .git_ai_with_stdin(
+            &["blame", "--contents", "-", "test.txt"],
+            modified_content.as_bytes(),
+        )
+        .unwrap();
+
+    println!("\n[DEBUG] git-ai blame output:\n{}", git_ai_output);
+    let lines = git_ai_output.lines().collect::<Vec<&str>>();
+
+    assert!(
+        lines[0].starts_with("00000000 (External file (--contents)"),
+        "First line should be the  --contents"
+    );
+
+    assert!(
+        lines[3].starts_with("00000000 (External file (--contents)"),
+        "Last line should be the --contents"
+    );
+}
+
+#[test]
+fn test_blame_mark_unknown_without_authorship_log() {
+    // Test that --mark-unknown shows "Unknown" for commits without authorship logs
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    // Create a commit WITHOUT using git-ai (bypassing hooks to avoid authorship log)
+    file.set_contents(crate::lines!["Line from untracked commit"]);
+
+    // Use git_og to bypass git-ai hooks
+    repo.git_og(&["add", "test.txt"]).unwrap();
+    repo.git_og(&["commit", "-m", "Commit without authorship log"])
+        .unwrap();
+
+    // Without --mark-unknown: should show author name
+    let output_without_flag = repo.git_ai(&["blame", "test.txt"]).unwrap();
+    println!("\n[DEBUG] Without --mark-unknown:\n{}", output_without_flag);
+    assert!(
+        output_without_flag.contains("Test User"),
+        "Without flag, lines from untracked commits should show author name"
+    );
+
+    // With --mark-unknown: should show "Unknown"
+    let output_with_flag = repo
+        .git_ai(&["blame", "--mark-unknown", "test.txt"])
+        .unwrap();
+    println!("\n[DEBUG] With --mark-unknown:\n{}", output_with_flag);
+    assert!(
+        output_with_flag.contains("Unknown"),
+        "With flag, lines from untracked commits should show 'Unknown'"
+    );
+    assert!(
+        !output_with_flag.contains("Test User"),
+        "With flag, should not show author name for untracked commits"
+    );
+}
+
+#[test]
+fn test_blame_mark_unknown_mixed_commits() {
+    // Test a file with lines from both tracked and untracked commits
+    // We'll create two separate files - one from untracked commit, one from tracked
+    let repo = TestRepo::new();
+
+    // Create file1 WITHOUT authorship log (using git_og)
+    let file1_path = repo.path().join("untracked.txt");
+    std::fs::write(&file1_path, "Untracked line\n").unwrap();
+    repo.git_og(&["add", "untracked.txt"]).unwrap();
+    repo.git_og(&["commit", "-m", "Untracked commit"]).unwrap();
+
+    // Create file2 WITH authorship log (through git-ai)
+    let mut file2 = repo.filename("tracked.txt");
+    file2.set_contents(crate::lines!["Tracked human line", "Tracked AI line".ai()]);
+    repo.stage_all_and_commit("Tracked commit").unwrap();
+
+    // Test untracked file with --mark-unknown
+    let output1 = repo
+        .git_ai(&["blame", "--mark-unknown", "untracked.txt"])
+        .unwrap();
+    println!("\n[DEBUG] Untracked file with --mark-unknown:\n{}", output1);
+    assert!(
+        output1.contains("Unknown"),
+        "Untracked file should show Unknown: {}",
+        output1
+    );
+
+    // Test tracked file with --mark-unknown
+    let output2 = repo
+        .git_ai(&["blame", "--mark-unknown", "tracked.txt"])
+        .unwrap();
+    println!("\n[DEBUG] Tracked file with --mark-unknown:\n{}", output2);
+
+    let lines: Vec<&str> = output2.lines().collect();
+
+    // Line 1 should show "Test User" (human line from tracked commit)
+    assert!(
+        lines[0].contains("Test User"),
+        "Line 1 should show Test User: {}",
+        lines[0]
+    );
+
+    // Line 2 should show AI tool name (AI line from tracked commit)
+    assert!(
+        lines[1].contains("mock_ai"),
+        "Line 2 should show mock_ai: {}",
+        lines[1]
+    );
+}
+
+#[test]
+fn test_blame_mark_unknown_backward_compatible() {
+    // Ensure that without --mark-unknown, behavior matches git blame exactly
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+
+    // Create commit without authorship log (using git_og)
+    file.set_contents(crate::lines!["Line 1", "Line 2"]);
+    repo.git_og(&["add", "test.txt"]).unwrap();
+    repo.git_og(&["commit", "-m", "Untracked commit"]).unwrap();
+
+    let git_output = repo.git(&["blame", "test.txt"]).unwrap();
+    let git_ai_output = repo.git_ai(&["blame", "test.txt"]).unwrap();
+
+    let git_norm = normalize_for_snapshot(&git_output);
+    let git_ai_norm = normalize_for_snapshot(&git_ai_output);
+
+    println!("\n[DEBUG] git blame:\n{}", git_norm);
+    println!("\n[DEBUG] git-ai blame:\n{}", git_ai_norm);
+
+    assert_eq!(
+        git_norm, git_ai_norm,
+        "Without --mark-unknown, git-ai blame should match git blame exactly"
+    );
+}
+
+crate::reuse_tests_in_worktree!(
+    test_blame_show_email,
+    test_blame_show_name,
+    test_blame_show_number,
+    test_blame_suppress_author,
+    test_blame_with_ai_authorship,
+    test_blame_ai_human_author,
+    test_blame_basic_format,
+    test_blame_porcelain_format,
+    test_blame_long_rev,
+    test_blame_raw_timestamp,
+    test_blame_abbrev,
+    test_blame_blank_boundary,
+    test_blame_show_root,
+    test_blame_date_format,
+    test_blame_multiple_flags,
+    test_blame_incremental_format,
+    test_blame_line_porcelain,
+    test_blame_contents_from_stdin,
+    test_blame_mark_unknown_without_authorship_log,
+    test_blame_mark_unknown_mixed_commits,
+    test_blame_mark_unknown_backward_compatible,
+);

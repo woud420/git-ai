@@ -1,9 +1,4 @@
-#[cfg(unix)]
-use super::StatFileType;
-use super::{
-    Duration, Path, PathBuf, StatDiffResult, StatEntry, TestRepo, add_and_commit, diff, fs,
-    normalize_path, repo_root, snapshot, thread,
-};
+use super::*;
 
 #[test]
 fn test_bash_tool_empty_stat_diff() {

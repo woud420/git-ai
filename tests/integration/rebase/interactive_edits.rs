@@ -1,6 +1,4 @@
-#[cfg(not(target_os = "windows"))]
-use super::write_executable_script;
-use super::{ExpectedLineExt, TestRepo};
+use super::*;
 
 /// Test interactive rebase with commit reordering - verifies interactive rebase works
 #[test]

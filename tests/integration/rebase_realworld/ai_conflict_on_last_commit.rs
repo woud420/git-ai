@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, HumanContextAttribution, TestRepo, assert_blame_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, fs, get_commit_chain,
-};
+use super::*;
 
 /// Test 5: schema.rs max_connections — conflict is on C5 (LAST feature commit).
 /// C1–C4 accumulate model_*.rs files cleanly.  C5 modifies schema.rs

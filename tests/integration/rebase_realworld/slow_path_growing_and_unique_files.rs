@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_sample_at_commit, assert_note_base_commit_matches,
-    assert_note_files_exact, assert_note_no_forbidden_files, fs, get_commit_chain,
-};
+use super::*;
 
 /// Test 10: Shared file grows AND each commit adds a unique helper file.
 /// shared_util.js prepended by main; feature appends 8 lines to it and

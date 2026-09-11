@@ -1,7 +1,17 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "service.py",
+        "c1_service.py",
+        ["class DataService:", "def fetch(self, key):"],
+    ),
+    (
+        "service.py",
+        "c2_service.py",
+        ["def delete(self, key):", "def exists(self, key):"],
+    ),
+];
 
 #[test]
 fn test_fast_path_single_file_grows_across_commits() {
@@ -234,16 +244,7 @@ fn test_fast_path_single_file_grows_across_commits() {
         ],
     );
     // C1 lines must also still be AI-attributed at sha2.
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "service.py",
-        "chain2_prior_c1_service.py",
-        &[
-            ("class DataService:", true),
-            ("def fetch(self, key):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[0..1]);
 
     // sha3 = C4': service.py (C4's delta only; fast-path remaps original note)
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
@@ -261,26 +262,7 @@ fn test_fast_path_single_file_grows_across_commits() {
         ],
     );
     // C1 and C2 lines must also still be AI-attributed at sha3.
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "service.py",
-        "chain3_prior_c1_service.py",
-        &[
-            ("class DataService:", true),
-            ("def fetch(self, key):", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "service.py",
-        "chain3_prior_c2_service.py",
-        &[
-            ("def delete(self, key):", true),
-            ("def exists(self, key):", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[0..2]);
 
     // sha4 = C5': service.py (C5's delta only; fast-path remaps original note)
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");

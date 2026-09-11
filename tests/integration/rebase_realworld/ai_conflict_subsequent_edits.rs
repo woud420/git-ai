@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, HumanContextAttribution, TestRepo, assert_note_base_commit_matches,
-    assert_note_files_exact, get_commit_chain,
-};
+use super::*;
 
 /// Test 7: dispatcher.py — conflict on C2.  C3 and C4 also modify dispatcher.py
 /// (no further conflicts).  AI resolves C2 with 12-line process() implementation.

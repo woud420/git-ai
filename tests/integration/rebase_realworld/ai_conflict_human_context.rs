@@ -1,7 +1,4 @@
-use super::{
-    ExpectedLineExt, HumanContextAttribution, TestRepo, assert_blame_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, fs, get_commit_chain,
-};
+use super::*;
 
 /// Test 3: processor.py — feature (C3) adds 5 AI lines to method2 body,
 /// main also changes method2.  AI resolution rewrites processor.py preserving

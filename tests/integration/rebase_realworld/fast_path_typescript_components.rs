@@ -1,8 +1,27 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_blame_at_commit, assert_blame_sample_at_commit,
-    assert_note_base_commit_matches, assert_note_files_exact, assert_note_no_forbidden_files,
-    get_commit_chain,
-};
+use super::*;
+
+const PRIOR_SAMPLES: &[PriorBlameSample] = &[
+    (
+        "Button.tsx",
+        "button_tsx",
+        ["interface ButtonProps {", "export function Button"],
+    ),
+    (
+        "Input.tsx",
+        "input_tsx",
+        ["interface InputProps {", "export function Input"],
+    ),
+    (
+        "Modal.tsx",
+        "modal_tsx",
+        ["interface ModalProps {", "export function Modal"],
+    ),
+    (
+        "Table.tsx",
+        "table_tsx",
+        ["interface TableProps<T> {", "export function Table<T"],
+    ),
+];
 
 #[test]
 fn test_fast_path_typescript_frontend_5_components() {
@@ -196,16 +215,7 @@ fn test_fast_path_typescript_frontend_5_components() {
         "sha1_no_future",
         &["Modal.tsx", "Table.tsx", "Form.tsx"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[1],
-        "Button.tsx",
-        "chain1_prior_button_tsx",
-        &[
-            ("interface ButtonProps {", true),
-            ("export function Button", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[1], 1, &PRIOR_SAMPLES[0..1]);
 
     // sha2 = C3': Modal.tsx
     assert_note_base_commit_matches(&repo, &chain[2], "sha2");
@@ -216,61 +226,13 @@ fn test_fast_path_typescript_frontend_5_components() {
         "sha2_no_future",
         &["Table.tsx", "Form.tsx"],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "Button.tsx",
-        "chain2_prior_button_tsx",
-        &[
-            ("interface ButtonProps {", true),
-            ("export function Button", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[2],
-        "Input.tsx",
-        "chain2_prior_input_tsx",
-        &[
-            ("interface InputProps {", true),
-            ("export function Input", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[2], 2, &PRIOR_SAMPLES[0..2]);
 
     // sha3 = C4': Table.tsx
     assert_note_base_commit_matches(&repo, &chain[3], "sha3");
     assert_note_files_exact(&repo, &chain[3], "sha3_files", &["Table.tsx"]);
     assert_note_no_forbidden_files(&repo, &chain[3], "sha3_no_future", &["Form.tsx"]);
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "Button.tsx",
-        "chain3_prior_button_tsx",
-        &[
-            ("interface ButtonProps {", true),
-            ("export function Button", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "Input.tsx",
-        "chain3_prior_input_tsx",
-        &[
-            ("interface InputProps {", true),
-            ("export function Input", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[3],
-        "Modal.tsx",
-        "chain3_prior_modal_tsx",
-        &[
-            ("interface ModalProps {", true),
-            ("export function Modal", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[3], 3, &PRIOR_SAMPLES[0..3]);
 
     // sha4 = C5': Form.tsx
     assert_note_base_commit_matches(&repo, &chain[4], "sha4");
@@ -311,36 +273,7 @@ fn test_fast_path_typescript_frontend_5_components() {
             ("export default Button;", true),
         ],
     );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "Input.tsx",
-        "chain4_prior_input_tsx",
-        &[
-            ("interface InputProps {", true),
-            ("export function Input", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "Modal.tsx",
-        "chain4_prior_modal_tsx",
-        &[
-            ("interface ModalProps {", true),
-            ("export function Modal", true),
-        ],
-    );
-    assert_blame_sample_at_commit(
-        &repo,
-        &chain[4],
-        "Table.tsx",
-        "chain4_prior_table_tsx",
-        &[
-            ("interface TableProps<T> {", true),
-            ("export function Table<T", true),
-        ],
-    );
+    assert_prior_blame_samples(&repo, &chain[4], 4, &PRIOR_SAMPLES[1..4]);
 }
 
 crate::reuse_tests_in_worktree!(test_fast_path_typescript_frontend_5_components,);

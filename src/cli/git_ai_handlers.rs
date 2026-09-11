@@ -1,7 +1,9 @@
 mod checkpoint;
-mod help;
-mod internal;
 use crate::cli::fail::{fail, resolve_repo_in_cwd_or_fail, resolve_repo_or_fail};
+use crate::cli::machine_json::{
+    emit_machine_json_error, parse_machine_json_arg, parse_machine_request,
+    print_machine_json_serializable, resolve_repo_or_machine_error,
+};
 use crate::config;
 use crate::model::repository::internal_db::InternalDatabase;
 use crate::observability::log_message;
@@ -9,14 +11,13 @@ use crate::operations::authorship::ignore::effective_ignore_patterns;
 use crate::operations::authorship::range_authorship;
 use crate::operations::authorship::stats::stats_command;
 use crate::operations::commands;
-use crate::operations::git::repository::CommitRange;
+use crate::operations::git::repository::{CommitRange, Repository};
+use crate::operations::git::sync_authorship::{
+    NotesExistence, fetch_authorship_notes, push_authorship_notes,
+};
 use crate::process_spawn::is_interactive_terminal;
 use checkpoint::handle_checkpoint;
-use help::print_help;
-pub(crate) use internal::{
-    handle_blame_analysis_internal, handle_effective_ignore_patterns_internal,
-    handle_fetch_authorship_notes_internal, handle_push_authorship_notes_internal,
-};
+use serde::{Deserialize, Serialize};
 use std::io::IsTerminal;
 
 pub fn handle_git_ai(args: &[String]) {
@@ -305,6 +306,230 @@ fn handle_notes_serve(args: &[String]) {
     }
 }
 
+fn print_help() {
+    eprintln!("git-ai - git proxy with AI authorship tracking");
+    eprintln!();
+    eprintln!("Usage: git-ai <command> [args...]");
+    eprintln!();
+    eprintln!("Commands:");
+    eprintln!("  checkpoint         Checkpoint working changes and attribute author");
+    eprintln!(
+        "{}",
+        crate::operations::commands::checkpoint_agent::presets::checkpoint_preset_help()
+    );
+    eprintln!(
+        "    --hook-input <json|stdin>   JSON payload required by presets, or 'stdin' to read from stdin"
+    );
+    eprintln!("    human [pathspecs...]             Compatibility untracked boundary");
+    eprintln!("    known_human [pathspecs...]       Evidence-backed human checkpoint");
+    eprintln!("    mock_* [pathspecs...]            Test-only checkpoint presets");
+    eprintln!("  log [args...]      Show commit log with AI authorship stats");
+    eprintln!("                        Use --raw or --notes to include raw authorship note data");
+    eprintln!("  blame <file>       Git blame with AI authorship overlay");
+    eprintln!("    --json                 Output blame data as JSON");
+    eprintln!("  diff <commit|range>  Show diff with AI authorship annotations");
+    eprintln!("    <commit>              Diff from commit's parent to commit");
+    eprintln!("    <commit1>..<commit2>  Diff between two commits");
+    eprintln!("    --json                 Output in JSON format");
+    eprintln!(
+        "    --include-stats        Include commit_stats in JSON output (single commit only)"
+    );
+    eprintln!(
+        "    --all-prompts          Include all prompts from commit note in JSON output (single commit only)"
+    );
+    eprintln!("  stats [commit]     Show AI authorship statistics for a commit");
+    eprintln!("    --json                 Output in JSON format");
+    eprintln!("  usage              Show local AI usage statistics");
+    eprintln!("    --period <1d|3d|7d|30d>  Time window (default: 30d)");
+    eprintln!("    --json                 Output in JSON format");
+    eprintln!("  analyze [beta]      Analyze agent sessions and effectiveness");
+    eprintln!("  status             Show uncommitted AI authorship status (debug)");
+    eprintln!("    --json                 Output in JSON format");
+    eprintln!(
+        "    --diff-only            Report only current-diff stats, omitting the per-checkpoint breakdown"
+    );
+    eprintln!("  show <rev|range>   Display authorship logs for a revision or range");
+    eprintln!("  show-prompt <id>   Display a prompt record by its ID");
+    eprintln!("    --commit <rev>        Look in a specific commit only");
+    eprintln!(
+        "    --offset <n>          Skip n occurrences (0 = most recent, mutually exclusive with --commit)"
+    );
+    eprintln!("  config             View and manage git-ai configuration");
+    eprintln!("                        Show all config as formatted JSON");
+    eprintln!("    <key>                 Show specific config value (supports dot notation)");
+    eprintln!("    set <key> <value>     Set a config value (arrays: single value = [value])");
+    eprintln!("    --add <key> <value>   Add to array or upsert into object");
+    eprintln!("    unset <key>           Remove config value (reverts to default)");
+    eprintln!("  debug              Print support/debug diagnostics");
+    eprintln!("  bg                 Run and control git-ai background service");
+    eprintln!("  install-hooks      Configure Git Trace2 and supported agent/editor integrations");
+    eprintln!("    --installer-env NAME=ABSOLUTE_PATH");
+    eprintln!("                           Package-only user path handoff (repeatable)");
+    eprintln!("    --skills               Also install agent skill files");
+    eprintln!("    --visual-studio-extension");
+    eprintln!(
+        "                           Include Visual Studio detection and status checks on Windows"
+    );
+    eprintln!("                           This does not install a VSIX package");
+    eprintln!(
+        "  uninstall          Remove git-ai from this machine (hooks, git config, daemon, binaries; --purge for data)"
+    );
+    eprintln!("  uninstall-hooks    Remove git-ai hooks from all detected tools");
+    eprintln!("  ci                 Continuous integration utilities");
+    eprintln!("    github                 GitHub CI helpers");
+    eprintln!("  git-path           Print the path to the underlying git executable");
+    eprintln!("  await [beta]       Wait for the background service to finish all work");
+    eprintln!("    --timeout <seconds>    Maximum time to wait (default: 30)");
+    eprintln!(
+        "  reingest          Redeliver retained metric events through the background service"
+    );
+    eprintln!("    --all                 Select every retained metric event");
+    eprintln!("    --since <duration>    Select a recent duration such as 2h or 7d");
+    eprintln!("    --from <time> --to <time>  Select a half-open RFC3339 time range");
+    eprintln!("  upgrade            Check for updates and install if available");
+    eprintln!("    --force               Reinstall latest version even if already up to date");
+    eprintln!("  fetch-notes [remote] Synchronously fetch AI authorship notes");
+    eprintln!("    --remote <name>       Explicit remote name (default: upstream or origin)");
+    eprintln!("    --json                Output result as JSON");
+    eprintln!("  login              Authenticate with Git AI");
+    eprintln!("  logout             Clear stored credentials");
+    eprintln!("  whoami             Show auth state and login identity");
+    eprintln!("  version, -v, --version     Print the git-ai version");
+    eprintln!("  help, -h, --help           Show this help message");
+    eprintln!();
+    std::process::exit(0);
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct EffectiveIgnorePatternsRequest {
+    user_patterns: Vec<String>,
+    extra_patterns: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EffectiveIgnorePatternsResponse {
+    patterns: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BlameAnalysisRequest {
+    file_path: String,
+    #[serde(default)]
+    options: commands::blame::GitAiBlameOptions,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthorshipRemoteRequest {
+    remote_name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct FetchAuthorshipNotesResponse {
+    notes_existence: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PushAuthorshipNotesResponse {
+    ok: bool,
+}
+
+fn disable_debug_logs_for_machine_command() {
+    // SAFETY: git-ai command handlers run on the main thread and mutate process env
+    // before spawning any worker threads for these internal machine commands.
+    unsafe {
+        std::env::set_var("GIT_AI_DEBUG", "0");
+        std::env::remove_var("GIT_AI_DEBUG_PERFORMANCE");
+    }
+}
+
+fn parse_authorship_remote_request(
+    args: &[String],
+    command: &str,
+) -> (Repository, AuthorshipRemoteRequest) {
+    let payload =
+        parse_machine_json_arg(args, command).unwrap_or_else(|msg| emit_machine_json_error(msg));
+
+    let request: AuthorshipRemoteRequest = parse_machine_request(&payload);
+
+    if request.remote_name.trim().is_empty() {
+        emit_machine_json_error("remote_name cannot be empty");
+    }
+
+    let repo = resolve_repo_or_machine_error();
+
+    (repo, request)
+}
+
+fn notes_existence_label(existence: NotesExistence) -> &'static str {
+    match existence {
+        NotesExistence::Found => "found",
+        NotesExistence::NotFound => "not_found",
+    }
+}
+
+pub(crate) fn handle_effective_ignore_patterns_internal(args: &[String]) {
+    let payload = parse_machine_json_arg(args, "effective-ignore-patterns")
+        .unwrap_or_else(|msg| emit_machine_json_error(msg));
+
+    let request: EffectiveIgnorePatternsRequest = parse_machine_request(&payload);
+
+    let repo = resolve_repo_or_machine_error();
+
+    let response = EffectiveIgnorePatternsResponse {
+        patterns: effective_ignore_patterns(&repo, &request.user_patterns, &request.extra_patterns),
+    };
+
+    print_machine_json_serializable(&response);
+}
+
+pub(crate) fn handle_blame_analysis_internal(args: &[String]) {
+    let payload = parse_machine_json_arg(args, "blame-analysis")
+        .unwrap_or_else(|msg| emit_machine_json_error(msg));
+
+    let request: BlameAnalysisRequest = parse_machine_request(&payload);
+
+    if request.file_path.trim().is_empty() {
+        emit_machine_json_error("file_path cannot be empty");
+    }
+
+    let repo = resolve_repo_or_machine_error();
+
+    let analysis = repo
+        .blame_analysis(&request.file_path, &request.options)
+        .unwrap_or_else(|e| emit_machine_json_error(format!("blame_analysis failed: {}", e)));
+
+    print_machine_json_serializable(&analysis);
+}
+
+pub(crate) fn handle_fetch_authorship_notes_internal(args: &[String]) {
+    disable_debug_logs_for_machine_command();
+    let (repo, request) = parse_authorship_remote_request(args, "fetch-authorship-notes");
+
+    let notes_existence = fetch_authorship_notes(&repo, &request.remote_name).unwrap_or_else(|e| {
+        emit_machine_json_error(format!("fetch_authorship_notes failed: {}", e))
+    });
+
+    let response = FetchAuthorshipNotesResponse {
+        notes_existence: notes_existence_label(notes_existence).to_string(),
+    };
+    print_machine_json_serializable(&response);
+}
+
+pub(crate) fn handle_push_authorship_notes_internal(args: &[String]) {
+    disable_debug_logs_for_machine_command();
+    let (repo, request) = parse_authorship_remote_request(args, "push-authorship-notes");
+
+    push_authorship_notes(&repo, &request.remote_name).unwrap_or_else(|e| {
+        emit_machine_json_error(format!("push_authorship_notes failed: {}", e))
+    });
+
+    let response = PushAuthorshipNotesResponse { ok: true };
+    print_machine_json_serializable(&response);
+}
+
 fn handle_ai_blame(args: &[String]) {
     if args.is_empty() {
         eprintln!("Error: blame requires a file argument");
@@ -536,8 +761,6 @@ fn handle_git_hooks(args: &[String]) {
     }
 }
 
-/// Synthesize JSON hook_input from CLI args for mock/test presets that can be
-/// invoked without --hook-input.
 /// Exit mirroring the child's termination status, re-raising the original
 /// signal on Unix so the calling shell sees the correct termination reason
 /// (e.g. SIGPIPE from `git ai log | head`).

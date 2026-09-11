@@ -1104,6 +1104,7 @@ dependencies = [
  "named_pipe",
  "openssl",
  "paste",
+ "proc-macro2",
  "rand 0.10.1",
  "ratatui",
  "regex",

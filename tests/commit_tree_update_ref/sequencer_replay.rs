@@ -1,8 +1,4 @@
-use super::{
-    ExpectedLineExt, TestRepo, assert_note_has_ai_for_file, fs, head_sha,
-    new_daemon_test_sync_session_id, raw_git_trace_to_file, raw_git_trace_to_file_output,
-    replay_trace_file_to_daemon, setup_initial_commit,
-};
+use super::*;
 
 #[test]
 #[ignore = "stock trace2 does not record rebased output commit oids"]

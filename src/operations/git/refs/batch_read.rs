@@ -1,7 +1,7 @@
+use super::AI_AUTHORSHIP_FULL_REF;
 use super::batch_write::notes_add_blob_batch;
-use super::constants::AI_AUTHORSHIP_FULL_REF;
 use super::note_fanout::normalize_note_path;
-use super::ref_queries::ref_exists;
+use super::ref_exists;
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
 use crate::operations::git::cat_file::batch_read_blob_contents;

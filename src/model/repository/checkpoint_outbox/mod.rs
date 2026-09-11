@@ -1,6 +1,5 @@
 use crate::model::checkpoint_delivery::{CheckpointDelivery, CheckpointDeliveryError};
 use sha2::{Digest, Sha256};
-use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -23,36 +22,44 @@ pub use publication::{
 
 pub const CHECKPOINT_OUTBOX_VERSION: &str = "checkpoint-outbox-v1";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CheckpointOutboxError {
+    #[error("{0}")]
     Delivery(CheckpointDeliveryError),
+    #[error("failed to encode checkpoint delivery: {0}")]
     Encode(String),
+    #[error("failed to decode checkpoint delivery: {0}")]
     Decode(String),
+    #[error("checkpoint outbox override must be absolute: {}", .0.display())]
     OverrideMustBeAbsolute(PathBuf),
+    #[error("durable checkpoint outbox publication is unsupported")]
     UnsupportedPlatform,
+    #[error("checkpoint outbox root must not be a symlink")]
     RootIsSymlink,
+    #[error("checkpoint outbox root must be a directory")]
     RootIsNotDirectory,
-    RootOwnerMismatch {
-        expected: u32,
-        actual: u32,
-    },
-    RootModeMismatch {
-        expected: u32,
-        actual: u32,
-    },
+    #[error("checkpoint outbox root owner mismatch (expected uid {expected}, found {actual})")]
+    RootOwnerMismatch { expected: u32, actual: u32 },
+    #[error("checkpoint outbox root mode mismatch (expected {expected:04o}, found {actual:04o})")]
+    RootModeMismatch { expected: u32, actual: u32 },
+    #[error("checkpoint outbox contains an unsafe ready record")]
     UnsafeReadyRecord,
-    RecordTooLarge {
-        encoded_bytes: u64,
-        max_bytes: u64,
-    },
+    #[error("checkpoint outbox record is too large ({encoded_bytes} bytes, maximum {max_bytes})")]
+    RecordTooLarge { encoded_bytes: u64, max_bytes: u64 },
+    #[error(
+        "checkpoint outbox capacity exceeded ({ready_records} of {max_records} records, {ready_bytes} of {max_bytes} bytes)"
+    )]
     ReadyCapacityExceeded {
         ready_records: usize,
         max_records: usize,
         ready_bytes: u64,
         max_bytes: u64,
     },
+    #[error("checkpoint outbox delivery is already published")]
     AlreadyPublished,
+    #[error("checkpoint outbox lock root failed (WouldBlock)")]
     LockBusy,
+    #[error("checkpoint outbox {operation} failed ({kind:?})")]
     Io {
         operation: &'static str,
         kind: io::ErrorKind,
@@ -68,70 +75,6 @@ impl CheckpointOutboxError {
         }
     }
 }
-
-impl fmt::Display for CheckpointOutboxError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Delivery(error) => error.fmt(f),
-            Self::Encode(error) => write!(f, "failed to encode checkpoint delivery: {}", error),
-            Self::Decode(error) => write!(f, "failed to decode checkpoint delivery: {}", error),
-            Self::OverrideMustBeAbsolute(path) => write!(
-                f,
-                "checkpoint outbox override must be absolute: {}",
-                path.display()
-            ),
-            Self::UnsupportedPlatform => {
-                write!(f, "durable checkpoint outbox publication is unsupported")
-            }
-            Self::RootIsSymlink => write!(f, "checkpoint outbox root must not be a symlink"),
-            Self::RootIsNotDirectory => {
-                write!(f, "checkpoint outbox root must be a directory")
-            }
-            Self::RootOwnerMismatch { expected, actual } => write!(
-                f,
-                "checkpoint outbox root owner mismatch (expected uid {}, found {})",
-                expected, actual
-            ),
-            Self::RootModeMismatch { expected, actual } => write!(
-                f,
-                "checkpoint outbox root mode mismatch (expected {:04o}, found {:04o})",
-                expected, actual
-            ),
-            Self::UnsafeReadyRecord => {
-                write!(f, "checkpoint outbox contains an unsafe ready record")
-            }
-            Self::RecordTooLarge {
-                encoded_bytes,
-                max_bytes,
-            } => write!(
-                f,
-                "checkpoint outbox record is too large ({} bytes, maximum {})",
-                encoded_bytes, max_bytes
-            ),
-            Self::ReadyCapacityExceeded {
-                ready_records,
-                max_records,
-                ready_bytes,
-                max_bytes,
-            } => write!(
-                f,
-                "checkpoint outbox capacity exceeded ({} of {} records, {} of {} bytes)",
-                ready_records, max_records, ready_bytes, max_bytes
-            ),
-            Self::AlreadyPublished => {
-                write!(f, "checkpoint outbox delivery is already published")
-            }
-            Self::LockBusy => {
-                write!(f, "checkpoint outbox lock root failed (WouldBlock)")
-            }
-            Self::Io { operation, kind } => {
-                write!(f, "checkpoint outbox {} failed ({:?})", operation, kind)
-            }
-        }
-    }
-}
-
-impl std::error::Error for CheckpointOutboxError {}
 
 impl From<CheckpointDeliveryError> for CheckpointOutboxError {
     fn from(error: CheckpointDeliveryError) -> Self {
@@ -264,6 +207,77 @@ mod tests {
     use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
     use crate::model::working_log::CheckpointKind;
     use std::collections::HashMap;
+
+    #[allow(deprecated)]
+    fn assert_error_contract(error: &dyn std::error::Error, expected: &str) {
+        assert_eq!(error.to_string(), expected);
+        assert_eq!(format!("{error:*^120.3}"), expected);
+        assert_eq!(format!("{error:#}"), expected);
+        assert!(error.source().is_none());
+        assert_eq!(
+            error.description(),
+            "description() is deprecated; use Display"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::schema(CheckpointDeliveryError::UnsupportedSchema { found: 2, supported: 1 }, "schema 2 is newer than supported schema 1")]
+    #[case::empty(CheckpointDeliveryError::EmptyIdentifier { field: "trace_id" }, "trace_id must not be empty")]
+    #[case::unsafe_identifier(CheckpointDeliveryError::UnsafeIdentifier { field: "trace_id" }, "trace_id contains unsafe characters")]
+    #[case::relative_path(CheckpointDeliveryError::PathMustBeAbsolute { field: "trace_id" }, "trace_id must be absolute")]
+    #[case::path_encoding(CheckpointDeliveryError::NonUtf8Path { field: "trace_id" }, "trace_id uses an unsupported path encoding")]
+    #[case::limit(CheckpointDeliveryError::LimitExceeded { field: "trace_id", limit: 10, actual: 20 }, "trace_id exceeds limit 10 (actual 20)")]
+    fn delivery_error_display_clone_and_conversion_are_stable(
+        #[case] error: CheckpointDeliveryError,
+        #[case] suffix: &str,
+    ) {
+        let expected = format!("checkpoint delivery {suffix}");
+        assert_eq!(error.clone(), error);
+        assert_error_contract(&error, &expected);
+        let converted = CheckpointOutboxError::from(error.clone());
+        assert!(matches!(&converted, CheckpointOutboxError::Delivery(inner) if inner == &error));
+        assert_error_contract(&converted, &expected);
+    }
+
+    #[rstest::rstest]
+    #[case::encode(CheckpointOutboxError::Encode("bad\ndata".into()), "failed to encode checkpoint delivery: bad\ndata")]
+    #[case::decode(CheckpointOutboxError::Decode("bad data".into()), "failed to decode checkpoint delivery: bad data")]
+    #[case::relative_override(CheckpointOutboxError::OverrideMustBeAbsolute("relative".into()), "checkpoint outbox override must be absolute: relative")]
+    #[case::platform(
+        CheckpointOutboxError::UnsupportedPlatform,
+        "durable checkpoint outbox publication is unsupported"
+    )]
+    #[case::symlink(
+        CheckpointOutboxError::RootIsSymlink,
+        "checkpoint outbox root must not be a symlink"
+    )]
+    #[case::not_directory(
+        CheckpointOutboxError::RootIsNotDirectory,
+        "checkpoint outbox root must be a directory"
+    )]
+    #[case::owner(CheckpointOutboxError::RootOwnerMismatch { expected: 501, actual: 0 }, "checkpoint outbox root owner mismatch (expected uid 501, found 0)")]
+    #[case::mode(CheckpointOutboxError::RootModeMismatch { expected: 0o700, actual: 0o1777 }, "checkpoint outbox root mode mismatch (expected 0700, found 1777)")]
+    #[case::unsafe_record(
+        CheckpointOutboxError::UnsafeReadyRecord,
+        "checkpoint outbox contains an unsafe ready record"
+    )]
+    #[case::record_size(CheckpointOutboxError::RecordTooLarge { encoded_bytes: 20, max_bytes: 10 }, "checkpoint outbox record is too large (20 bytes, maximum 10)")]
+    #[case::capacity(CheckpointOutboxError::ReadyCapacityExceeded { ready_records: 3, max_records: 2, ready_bytes: 20, max_bytes: 10 }, "checkpoint outbox capacity exceeded (3 of 2 records, 20 of 10 bytes)")]
+    #[case::already_published(
+        CheckpointOutboxError::AlreadyPublished,
+        "checkpoint outbox delivery is already published"
+    )]
+    #[case::lock_busy(
+        CheckpointOutboxError::LockBusy,
+        "checkpoint outbox lock root failed (WouldBlock)"
+    )]
+    #[case::io(CheckpointOutboxError::Io { operation: "read", kind: io::ErrorKind::PermissionDenied }, "checkpoint outbox read failed (PermissionDenied)")]
+    fn outbox_error_display_and_sources_are_stable(
+        #[case] error: CheckpointOutboxError,
+        #[case] expected: &str,
+    ) {
+        assert_error_contract(&error, expected);
+    }
 
     fn delivery() -> CheckpointDelivery {
         let request = CheckpointRequest {

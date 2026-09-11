@@ -1,13 +1,26 @@
+mod metrics;
+
+#[cfg(test)]
+use metrics::parse_commit_metric_metadata_output;
+use metrics::record_commit_metrics;
+#[allow(unused_imports)]
+pub(crate) use metrics::{
+    CommitMetricMetadata, MetricToolModelBreakdown, commit_metric_attrs, commit_metric_metadata,
+    metric_tool_model_breakdown, stable_patch_id_for_commit,
+};
+
 use crate::config::Config;
 use crate::error::GitAiError;
+use crate::model::authorship_log::LineRange;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry};
 use crate::operations::authorship::attribution_recovery::{
     AttributionRecoveryContext, FileTimestampsByPath, UnknownLinesByFile,
 };
 use crate::operations::authorship::diff_base::single_commit_diff_base;
+use crate::operations::authorship::ignore::effective_ignore_patterns;
 use crate::operations::authorship::ignore::{
-    build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
+    build_ignore_matcher, should_ignore_file_with_matcher,
 };
 use crate::operations::authorship::recovery_stores::RecoveryStores;
 use crate::operations::authorship::rewrite::DiffTreeResult;
@@ -18,36 +31,9 @@ use crate::operations::authorship::virtual_attribution::{
     AuthorshipLogDiffContext, VirtualAttributions,
 };
 use crate::operations::git::notes_api::write_note;
-use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
-
-/// Skip expensive post-commit stats when this threshold is exceeded.
-/// High hunk density is the strongest predictor of slow diff_ai_accepted_stats.
-#[doc(hidden)]
-pub const STATS_SKIP_MAX_HUNKS: usize = 1000;
-/// Skip expensive stats for very large net additions even if hunks are moderate.
-#[doc(hidden)]
-pub const STATS_SKIP_MAX_ADDED_LINES: usize = 6000;
-/// Skip expensive stats for extremely wide commits touching many added-line files.
-#[doc(hidden)]
-pub const STATS_SKIP_MAX_FILES_WITH_ADDITIONS: usize = 200;
-/// Skip expensive stats for commits that delete a large number of lines.
-/// Deletion-heavy commits (e.g. removing many files) trigger the same expensive
-/// diff-parsing path as large addition commits, but the added-lines estimate is
-/// near zero, so the cost was previously invisible to the estimator.
-#[doc(hidden)]
-pub const STATS_SKIP_MAX_DELETED_LINES: usize = 6000;
-
-#[derive(Debug, Clone, Copy)]
-#[doc(hidden)]
-pub struct StatsCostEstimate {
-    pub files_with_additions: usize,
-    pub added_lines: usize,
-    pub hunk_ranges: usize,
-    pub deleted_lines: usize,
-}
 
 fn checkpoint_entry_requires_post_processing(
     checkpoint: &Checkpoint,
@@ -566,29 +552,15 @@ where
     })
 }
 
-fn commit_tree_snapshot_for_files(
-    repo: &Repository,
-    commit_sha: &str,
-    file_paths: &HashSet<String>,
-) -> Result<HashMap<String, String>, GitAiError> {
-    let requests = file_paths
-        .iter()
-        .map(|file_path| (commit_sha.to_string(), file_path.clone()))
-        .collect::<Vec<_>>();
-    let contents = batch_read_paths_at_treeishes(repo, &requests)?;
-    let mut snapshot = HashMap::with_capacity(file_paths.len());
-    for file_path in file_paths {
-        snapshot.insert(
-            file_path.clone(),
-            contents
-                .get(&(commit_sha.to_string(), file_path.clone()))
-                .cloned()
-                .unwrap_or_default(),
-        );
-    }
-
-    Ok(snapshot)
+#[derive(Debug, Clone)]
+enum StatsSkipReason {
+    MergeCommit,
+    Expensive(StatsCostEstimate),
 }
+
+#[path = "post_commit_tests.rs"]
+#[cfg(test)]
+mod tests;
 
 fn recovery_committed_hunks(
     repo: &Repository,
@@ -618,6 +590,152 @@ fn recovery_committed_hunks(
             )
         })
         .collect())
+}
+
+/// Skip expensive post-commit stats when this threshold is exceeded.
+/// High hunk density is the strongest predictor of slow diff_ai_accepted_stats.
+#[doc(hidden)]
+pub const STATS_SKIP_MAX_HUNKS: usize = 1000;
+/// Skip expensive stats for very large net additions even if hunks are moderate.
+#[doc(hidden)]
+pub const STATS_SKIP_MAX_ADDED_LINES: usize = 6000;
+/// Skip expensive stats for extremely wide commits touching many added-line files.
+#[doc(hidden)]
+pub const STATS_SKIP_MAX_FILES_WITH_ADDITIONS: usize = 200;
+/// Skip expensive stats for commits that delete a large number of lines.
+/// Deletion-heavy commits (e.g. removing many files) trigger the same expensive
+/// diff-parsing path as large addition commits, but the added-lines estimate is
+/// near zero, so the cost was previously invisible to the estimator.
+#[doc(hidden)]
+pub const STATS_SKIP_MAX_DELETED_LINES: usize = 6000;
+
+#[derive(Debug, Clone, Copy)]
+#[doc(hidden)]
+pub struct StatsCostEstimate {
+    pub files_with_additions: usize,
+    pub added_lines: usize,
+    pub hunk_ranges: usize,
+    pub deleted_lines: usize,
+}
+
+#[doc(hidden)]
+pub fn should_skip_expensive_post_commit_stats(estimate: &StatsCostEstimate) -> bool {
+    estimate.hunk_ranges >= STATS_SKIP_MAX_HUNKS
+        || estimate.added_lines >= STATS_SKIP_MAX_ADDED_LINES
+        || estimate.files_with_additions >= STATS_SKIP_MAX_FILES_WITH_ADDITIONS
+        || estimate.deleted_lines >= STATS_SKIP_MAX_DELETED_LINES
+}
+
+/// Public result of the stats cost estimate for a commit, used by the async
+/// wrapper path to decide whether to skip expensive stats computation.
+pub struct StatsSkipEstimate {
+    should_skip: bool,
+}
+
+impl StatsSkipEstimate {
+    pub fn should_skip(&self) -> bool {
+        self.should_skip
+    }
+}
+
+/// Estimate whether stats computation for `commit_sha` would be too expensive.
+/// Resolves the parent commit automatically. Intended for callers outside the
+/// normal post-commit flow (e.g. the async wrapper path).
+pub fn estimate_stats_cost_for_head(
+    repo: &Repository,
+    commit_sha: &str,
+    ignore_patterns: &[String],
+) -> Result<StatsSkipEstimate, GitAiError> {
+    let commit = repo.find_commit(commit_sha.to_string())?;
+    let parent_sha = if commit.parent_count().unwrap_or(0) > 0 {
+        commit
+            .parent(0)
+            .map(|p| p.id())
+            .unwrap_or_else(|_| "initial".to_string())
+    } else {
+        "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()
+    };
+    estimate_stats_cost_for_commit_range(repo, &parent_sha, commit_sha, ignore_patterns)
+}
+
+pub fn estimate_stats_cost_for_commit_range(
+    repo: &Repository,
+    parent_sha: &str,
+    commit_sha: &str,
+    ignore_patterns: &[String],
+) -> Result<StatsSkipEstimate, GitAiError> {
+    let estimate = estimate_stats_cost(repo, parent_sha, commit_sha, ignore_patterns)?;
+    Ok(StatsSkipEstimate {
+        should_skip: should_skip_expensive_post_commit_stats(&estimate),
+    })
+}
+
+fn estimate_stats_cost(
+    repo: &Repository,
+    parent_sha: &str,
+    commit_sha: &str,
+    ignore_patterns: &[String],
+) -> Result<StatsCostEstimate, GitAiError> {
+    let (mut added_lines_by_file, total_deleted_lines) =
+        repo.diff_added_lines_with_deleted_count(parent_sha, commit_sha)?;
+    let ignore_matcher = build_ignore_matcher(ignore_patterns);
+    added_lines_by_file
+        .retain(|file_path, _| !should_ignore_file_with_matcher(file_path, &ignore_matcher));
+
+    let files_with_additions = added_lines_by_file
+        .values()
+        .filter(|lines| !lines.is_empty())
+        .count();
+
+    let mut added_lines = 0usize;
+    let mut hunk_ranges = 0usize;
+
+    for (_file, lines) in added_lines_by_file {
+        if lines.is_empty() {
+            continue;
+        }
+        added_lines += lines.len();
+        hunk_ranges += count_line_ranges(&lines);
+    }
+
+    Ok(StatsCostEstimate {
+        files_with_additions,
+        added_lines,
+        hunk_ranges,
+        deleted_lines: total_deleted_lines,
+    })
+}
+
+#[doc(hidden)]
+pub fn count_line_ranges(lines: &[u32]) -> usize {
+    let mut sorted = lines.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    LineRange::contiguous_chunks(&sorted).count()
+}
+
+fn commit_tree_snapshot_for_files(
+    repo: &Repository,
+    commit_sha: &str,
+    file_paths: &HashSet<String>,
+) -> Result<HashMap<String, String>, GitAiError> {
+    let requests = file_paths
+        .iter()
+        .map(|file_path| (commit_sha.to_string(), file_path.clone()))
+        .collect::<Vec<_>>();
+    let contents = batch_read_paths_at_treeishes(repo, &requests)?;
+    let mut snapshot = HashMap::with_capacity(file_paths.len());
+    for file_path in file_paths {
+        snapshot.insert(
+            file_path.clone(),
+            contents
+                .get(&(commit_sha.to_string(), file_path.clone()))
+                .cloned()
+                .unwrap_or_default(),
+        );
+    }
+
+    Ok(snapshot)
 }
 
 /// Amend-specific post-commit that merges blame-sourced attributions from the
@@ -860,572 +978,4 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         authorship_note: authorship_note_str,
         parent_sha,
     })
-}
-
-#[derive(Debug, Clone)]
-enum StatsSkipReason {
-    MergeCommit,
-    Expensive(StatsCostEstimate),
-}
-
-#[doc(hidden)]
-pub fn should_skip_expensive_post_commit_stats(estimate: &StatsCostEstimate) -> bool {
-    estimate.hunk_ranges >= STATS_SKIP_MAX_HUNKS
-        || estimate.added_lines >= STATS_SKIP_MAX_ADDED_LINES
-        || estimate.files_with_additions >= STATS_SKIP_MAX_FILES_WITH_ADDITIONS
-        || estimate.deleted_lines >= STATS_SKIP_MAX_DELETED_LINES
-}
-
-/// Public result of the stats cost estimate for a commit, used by the async
-/// wrapper path to decide whether to skip expensive stats computation.
-pub struct StatsSkipEstimate {
-    should_skip: bool,
-}
-
-impl StatsSkipEstimate {
-    pub fn should_skip(&self) -> bool {
-        self.should_skip
-    }
-}
-
-/// Estimate whether stats computation for `commit_sha` would be too expensive.
-/// Resolves the parent commit automatically. Intended for callers outside the
-/// normal post-commit flow (e.g. the async wrapper path).
-pub fn estimate_stats_cost_for_head(
-    repo: &Repository,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-) -> Result<StatsSkipEstimate, GitAiError> {
-    let commit = repo.find_commit(commit_sha.to_string())?;
-    let parent_sha = if commit.parent_count().unwrap_or(0) > 0 {
-        commit
-            .parent(0)
-            .map(|p| p.id())
-            .unwrap_or_else(|_| "initial".to_string())
-    } else {
-        "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()
-    };
-    estimate_stats_cost_for_commit_range(repo, &parent_sha, commit_sha, ignore_patterns)
-}
-
-pub fn estimate_stats_cost_for_commit_range(
-    repo: &Repository,
-    parent_sha: &str,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-) -> Result<StatsSkipEstimate, GitAiError> {
-    let estimate = estimate_stats_cost(repo, parent_sha, commit_sha, ignore_patterns)?;
-    Ok(StatsSkipEstimate {
-        should_skip: should_skip_expensive_post_commit_stats(&estimate),
-    })
-}
-
-fn estimate_stats_cost(
-    repo: &Repository,
-    parent_sha: &str,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-) -> Result<StatsCostEstimate, GitAiError> {
-    let (mut added_lines_by_file, total_deleted_lines) =
-        repo.diff_added_lines_with_deleted_count(parent_sha, commit_sha)?;
-    let ignore_matcher = build_ignore_matcher(ignore_patterns);
-    added_lines_by_file
-        .retain(|file_path, _| !should_ignore_file_with_matcher(file_path, &ignore_matcher));
-
-    let files_with_additions = added_lines_by_file
-        .values()
-        .filter(|lines| !lines.is_empty())
-        .count();
-
-    let mut added_lines = 0usize;
-    let mut hunk_ranges = 0usize;
-
-    for (_file, lines) in added_lines_by_file {
-        if lines.is_empty() {
-            continue;
-        }
-        added_lines += lines.len();
-        hunk_ranges += count_line_ranges(&lines);
-    }
-
-    Ok(StatsCostEstimate {
-        files_with_additions,
-        added_lines,
-        hunk_ranges,
-        deleted_lines: total_deleted_lines,
-    })
-}
-
-#[doc(hidden)]
-pub fn count_line_ranges(lines: &[u32]) -> usize {
-    if lines.is_empty() {
-        return 0;
-    }
-
-    let mut sorted = lines.to_vec();
-    sorted.sort_unstable();
-    sorted.dedup();
-
-    let mut ranges = 1usize;
-    let mut prev = sorted[0];
-    for &line in &sorted[1..] {
-        if line != prev + 1 {
-            ranges += 1;
-        }
-        prev = line;
-    }
-    ranges
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct MetricToolModelBreakdown {
-    pub tool_model_pairs: Vec<String>,
-    pub ai_additions: Vec<u32>,
-    pub ai_accepted: Vec<u32>,
-}
-
-/// Build the metrics tool/model arrays and remove mock_ai test data.
-/// Returns None when the entire event would only represent mock_ai data.
-pub(crate) fn metric_tool_model_breakdown(
-    stats: &crate::operations::authorship::stats::CommitStats,
-) -> Option<MetricToolModelBreakdown> {
-    let only_mock_ai = !stats.tool_model_breakdown.is_empty()
-        && stats
-            .tool_model_breakdown
-            .keys()
-            .all(|k| k.starts_with("mock_ai::"));
-    if only_mock_ai {
-        return None;
-    }
-
-    let mut agg_ai = stats.ai_additions;
-    let mut agg_accepted = stats.ai_accepted;
-    for (key, ts) in &stats.tool_model_breakdown {
-        if key.starts_with("mock_ai::") {
-            agg_ai = agg_ai.saturating_sub(ts.ai_additions);
-            agg_accepted = agg_accepted.saturating_sub(ts.ai_accepted);
-        }
-    }
-
-    let mut tool_model_pairs: Vec<String> = vec!["all".to_string()];
-    let mut ai_additions: Vec<u32> = vec![agg_ai];
-    let mut ai_accepted: Vec<u32> = vec![agg_accepted];
-
-    for (tool_model, tool_stats) in &stats.tool_model_breakdown {
-        if tool_model.starts_with("mock_ai::") {
-            continue;
-        }
-        tool_model_pairs.push(tool_model.clone());
-        ai_additions.push(tool_stats.ai_additions);
-        ai_accepted.push(tool_stats.ai_accepted);
-    }
-
-    Some(MetricToolModelBreakdown {
-        tool_model_pairs,
-        ai_additions,
-        ai_accepted,
-    })
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CommitMetricMetadata {
-    pub subject: Option<String>,
-    pub body: Option<String>,
-    pub author_ts: Option<u64>,
-    pub commit_ts: Option<u64>,
-}
-
-pub(crate) fn commit_metric_metadata(
-    repo: &Repository,
-    commit_sha: &str,
-) -> Result<CommitMetricMetadata, GitAiError> {
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "show".to_string(),
-        "-s".to_string(),
-        "--no-notes".to_string(),
-        "--encoding=UTF-8".to_string(),
-        "--format=%s%x00%b%x00%at%x00%ct".to_string(),
-        commit_sha.to_string(),
-    ]);
-    let output = crate::clients::git_cli::exec_git(&args)?;
-    let stdout = String::from_utf8(output.stdout)?;
-    Ok(parse_commit_metric_metadata_output(&stdout))
-}
-
-fn parse_commit_metric_metadata_output(output: &str) -> CommitMetricMetadata {
-    let mut parts = output.splitn(4, '\0');
-    let Some(subject) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(body) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(author_ts) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(commit_ts) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-
-    let subject = subject.trim().to_string();
-    let body = body.trim().to_string();
-
-    CommitMetricMetadata {
-        subject: Some(subject),
-        body: (!body.is_empty()).then_some(body),
-        author_ts: author_ts.trim().parse::<u64>().ok(),
-        commit_ts: commit_ts.trim().parse::<u64>().ok(),
-    }
-}
-
-pub(crate) fn stable_patch_id_for_commit(repo: &Repository, commit_sha: &str) -> Option<String> {
-    stable_patch_ids_for_commits(repo, &[commit_sha.to_string()], PatchDiffMode::Configured)
-        .ok()
-        .and_then(|patch_ids| patch_ids.into_iter().next())
-        .flatten()
-}
-
-pub(crate) fn commit_metric_attrs(
-    repo: &Repository,
-    commit_sha: &str,
-    parent_sha: &str,
-    human_author: &str,
-) -> crate::metrics::EventAttributes {
-    let mut attrs = crate::metrics::EventAttributes::with_version(env!("CARGO_PKG_VERSION"))
-        .author(human_author)
-        .commit_sha(commit_sha)
-        .base_commit_sha(parent_sha);
-
-    if let Ok(Some(remote_name)) = repo.get_default_remote()
-        && let Ok(remotes) = repo.remotes_with_urls()
-        && let Some((_, url)) = remotes.into_iter().find(|(n, _)| n == &remote_name)
-        && let Ok(normalized) = crate::repo_url::normalize_repo_url(&url)
-    {
-        attrs = attrs.repo_url(normalized);
-    }
-
-    if let Ok(head_ref) = repo.head()
-        && let Ok(short_branch) = head_ref.shorthand()
-    {
-        attrs = attrs.branch(short_branch);
-    }
-
-    attrs.custom_attributes_map(Config::fresh().custom_attributes())
-}
-
-/// Record metrics for a committed change.
-/// This is a best-effort operation - failures are silently ignored.
-#[allow(clippy::too_many_arguments)]
-fn record_commit_metrics(
-    repo: &Repository,
-    commit_sha: &str,
-    parent_sha: &str,
-    human_author: &str,
-    authorship_note: &str,
-    stats: &crate::operations::authorship::stats::CommitStats,
-    checkpoints: &[Checkpoint],
-    hunks_json: Option<&str>,
-) {
-    use crate::metrics::{CommittedValues, record};
-
-    let Some(breakdown) = metric_tool_model_breakdown(stats) else {
-        return;
-    };
-
-    // Build values with all stats
-    let values = CommittedValues::new()
-        .human_additions(stats.human_additions)
-        .git_diff_deleted_lines(stats.git_diff_deleted_lines)
-        .git_diff_added_lines(stats.git_diff_added_lines)
-        .tool_model_pairs(breakdown.tool_model_pairs)
-        .ai_additions(breakdown.ai_additions)
-        .ai_accepted(breakdown.ai_accepted);
-
-    // Add first checkpoint timestamp (null if no checkpoints)
-    let values = if let Some(first) = checkpoints.first() {
-        values.first_checkpoint_ts(first.timestamp)
-    } else {
-        values.first_checkpoint_ts_null()
-    };
-
-    let metadata = commit_metric_metadata(repo, commit_sha).unwrap_or_default();
-    let values = match metadata.subject {
-        Some(subject) => values.commit_subject(subject),
-        None => values.commit_subject_null(),
-    };
-    let values = match metadata.body {
-        Some(body) => values.commit_body(body),
-        None => values.commit_body_null(),
-    };
-    let values = match metadata.author_ts {
-        Some(author_ts) => values.author_ts(author_ts),
-        None => values.author_ts_null(),
-    };
-    let values = match metadata.commit_ts {
-        Some(commit_ts) => values.commit_ts(commit_ts),
-        None => values.commit_ts_null(),
-    };
-    let values = match stable_patch_id_for_commit(repo, commit_sha) {
-        Some(patch_id) => values.patch_id(patch_id),
-        None => values.patch_id_null(),
-    }
-    .authorship_note(authorship_note);
-
-    let values = if let Some(hunks) = hunks_json {
-        values.hunks(hunks)
-    } else {
-        values.hunks_null()
-    };
-
-    let attrs = commit_metric_attrs(repo, commit_sha, parent_sha, human_author);
-
-    // Record the metric
-    record(values, attrs);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_commit_metric_metadata_output_reads_subject_body_and_timestamps() {
-        let metadata = parse_commit_metric_metadata_output(concat!(
-            "Subject line",
-            "\0",
-            "Body line one\n\nBody line two",
-            "\0",
-            "1704067200",
-            "\0",
-            "1704067260\n"
-        ));
-
-        assert_eq!(metadata.subject, Some("Subject line".to_string()));
-        assert_eq!(
-            metadata.body,
-            Some("Body line one\n\nBody line two".to_string())
-        );
-        assert_eq!(metadata.author_ts, Some(1_704_067_200));
-        assert_eq!(metadata.commit_ts, Some(1_704_067_260));
-    }
-
-    #[test]
-    fn parse_commit_metric_metadata_output_uses_null_body_for_empty_body() {
-        let metadata = parse_commit_metric_metadata_output(concat!(
-            "Subject line",
-            "\0",
-            "",
-            "\0",
-            "1704067200",
-            "\0",
-            "1704067260\n"
-        ));
-
-        assert_eq!(metadata.subject, Some("Subject line".to_string()));
-        assert_eq!(metadata.body, None);
-        assert_eq!(metadata.author_ts, Some(1_704_067_200));
-        assert_eq!(metadata.commit_ts, Some(1_704_067_260));
-    }
-
-    #[test]
-    fn test_count_line_ranges_handles_scattered_and_contiguous_lines() {
-        assert_eq!(count_line_ranges(&[]), 0);
-        assert_eq!(count_line_ranges(&[1]), 1);
-        assert_eq!(count_line_ranges(&[1, 2, 3]), 1);
-        assert_eq!(count_line_ranges(&[1, 3, 5]), 3);
-        // Includes unsorted and duplicate values.
-        assert_eq!(count_line_ranges(&[5, 3, 3, 4, 10]), 2);
-    }
-
-    #[test]
-    fn test_should_skip_expensive_post_commit_stats_thresholds() {
-        let below_threshold = StatsCostEstimate {
-            files_with_additions: STATS_SKIP_MAX_FILES_WITH_ADDITIONS - 1,
-            added_lines: STATS_SKIP_MAX_ADDED_LINES - 1,
-            hunk_ranges: STATS_SKIP_MAX_HUNKS - 1,
-            deleted_lines: STATS_SKIP_MAX_DELETED_LINES - 1,
-        };
-        assert!(!should_skip_expensive_post_commit_stats(&below_threshold));
-
-        let by_hunks = StatsCostEstimate {
-            files_with_additions: 1,
-            added_lines: 1,
-            hunk_ranges: STATS_SKIP_MAX_HUNKS,
-            deleted_lines: 0,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_hunks));
-
-        let by_added_lines = StatsCostEstimate {
-            files_with_additions: 1,
-            added_lines: STATS_SKIP_MAX_ADDED_LINES,
-            hunk_ranges: 1,
-            deleted_lines: 0,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_added_lines));
-
-        let by_files = StatsCostEstimate {
-            files_with_additions: STATS_SKIP_MAX_FILES_WITH_ADDITIONS,
-            added_lines: 1,
-            hunk_ranges: 1,
-            deleted_lines: 0,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_files));
-
-        let by_deleted_lines = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: STATS_SKIP_MAX_DELETED_LINES,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_deleted_lines));
-    }
-
-    #[test]
-    fn test_count_line_ranges_single_element() {
-        assert_eq!(count_line_ranges(&[42]), 1);
-    }
-
-    #[test]
-    fn test_count_line_ranges_all_contiguous() {
-        assert_eq!(count_line_ranges(&[1, 2, 3, 4, 5]), 1);
-    }
-
-    #[test]
-    fn test_count_line_ranges_all_scattered() {
-        assert_eq!(count_line_ranges(&[1, 10, 20, 30]), 4);
-    }
-
-    #[test]
-    fn test_count_line_ranges_duplicates() {
-        assert_eq!(count_line_ranges(&[5, 5, 5]), 1);
-    }
-
-    #[test]
-    fn test_count_line_ranges_unsorted() {
-        // After sort+dedup: [1, 2, 5, 6, 10] -> ranges: [1,2], [5,6], [10]
-        assert_eq!(count_line_ranges(&[10, 5, 6, 1, 2]), 3);
-    }
-
-    #[test]
-    fn test_metric_tool_model_breakdown_filters_mock_ai() {
-        use crate::operations::authorship::stats::{CommitStats, ToolModelHeadlineStats};
-
-        let mut tool_model_breakdown = std::collections::BTreeMap::new();
-        tool_model_breakdown.insert(
-            "mock_ai::unknown".to_string(),
-            ToolModelHeadlineStats {
-                ai_additions: 4,
-                ai_accepted: 3,
-            },
-        );
-        tool_model_breakdown.insert(
-            "codex::gpt-5".to_string(),
-            ToolModelHeadlineStats {
-                ai_additions: 6,
-                ai_accepted: 5,
-            },
-        );
-        let stats = CommitStats {
-            ai_additions: 10,
-            ai_accepted: 8,
-            tool_model_breakdown,
-            ..Default::default()
-        };
-
-        let result = metric_tool_model_breakdown(&stats).unwrap();
-
-        assert_eq!(result.tool_model_pairs, vec!["all", "codex::gpt-5"]);
-        assert_eq!(result.ai_additions, vec![6, 6]);
-        assert_eq!(result.ai_accepted, vec![5, 5]);
-    }
-
-    #[test]
-    fn test_metric_tool_model_breakdown_skips_mock_only() {
-        use crate::operations::authorship::stats::{CommitStats, ToolModelHeadlineStats};
-
-        let mut tool_model_breakdown = std::collections::BTreeMap::new();
-        tool_model_breakdown.insert(
-            "mock_ai::unknown".to_string(),
-            ToolModelHeadlineStats {
-                ai_additions: 4,
-                ai_accepted: 3,
-            },
-        );
-        let stats = CommitStats {
-            ai_additions: 4,
-            ai_accepted: 3,
-            tool_model_breakdown,
-            ..Default::default()
-        };
-
-        assert_eq!(metric_tool_model_breakdown(&stats), None);
-    }
-
-    #[test]
-    fn test_count_line_ranges_two_ranges() {
-        assert_eq!(count_line_ranges(&[1, 2, 3, 10, 11, 12]), 2);
-    }
-
-    #[test]
-    fn test_should_skip_stats_exactly_at_thresholds() {
-        // Exactly at the hunks threshold alone should trigger skip.
-        let at_hunks = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: STATS_SKIP_MAX_HUNKS,
-            deleted_lines: 0,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_hunks),
-            "Exactly at hunk threshold should skip"
-        );
-
-        // Exactly at added-lines threshold alone should trigger skip.
-        let at_added = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: STATS_SKIP_MAX_ADDED_LINES,
-            hunk_ranges: 0,
-            deleted_lines: 0,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_added),
-            "Exactly at added-lines threshold should skip"
-        );
-
-        // Exactly at files-with-additions threshold alone should trigger skip.
-        let at_files = StatsCostEstimate {
-            files_with_additions: STATS_SKIP_MAX_FILES_WITH_ADDITIONS,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: 0,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_files),
-            "Exactly at files-with-additions threshold should skip"
-        );
-
-        // Exactly at deleted-lines threshold alone should trigger skip.
-        let at_deleted = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: STATS_SKIP_MAX_DELETED_LINES,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_deleted),
-            "Exactly at deleted-lines threshold should skip"
-        );
-
-        // All at zero should NOT skip.
-        let all_zero = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: 0,
-        };
-        assert!(
-            !should_skip_expensive_post_commit_stats(&all_zero),
-            "All zero values should not skip"
-        );
-    }
 }

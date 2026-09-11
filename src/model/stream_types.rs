@@ -34,39 +34,21 @@ pub fn read_jsonl_line(
 }
 
 /// Errors that can occur during transcript processing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum StreamError {
     /// Transient errors that should be retried (file locked, network timeout).
+    #[error("Transient error (retry after {retry_after:?}): {message}")]
     Transient {
         message: String,
         retry_after: Duration,
     },
     /// Parse errors from malformed data (bad JSON, unexpected format).
+    #[error("Parse error at line {line}: {message}")]
     Parse { line: usize, message: String },
     /// Fatal errors that cannot be recovered (file deleted, permissions denied).
+    #[error("Fatal error: {message}")]
     Fatal { message: String },
 }
-
-impl std::fmt::Display for StreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StreamError::Transient {
-                message,
-                retry_after,
-            } => write!(
-                f,
-                "Transient error (retry after {:?}): {}",
-                retry_after, message
-            ),
-            StreamError::Parse { line, message } => {
-                write!(f, "Parse error at line {}: {}", line, message)
-            }
-            StreamError::Fatal { message } => write!(f, "Fatal error: {}", message),
-        }
-    }
-}
-
-impl std::error::Error for StreamError {}
 
 /// Batch of transcript events returned by transcript readers after processing.
 pub struct StreamBatch {
@@ -80,16 +62,27 @@ pub struct StreamBatch {
 mod tests {
     use super::*;
 
+    #[allow(deprecated)]
+    fn assert_error_contract(error: &StreamError, expected: &str) {
+        use std::error::Error;
+        assert_eq!(error.to_string(), expected);
+        assert_eq!(format!("{error:*^120.3}"), expected);
+        assert_eq!(format!("{error:#}"), expected);
+        assert_eq!(error.clone().to_string(), expected);
+        assert!(error.source().is_none());
+        assert_eq!(
+            error.description(),
+            "description() is deprecated; use Display"
+        );
+    }
+
     #[test]
     fn test_transient_error_display() {
         let err = StreamError::Transient {
             message: "file locked".to_string(),
             retry_after: Duration::from_secs(5),
         };
-        let display = format!("{}", err);
-        assert!(display.contains("Transient error"));
-        assert!(display.contains("5s"));
-        assert!(display.contains("file locked"));
+        assert_error_contract(&err, "Transient error (retry after 5s): file locked");
     }
 
     #[test]
@@ -98,9 +91,7 @@ mod tests {
             line: 42,
             message: "invalid JSON".to_string(),
         };
-        let display = format!("{}", err);
-        assert!(display.contains("Parse error at line 42"));
-        assert!(display.contains("invalid JSON"));
+        assert_error_contract(&err, "Parse error at line 42: invalid JSON");
     }
 
     #[test]
@@ -108,9 +99,7 @@ mod tests {
         let err = StreamError::Fatal {
             message: "file deleted".to_string(),
         };
-        let display = format!("{}", err);
-        assert!(display.contains("Fatal error"));
-        assert!(display.contains("file deleted"));
+        assert_error_contract(&err, "Fatal error: file deleted");
     }
 
     #[test]

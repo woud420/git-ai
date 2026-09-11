@@ -1,4 +1,5 @@
 use crate::repos::test_repo::TestRepo;
+use crate::test_utils::diff_json;
 use serde_json::Value;
 use std::fs;
 
@@ -9,12 +10,6 @@ fn write_bytes(repo: &TestRepo, path: &str, bytes: &[u8]) {
         fs::create_dir_all(parent).expect("parent directory should be creatable");
     }
     fs::write(abs_path, bytes).expect("file write should succeed");
-}
-
-/// Helper: run git-ai diff --json and parse the result
-fn diff_json(repo: &TestRepo, args: &[&str]) -> Value {
-    let output = repo.git_ai(args).expect("git-ai diff should succeed");
-    serde_json::from_str(&output).expect("diff JSON should parse")
 }
 
 /// Helper: run git-ai diff and return raw output (for non-JSON mode)

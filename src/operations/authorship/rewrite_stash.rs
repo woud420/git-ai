@@ -20,45 +20,6 @@ pub struct StashMetadata {
     pub pathspecs: Vec<String>,
 }
 
-fn stashes_dir(repo: &Repository) -> PathBuf {
-    repo.storage.ai_dir.join("stashes")
-}
-
-fn stashes_v2_dir(repo: &Repository) -> PathBuf {
-    repo.storage.ai_dir.join("stashes_v2")
-}
-
-fn cleanup_legacy_stashes_dir(repo: &Repository) {
-    let legacy = stashes_dir(repo);
-    if legacy.exists() {
-        let _ = fs::remove_dir_all(legacy);
-    }
-}
-
-fn stash_entry_dir(repo: &Repository, stash_sha: &str) -> PathBuf {
-    stashes_v2_dir(repo).join(stash_sha)
-}
-
-fn stash_metadata_path(repo: &Repository, stash_sha: &str) -> PathBuf {
-    stash_entry_dir(repo, stash_sha).join("metadata.json")
-}
-
-fn filtered_stash_working_log_base(stash_sha: &str) -> String {
-    format!("_stash_filter_{}", stash_sha)
-}
-
-fn working_log_for_dir(repo: &Repository, dir: PathBuf, base_commit: &str) -> PersistedWorkingLog {
-    let canonical_workdir =
-        crate::operations::git::canonicalize::canonicalize_or_self(&repo.storage.repo_workdir);
-    PersistedWorkingLog::new(
-        dir,
-        base_commit,
-        repo.storage.repo_workdir.clone(),
-        canonical_workdir,
-        None,
-    )
-}
-
 fn path_matches_any(path: &str, pathspecs: &[String]) -> bool {
     pathspecs.iter().any(|spec| {
         // Trailing-`*` prefix glob (e.g. `src/foo*`, or a bare `*`), matching
@@ -614,6 +575,48 @@ fn merge_initial_replacing_paths_with_contents(
     )
 }
 
+#[cfg(test)]
+mod tests;
+
+fn stashes_dir(repo: &Repository) -> PathBuf {
+    repo.storage.ai_dir.join("stashes")
+}
+
+fn stashes_v2_dir(repo: &Repository) -> PathBuf {
+    repo.storage.ai_dir.join("stashes_v2")
+}
+
+fn cleanup_legacy_stashes_dir(repo: &Repository) {
+    let legacy = stashes_dir(repo);
+    if legacy.exists() {
+        let _ = fs::remove_dir_all(legacy);
+    }
+}
+
+fn stash_entry_dir(repo: &Repository, stash_sha: &str) -> PathBuf {
+    stashes_v2_dir(repo).join(stash_sha)
+}
+
+fn stash_metadata_path(repo: &Repository, stash_sha: &str) -> PathBuf {
+    stash_entry_dir(repo, stash_sha).join("metadata.json")
+}
+
+fn filtered_stash_working_log_base(stash_sha: &str) -> String {
+    format!("_stash_filter_{}", stash_sha)
+}
+
+fn working_log_for_dir(repo: &Repository, dir: PathBuf, base_commit: &str) -> PersistedWorkingLog {
+    let canonical_workdir =
+        crate::operations::git::canonicalize::canonicalize_or_self(&repo.storage.repo_workdir);
+    PersistedWorkingLog::new(
+        dir,
+        base_commit,
+        repo.storage.repo_workdir.clone(),
+        canonical_workdir,
+        None,
+    )
+}
+
 fn reconstruct_stash_applied_contents(
     repo: &Repository,
     stash_sha: &str,
@@ -722,6 +725,3 @@ fn run_isolated_git(
     }
     Ok(output)
 }
-
-#[cfg(test)]
-mod tests;

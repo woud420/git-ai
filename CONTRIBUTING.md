@@ -58,7 +58,7 @@ If `~/.git-ai` isn't set up yet, the script will run the installer automatically
 
 On Windows, `make dev` runs the Windows development script, installs the current branch build, updates the `git.exe` shim, runs install hooks, and restarts the daemon.
 
-Use `make dev` before testing Windows behavior locally. `cargo build` only produces `target\debug\git-ai.exe`; it does not replace the installed `git-ai.exe`, update the `git.exe` shim, run install hooks, or restart the daemon. Testing setup, daemon startup, or git proxy behavior against only `target\debug\git-ai.exe` can give misleading results.
+Use `make dev` when the task includes testing installed Windows setup, daemon startup, or git proxy integration. For ordinary Windows code verification, use the isolated test harness and cross-check commands. `cargo build` only produces `target\debug\git-ai.exe`; it does not replace the installed `git-ai.exe`, update the `git.exe` shim, run install hooks, or restart the daemon. Testing setup, daemon startup, or git proxy behavior against only `target\debug\git-ai.exe` can give misleading results.
 
 For changes that affect Windows setup or daemon startup, verify the installed development build in a fresh daemon session:
 

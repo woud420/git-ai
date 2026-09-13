@@ -12,7 +12,7 @@ These are hard constraints. Violating any of them will get a PR rejected outrigh
 
 5. **Reuse existing code.** This is a large codebase. For nearly any operation you need, there is almost certainly a helper function already available and tested. Reuse code as much as practical -- it also keeps diffs small. PRs that fail to reuse existing code where applicable will be rejected immediately.
 
-6. **Follow STRICT TDD.** PRs that are not clearly TDD-driven with high-quality `TestRepo`-based tests will be rejected immediately.
+6. **Use regression-first testing for behavior changes.** Use high-quality `TestRepo` regression or characterization tests for Git integration, checkpoints, and attribution. Use focused unit tests for isolated pure logic; documentation-only changes need relevant documentation checks. Keep the attribution and isolation invariants below intact.
 
 ## Build & Test Commands
 
@@ -138,9 +138,8 @@ Untracked line
     fs::write(&file_path, initial).unwrap();
     // Example of a completely untracked edit where we didn't fire a checkpoint call at all
     repo.stage_all_and_commit("Initial commit").unwrap();
-    // Assert after every commit
     let mut file = repo.filename("example.md");
-    // ALWAYS use the helper to assert the lines post-commit AND make sure to always assert line-level after EVERY commit for EVERY test you EVER right. This is CRUCIAL.
+    // Assert committed lines at every transition whose attribution is part of the tested invariant.
     file.assert_committed_lines(lines![
         "Untracked line".unattributed_human(), // 'untracked'
     ]);

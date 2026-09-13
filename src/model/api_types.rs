@@ -601,9 +601,9 @@ mod tests {
     #[test]
     fn daemon_logs_upload_response_accepts_null_error_index() {
         let response: DaemonLogsUploadResponse = serde_json::from_str(
-            r#"{"accepted":0,"dropped":0,"enqueued":false,"errors":[{"index":null,"error":"bad"}]}"#,
-        )
-        .unwrap();
+        r#"{"accepted":0,"dropped":0,"enqueued":false,"errors":[{"index":null,"error":"bad"}]}"#,
+    )
+    .unwrap();
 
         assert_eq!(response.errors[0].index, None);
     }

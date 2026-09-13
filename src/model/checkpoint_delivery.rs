@@ -1,6 +1,5 @@
 use crate::model::checkpoint_request::CheckpointRequest;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 pub const CHECKPOINT_DELIVERY_SCHEMA_VERSION: u16 = 1;
 pub const CHECKPOINT_DELIVERY_MAX_FILES: usize = 1_000;
@@ -20,73 +19,25 @@ pub struct CheckpointDelivery {
     pub request: CheckpointRequest,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CheckpointDeliveryError {
-    UnsupportedSchema {
-        found: u16,
-        supported: u16,
-    },
-    EmptyIdentifier {
-        field: &'static str,
-    },
-    UnsafeIdentifier {
-        field: &'static str,
-    },
-    PathMustBeAbsolute {
-        field: &'static str,
-    },
-    NonUtf8Path {
-        field: &'static str,
-    },
+    #[error("checkpoint delivery schema {found} is newer than supported schema {supported}")]
+    UnsupportedSchema { found: u16, supported: u16 },
+    #[error("checkpoint delivery {field} must not be empty")]
+    EmptyIdentifier { field: &'static str },
+    #[error("checkpoint delivery {field} contains unsafe characters")]
+    UnsafeIdentifier { field: &'static str },
+    #[error("checkpoint delivery {field} must be absolute")]
+    PathMustBeAbsolute { field: &'static str },
+    #[error("checkpoint delivery {field} uses an unsupported path encoding")]
+    NonUtf8Path { field: &'static str },
+    #[error("checkpoint delivery {field} exceeds limit {limit} (actual {actual})")]
     LimitExceeded {
         field: &'static str,
         limit: usize,
         actual: usize,
     },
 }
-
-impl fmt::Display for CheckpointDeliveryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnsupportedSchema { found, supported } => write!(
-                f,
-                "checkpoint delivery schema {} is newer than supported schema {}",
-                found, supported
-            ),
-            Self::EmptyIdentifier { field } => {
-                write!(f, "checkpoint delivery {} must not be empty", field)
-            }
-            Self::UnsafeIdentifier { field } => {
-                write!(
-                    f,
-                    "checkpoint delivery {} contains unsafe characters",
-                    field
-                )
-            }
-            Self::PathMustBeAbsolute { field } => {
-                write!(f, "checkpoint delivery {} must be absolute", field)
-            }
-            Self::NonUtf8Path { field } => {
-                write!(
-                    f,
-                    "checkpoint delivery {} uses an unsupported path encoding",
-                    field
-                )
-            }
-            Self::LimitExceeded {
-                field,
-                limit,
-                actual,
-            } => write!(
-                f,
-                "checkpoint delivery {} exceeds limit {} (actual {})",
-                field, limit, actual
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CheckpointDeliveryError {}
 
 impl CheckpointDelivery {
     pub fn from_requests(requests: Vec<CheckpointRequest>) -> Vec<Self> {

@@ -4,587 +4,7 @@ use git_ai::operations::authorship::range_authorship::{
 };
 use git_ai::operations::git::repository::{CommitRange, find_repository_in_path};
 
-#[test]
-fn test_range_authorship_simple_range() {
-    let repo = TestRepo::new();
-
-    // Create initial commit with human work
-    std::fs::write(repo.path().join("test.txt"), "Line 1\n").unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-    let first_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Add AI work
-    std::fs::write(
-        repo.path().join("test.txt"),
-        "Line 1\nAI Line 2\nAI Line 3\n",
-    )
-    .unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-    repo.stage_all_and_commit("AI adds lines").unwrap();
-    let second_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship from first to second commit
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        first_sha.clone(),
-        second_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Verify stats
-    assert_eq!(stats.authorship_stats.total_commits, 1);
-    assert_eq!(stats.authorship_stats.commits_with_authorship, 1);
-    assert_eq!(stats.range_stats.ai_additions, 2);
-    assert_eq!(stats.range_stats.git_diff_added_lines, 2);
-}
-
-#[test]
-fn test_range_authorship_from_empty_tree() {
-    let repo = TestRepo::new();
-
-    // Create initial commit with AI work
-    std::fs::write(repo.path().join("test.txt"), "AI Line 1\n").unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-    repo.stage_all_and_commit("Initial AI commit").unwrap();
-
-    // Add more AI work
-    std::fs::write(
-        repo.path().join("test.txt"),
-        "AI Line 1\nAI Line 2\nAI Line 3\n",
-    )
-    .unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-    repo.stage_all_and_commit("Second AI commit").unwrap();
-    let head_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship from empty tree to HEAD
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        EMPTY_TREE_HASH.to_string(),
-        head_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Verify stats - should include all commits from beginning
-    assert_eq!(stats.authorship_stats.total_commits, 2);
-    assert_eq!(stats.authorship_stats.commits_with_authorship, 2);
-    // When using empty tree, the range stats show the diff from empty to HEAD
-    // The AI additions count is based on the filtered attributions for commits in range
-    assert_eq!(stats.range_stats.ai_additions, 3);
-    assert_eq!(stats.range_stats.git_diff_added_lines, 3);
-}
-
-#[test]
-fn test_range_authorship_single_commit() {
-    let repo = TestRepo::new();
-
-    // Create initial commit
-    std::fs::write(repo.path().join("test.txt"), "Line 1\n").unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-
-    // Create AI commit
-    std::fs::write(repo.path().join("test.txt"), "Line 1\nAI Line 2\n").unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-    repo.stage_all_and_commit("AI commit").unwrap();
-    let head_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship for single commit (start == end)
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        head_sha.clone(),
-        head_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // For single commit, should use stats_for_commit_stats
-    assert_eq!(stats.authorship_stats.total_commits, 1);
-    assert_eq!(stats.range_stats.ai_additions, 1);
-}
-
-#[test]
-fn test_range_authorship_mixed_commits() {
-    let repo = TestRepo::new();
-
-    // Create initial commit with human work
-    std::fs::write(repo.path().join("test.txt"), "Human Line 1\n").unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-    let first_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Add AI work
-    std::fs::write(repo.path().join("test.txt"), "Human Line 1\nAI Line 2\n").unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-    repo.stage_all_and_commit("AI commit").unwrap();
-
-    // Add human work
-    std::fs::write(
-        repo.path().join("test.txt"),
-        "Human Line 1\nAI Line 2\nHuman Line 3\n",
-    )
-    .unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
-        .unwrap();
-    repo.stage_all_and_commit("Human commit").unwrap();
-
-    // Add more AI work
-    std::fs::write(
-        repo.path().join("test.txt"),
-        "Human Line 1\nAI Line 2\nHuman Line 3\nAI Line 4\n",
-    )
-    .unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-    repo.stage_all_and_commit("Another AI commit").unwrap();
-    let head_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship from first to head
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        first_sha.clone(),
-        head_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Verify stats
-    assert_eq!(stats.authorship_stats.total_commits, 3);
-    assert_eq!(stats.authorship_stats.commits_with_authorship, 3);
-    // Range authorship merges attributions from start to end, filtering to commits in range
-    // The exact AI/human split depends on the merge attribution logic
-    assert_eq!(stats.range_stats.ai_additions, 2);
-    // Known-human lines in the range count as human additions, not unknown.
-    assert_eq!(stats.range_stats.human_additions, 1);
-    assert_eq!(stats.range_stats.unknown_additions, 0);
-    assert_eq!(stats.range_stats.git_diff_added_lines, 3);
-}
-
-#[test]
-fn test_range_authorship_no_changes() {
-    let repo = TestRepo::new();
-
-    // Create a commit
-    std::fs::write(repo.path().join("test.txt"), "Line 1\n").unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-    let sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship with same start and end (already tested above but worth verifying)
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        sha.clone(),
-        sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Should have 1 commit but no diffs since start == end
-    assert_eq!(stats.authorship_stats.total_commits, 1);
-}
-
-#[test]
-fn test_range_authorship_empty_tree_with_multiple_files() {
-    let repo = TestRepo::new();
-
-    // Create multiple files with AI work in first commit
-    std::fs::write(repo.path().join("file1.txt"), "AI content 1\n").unwrap();
-    std::fs::write(repo.path().join("file2.txt"), "AI content 2\n").unwrap();
-    repo.git(&["add", "file1.txt", "file2.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "file1.txt"])
-        .unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "file2.txt"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial multi-file commit")
-        .unwrap();
-    let head_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship from empty tree
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        EMPTY_TREE_HASH.to_string(),
-        head_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Verify all files are included
-    assert_eq!(stats.authorship_stats.total_commits, 1);
-    assert_eq!(stats.authorship_stats.commits_with_authorship, 1);
-    assert_eq!(stats.range_stats.ai_additions, 2);
-    assert_eq!(stats.range_stats.git_diff_added_lines, 2);
-}
-
-#[test]
-fn test_range_authorship_ignores_single_lockfile() {
-    let repo = TestRepo::new();
-
-    // Create initial commit with a source file
-    std::fs::create_dir(repo.path().join("src")).unwrap();
-    std::fs::write(repo.path().join("src/main.rs"), "fn main() {}\n").unwrap();
-    repo.git(&["add", "src/main.rs"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "src/main.rs"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-    let first_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Add AI work to source file and also change a lockfile
-    std::fs::write(
-        repo.path().join("src/main.rs"),
-        "fn main() {}\n// AI added code\nfn helper() {}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        repo.path().join("Cargo.lock"),
-        "# Large lockfile with 1000 lines\n".repeat(1000),
-    )
-    .unwrap();
-    repo.git(&["add", "src/main.rs", "Cargo.lock"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "src/main.rs"])
-        .unwrap();
-    repo.stage_all_and_commit("Add helper and update deps")
-        .unwrap();
-    let second_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        first_sha.clone(),
-        second_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Verify lockfile is excluded: only 2 lines added (from main.rs), not 1000+ from lockfile
-    assert_eq!(stats.authorship_stats.total_commits, 1);
-    assert_eq!(stats.authorship_stats.commits_with_authorship, 1);
-    assert_eq!(stats.range_stats.ai_additions, 2); // Only the 2 AI lines in main.rs
-    assert_eq!(stats.range_stats.git_diff_added_lines, 2); // Lockfile excluded (1000 lines ignored)
-    // The key assertion: git_diff should be 2, not 1002 if lockfile was included
-    assert!(stats.range_stats.git_diff_added_lines < 100); // Significantly less than if lockfile was counted
-}
-
-#[test]
-fn test_range_authorship_mixed_lockfile_and_source() {
-    let repo = TestRepo::new();
-
-    // Create initial commit
-    std::fs::create_dir(repo.path().join("src")).unwrap();
-    std::fs::write(repo.path().join("src/lib.rs"), "pub fn old() {}\n").unwrap();
-    repo.git(&["add", "src/lib.rs"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "src/lib.rs"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-    let first_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Human adds to source file
-    std::fs::write(
-        repo.path().join("src/lib.rs"),
-        "pub fn old() {}\npub fn new() {}\n",
-    )
-    .unwrap();
-    repo.git(&["add", "src/lib.rs"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "src/lib.rs"])
-        .unwrap();
-    repo.stage_all_and_commit("Human adds function").unwrap();
-
-    // AI adds to source file, and package-lock.json is updated (with 1000 lines)
-    std::fs::write(
-        repo.path().join("src/lib.rs"),
-        "pub fn old() {}\npub fn new() {}\n// AI comment\npub fn ai_func() {}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        repo.path().join("package-lock.json"),
-        "{\n  \"lockfileVersion\": 2,\n}\n".repeat(1000),
-    )
-    .unwrap();
-    repo.git(&["add", "src/lib.rs", "package-lock.json"])
-        .unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "src/lib.rs"])
-        .unwrap();
-    repo.stage_all_and_commit("AI adds function and updates deps")
-        .unwrap();
-    let head_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        first_sha.clone(),
-        head_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Key assertion: git_diff should only count lib.rs changes (3 lines), not package-lock.json (3000 lines)
-    assert_eq!(stats.authorship_stats.total_commits, 2);
-    assert_eq!(stats.authorship_stats.commits_with_authorship, 2);
-    assert_eq!(stats.range_stats.git_diff_added_lines, 3); // Only lib.rs, package-lock.json excluded
-    // Verify the total is much less than 3003 (if lockfile was included)
-    assert!(stats.range_stats.git_diff_added_lines < 100);
-    // Verify that some AI work is detected and human lines are correctly
-    // counted as human additions rather than unknown.
-    assert!(stats.range_stats.ai_additions > 0);
-    assert!(stats.range_stats.human_additions > 0);
-}
-
-#[test]
-fn test_range_authorship_multiple_lockfile_types() {
-    let repo = TestRepo::new();
-
-    // Create initial commit
-    std::fs::write(repo.path().join("README.md"), "# Project\n").unwrap();
-    repo.git(&["add", "README.md"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "README.md"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-    let first_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Add multiple lockfiles and one real source change
-    std::fs::write(repo.path().join("Cargo.lock"), "# Cargo lock\n".repeat(500)).unwrap();
-    std::fs::write(repo.path().join("yarn.lock"), "# yarn lock\n".repeat(500)).unwrap();
-    std::fs::write(
-        repo.path().join("poetry.lock"),
-        "# poetry lock\n".repeat(500),
-    )
-    .unwrap();
-    std::fs::write(repo.path().join("go.sum"), "# go sum\n".repeat(500)).unwrap();
-    std::fs::write(repo.path().join("README.md"), "# Project\n## New Section\n").unwrap();
-    repo.git(&[
-        "add",
-        "Cargo.lock",
-        "yarn.lock",
-        "poetry.lock",
-        "go.sum",
-        "README.md",
-    ])
-    .unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "README.md"])
-        .unwrap();
-    repo.stage_all_and_commit("Update dependencies").unwrap();
-    let second_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        first_sha.clone(),
-        second_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-        "poetry.lock".to_string(),
-        "go.sum".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Verify: only the 1 README line is counted, all lockfiles excluded (2000 lines ignored)
-    assert_eq!(stats.authorship_stats.total_commits, 1);
-    assert_eq!(stats.authorship_stats.commits_with_authorship, 1);
-    assert_eq!(stats.range_stats.ai_additions, 1); // Only README.md line
-    assert_eq!(stats.range_stats.git_diff_added_lines, 1); // All lockfiles excluded
-}
-
-#[test]
-fn test_range_authorship_lockfile_only_commit() {
-    let repo = TestRepo::new();
-
-    // Create initial commit
-    std::fs::create_dir(repo.path().join("src")).unwrap();
-    std::fs::write(repo.path().join("src/main.rs"), "fn main() {}\n").unwrap();
-    repo.git(&["add", "src/main.rs"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "src/main.rs"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial commit").unwrap();
-    let first_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Commit that only changes lockfiles (common scenario)
-    std::fs::write(
-        repo.path().join("package-lock.json"),
-        "{\n  \"version\": \"1.0.0\"\n}\n".repeat(1000),
-    )
-    .unwrap();
-    std::fs::write(repo.path().join("yarn.lock"), "# yarn\n".repeat(500)).unwrap();
-    repo.git(&["add", "package-lock.json", "yarn.lock"])
-        .unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "package-lock.json"])
-        .unwrap();
-    repo.stage_all_and_commit("Update lockfiles only").unwrap();
-    let second_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    // Test range authorship
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let commit_range = CommitRange::new_infer_refname(
-        &gitai_repo,
-        first_sha.clone(),
-        second_sha.clone(),
-        Some("HEAD".to_string()),
-    )
-    .unwrap();
-
-    let lockfile_patterns = vec![
-        "Cargo.lock".to_string(),
-        "package-lock.json".to_string(),
-        "yarn.lock".to_string(),
-    ];
-    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
-
-    // Verify: no lines counted since only lockfiles changed
-    assert_eq!(stats.authorship_stats.total_commits, 1);
-    assert_eq!(stats.range_stats.git_diff_added_lines, 0); // All lockfiles excluded
-    assert_eq!(stats.range_stats.ai_additions, 0);
-    assert_eq!(stats.range_stats.human_additions, 0);
-}
+mod lockfiles_and_globs;
 
 #[test]
 fn test_should_ignore_file_with_patterns() {
@@ -968,14 +388,13 @@ fn test_should_ignore_file_numeric_filenames() {
 }
 
 #[test]
-fn test_range_authorship_with_glob_patterns() {
+fn test_range_authorship_simple_range() {
     let repo = TestRepo::new();
 
-    // Initial commit
-    std::fs::create_dir(repo.path().join("src")).unwrap();
-    std::fs::write(repo.path().join("src/main.rs"), "fn main() {}\n").unwrap();
-    repo.git(&["add", "src/main.rs"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "src/main.rs"])
+    // Create initial commit with human work
+    std::fs::write(repo.path().join("test.txt"), "Line 1\n").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
         .unwrap();
     repo.stage_all_and_commit("Initial commit").unwrap();
     let first_sha = repo
@@ -984,36 +403,22 @@ fn test_range_authorship_with_glob_patterns() {
         .trim()
         .to_string();
 
-    // Add various files including lockfiles and generated files
+    // Add AI work
     std::fs::write(
-        repo.path().join("src/main.rs"),
-        "fn main() {}\nfn helper() {}\n",
+        repo.path().join("test.txt"),
+        "Line 1\nAI Line 2\nAI Line 3\n",
     )
     .unwrap();
-    std::fs::write(repo.path().join("Cargo.lock"), "# lock\n".repeat(1000)).unwrap();
-    std::fs::write(repo.path().join("package-lock.json"), "{}\n".repeat(500)).unwrap();
-    std::fs::write(
-        repo.path().join("api.generated.js"),
-        "// generated\n".repeat(200),
-    )
-    .unwrap();
-    repo.git(&[
-        "add",
-        "src/main.rs",
-        "Cargo.lock",
-        "package-lock.json",
-        "api.generated.js",
-    ])
-    .unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "src/main.rs"])
-        .unwrap();
-    repo.stage_all_and_commit("Add code and deps").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
+    repo.stage_all_and_commit("AI adds lines").unwrap();
     let second_sha = repo
         .git_og(&["rev-parse", "HEAD"])
         .unwrap()
         .trim()
         .to_string();
 
+    // Test range authorship from first to second commit
     let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
     let commit_range = CommitRange::new_infer_refname(
         &gitai_repo,
@@ -1023,17 +428,271 @@ fn test_range_authorship_with_glob_patterns() {
     )
     .unwrap();
 
-    // Use glob patterns to ignore lockfiles and generated files
-    let glob_patterns = vec![
-        "*.lock".to_string(),
-        "*lock.json".to_string(), // Matches package-lock.json
-        "*.generated.*".to_string(),
+    let lockfile_patterns = vec![
+        "Cargo.lock".to_string(),
+        "package-lock.json".to_string(),
+        "yarn.lock".to_string(),
     ];
-    let stats = range_authorship(commit_range, false, &glob_patterns, None).unwrap();
+    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
 
-    // Should only count the 1 line in main.rs, ignoring 1700 lines in lockfiles and generated files
-    assert_eq!(stats.range_stats.git_diff_added_lines, 1);
+    // Verify stats
+    assert_eq!(stats.authorship_stats.total_commits, 1);
+    assert_eq!(stats.authorship_stats.commits_with_authorship, 1);
+    assert_eq!(stats.range_stats.ai_additions, 2);
+    assert_eq!(stats.range_stats.git_diff_added_lines, 2);
+}
+
+#[test]
+fn test_range_authorship_from_empty_tree() {
+    let repo = TestRepo::new();
+
+    // Create initial commit with AI work
+    std::fs::write(repo.path().join("test.txt"), "AI Line 1\n").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
+    repo.stage_all_and_commit("Initial AI commit").unwrap();
+
+    // Add more AI work
+    std::fs::write(
+        repo.path().join("test.txt"),
+        "AI Line 1\nAI Line 2\nAI Line 3\n",
+    )
+    .unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
+    repo.stage_all_and_commit("Second AI commit").unwrap();
+    let head_sha = repo
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Test range authorship from empty tree to HEAD
+    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+    let commit_range = CommitRange::new_infer_refname(
+        &gitai_repo,
+        EMPTY_TREE_HASH.to_string(),
+        head_sha.clone(),
+        Some("HEAD".to_string()),
+    )
+    .unwrap();
+
+    let lockfile_patterns = vec![
+        "Cargo.lock".to_string(),
+        "package-lock.json".to_string(),
+        "yarn.lock".to_string(),
+    ];
+    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
+
+    // Verify stats - should include all commits from beginning
+    assert_eq!(stats.authorship_stats.total_commits, 2);
+    assert_eq!(stats.authorship_stats.commits_with_authorship, 2);
+    // When using empty tree, the range stats show the diff from empty to HEAD
+    // The AI additions count is based on the filtered attributions for commits in range
+    assert_eq!(stats.range_stats.ai_additions, 3);
+    assert_eq!(stats.range_stats.git_diff_added_lines, 3);
+}
+
+#[test]
+fn test_range_authorship_single_commit() {
+    let repo = TestRepo::new();
+
+    // Create initial commit
+    std::fs::write(repo.path().join("test.txt"), "Line 1\n").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // Create AI commit
+    std::fs::write(repo.path().join("test.txt"), "Line 1\nAI Line 2\n").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
+    repo.stage_all_and_commit("AI commit").unwrap();
+    let head_sha = repo
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Test range authorship for single commit (start == end)
+    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+    let commit_range = CommitRange::new_infer_refname(
+        &gitai_repo,
+        head_sha.clone(),
+        head_sha.clone(),
+        Some("HEAD".to_string()),
+    )
+    .unwrap();
+
+    let lockfile_patterns = vec![
+        "Cargo.lock".to_string(),
+        "package-lock.json".to_string(),
+        "yarn.lock".to_string(),
+    ];
+    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
+
+    // For single commit, should use stats_for_commit_stats
+    assert_eq!(stats.authorship_stats.total_commits, 1);
     assert_eq!(stats.range_stats.ai_additions, 1);
+}
+
+#[test]
+fn test_range_authorship_mixed_commits() {
+    let repo = TestRepo::new();
+
+    // Create initial commit with human work
+    std::fs::write(repo.path().join("test.txt"), "Human Line 1\n").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    let first_sha = repo
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Add AI work
+    std::fs::write(repo.path().join("test.txt"), "Human Line 1\nAI Line 2\n").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
+    repo.stage_all_and_commit("AI commit").unwrap();
+
+    // Add human work
+    std::fs::write(
+        repo.path().join("test.txt"),
+        "Human Line 1\nAI Line 2\nHuman Line 3\n",
+    )
+    .unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("Human commit").unwrap();
+
+    // Add more AI work
+    std::fs::write(
+        repo.path().join("test.txt"),
+        "Human Line 1\nAI Line 2\nHuman Line 3\nAI Line 4\n",
+    )
+    .unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
+    repo.stage_all_and_commit("Another AI commit").unwrap();
+    let head_sha = repo
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Test range authorship from first to head
+    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+    let commit_range = CommitRange::new_infer_refname(
+        &gitai_repo,
+        first_sha.clone(),
+        head_sha.clone(),
+        Some("HEAD".to_string()),
+    )
+    .unwrap();
+
+    let lockfile_patterns = vec![
+        "Cargo.lock".to_string(),
+        "package-lock.json".to_string(),
+        "yarn.lock".to_string(),
+    ];
+    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
+
+    // Verify stats
+    assert_eq!(stats.authorship_stats.total_commits, 3);
+    assert_eq!(stats.authorship_stats.commits_with_authorship, 3);
+    // Range authorship merges attributions from start to end, filtering to commits in range
+    // The exact AI/human split depends on the merge attribution logic
+    assert_eq!(stats.range_stats.ai_additions, 2);
+    // Known-human lines in the range count as human additions, not unknown.
+    assert_eq!(stats.range_stats.human_additions, 1);
+    assert_eq!(stats.range_stats.unknown_additions, 0);
+    assert_eq!(stats.range_stats.git_diff_added_lines, 3);
+}
+
+#[test]
+fn test_range_authorship_no_changes() {
+    let repo = TestRepo::new();
+
+    // Create a commit
+    std::fs::write(repo.path().join("test.txt"), "Line 1\n").unwrap();
+    repo.git(&["add", "test.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "test.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    let sha = repo
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Test range authorship with same start and end (already tested above but worth verifying)
+    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+    let commit_range = CommitRange::new_infer_refname(
+        &gitai_repo,
+        sha.clone(),
+        sha.clone(),
+        Some("HEAD".to_string()),
+    )
+    .unwrap();
+
+    let lockfile_patterns = vec![
+        "Cargo.lock".to_string(),
+        "package-lock.json".to_string(),
+        "yarn.lock".to_string(),
+    ];
+    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
+
+    // Should have 1 commit but no diffs since start == end
+    assert_eq!(stats.authorship_stats.total_commits, 1);
+}
+
+#[test]
+fn test_range_authorship_empty_tree_with_multiple_files() {
+    let repo = TestRepo::new();
+
+    // Create multiple files with AI work in first commit
+    std::fs::write(repo.path().join("file1.txt"), "AI content 1\n").unwrap();
+    std::fs::write(repo.path().join("file2.txt"), "AI content 2\n").unwrap();
+    repo.git(&["add", "file1.txt", "file2.txt"]).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "file1.txt"])
+        .unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "file2.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("Initial multi-file commit")
+        .unwrap();
+    let head_sha = repo
+        .git_og(&["rev-parse", "HEAD"])
+        .unwrap()
+        .trim()
+        .to_string();
+
+    // Test range authorship from empty tree
+    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+    let commit_range = CommitRange::new_infer_refname(
+        &gitai_repo,
+        EMPTY_TREE_HASH.to_string(),
+        head_sha.clone(),
+        Some("HEAD".to_string()),
+    )
+    .unwrap();
+
+    let lockfile_patterns = vec![
+        "Cargo.lock".to_string(),
+        "package-lock.json".to_string(),
+        "yarn.lock".to_string(),
+    ];
+    let stats = range_authorship(commit_range, false, &lockfile_patterns, None).unwrap();
+
+    // Verify all files are included
+    assert_eq!(stats.authorship_stats.total_commits, 1);
+    assert_eq!(stats.authorship_stats.commits_with_authorship, 1);
+    assert_eq!(stats.range_stats.ai_additions, 2);
+    assert_eq!(stats.range_stats.git_diff_added_lines, 2);
 }
 
 #[test]

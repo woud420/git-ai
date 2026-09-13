@@ -453,8 +453,10 @@ fn test_compute_trust_hash_deterministic() {
     )
     .unwrap();
     assert_eq!(hash1, hash2);
-    assert!(hash1.starts_with("sha256:"));
-    assert_eq!(hash1.len(), 7 + 64); // "sha256:" + 64 hex chars
+    assert_eq!(
+        hash1,
+        "sha256:7a03fa3af2a6677696aed9d12e80d8a4f4b5327cc17e78f99e067900a88113c7"
+    );
 }
 
 #[test]
@@ -500,9 +502,12 @@ fn test_canonical_json_sorts_keys() {
     let input: JsonValue = serde_json::json!({
         "z_key": 1,
         "a_key": 2,
-        "m_key": {"b": 1, "a": 2}
+        "m_key": [{"b": 1, "a": 2}, null, false, "é"]
     });
     let result = CodexInstaller::canonical_json(&input);
     let serialized = serde_json::to_string(&result).unwrap();
-    assert_eq!(serialized, r#"{"a_key":2,"m_key":{"a":2,"b":1},"z_key":1}"#);
+    assert_eq!(
+        serialized,
+        r#"{"a_key":2,"m_key":[{"a":2,"b":1},null,false,"é"],"z_key":1}"#
+    );
 }

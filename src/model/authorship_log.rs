@@ -118,27 +118,13 @@ impl LineRange {
         lines: &[u32],
         mut make_range: impl FnMut(u32, u32) -> T,
     ) -> Vec<T> {
-        if lines.is_empty() {
-            return vec![];
-        }
+        Self::contiguous_chunks(lines)
+            .map(|chunk| make_range(chunk[0], chunk[chunk.len() - 1]))
+            .collect()
+    }
 
-        let mut ranges = Vec::new();
-        let mut current_start = lines[0];
-        let mut current_end = lines[0];
-
-        for &line in &lines[1..] {
-            if line == current_end + 1 {
-                current_end = line;
-            } else {
-                ranges.push(make_range(current_start, current_end));
-                current_start = line;
-                current_end = line;
-            }
-        }
-
-        ranges.push(make_range(current_start, current_end));
-
-        ranges
+    pub(crate) fn contiguous_chunks(lines: &[u32]) -> impl Iterator<Item = &[u32]> {
+        lines.chunk_by(|previous, next| *next == *previous + 1)
     }
 
     #[allow(dead_code)]
@@ -269,6 +255,20 @@ mod tests {
         let cases = [
             (Vec::new(), Vec::new()),
             (vec![4], vec![LineRange::Single(4)]),
+            (vec![0, 1], vec![LineRange::Range(0, 1)]),
+            (
+                vec![2, 2, 3],
+                vec![LineRange::Single(2), LineRange::Range(2, 3)],
+            ),
+            (
+                vec![3, 1, 2],
+                vec![LineRange::Single(3), LineRange::Range(1, 2)],
+            ),
+            (vec![u32::MAX], vec![LineRange::Single(u32::MAX)]),
+            (
+                vec![u32::MAX - 1, u32::MAX],
+                vec![LineRange::Range(u32::MAX - 1, u32::MAX)],
+            ),
             (vec![2, 3, 4], vec![LineRange::Range(2, 4)]),
             (
                 vec![1, 3, 5],
@@ -298,6 +298,13 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "attempt to add with overflow")]
+    fn line_range_compression_preserves_duplicate_max_overflow() {
+        LineRange::compress_lines(&[u32::MAX, u32::MAX]);
     }
 
     // --- LineRange::shift regression tests ---

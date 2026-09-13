@@ -6,6 +6,19 @@ use git_ai::operations::streams::agents::{ClaudeAgent, GeminiAgent};
 use serde_json::json;
 use std::fs;
 
+#[track_caller]
+fn preset_error_message(
+    result: Result<Vec<ParsedHookEvent>, GitAiError>,
+    unexpected: &'static str,
+) -> String {
+    assert!(result.is_err());
+    match result {
+        Err(GitAiError::PresetError(msg)) => msg,
+        // Preserve the static-string panic payload used by the individual tests.
+        _ => std::panic::panic_any(unexpected),
+    }
+}
+
 // ==============================================================================
 // ClaudePreset Error Cases
 // ==============================================================================
@@ -15,13 +28,8 @@ fn test_claude_preset_invalid_json() {
     let preset = resolve_preset("claude").unwrap();
     let result = preset.parse("not valid json", "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Invalid JSON"));
-        }
-        _ => panic!("Expected PresetError for invalid JSON"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for invalid JSON");
+    assert!(msg.contains("Invalid JSON"));
 }
 
 #[test]
@@ -35,13 +43,8 @@ fn test_claude_preset_missing_transcript_path() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("transcript_path not found"));
-        }
-        _ => panic!("Expected PresetError for missing transcript_path"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for missing transcript_path");
+    assert!(msg.contains("transcript_path not found"));
 }
 
 #[test]
@@ -55,13 +58,8 @@ fn test_claude_preset_missing_cwd() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("cwd not found"));
-        }
-        _ => panic!("Expected PresetError for missing cwd"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for missing cwd");
+    assert!(msg.contains("cwd not found"));
 }
 
 #[test]
@@ -196,13 +194,11 @@ fn test_claude_vscode_copilot_detection() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Skipping VS Code hook payload in Claude preset"));
-        }
-        _ => panic!("Expected PresetError for VS Code Copilot payload in Claude preset"),
-    }
+    let msg = preset_error_message(
+        result,
+        "Expected PresetError for VS Code Copilot payload in Claude preset",
+    );
+    assert!(msg.contains("Skipping VS Code hook payload in Claude preset"));
 }
 
 #[test]
@@ -223,167 +219,89 @@ fn test_claude_cursor_detection() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Skipping Cursor hook payload in Claude preset"));
-        }
-        _ => panic!("Expected PresetError for Cursor payload in Claude preset"),
-    }
+    let msg = preset_error_message(
+        result,
+        "Expected PresetError for Cursor payload in Claude preset",
+    );
+    assert!(msg.contains("Skipping Cursor hook payload in Claude preset"));
 }
 
 // ==============================================================================
-// GeminiPreset Error Cases
+// Edge Cases - Unusual but Valid Inputs
 // ==============================================================================
 
 #[test]
-fn test_gemini_preset_invalid_json() {
-    let preset = resolve_preset("gemini").unwrap();
-    let result = preset.parse("invalid{json", "t_test");
-
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Invalid JSON"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
-}
-
-#[test]
-fn test_gemini_preset_missing_session_id() {
-    let preset = resolve_preset("gemini").unwrap();
+fn test_claude_preset_with_tool_input_no_file_path() {
+    let preset = resolve_preset("claude").unwrap();
     let hook_input = json!({
-        "transcript_path": "tests/fixtures/gemini-session-simple.jsonl",
-        "cwd": "/path"
-    })
-    .to_string();
-
-    let result = preset.parse(&hook_input, "t_test");
-
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("session_id not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
-}
-
-#[test]
-fn test_gemini_preset_missing_transcript_path() {
-    let preset = resolve_preset("gemini").unwrap();
-    let hook_input = json!({
-        "session_id": "test-session",
-        "cwd": "/path"
-    })
-    .to_string();
-
-    let result = preset.parse(&hook_input, "t_test");
-
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("transcript_path not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
-}
-
-#[test]
-fn test_gemini_preset_missing_cwd() {
-    let preset = resolve_preset("gemini").unwrap();
-    let hook_input = json!({
-        "session_id": "test-session",
-        "transcript_path": "tests/fixtures/gemini-session-simple.jsonl"
-    })
-    .to_string();
-
-    let result = preset.parse(&hook_input, "t_test");
-
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("cwd not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
-}
-
-#[test]
-fn test_gemini_preset_beforetool_checkpoint() {
-    let preset = resolve_preset("gemini").unwrap();
-    let hook_input = json!({
-        "session_id": "test-session",
-        "transcript_path": "tests/fixtures/gemini-session-simple.jsonl",
         "cwd": "/path",
-        "hook_event_name": "BeforeTool",
+        "hook_event_name": "PostToolUse",
+        "transcript_path": "tests/fixtures/example-claude-code.jsonl",
         "tool_input": {
-            "file_path": "/file.js"
+            "other_field": "value"
+        }
+    })
+    .to_string();
+
+    let events = preset.parse(&hook_input, "t_test").expect("Should succeed");
+
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        ParsedHookEvent::PostFileEdit(e) => {
+            assert!(e.file_paths.is_empty());
+        }
+        _ => panic!("Expected PostFileEdit"),
+    }
+}
+
+#[test]
+fn test_claude_preset_with_unicode_in_path() {
+    let preset = resolve_preset("claude").unwrap();
+    let hook_input = json!({
+        "cwd": "/Users/测试/项目",
+        "hook_event_name": "PostToolUse",
+        "transcript_path": "tests/fixtures/example-claude-code.jsonl",
+        "tool_input": {
+            "file_path": "/Users/测试/项目/文件.rs"
         }
     })
     .to_string();
 
     let events = preset
         .parse(&hook_input, "t_test")
-        .expect("Should succeed for BeforeTool");
+        .expect("Should handle unicode paths");
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        ParsedHookEvent::PreFileEdit(e) => {
-            assert_eq!(e.file_paths, vec![std::path::PathBuf::from("/file.js")]);
+        ParsedHookEvent::PostFileEdit(e) => {
+            assert!(!e.file_paths.is_empty());
+            assert_eq!(
+                e.file_paths[0],
+                std::path::PathBuf::from("/Users/测试/项目/文件.rs")
+            );
         }
-        _ => panic!("Expected PreFileEdit for BeforeTool"),
+        _ => panic!("Expected PostFileEdit"),
     }
 }
 
 #[test]
-fn test_gemini_transcript_parsing_invalid_path() {
-    let result = GeminiAgent::new().read_incremental(
-        std::path::Path::new("/nonexistent/path.jsonl"),
-        Box::new(ByteOffsetWatermark::new(0)),
-        "test",
-    );
+fn test_claude_transcript_with_tool_result_in_user_content() {
+    let temp_file = std::env::temp_dir().join("claude_tool_result.jsonl");
+    let content = r#"{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"content":[{"type":"tool_result","content":"should be skipped"},{"type":"text","text":"actual user input"}]}}
+{"type":"assistant","timestamp":"2025-01-01T00:00:01Z","message":{"model":"claude-3","content":[{"type":"text","text":"response"}]}}"#;
+    fs::write(&temp_file, content).expect("Failed to write temp file");
 
-    assert!(result.is_err());
-    match result {
-        Err(git_ai::operations::streams::StreamError::Fatal { .. }) => {}
-        _ => panic!("Expected Fatal error for nonexistent path"),
-    }
-}
+    let batch = ClaudeAgent::new()
+        .read_incremental(&temp_file, Box::new(ByteOffsetWatermark::new(0)), "test")
+        .expect("Should parse successfully");
 
-#[test]
-fn test_gemini_transcript_parsing_empty_file() {
-    let temp_file = std::env::temp_dir().join("gemini_empty.jsonl");
-    fs::write(&temp_file, "").expect("Failed to write temp file");
-
-    let result = GeminiAgent::new().read_incremental(
-        &temp_file,
-        Box::new(ByteOffsetWatermark::new(0)),
-        "test",
-    );
-
-    assert!(result.is_ok());
-    let batch = result.unwrap();
-    assert!(batch.events.is_empty());
-
-    fs::remove_file(temp_file).ok();
-}
-
-#[test]
-fn test_gemini_transcript_parsing_invalid_json_line() {
-    let temp_file = std::env::temp_dir().join("gemini_invalid_line.jsonl");
-    fs::write(&temp_file, "this is not valid json\n").expect("Failed to write temp file");
-
-    let result = GeminiAgent::new().read_incremental(
-        &temp_file,
-        Box::new(ByteOffsetWatermark::new(0)),
-        "test",
-    );
-
-    // Malformed JSON lines are skipped, not fatal errors
-    let batch = result.expect("malformed lines should be skipped, not cause errors");
-    assert_eq!(batch.events.len(), 0);
+    // Events are raw JSONL entries. The user entry is a single event.
+    let user_events: Vec<_> = batch
+        .events
+        .iter()
+        .filter(|e| e["type"] == "user")
+        .collect();
+    assert_eq!(user_events.len(), 1);
 
     fs::remove_file(temp_file).ok();
 }
@@ -412,13 +330,8 @@ fn test_continue_preset_missing_session_id() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("session_id not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("session_id not found"));
 }
 
 #[test]
@@ -433,13 +346,8 @@ fn test_continue_preset_missing_transcript_path() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("transcript_path not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("transcript_path not found"));
 }
 
 #[test]
@@ -518,13 +426,11 @@ fn test_codex_preset_missing_session_id() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("session_id") || msg.contains("thread_id"));
-        }
-        _ => panic!("Expected PresetError for missing session_id/thread_id"),
-    }
+    let msg = preset_error_message(
+        result,
+        "Expected PresetError for missing session_id/thread_id",
+    );
+    assert!(msg.contains("session_id") || msg.contains("thread_id"));
 }
 
 #[test]
@@ -556,6 +462,29 @@ fn test_codex_preset_invalid_transcript_path() {
     }
 }
 
+#[test]
+fn test_continue_preset_with_tool_input_no_file_path() {
+    let preset = resolve_preset("continue-cli").unwrap();
+    let hook_input = json!({
+        "session_id": "test",
+        "transcript_path": "tests/fixtures/continue-cli-session-simple.json",
+        "cwd": "/path",
+        "model": "gpt-4",
+        "tool_input": {}
+    })
+    .to_string();
+
+    let events = preset.parse(&hook_input, "t_test").expect("Should succeed");
+
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        ParsedHookEvent::PostFileEdit(e) => {
+            assert!(e.file_paths.is_empty());
+        }
+        _ => panic!("Expected PostFileEdit"),
+    }
+}
+
 // ==============================================================================
 // CursorPreset Error Cases
 // ==============================================================================
@@ -579,13 +508,8 @@ fn test_cursor_preset_missing_conversation_id() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("conversation_id not found"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("conversation_id not found"));
 }
 
 #[test]
@@ -600,13 +524,8 @@ fn test_cursor_preset_missing_workspace_roots() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("workspace_roots not found"));
-        }
-        _ => panic!("Expected PresetError for missing workspace_roots"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for missing workspace_roots");
+    assert!(msg.contains("workspace_roots not found"));
 }
 
 // ==============================================================================
@@ -633,14 +552,9 @@ fn test_github_copilot_preset_invalid_hook_event_name() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Invalid hook_event_name"));
-            assert!(msg.contains("before_edit") || msg.contains("after_edit"));
-        }
-        _ => panic!("Expected PresetError for invalid hook_event_name"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError for invalid hook_event_name");
+    assert!(msg.contains("Invalid hook_event_name"));
+    assert!(msg.contains("before_edit") || msg.contains("after_edit"));
 }
 
 // ==============================================================================
@@ -704,14 +618,9 @@ fn test_aitab_preset_invalid_hook_event_name() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("Unsupported hook_event_name"));
-            assert!(msg.contains("expected 'before_edit' or 'after_edit'"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("Unsupported hook_event_name"));
+    assert!(msg.contains("expected 'before_edit' or 'after_edit'"));
 }
 
 #[test]
@@ -726,13 +635,8 @@ fn test_aitab_preset_empty_tool() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("tool must be a non-empty string"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("tool must be a non-empty string"));
 }
 
 #[test]
@@ -747,13 +651,8 @@ fn test_aitab_preset_empty_model() {
 
     let result = preset.parse(&hook_input, "t_test");
 
-    assert!(result.is_err());
-    match result {
-        Err(GitAiError::PresetError(msg)) => {
-            assert!(msg.contains("model must be a non-empty string"));
-        }
-        _ => panic!("Expected PresetError"),
-    }
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("model must be a non-empty string"));
 }
 
 #[test]
@@ -902,31 +801,139 @@ fn test_all_presets_handle_invalid_json_consistently() {
 }
 
 // ==============================================================================
-// Edge Cases - Unusual but Valid Inputs
+// GeminiPreset Error Cases
 // ==============================================================================
 
 #[test]
-fn test_claude_preset_with_tool_input_no_file_path() {
-    let preset = resolve_preset("claude").unwrap();
+fn test_gemini_preset_invalid_json() {
+    let preset = resolve_preset("gemini").unwrap();
+    let result = preset.parse("invalid{json", "t_test");
+
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("Invalid JSON"));
+}
+
+#[test]
+fn test_gemini_preset_missing_session_id() {
+    let preset = resolve_preset("gemini").unwrap();
     let hook_input = json!({
+        "transcript_path": "tests/fixtures/gemini-session-simple.jsonl",
+        "cwd": "/path"
+    })
+    .to_string();
+
+    let result = preset.parse(&hook_input, "t_test");
+
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("session_id not found"));
+}
+
+#[test]
+fn test_gemini_preset_missing_transcript_path() {
+    let preset = resolve_preset("gemini").unwrap();
+    let hook_input = json!({
+        "session_id": "test-session",
+        "cwd": "/path"
+    })
+    .to_string();
+
+    let result = preset.parse(&hook_input, "t_test");
+
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("transcript_path not found"));
+}
+
+#[test]
+fn test_gemini_preset_missing_cwd() {
+    let preset = resolve_preset("gemini").unwrap();
+    let hook_input = json!({
+        "session_id": "test-session",
+        "transcript_path": "tests/fixtures/gemini-session-simple.jsonl"
+    })
+    .to_string();
+
+    let result = preset.parse(&hook_input, "t_test");
+
+    let msg = preset_error_message(result, "Expected PresetError");
+    assert!(msg.contains("cwd not found"));
+}
+
+#[test]
+fn test_gemini_preset_beforetool_checkpoint() {
+    let preset = resolve_preset("gemini").unwrap();
+    let hook_input = json!({
+        "session_id": "test-session",
+        "transcript_path": "tests/fixtures/gemini-session-simple.jsonl",
         "cwd": "/path",
-        "hook_event_name": "PostToolUse",
-        "transcript_path": "tests/fixtures/example-claude-code.jsonl",
+        "hook_event_name": "BeforeTool",
         "tool_input": {
-            "other_field": "value"
+            "file_path": "/file.js"
         }
     })
     .to_string();
 
-    let events = preset.parse(&hook_input, "t_test").expect("Should succeed");
+    let events = preset
+        .parse(&hook_input, "t_test")
+        .expect("Should succeed for BeforeTool");
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        ParsedHookEvent::PostFileEdit(e) => {
-            assert!(e.file_paths.is_empty());
+        ParsedHookEvent::PreFileEdit(e) => {
+            assert_eq!(e.file_paths, vec![std::path::PathBuf::from("/file.js")]);
         }
-        _ => panic!("Expected PostFileEdit"),
+        _ => panic!("Expected PreFileEdit for BeforeTool"),
     }
+}
+
+#[test]
+fn test_gemini_transcript_parsing_invalid_path() {
+    let result = GeminiAgent::new().read_incremental(
+        std::path::Path::new("/nonexistent/path.jsonl"),
+        Box::new(ByteOffsetWatermark::new(0)),
+        "test",
+    );
+
+    assert!(result.is_err());
+    match result {
+        Err(git_ai::operations::streams::StreamError::Fatal { .. }) => {}
+        _ => panic!("Expected Fatal error for nonexistent path"),
+    }
+}
+
+#[test]
+fn test_gemini_transcript_parsing_empty_file() {
+    let temp_file = std::env::temp_dir().join("gemini_empty.jsonl");
+    fs::write(&temp_file, "").expect("Failed to write temp file");
+
+    let result = GeminiAgent::new().read_incremental(
+        &temp_file,
+        Box::new(ByteOffsetWatermark::new(0)),
+        "test",
+    );
+
+    assert!(result.is_ok());
+    let batch = result.unwrap();
+    assert!(batch.events.is_empty());
+
+    fs::remove_file(temp_file).ok();
+}
+
+#[test]
+fn test_gemini_transcript_parsing_invalid_json_line() {
+    let temp_file = std::env::temp_dir().join("gemini_invalid_line.jsonl");
+    fs::write(&temp_file, "this is not valid json\n").expect("Failed to write temp file");
+
+    let result = GeminiAgent::new().read_incremental(
+        &temp_file,
+        Box::new(ByteOffsetWatermark::new(0)),
+        "test",
+    );
+
+    // Malformed JSON lines are skipped, not fatal errors
+    let batch = result.expect("malformed lines should be skipped, not cause errors");
+    assert_eq!(batch.events.len(), 0);
+
+    fs::remove_file(temp_file).ok();
 }
 
 #[test]
@@ -948,59 +955,6 @@ fn test_gemini_preset_with_tool_input_no_file_path() {
     match &events[0] {
         ParsedHookEvent::PostFileEdit(e) => {
             assert!(e.file_paths.is_empty());
-        }
-        _ => panic!("Expected PostFileEdit"),
-    }
-}
-
-#[test]
-fn test_continue_preset_with_tool_input_no_file_path() {
-    let preset = resolve_preset("continue-cli").unwrap();
-    let hook_input = json!({
-        "session_id": "test",
-        "transcript_path": "tests/fixtures/continue-cli-session-simple.json",
-        "cwd": "/path",
-        "model": "gpt-4",
-        "tool_input": {}
-    })
-    .to_string();
-
-    let events = preset.parse(&hook_input, "t_test").expect("Should succeed");
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        ParsedHookEvent::PostFileEdit(e) => {
-            assert!(e.file_paths.is_empty());
-        }
-        _ => panic!("Expected PostFileEdit"),
-    }
-}
-
-#[test]
-fn test_claude_preset_with_unicode_in_path() {
-    let preset = resolve_preset("claude").unwrap();
-    let hook_input = json!({
-        "cwd": "/Users/测试/项目",
-        "hook_event_name": "PostToolUse",
-        "transcript_path": "tests/fixtures/example-claude-code.jsonl",
-        "tool_input": {
-            "file_path": "/Users/测试/项目/文件.rs"
-        }
-    })
-    .to_string();
-
-    let events = preset
-        .parse(&hook_input, "t_test")
-        .expect("Should handle unicode paths");
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        ParsedHookEvent::PostFileEdit(e) => {
-            assert!(!e.file_paths.is_empty());
-            assert_eq!(
-                e.file_paths[0],
-                std::path::PathBuf::from("/Users/测试/项目/文件.rs")
-            );
         }
         _ => panic!("Expected PostFileEdit"),
     }
@@ -1029,28 +983,6 @@ fn test_gemini_transcript_with_unknown_message_types() {
         .expect("Should parse successfully");
 
     assert_eq!(batch.events.len(), 4);
-
-    fs::remove_file(temp_file).ok();
-}
-
-#[test]
-fn test_claude_transcript_with_tool_result_in_user_content() {
-    let temp_file = std::env::temp_dir().join("claude_tool_result.jsonl");
-    let content = r#"{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"content":[{"type":"tool_result","content":"should be skipped"},{"type":"text","text":"actual user input"}]}}
-{"type":"assistant","timestamp":"2025-01-01T00:00:01Z","message":{"model":"claude-3","content":[{"type":"text","text":"response"}]}}"#;
-    fs::write(&temp_file, content).expect("Failed to write temp file");
-
-    let batch = ClaudeAgent::new()
-        .read_incremental(&temp_file, Box::new(ByteOffsetWatermark::new(0)), "test")
-        .expect("Should parse successfully");
-
-    // Events are raw JSONL entries. The user entry is a single event.
-    let user_events: Vec<_> = batch
-        .events
-        .iter()
-        .filter(|e| e["type"] == "user")
-        .collect();
-    assert_eq!(user_events.len(), 1);
 
     fs::remove_file(temp_file).ok();
 }

@@ -354,11 +354,14 @@ fn should_skip_rewrite_metric_stats(
         deleted_lines += hunk.deleted_lines.len();
     }
 
-    hunk_ranges >= crate::operations::authorship::post_commit::STATS_SKIP_MAX_HUNKS
-        || added_lines >= crate::operations::authorship::post_commit::STATS_SKIP_MAX_ADDED_LINES
-        || files_with_additions.len()
-            >= crate::operations::authorship::post_commit::STATS_SKIP_MAX_FILES_WITH_ADDITIONS
-        || deleted_lines >= crate::operations::authorship::post_commit::STATS_SKIP_MAX_DELETED_LINES
+    crate::operations::authorship::post_commit::should_skip_expensive_post_commit_stats(
+        &crate::operations::authorship::post_commit::StatsCostEstimate {
+            hunk_ranges,
+            added_lines,
+            files_with_additions: files_with_additions.len(),
+            deleted_lines,
+        },
+    )
 }
 
 fn rewrite_metric_attrs(
@@ -670,5 +673,65 @@ mod tests {
                 .get(&rewrite_committed_pos::GIT_DIFF_ADDED_LINES.to_string()),
             Some(&serde_json::json!(1))
         );
+    }
+
+    #[test]
+    fn rewrite_stats_cost_preserves_each_boundary_and_ignored_files() {
+        use crate::operations::authorship::post_commit::{
+            STATS_SKIP_MAX_ADDED_LINES, STATS_SKIP_MAX_DELETED_LINES,
+            STATS_SKIP_MAX_FILES_WITH_ADDITIONS, STATS_SKIP_MAX_HUNKS,
+        };
+        use crate::operations::commands::diff::DiffHunk;
+
+        fn hunk(path: String, added: usize, deleted: usize) -> DiffHunk {
+            DiffHunk {
+                file_path: path,
+                old_file_path: None,
+                old_start: 1,
+                old_count: deleted as u32,
+                new_start: 1,
+                new_count: added as u32,
+                deleted_lines: vec![1; deleted],
+                added_lines: vec![1; added],
+                deleted_contents: Vec::new(),
+                added_contents: Vec::new(),
+            }
+        }
+
+        for (boundary, distinct_files, added, deleted) in [
+            (STATS_SKIP_MAX_HUNKS, false, 1, 0),
+            (STATS_SKIP_MAX_FILES_WITH_ADDITIONS, true, 1, 0),
+            (STATS_SKIP_MAX_ADDED_LINES, false, 0, 0),
+            (STATS_SKIP_MAX_DELETED_LINES, false, 0, 1),
+        ] {
+            for count in [boundary - 1, boundary] {
+                let hunks = if added == 1 {
+                    (0..count)
+                        .map(|index| {
+                            hunk(
+                                format!("{}.rs", if distinct_files { index } else { 0 }),
+                                1,
+                                0,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![hunk(
+                        "0.rs".to_string(),
+                        if deleted == 0 { count } else { 0 },
+                        if deleted == 1 { count } else { 0 },
+                    )]
+                };
+                assert_eq!(
+                    should_skip_rewrite_metric_stats(&hunks, &[]),
+                    count == boundary,
+                    "boundary={boundary}, count={count}, distinct_files={distinct_files}, added={added}, deleted={deleted}"
+                );
+                assert!(!should_skip_rewrite_metric_stats(
+                    &hunks,
+                    &["*.rs".to_string()]
+                ));
+            }
+        }
     }
 }

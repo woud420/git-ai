@@ -6,6 +6,7 @@ fn notes_sync_http_backend_clone_warms_notes_cache() {
     let backend_url = server.base_url();
 
     let source = TestRepo::new_with_daemon_env(&[
+        ("RUST_LOG", "info"),
         ("GIT_AI_NOTES_BACKEND_KIND", "http"),
         ("GIT_AI_NOTES_BACKEND_URL", backend_url.as_str()),
         ("GIT_AI_API_KEY", "notes-sync-http-clone-test-key"),
@@ -88,6 +89,7 @@ fn notes_sync_http_backend_plain_pull_warms_notes_cache() {
     let backend_url = server.base_url();
 
     let local = TestRepo::new_with_daemon_env(&[
+        ("RUST_LOG", "info"),
         ("GIT_AI_NOTES_BACKEND_KIND", "http"),
         ("GIT_AI_NOTES_BACKEND_URL", backend_url.as_str()),
         ("GIT_AI_API_KEY", "notes-sync-http-pull-test-key"),

@@ -12,7 +12,7 @@ These are hard constraints. Violating any of them will get a PR rejected outrigh
 
 5. **Reuse existing code.** This is a large codebase. For nearly any operation you need, there is almost certainly a helper function already available and tested. Reuse code as much as practical -- it also keeps diffs small. PRs that fail to reuse existing code where applicable will be rejected immediately.
 
-6. **Follow STRICT TDD.** PRs that are not clearly TDD-driven with high-quality `TestRepo`-based tests will be rejected immediately.
+6. **Use regression-first testing for behavior changes.** Use high-quality `TestRepo` regression or characterization tests for Git integration, checkpoints, and attribution. Use focused unit tests for isolated pure logic; documentation-only changes need relevant documentation checks. Keep the attribution and isolation invariants below intact.
 
 ## Build & Test Commands
 

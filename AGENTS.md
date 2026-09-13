@@ -238,9 +238,9 @@ Uses `insta` crate. Snapshots live in `tests/integration/snapshots/` and `tests/
 
 ## Error conventions
 
-`GitAiError::Generic(String)` is legacy. When touching a module that constructs
-it, convert those sites to the layered types instead — never as a repo-wide
-sweep: `PersistenceError` (model/repository; sqlite/lock/migration/io with
+`GitAiError::Generic(String)` is legacy. For error construction sites already
+changed by the task, prefer the layered types; leave unrelated sites unchanged:
+`PersistenceError` (model/repository; sqlite/lock/migration/io with
 `retryability()`), `ApiError` (clients/api; operation + status + message with
 `retryability()`), both bridging losslessly into `GitAiError` so pub signatures
 stay unchanged. Keep observable Display text byte-stable where it is persisted

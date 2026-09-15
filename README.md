@@ -35,7 +35,7 @@ per-repository daemon; attribution work does not run in Git's critical path.
 
 ## Install and quick start
 
-Until this fork publishes release artifacts, build and install from source.
+Use [Homebrew or Chocolatey](packaging/package-managers.md); build from source until fork releases exist.
 The installers support macOS and Linux on x86_64 or ARM64, and Windows on x64
 or ARM64. Install Rust 1.93.0 or newer and Git first, then clone this
 repository and run the commands for your platform. Do not use `sudo` or an
@@ -95,6 +95,7 @@ git-ai uninstall
 git-ai uninstall --purge
 ```
 
+For Homebrew or Chocolatey, also follow the [package removal instructions](packaging/package-managers.md).
 The default command removes agent hooks, the global Trace2 configuration, the
 daemon, installed binaries and shims, and installer-added PATH entries while
 keeping configuration and local attribution databases. `--purge` also removes

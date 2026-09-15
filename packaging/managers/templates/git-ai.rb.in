@@ -1,0 +1,64 @@
+class GitAi < Formula
+  desc "Track AI-generated code in Git"
+  homepage "https://github.com/@REPOSITORY@"
+  version "@VERSION@"
+  license "Apache-2.0"
+
+  head do
+    url "https://github.com/@REPOSITORY@.git", branch: "main"
+    depends_on "rust" => :build
+  end
+
+  depends_on "git"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/@REPOSITORY@/releases/download/@TAG@/git-ai-macos-arm64", using: :nounzip
+      sha256 "@SHA256_MACOS_ARM64@"
+    end
+    on_intel do
+      url "https://github.com/@REPOSITORY@/releases/download/@TAG@/git-ai-macos-x64", using: :nounzip
+      sha256 "@SHA256_MACOS_X64@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/@REPOSITORY@/releases/download/@TAG@/git-ai-linux-arm64", using: :nounzip
+      sha256 "@SHA256_LINUX_ARM64@"
+    end
+    on_intel do
+      url "https://github.com/@REPOSITORY@/releases/download/@TAG@/git-ai-linux-x64", using: :nounzip
+      sha256 "@SHA256_LINUX_X64@"
+    end
+  end
+
+  def install
+    if build.head?
+      system "cargo", "install", *std_cargo_args, "--bin", "git-ai"
+    else
+      platform = OS.mac? ? "macos" : "linux"
+      arch = Hardware::CPU.arm? ? "arm64" : "x64"
+      bin.install "git-ai-#{platform}-#{arch}" => "git-ai"
+    end
+    (bin/"git-ai-package-manager").write "homebrew\n"
+  end
+
+  def caveats
+    <<~EOS
+      Enable per-user integration in a normal shell:
+        git-ai install-hooks
+        git-ai config --add allowed_repositories /path/to/repository
+
+      After upgrading, run git-ai install-hooks again to refresh binary paths.
+      Before brew uninstall, run git-ai uninstall to remove your integration.
+    EOS
+  end
+
+  test do
+    output = shell_output("#{bin}/git-ai --version")
+    assert_match(/^\d+\.\d+\.\d+/, output)
+    assert_match version.to_s, output unless build.head?
+    assert_match "brew upgrade", shell_output("#{bin}/git-ai upgrade 2>&1", 1)
+  end
+end

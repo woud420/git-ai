@@ -20,6 +20,7 @@ pub mod clock;
 pub mod daemon_control;
 pub mod diff_json;
 pub mod domain;
+pub mod git_oid;
 pub mod hunk_shift;
 pub mod imara_diff_utils;
 pub mod jj_observation;

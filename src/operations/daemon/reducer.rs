@@ -2,8 +2,8 @@ use crate::error::GitAiError;
 use crate::model::domain::{
     AnalysisResult, AppliedCommand, FamilyState, GlobalState, NormalizedCommand, WorktreeState,
 };
+use crate::model::git_oid::is_zero_oid;
 use crate::operations::daemon::analyzers::{AnalysisView, AnalyzerRegistry};
-use crate::operations::git::oid::is_zero_oid;
 use std::path::PathBuf;
 
 /// Convenience wrapper around [`reduce_family_command_with_ref_snapshot`] for

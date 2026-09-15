@@ -4,6 +4,8 @@ Baseline: `f138e678802b886603b5504fd789768fef506113`, inspected 2026-09-15.
 Tracking: [ENG-464](https://linear.app/polarcoordinates/issue/ENG-464/tighten-existing-layered-architecture-boundaries).
 The audit precedes production edits. References below describe the baseline;
 the current architecture indexes describe the corrected implementation.
+[Verification](layer-boundary-verification.md) records the commits, gates and
+reproduction settings.
 
 ## Findings and change sequence
 

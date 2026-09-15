@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
+  <Default Extension="nuspec" ContentType="application/octet" />
+  <Default Extension="ps1" ContentType="application/octet" />
+  <Default Extension="exe" ContentType="application/octet" />
+  <Default Extension="ignore" ContentType="application/octet" />
+  <Default Extension="txt" ContentType="application/octet" />
+  <Override PartName="/tools/git-ai-package-manager" ContentType="application/octet" />
+</Types>

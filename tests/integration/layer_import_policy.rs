@@ -316,7 +316,7 @@ fn source_violations(rel: &str, content: &str) -> Vec<String> {
     // A complete use statement wins over its inner paths, so brace prefixes
     // cannot be mistaken for dependencies on the whole parent module.
     static PATHS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"\buse\s+[^;]+;|\b(?:crate|self|super|std|tokio|rusqlite|ureq|interprocess|serde_json|rand|tracing|chrono)(?:::[A-Za-z_][A-Za-z_0-9]*)+").unwrap()
+        regex::Regex::new(r"\buse\s+[A-Za-z_:][A-Za-z_0-9:*,{}\s]*;|\b(?:crate|self|super|std|tokio|rusqlite|ureq|interprocess|serde_json|rand|tracing|chrono)(?:::[A-Za-z_][A-Za-z_0-9]*)+").unwrap()
     });
     let rules: Vec<_> = RULES
         .iter()
@@ -364,6 +364,15 @@ fn source_violations(rel: &str, content: &str) -> Vec<String> {
         let paths =
             imported.map_or_else(|| vec![matched.as_str().to_string()], |(_, _, paths)| paths);
         for path in paths {
+            if is_import {
+                let words: Vec<_> = path.split_whitespace().collect();
+                if !matches!(words.as_slice(), [_] | [_, "as", _]) {
+                    violations.push(format!(
+                        "{rel}: split comments and imports so `{path}` can be checked"
+                    ));
+                    continue;
+                }
+            }
             if after_test_module && (path.starts_with("super::") || path.starts_with("self::")) {
                 continue;
             }
@@ -598,6 +607,10 @@ fn policy_rejects_upward_dependency_syntax() {
         (reducer, "use crate::model::{self as m, domain};"),
         (reducer, "use crate::model::*;"),
         (reducer, "use std as platform;"),
+        (
+            reducer,
+            "let x = 0; // use the canonical value\nuse crate::operations::git::oid::is_zero_oid;",
+        ),
         (reducer, "#[cfg(test)]\nmod tests {}\nuse std::fs::File;"),
         (
             reducer,

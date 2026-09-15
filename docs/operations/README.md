@@ -27,9 +27,11 @@ macOS Intel and macOS Apple Silicon binaries and PKGs, and a macOS universal
 PKG. Production signing and notarization depend on the configured release
 environment and secrets.
 
-As of 2026-09-06, this fork has not published tags or release artifacts. Build
+As of 2026-09-15, this fork has not published tags or release artifacts. Build
 and install from source using the root README in the meantime. A successful
 non-dry-run workflow can publish version-pinned `install.sh` / `install.ps1`
 assets and the platform packages to this fork's GitHub Releases. The Nix flake
-can be consumed directly from this repository; no fork-owned Homebrew tap is
-currently published.
+can be consumed directly from this repository. The repository also provides a
+source Homebrew tap; stable release builds generate a binary Homebrew formula
+and an embedded Chocolatey package. See [package-manager distribution](../../packaging/package-managers.md)
+for installation, user setup, lifecycle, and release promotion.

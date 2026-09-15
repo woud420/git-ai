@@ -1,79 +1,94 @@
 # State Ownership
 
-Every mutable state owner, its serialization model, and the definitive answer
-to "what is ordered through the per-family actor flow". Verified 2026-09-06.
+Principal mutable owners and synchronization boundaries, checked 2026-09-15.
+The [layer boundary audit](layer-boundary-audit.md) lists the measured coordinator
+slices. Each `actor_coordinator_*` file extends the same `ActorDaemonCoordinator`
+in `src/operations/daemon/actor_types.rs`; a file split is not a state owner.
 
-## The serialization verdict
+## What the family flow orders
 
-**Family-serialized (ordered per repository family, via
-`coordinator → family_actor (mpsc) → reducer → per-family exec-lock →
-side-effect application`):**
-- FamilyState (refs, worktrees, applied_seq, watermarks) — in-memory, actor-owned.
-- Working logs (`.git/ai/working_logs/<base_commit>/`) — every mutation path
-  (`repo_storage::append_checkpoint`, `write_all_checkpoints`,
-  `mutate_all_checkpoints`, the post-rewrite filters in
-  `git_op_side_effects.rs`) executes inside the family actor's side-effect
-  pipeline.
-- Post-commit note generation and rewrite note migration — invoked from
-  `actor_coordinator_{side_effects,rewrites}.rs` under the family exec-lock.
+`actor_coordinator_seq.rs` maintains ordered family entries.
+`actor_coordinator_drain.rs` (`drain_ready_family_sequencer_entries`) obtains the
+family exec-lock before dequeue/routing and holds it through actor reduction
+and effects:
 
-**Mutex-guarded but NOT family-ordered (deliberate — these are queues/caches,
-not attribution decisions):**
-- The five SQLite stores (`model/repository/*`): process-global
-  `OnceLock<Mutex<…>>` each; writers are the telemetry worker (tokio task),
-  attribution-recovery backfill, stream worker, and notes backend queue.
-  SQLite WAL + the Mutex make each store internally consistent; ordering
-  across stores is not guaranteed and not required.
-- Telemetry buffers and upload dispatch (`telemetry_worker.rs` statics).
+```
+family sequencer → family exec-lock → coordinator → family actor
+                 (held)                         → enrich + reduce
+                                               → effect execution
+```
 
-**Single-process CLI paths (no daemon ordering, no concurrency within an
-invocation):** config file writes (`git-ai config`), `notes migrate`,
-`fetch-notes`, install/uninstall. These mutate user-config or perform
-explicit migrations; they do not race the actor flow for the same fact.
+The family actor owns `FamilyState` and `RefCursor`
+(`family_actor.rs`, `spawn_family_actor`). Refs, worktrees, sequence and watermarks
+start empty/zero. Watermark updates run through its mailbox. Ref/worktree maps
+are observation caches, not authoritative historical snapshots; reducer branch
+pairing can infer detached state when the branch is ambiguous.
 
-Residual risk (accepted, documented): notes rows can be written by the family
-flow (sqlite backend post-commit) and refreshed by cache
-imports/`fetch-notes`; the `origin` column ('local' > 'cache'/'queue') plus
-never-overwrite-local upserts resolve the priority (`notes_db.rs`).
+Within this daemon flow, the lock orders checkpoint application, post-commit
+note generation and rewrite/working-log migration. Concrete paths are
+`actor_coordinator_drain.rs` → `side_effect_helpers.rs` (`apply_checkpoint_side_effect`)
+→ `checkpoint.rs` (`execute_resolved_checkpoint`), and
+`actor_coordinator_side_effects.rs` → commit/rewrite effect modules.
+`AppliedCommand` and `applied_seq` record reduction before effects finish.
+`actor_coordinator_control.rs` (`sync_family`) fences ingress and drains effects;
+`status_for_family` alone is not a completion fence. Failed command effects are
+reported, not automatically persisted for replay as an effect transaction.
 
-## Singleton inventory
+The lock belongs to the queued command's family. Notes synchronization may touch
+a destination repository, which is why `sync_family` retains a global effects
+completion check. Storage APIs themselves do not require a family lock: for
+example, `commands/status.rs` calls `repo_storage.rs` (`working_log_for_base_commit`),
+which can create the log directory. The claim is about daemon attribution
+mutation paths, not every filesystem mutation beneath `.git/ai`.
 
-| Static | Location | Guard | Persistence / recovery |
-|---|---|---|---|
-| `CONFIG` | `config/mod.rs` | OnceLock | snapshot of config.json; daemon paths use `Config::fresh()` to observe edits |
-| `AUTHOR_CONFIG_CACHE` | `config/mod.rs` | Mutex, 15s TTL + file fingerprint | recomputed on expiry |
-| `DISTINCT_ID` | `config/mod.rs` | OnceLock | persisted id, read-once |
-| `TEST_FEATURE_FLAGS_OVERRIDE` | `config/file.rs` | RwLock, cfg(test) | test-only |
-| `METRICS_DB` | `model/repository/metrics_db/schema.rs` | OnceLock<Mutex> | SQLite v5; retry queue survives restarts |
-| `NOTES_DB` | `model/repository/notes_db.rs` | OnceLock<Mutex> | SQLite v2; `origin` rows: local never evicted, cache evictable, queue retried |
-| `INTERNAL_DB` | `model/repository/internal_db.rs` | OnceLock<Mutex> | legacy prompts/CAS queue (dormant) |
-| `BASH_HISTORY_DB` | `model/repository/bash_history_db.rs` | OnceLock<Mutex<Result…>> | SQLite v2 |
-| streams DB handle | `model/repository/streams_db.rs` | Arc<Mutex> per worker | SQLite v4 watermarks |
-| `DAEMON_TELEMETRY_HANDLE`, `DAEMON_INTERNAL_TELEMETRY`, upload flags | `operations/daemon/telemetry_{handle,worker}.rs` | OnceLock/AtomicBool | in-memory; buffers flushed every 3s |
-| `REFRESH_LOCK` (OAuth) | `clients/api/client.rs` | Lazy<Mutex> | serializes in-process token refresh; cross-process races accepted |
-| `LAST_METRICS_UPLOAD_STARTED_AT` | `clients/api/metrics.rs` | OnceLock<Mutex> | 500ms upload rate limit, resets on restart |
-| `DAEMON_PROCESS_ACTIVE` | `operations/daemon/daemon_config.rs` | AtomicBool | process-lifetime flag |
-| `SystemGitBackend.alias_cache` | `operations/daemon/git_backend.rs` | per-family map, 60s stale-while-revalidate | re-resolved on expiry |
-| checkpoint journal cache | `operations/git/repo_storage/checkpoint_journal/cache.rs` | OnceLock<Mutex>, 2 entries / 800 KiB conservative retained-capacity estimate | decoded state is moved into one lease; exact SHA-256 + byte length invalidates external changes |
+## Independent owners
 
-## Lock landscape
+| Owner | Guard / writers | Authority and recovery |
+|---|---|---|
+| Coordinator ingress, root slots, sequencers and execution locks (`actor_types.rs`) | Async normalizer mutex, short-lived map mutexes, atomics, mailbox and per-family exec-lock; ingestion, sequencing and drain methods | Process-local queue/fence state. The drain removes ready entries before applying them; restart does not replay a durable command queue. |
+| Coordinator pending rebase/cherry-pick/squash and AI-edit maps | Coordinator mutexes; command/checkpoint effects | Continuation/filtering state; fields and methods are in `actor_types.rs` and `actor_coordinator_{worktree,side_effects,base}.rs`. |
+| Notes (`NOTES_DB` in `model/repository/notes_db.rs`), metrics, internal and Bash-history SQLite handles | Process-global `OnceLock` mutex handles in `model/repository/{notes_db.rs,metrics_db/schema.rs,internal_db.rs,bash_history_db.rs}`; backend, telemetry/recovery and Bash-control writers | Per-store transactions/WAL; a Rust mutex coordinates one process, not all processes. Stores have no common transaction or family ordering. |
+| Streams DB | `StreamsDatabase` owns `Arc<Mutex<Connection>>`; injected into `stream_worker.rs` | Persistent stream positions/session records; no global DB singleton (`model/repository/streams_db.rs`). |
+| Native jj journal | Explicitly opened `JjObservationJournal` connection; native admission/registration workflows | Durable evidence, registrations and receipts (`model/repository/jj_observation_journal/`). No Git attribution application. |
+| jj observer runtime/intent | `jj_observer::Observer` has a state mutex, mutation async mutex and bounded job slot; intent storage opens its own connections | `model/repository/jj_observer_intent/` persists selected target, enabled/blocked state and revision; observer runtime is separate from Git family sequencing. |
+| Checkpoint outbox | Publishers and `checkpoint_outbox_worker.rs`; filesystem publication/consume protections in `model/repository/checkpoint_outbox/publication/` | Durable delivery records. Worker retries with in-memory counters and poll backoff, then quarantines; successful replay removes a record. Working-log delivery IDs suppress recorded reapplication. |
+| Telemetry buffers/upload dispatch | Worker buffer async mutex plus upload flags; `telemetry_worker/`, `telemetry_handle.rs` | Notes/metrics use durable queues. Daemon logs remain best-effort memory buffers; failed dispatched uploads are dropped. |
+| Config/migrations/installers | Separate CLI processes; config writes, `notes migrate`, `fetch-notes`, install/uninstall | No family-order guarantee or cross-process exclusion from concurrent daemon effects. Backend/SQLite/file behavior supplies the applicable local protections. |
 
-OAuth refresh (std Mutex), config (OnceLock), each DB (std Mutex around its
-connection; SQLite transactions nest inside), and daemon coordination (tokio
-AsyncMutex for the normalizer + per-family async exec-locks + std Mutex for the
-sequencer map) retain their existing ownership boundaries. File locks use
-`model::repository::lock_file::LockFile` for daemon ownership and
-per-working-log checkpoint-journal publication. The journal owns its storage
-paths, legacy-format provenance, and a bounded process-global decoded-state
-cache. Cache checkout always takes the journal file lock before the short-lived
-cache Mutex; publication holds only the file lock, and lease return drops the
-file lock before taking the cache Mutex. Every warm checkout hashes the exact
-file bytes; cold decoding hashes the exact accepted byte stream and compares
-that revision with the final file, while every cache-lease publication or
-durable-success path rechecks the SHA-256 + length revision. Legacy uncached
-rewrite helpers retain their file-lock and atomic-replacement contract but are
-not revision-CAS guarded. The 800 KiB experimental bound is a conservative
-recursive estimate of retained capacities, allocator overhead, and alignment
-rather than a claim about exact resident memory; the independent two-entry
-limit is the second bound. New cross-lock interactions require documentation
-here first.
+Notes cache refreshes specifically cannot overwrite `origin='local'` rows:
+`notes_db.rs` (`cache_synced_notes`) has that SQL predicate. This is not a universal
+“local beats queue” rule: `UPSERT_NOTE_SQL` used for HTTP queue writes updates
+content on conflict. `upsert_local_notes_batch` writes local-primary content.
+Backend migration and concurrent cache/queue operations must be reasoned about
+using these distinct methods; see [persistence-model.md](../contracts/persistence-model.md).
+
+## Process caches and handles
+
+| State | Implementation / guard | Refresh or lifetime |
+|---|---|---|
+| `CONFIG`, `DISTINCT_ID` | `config/mod.rs`, `OnceLock` | Config snapshot and persisted identity. Callers using `Config::fresh()` observe edits; other callers retain the snapshot. |
+| `AUTHOR_CONFIG_CACHE` | `config/mod.rs`, `OnceLock<Mutex>` | 15-second TTL plus file fingerprint. |
+| `TEST_FEATURE_FLAGS_OVERRIDE` | `config/file.rs`, test-only `RwLock` | Test lifetime. |
+| `DAEMON_TELEMETRY_HANDLE`, `DAEMON_INTERNAL_TELEMETRY`, upload flags/run ID | `operations/daemon/telemetry_handle.rs`, `telemetry_worker/` | Process lifetime; worker loop schedules flushes. |
+| OAuth `REFRESH_LOCK` | `clients/api/client.rs`, `LazyLock<Mutex>` | In-process token refresh serialization only. |
+| `LAST_METRICS_UPLOAD_STARTED_AT` | `clients/api/metrics.rs`, `OnceLock<Mutex>` | In-process upload rate limiting. |
+| `DAEMON_PROCESS_ACTIVE` | `operations/daemon/daemon_config.rs`, `AtomicBool` | Process lifetime. |
+| `SystemGitBackend.alias_cache` | `operations/daemon/git_backend.rs`, shared mutex map keyed by family | 60-second stale-while-revalidate TTL. |
+| Decoded checkpoint journal cache | `operations/git/repo_storage/checkpoint_journal/cache.rs`, `OnceLock<Mutex>` | Two entries / 800 KiB conservative retained-capacity estimate; exact SHA-256 plus byte length validates file revision. |
+
+## Journal lock boundary
+
+`model::repository::lock_file::LockFile` protects daemon ownership and
+working-log journal publication. The journal owns storage paths, legacy-format
+provenance and its bounded decoded-state cache. Cache checkout takes the journal
+file lock before the short-lived cache mutex; publication holds only the file
+lock, and lease return drops the file lock before taking the cache mutex.
+
+Warm checkout hashes exact file bytes; cold decoding hashes the accepted byte
+stream and compares it with the final file. Cache-lease publication and durable
+success recheck SHA-256 plus length. Legacy uncached rewrite helpers retain file
+locking and atomic replacement, without revision-CAS protection. These are
+storage protections, not proof of one transaction across all attribution facts.
+The cache capacity estimate includes retained capacities/allocator overhead and
+alignment, not exact resident memory. Its independent entry limit is a second
+bound. New cross-lock interactions must be documented here.

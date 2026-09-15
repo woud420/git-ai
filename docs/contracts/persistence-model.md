@@ -1,50 +1,78 @@
 # Persistence Model
 
-One documented source of truth per persisted fact. There must never be two
-undocumented authorities for the same fact; if a change introduces a second
-writer or store for anything below, update this table in the same PR.
+Each fact below names its durable owner, derived copies and implementation.
+A new writer or store must update this contract; process mutexes and family
+sequencing do not imply cross-store atomicity. See
+[state-ownership.md](../architecture/state-ownership.md) for execution ordering.
 
-| Fact | Authoritative store | Caches / derived copies | Retention |
-|---|---|---|---|
-| Authorship notes (sqlite backend, default) | `~/.git-ai/internal/notes-db`, rows `origin='local'` | `refs/notes/ai` (only if exported/migrated); read-fallback backfills as `origin='cache'` | local rows never evicted |
-| Authorship notes (git_notes backend, opt-in) | `refs/notes/ai` in the repo | notes-db `origin='cache'` rows | git-owned |
-| Authorship notes (http backend, opt-in) | remote server (see `notes-backend-spec.md`) | notes-db `origin='queue'` (pending→uploaded cache) | uploaded rows kept as cache; cache evicted ≥90d over 10k rows |
-| Working checkpoints | `.git/ai/working_logs/<base_commit>/` JSON | none (daemon FamilyState watermarks reference them) | migrated/renamed on HEAD moves; consumed by post-commit |
-| Ref/worktree state | git itself | daemon `FamilyState` (in-memory, re-derivable), reflog cursor offsets | reconstructable |
-| Transcript positions | streams DB (v4): per-session watermarks | — | advanced monotonically; sessions re-scanned from watermark |
-| Transcript content | the agents' own transcript files (never copied) | redacted events → metrics DB (allowed repos only) | agent-owned |
-| Metrics events | metrics DB (v5) | — | pruned by age; upload queue retries ≤6 then parks |
-| Bash tool-use provenance | bash-history DB (v2) | — | pruned |
-| Prompts / CAS queue | internal DB (v3, legacy — queue dormant) | — | candidate for removal in P9.5 |
-| User config | `~/.git-ai/config.json` | `CONFIG` snapshot (per-process); daemon uses `Config::fresh()` | user-owned; `git-ai uninstall --purge` deletes |
-| Credentials | OS keyring (flagged) or config `api_key` / `GIT_AI_API_KEY` | in-memory token cache | masked in all serialization |
+## Facts and authorities
 
-Known multi-source tension (accepted + mitigated): under the sqlite-default
-backend, a teammate's pushed `refs/notes/ai` update is only observed via the
-read-fallback (which backfills `origin='cache'`) or `git-ai fetch-notes`;
-`origin='local'` rows always win upserts. Backend switches go through
-`git-ai notes migrate --to <backend>` — never by hand-editing stores.
+| Fact | Durable owner / derived copies | Implementation and recovery |
+|---|---|---|
+| Authorship notes (sqlite backend, default) | `notes-db` local-primary rows; Git copy at `refs/notes/ai` (only if exported/migrated); existing legacy refs remain a read fallback that can populate cache rows | `operations/git/notes_api.rs`, `operations/git/notes_store.rs` (`SqliteNoteStore`); local rows are never cache-evicted. |
+| Authorship notes (git_notes backend, opt-in) | Repository `refs/notes/ai`; this backend's reads/writes do not use notes-db | `operations/git/notes_store.rs` (`GitNotesStore`) delegates to `operations/git/refs.rs`. |
+| Authorship notes (http backend, opt-in) | Remote service; notes-db queues pending writes and caches reads | `operations/git/notes_store.rs` (`HttpNoteStore`), `daemon/telemetry_worker/notes_flush.rs`; successful upload retains local rows. |
+| Working checkpoints | Repository storage `working_logs/<base_commit>/`, checkpoint index journal and referenced content/initial-attribution files | `operations/git/repo_storage.rs`, `operations/git/repo_storage/checkpoint_journal/`; bounded decoded cache is derived and revision-checked. Rewrite/post-commit paths migrate or archive logs. |
+| Pending checkpoint delivery | Versioned ready records in selected outbox root; applied delivery ID retained in a working-log checkpoint | `model/repository/checkpoint_outbox/`, `daemon/checkpoint_outbox_worker.rs`, `daemon/checkpoint.rs` (`execute_resolved_checkpoint`); replay re-enters family sequencing, checks recorded IDs/durability, and quarantines repeated failures. |
+| Ref/worktree facts | Git refs/reflogs; daemon `FamilyState` and `RefCursor` are process-local projections | `daemon/ref_cursor/enrichment.rs`, `daemon/family_actor.rs`; asynchronous ingress offsets are hints, not universally exact start snapshots. |
+| Transcript positions/session records | Streams DB | `model/repository/streams_db.rs`, `daemon/stream_worker.rs`; stream-specific watermark strategies track consumed input. |
+| Transcript source/content | Agent transcript files are source inputs; redacted session events become derived metrics rows | `operations/streams/`, `daemon/stream_worker.rs`; checkpoint stream paths are validated in `daemon/checkpoint_stream_authority.rs`. |
+| Metrics events/retry state | Metrics DB | `model/repository/metrics_db/`; retained history, age pruning and bounded upload retry queue. |
+| Bash tool-use provenance | Bash-history DB | `model/repository/bash_history_db.rs`; control writers in `daemon/actor_coordinator_control_requests.rs`. |
+| Legacy prompts/CAS queue | Internal DB | `model/repository/internal_db.rs`, `daemon/telemetry_worker/cas_flush.rs`; retained compatibility store. |
+| Native jj evidence/registration/admission | Explicitly selected jj journal; immutable receipts and staged/current native records | `model/repository/jj_observation_journal/`, `operations/jj/`; evidence capture is separate from Git attribution. |
+| jj observer intent | Daemon-owned observer-intent DB; runtime worker/job state is derived | `model/repository/jj_observer_intent/`, `daemon/jj_observer/`; persisted target/revision/enabled/blocked state. |
+| User config and credentials | `~/.git-ai/config.json`, auth storage selected by configuration, and environment overrides | `config/`, `clients/auth/`; `CONFIG` is a per-process snapshot, while `Config::fresh()` reloads. API keys are persisted config fields, so not all serialization is redacted. |
 
----
+Source paths beginning `model/`, `operations/`, `config/` or `clients/` are
+relative to `src/`; `daemon/` abbreviates `src/operations/daemon/`.
 
-## Per-DB authority
+## SQLite owners
 
-The five persistence stores, their module homes, and who may write them:
+Default internal paths may be overridden by the corresponding test/runtime
+configuration. Exact resolution belongs to each owner's constructor.
 
-| Store | Path | Schema version | Owning module | Accessor form | Writers |
-|---|---|---|---|---|---|
-| Notes DB | `~/.git-ai/internal/notes-db` (or `GIT_AI_TEST_NOTES_DB_PATH` in tests) | notes-db v2 | `model/repository/notes_db.rs` | `NotesDatabase::global()` singleton (`OnceLock<Mutex<NotesDatabase>>`) | `SqliteNoteStore` (local-primary), `HttpNoteStore` (queue), `cache_synced_notes` (read-cache backfill) via `notes_store.rs` |
-| Internal DB | `~/.git-ai/internal/db` | v3 | `model/repository/internal_db.rs` | `InternalDatabase::global()` singleton | daemon post-commit pipeline, CAS queue |
-| Streams DB | `~/.git-ai/internal/transcripts-db` (historical filename retained for compatibility) | v4 | `model/repository/streams_db.rs` | `StreamsDatabase` injected at daemon init | stream workers; `streams_db::update_watermark(&dyn WatermarkStrategy)` is the reference pattern for strategy injection |
-| Metrics DB | `~/.git-ai/internal/metrics-db` | v5 | `model/repository/metrics_db/` | global singleton | telemetry worker, event emitters |
-| Bash-history DB | `~/.git-ai/internal/bash-history-db` | v2 | `model/repository/bash_history_db.rs` | global singleton | bash tool-use checkpoint pipeline |
+| Store | Default path / schema | Access and writers |
+|---|---|---|
+| Notes | `~/.git-ai/internal/notes-db`, v2 | `NotesDatabase::global()` mutex; notes-store local/queue writes, cache imports and notes flush. |
+| Metrics | `~/.git-ai/internal/metrics-db`, v5 | `MetricsDatabase::global()` mutex; event writers, telemetry/recovery and reingestion. |
+| Internal | `~/.git-ai/internal/db`, v3 | `InternalDatabase::global()` mutex; compatibility prompt/CAS paths. |
+| Bash history | `~/.git-ai/internal/bash-history-db`, v2 | `BashHistoryDatabase::global()` mutex; Bash control recording. |
+| Streams | `~/.git-ai/internal/transcripts-db`, v4 | Injected `StreamsDatabase`, `Arc<Mutex<Connection>>`; stream worker. |
+| jj observation journal | Caller-selected path, v4 | Explicit `JjObservationJournal` connection; schema/registration/admission transactions. |
+| jj observer intent | Observer-selected daemon path, v1 | Per-operation connections; exact-schema verification and revision-checked transactions in `model/repository/jj_observer_intent/mod.rs` (`{load,replace}`). |
 
-### Notes-backend authority statement (per `notes_backend.kind`)
+## Notes write/fallback contract
 
-- **`sqlite` (default)**: `notes-db` is authoritative (`origin='local'` rows, written via `upsert_local_note[s_batch]` through `SqliteNoteStore`). `refs/notes/ai` is a read-only legacy fallback; on a miss the raw content is backfilled as `origin='cache'` so subsequent reads are served from the db. `read_notes_batch` propagates refs errors (fail-closed for rewrite migration); `read_note` and `read_authorship` are `Option`-typed and swallow refs errors.
+`operations/git/notes_api.rs` composes backend selection and fallback; its
+`export_notes_to_git_refs` is called by `operations/commands/notes_migrate.rs`
+when exporting SQLite local-primary notes to Git Notes.
+`operations/git/notes_store.rs` provides concrete backend primitives. Existing asymmetries are
+intentional compatibility behavior:
 
-- **`http`**: The remote server is authoritative. `notes-db` serves as a write queue (`origin='queue'`, synced=0, written via `upsert_note[s_batch]` through `HttpNoteStore`) and a read cache (`origin='cache'`, synced=1, written via `cache_synced_notes`). `HttpNoteStore::write_note/write_notes_batch` call `telemetry_handle::submit_notes()` as an inline flush kick — a documented store→daemon coupling. `refs/notes/ai` is a transition-period read fallback only (errors swallowed, no backfill). Batch reads add a remote-fetch tier before the refs fallback.
+- **SQLite:** DB-first reads, then legacy refs fallback with best-effort cache
+  backfill. `read_notes_batch` propagates refs errors; `read_note` and
+  `read_authorship` use `Option` and suppress read errors.
+- **HTTP:** writes queue locally and call `daemon/telemetry_handle.rs` (`submit_notes`) to
+  wake uploads. Batch misses can fetch remotely before refs fallback. A refs
+  fallback does not backfill the HTTP cache. This is an explicit store-to-daemon
+  notification dependency.
+- **Git notes:** `GitNotesStore` reads/writes only `refs/notes/ai` via the Git
+  primitives. `refs/notes/ai-display` is disposable display materialization
+  (`operations/git/notes_api.rs`, `materialize_notes_for_display`), not another authority.
 
-- **`git_notes`**: `refs/notes/ai` in the repository is solely authoritative. `notes-db` is untouched by reads or writes under this backend. `GitNotesStore` delegates 1:1 to `pub(in crate::operations::git)` fns in `refs.rs`; the visibility wall is enforced by module placement in `operations/git/`.
+`model/repository/notes_db.rs` (`upsert_local_notes_batch`) replaces local-primary content.
+`cache_synced_notes` skips existing local rows. HTTP queue `UPSERT_NOTE_SQL`
+updates content on conflict; unchanged content preserves synced/retry state,
+changed content resets it. The cache predicate is not a universal priority rule
+for every writer. Backend migrations use `operations/commands/notes_migrate.rs`; independent CLI
+and daemon processes have no shared family-order guarantee.
 
-- **`refs/notes/ai-display`**: Disposable derived state. Rebuilt from scratch (from the all-zeros SHA) by `materialize_notes_for_display` on each call; not authoritative for any fact.
+Notes and metrics retry queues allow up to six failed attempts before stopping
+automatic upload
+(`model/repository/notes_db.rs` (`dequeue_pending`), `model/repository/metrics_db/upload_queue.rs`); metadata
+and retry times persist; terminal metric errors can stop retries earlier. Outbox application retries use process-local counters,
+poll backoff and quarantine after five failures (`daemon/checkpoint_outbox_worker.rs`).
+Daemon diagnostic logs have no durable retry queue and are best-effort after
+dispatch (`daemon/telemetry_worker/daemon_log_upload.rs`). These guarantees do not make
+arbitrary command effects or repeated content checkpoints exactly-once.

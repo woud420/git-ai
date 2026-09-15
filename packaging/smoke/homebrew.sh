@@ -12,15 +12,15 @@ git -C "$smoke_dir/source" checkout --quiet -b package-smoke "$revision"
 mkdir -p "$smoke_dir/tap/Formula"
 python3 - "$checkout" "$smoke_dir" <<'PY'
 import json
-import re
 import sys
 from pathlib import Path
 
 checkout, smoke_dir = map(Path, sys.argv[1:])
 source = (checkout / "Formula/git-ai.rb").read_text()
-replacement = f'  head {json.dumps((smoke_dir / "source").as_uri())}, branch: "package-smoke"'
-source, count = re.subn(r"^  head .*$", lambda _: replacement, source, flags=re.MULTILINE)
-assert count == 1, "expected exactly one source HEAD declaration"
+upstream = '"https://github.com/woud420/git-ai.git", branch: "main"'
+replacement = f'{json.dumps((smoke_dir / "source").as_uri())}, using: :git, branch: "package-smoke"'
+assert source.count(upstream) == 1, "expected exactly one source HEAD URL"
+source = source.replace(upstream, replacement)
 (smoke_dir / "tap/Formula/git-ai.rb").write_text(source)
 PY
 git -C "$smoke_dir/tap" init --quiet

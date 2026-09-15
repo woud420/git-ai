@@ -63,15 +63,15 @@ fixtures together instead of expanding an exception list.
 
 ## Retained distinctions
 
-- `model/hunk_shift.rs::DiffHunk` is attribution algebra;
-  `operations/commands/diff.rs::DiffHunk` is a command DTO. Both remain in use.
+- `DiffHunk` in `model/hunk_shift.rs` is attribution algebra;
+  `DiffHunk` in `operations/commands/diff.rs` is a command DTO. Both remain in use.
 - `model/attribution.rs` owns `Attribution`/`LineAttribution`; the tracker retains
   its curated re-export. `model/imara_diff_utils.rs` owns `ByteDiff`.
 - Path formatting belongs to `operations/git/path_format.rs`, executable
   discovery/spawn to `cli/git_ai_exe.rs`, CLI environment checks to
   `cli/environment.rs`, and locks to `model/repository/lock_file.rs`.
-- Daemon/self-check workflows live in `operations/daemon/{self_check,
-  attribution_self_check}.rs`, Git trace2 checks in
+- Daemon/self-check workflows live in `operations/daemon/self_check.rs`
+  and `operations/daemon/attribution_self_check.rs`, Git trace2 checks in
   `operations/git/trace2_validation.rs`, and self-check blame classification in
   `operations/commands/blame/self_check_validation.rs`.
 

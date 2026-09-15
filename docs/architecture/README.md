@@ -36,21 +36,21 @@ Unqualified source paths in the pipeline table are under `src/operations/daemon/
 |---|---|
 | Observe | `socket_listeners.rs` receives trace2 frames. `actor_coordinator_ingest.rs` captures root metadata and asynchronous reflog offset hints when repository context becomes available. |
 | Normalize | `trace_normalizer/` produces `model::domain::NormalizedCommand`; `GitBackend` resolves Git family/alias information. The envelope retains Git argv, source OIDs and offset hints. |
-| Order and lock | `actor_coordinator_seq.rs` maintains ordered family entries. `actor_coordinator_drain.rs::drain_ready_family_sequencer_entries` takes the family exec-lock before routing a ready command and retains it through effects. |
+| Order and lock | `actor_coordinator_seq.rs` maintains ordered family entries. `actor_coordinator_drain.rs` (`drain_ready_family_sequencer_entries`) takes the family exec-lock before routing a ready command and retains it through effects. |
 | Enrich | `coordinator.rs` routes to `family_actor.rs`; `RefCursor::enrich_command` in `ref_cursor/enrichment.rs` derives ref transitions from cursor-bounded reflog matching and supported immutable arguments. Ingress offsets are soft hints when an established cursor exists; cold seeds can be clamped to the command's own entry. Missing evidence is not replaced by a live-HEAD guess. |
-| Classify and reduce | `family_actor.rs` supplies the pre-command ref snapshot and canonical worktree path to `reducer.rs::reduce_family_command_with_ref_snapshot`. Built-in analyzers classify the command; the reducer updates in-memory `FamilyState` and returns `AppliedCommand`. |
+| Classify and reduce | `family_actor.rs` supplies the pre-command ref snapshot and canonical worktree path to `reducer.rs` (`reduce_family_command_with_ref_snapshot`). Built-in analyzers classify the command; the reducer updates in-memory `FamilyState` and returns `AppliedCommand`. |
 | Execute | `actor_coordinator_drain.rs` invokes `actor_coordinator_side_effects.rs`, `actor_coordinator_rewrites.rs` and the concrete commit/rewrite/working-log/notes effects. Successful exits and explicitly handled conflict/partial-success cases can produce effects. Failed rebase/cherry-pick commands also preserve continuation state. |
 
 The family exec-lock surrounds actor reduction **and** effect execution. The
 actor owns `FamilyState` and its `RefCursor`; the outer coordinator owns queue,
 fence and effect state. `AppliedCommand` acknowledges reduction, not successful
-effect completion. `actor_coordinator_control.rs::sync_family` waits for ingress
+effect completion. `actor_coordinator_control.rs` (`sync_family`) waits for ingress
 and effects; `status_for_family` reports current sequence/error state without
 that completion fence. Global commands use `global_actor.rs`.
 
 Checkpoint control requests (`CheckpointRun` / `CheckpointDeliver`) enter through
 `actor_coordinator_query.rs`. They join the same family sequencer; the drain
-advances the actor sequence and runs `side_effect_helpers.rs::apply_checkpoint_side_effect`.
+advances the actor sequence and runs `side_effect_helpers.rs` (`apply_checkpoint_side_effect`).
 Outbox replay re-enters the delivery path. Transcript enrichment is separately
 authorized by `checkpoint_stream_authority.rs` and consumed by `stream_worker.rs`.
 
@@ -59,7 +59,7 @@ authorized by `checkpoint_stream_authority.rs` and consumed by `stream_worker.rs
 - **Observed facts:** trace2 frames, captured checkpoint requests/content and
   authorized agent transcript files. Reflog hints are asynchronously captured
   observations; cursor matching establishes usable historical ref transitions
-  (`ref_cursor/enrichment.rs::initialize_from_command_reflog_start_offsets`).
+  (`ref_cursor/enrichment.rs`, `initialize_from_command_reflog_start_offsets`).
 - **Interpretation:** primary command/event classification is in `analyzers/`.
   Ref selection, reducer branch-state inference and rewrite execution retain
   operation-specific decisions. `SemanticEvent` is not a complete effect plan.
@@ -86,7 +86,7 @@ authorized by `checkpoint_stream_authority.rs` and consumed by `stream_worker.rs
 - **Replay limits:** command effects run while draining in-memory entries;
   dequeue does not provide durable replay or exactly-once execution. Checkpoint delivery IDs recorded in
   the working log suppress reapplication and require durable-record validation
-  (`checkpoint.rs::execute_resolved_checkpoint`). Identical file content alone
+  (`checkpoint.rs`, `execute_resolved_checkpoint`). Identical file content alone
   is not a universal idempotency key. Cache imports preserve local notes;
   queue writes and local writes follow different upsert rules (`model/repository/notes_db.rs`).
 

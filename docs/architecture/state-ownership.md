@@ -8,7 +8,7 @@ in `src/operations/daemon/actor_types.rs`; a file split is not a state owner.
 ## What the family flow orders
 
 `actor_coordinator_seq.rs` maintains ordered family entries.
-`actor_coordinator_drain.rs::drain_ready_family_sequencer_entries` obtains the
+`actor_coordinator_drain.rs` (`drain_ready_family_sequencer_entries`) obtains the
 family exec-lock before dequeue/routing and holds it through actor reduction
 and effects:
 
@@ -19,25 +19,25 @@ family sequencer → family exec-lock → coordinator → family actor
 ```
 
 The family actor owns `FamilyState` and `RefCursor`
-(`family_actor.rs::spawn_family_actor`). Refs, worktrees, sequence and watermarks
+(`family_actor.rs`, `spawn_family_actor`). Refs, worktrees, sequence and watermarks
 start empty/zero. Watermark updates run through its mailbox. Ref/worktree maps
 are observation caches, not authoritative historical snapshots; reducer branch
 pairing can infer detached state when the branch is ambiguous.
 
 Within this daemon flow, the lock orders checkpoint application, post-commit
 note generation and rewrite/working-log migration. Concrete paths are
-`actor_coordinator_drain.rs` → `side_effect_helpers.rs::apply_checkpoint_side_effect`
-→ `checkpoint.rs::execute_resolved_checkpoint`, and
+`actor_coordinator_drain.rs` → `side_effect_helpers.rs` (`apply_checkpoint_side_effect`)
+→ `checkpoint.rs` (`execute_resolved_checkpoint`), and
 `actor_coordinator_side_effects.rs` → commit/rewrite effect modules.
 `AppliedCommand` and `applied_seq` record reduction before effects finish.
-`actor_coordinator_control.rs::sync_family` fences ingress and drains effects;
+`actor_coordinator_control.rs` (`sync_family`) fences ingress and drains effects;
 `status_for_family` alone is not a completion fence. Failed command effects are
 reported, not automatically persisted for replay as an effect transaction.
 
 The lock belongs to the queued command's family. Notes synchronization may touch
 a destination repository, which is why `sync_family` retains a global effects
 completion check. Storage APIs themselves do not require a family lock: for
-example, `commands/status.rs` calls `repo_storage.rs::working_log_for_base_commit`,
+example, `commands/status.rs` calls `repo_storage.rs` (`working_log_for_base_commit`),
 which can create the log directory. The claim is about daemon attribution
 mutation paths, not every filesystem mutation beneath `.git/ai`.
 
@@ -47,7 +47,7 @@ mutation paths, not every filesystem mutation beneath `.git/ai`.
 |---|---|---|
 | Coordinator ingress, root slots, sequencers and execution locks (`actor_types.rs`) | Async normalizer mutex, short-lived map mutexes, atomics, mailbox and per-family exec-lock; ingestion, sequencing and drain methods | Process-local queue/fence state. The drain removes ready entries before applying them; restart does not replay a durable command queue. |
 | Coordinator pending rebase/cherry-pick/squash and AI-edit maps | Coordinator mutexes; command/checkpoint effects | Continuation/filtering state; fields and methods are in `actor_types.rs` and `actor_coordinator_{worktree,side_effects,base}.rs`. |
-| Notes, metrics, internal and Bash-history SQLite handles | Process-global `OnceLock` mutex handles in `model/repository/{notes_db.rs,metrics_db/schema.rs,internal_db.rs,bash_history_db.rs}`; backend, telemetry/recovery and Bash-control writers | Per-store transactions/WAL; a Rust mutex coordinates one process, not all processes. Stores have no common transaction or family ordering. |
+| Notes (`NOTES_DB` in `model/repository/notes_db.rs`), metrics, internal and Bash-history SQLite handles | Process-global `OnceLock` mutex handles in `model/repository/{notes_db.rs,metrics_db/schema.rs,internal_db.rs,bash_history_db.rs}`; backend, telemetry/recovery and Bash-control writers | Per-store transactions/WAL; a Rust mutex coordinates one process, not all processes. Stores have no common transaction or family ordering. |
 | Streams DB | `StreamsDatabase` owns `Arc<Mutex<Connection>>`; injected into `stream_worker.rs` | Persistent stream positions/session records; no global DB singleton (`model/repository/streams_db.rs`). |
 | Native jj journal | Explicitly opened `JjObservationJournal` connection; native admission/registration workflows | Durable evidence, registrations and receipts (`model/repository/jj_observation_journal/`). No Git attribution application. |
 | jj observer runtime/intent | `jj_observer::Observer` has a state mutex, mutation async mutex and bounded job slot; intent storage opens its own connections | `model/repository/jj_observer_intent/` persists selected target, enabled/blocked state and revision; observer runtime is separate from Git family sequencing. |
@@ -56,7 +56,7 @@ mutation paths, not every filesystem mutation beneath `.git/ai`.
 | Config/migrations/installers | Separate CLI processes; config writes, `notes migrate`, `fetch-notes`, install/uninstall | No family-order guarantee or cross-process exclusion from concurrent daemon effects. Backend/SQLite/file behavior supplies the applicable local protections. |
 
 Notes cache refreshes specifically cannot overwrite `origin='local'` rows:
-`notes_db.rs::cache_synced_notes` has that SQL predicate. This is not a universal
+`notes_db.rs` (`cache_synced_notes`) has that SQL predicate. This is not a universal
 “local beats queue” rule: `UPSERT_NOTE_SQL` used for HTTP queue writes updates
 content on conflict. `upsert_local_notes_batch` writes local-primary content.
 Backend migration and concurrent cache/queue operations must be reasoned about

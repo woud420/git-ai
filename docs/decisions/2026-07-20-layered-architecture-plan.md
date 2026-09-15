@@ -1,6 +1,6 @@
 # P9 — Layered Architecture on the Kickstart Structure
 
-Status: historical — partially implemented roadmap; current architecture and contract indexes are authoritative.
+Status: historical — partially implemented roadmap, not a statement that every layer rule below is enforced. Current architecture and contract indexes describe implementation; the [2026-09-15 boundary audit](../architecture/layer-boundary-audit.md) records corrections to purity, ownership and recovery claims.
 
 Adapted from an external "explicit architectural layers" plan; grounded against the actual post-restructure codebase (see `../architecture/inventory.md` for the current per-module status). Execution began 2026-07-21 with P9.1 (this document's landing PR).
 

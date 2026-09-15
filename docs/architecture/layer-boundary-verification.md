@@ -94,6 +94,6 @@ of 12 threads. No tests are filtered out or assertions disabled.
 ## Limits and handoff
 
 The import guard is lexical, not a complete Rust dependency resolver or a proof
-of whole-model purity. Windows runtime and hosted CI were not exercised.
-No production installation, remote push, pull request or deployment occurred.
-Review the local commit sequence and audit before choosing a publication step.
+of whole-model purity. At completion of local verification, Windows runtime and hosted CI had not been
+exercised, and no production installation, remote push, pull request or deployment
+had occurred. Publication and CI status are tracked separately in ENG-464.

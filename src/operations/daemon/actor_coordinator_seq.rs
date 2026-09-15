@@ -148,16 +148,6 @@ impl ActorDaemonCoordinator {
         Ok(())
     }
 
-    pub(crate) async fn drain_ready_family_sequencer_entries(
-        &self,
-        family: &str,
-    ) -> Result<(), GitAiError> {
-        let exec_lock = self.side_effect_exec_lock(family)?;
-        let _guard = exec_lock.lock().await;
-        self.drain_ready_family_sequencer_entries_locked(family)
-            .await
-    }
-
     pub(crate) async fn drain_all_ready_family_sequencers(&self) -> Result<(), GitAiError> {
         let families = {
             let map = self.family_sequencers_by_family.lock().map_err(|_| {

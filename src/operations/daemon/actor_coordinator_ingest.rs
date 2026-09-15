@@ -1,12 +1,9 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
-use crate::model::repository::error::PersistenceError;
 use crate::operations::git::repo_state::common_dir_for_worktree;
 use serde_json::{Value, json};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tokio::sync::Mutex as AsyncMutex;
 
 impl ActorDaemonCoordinator {
     pub(crate) fn enqueue_trace_payload(&self, payload: Value) -> Result<(), GitAiError> {
@@ -305,21 +302,5 @@ impl ActorDaemonCoordinator {
         }
 
         read_only_root
-    }
-
-    pub(crate) fn side_effect_exec_lock(
-        &self,
-        family: &str,
-    ) -> Result<Arc<AsyncMutex<()>>, GitAiError> {
-        let mut map =
-            self.side_effect_exec_locks
-                .lock()
-                .map_err(|_| PersistenceError::LockPoisoned {
-                    what: "side effect lock map",
-                })?;
-        Ok(map
-            .entry(family.to_string())
-            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-            .clone())
     }
 }

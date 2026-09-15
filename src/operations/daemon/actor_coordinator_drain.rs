@@ -5,7 +5,8 @@ use crate::model::checkpoint_request::{CheckpointRequest, PreparedPathRole};
 use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::CheckpointKind;
 use std::path::Path;
-use tokio::sync::oneshot;
+use std::sync::Arc;
+use tokio::sync::{Mutex as AsyncMutex, oneshot};
 
 struct FamilyEffectGuard<'a> {
     coordinator: &'a ActorDaemonCoordinator,
@@ -129,6 +130,32 @@ impl ActorDaemonCoordinator {
             }
         });
         Ok(())
+    }
+
+    pub(crate) fn side_effect_exec_lock(
+        &self,
+        family: &str,
+    ) -> Result<Arc<AsyncMutex<()>>, GitAiError> {
+        let mut map =
+            self.side_effect_exec_locks
+                .lock()
+                .map_err(|_| PersistenceError::LockPoisoned {
+                    what: "side effect lock map",
+                })?;
+        Ok(map
+            .entry(family.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone())
+    }
+
+    pub(crate) async fn drain_ready_family_sequencer_entries(
+        &self,
+        family: &str,
+    ) -> Result<(), GitAiError> {
+        let exec_lock = self.side_effect_exec_lock(family)?;
+        let _guard = exec_lock.lock().await;
+        self.drain_ready_family_sequencer_entries_locked(family)
+            .await
     }
 
     pub(crate) async fn drain_ready_family_sequencer_entries_locked(

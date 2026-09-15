@@ -106,7 +106,9 @@ class PackageGenerationTests(unittest.TestCase):
             self.assertIn("Get-CimInstance", script)
             self.assertIn("Win32_Processor", script)
             self.assertIn("Is64BitOperatingSystem", script)
-            self.assertIn("Get-FileHash", script)
+            self.assertIn("[IO.File]::OpenRead($source)", script)
+            self.assertIn("ComputeHash($stream)", script)
+            self.assertNotRegex(script, r"Get-FileHash|ReadAllBytes|ToHexString")
             for name in ASSETS[4:]:
                 self.assertIn(self.checksums[name], script)
             self.assertNotRegex(script, r"https?://|Install-Chocolatey|& .*install-hooks|Start-Process")

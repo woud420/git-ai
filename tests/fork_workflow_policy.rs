@@ -179,7 +179,7 @@ const STALE_DISTRIBUTION_FRAGMENTS: &[&str] = &[
 
 // Regression coverage for ENG-351.
 #[test]
-fn eng_351_review_workflow_has_no_unused_bot_assumptions() {
+fn review_workflow_has_no_unused_bot_assumptions() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = REVIEW_PROCESS_FILES
         .iter()
@@ -212,7 +212,7 @@ fn eng_351_review_workflow_has_no_unused_bot_assumptions() {
 
 // Regression coverage for ENG-352.
 #[test]
-fn eng_352_active_fork_surfaces_do_not_maintain_graphite_compatibility() {
+fn active_fork_surfaces_do_not_maintain_graphite_compatibility() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut violations = Vec::new();
 
@@ -270,7 +270,7 @@ fn eng_352_active_fork_surfaces_do_not_maintain_graphite_compatibility() {
 }
 
 #[test]
-fn eng_286_make_is_the_only_maintained_command_surface() {
+fn make_is_the_only_maintained_command_surface() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let makefile_path = root.join("Makefile");
     let makefile = fs::read_to_string(&makefile_path)
@@ -331,7 +331,7 @@ fn eng_286_make_is_the_only_maintained_command_surface() {
 }
 
 #[test]
-fn eng_286_requires_and_provisions_gnu_make_4_4_1() {
+fn requires_and_provisions_gnu_make_4_4_1() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let setup_path = root.join(GNU_MAKE_SETUP_ACTION);
     let setup = fs::read_to_string(&setup_path)
@@ -385,7 +385,7 @@ fn eng_286_requires_and_provisions_gnu_make_4_4_1() {
 }
 
 #[test]
-fn eng_372_bundled_skills_reference_supported_commands() {
+fn bundled_skills_reference_supported_commands() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut combined = String::new();
     let mut violations = Vec::new();
@@ -420,7 +420,7 @@ fn eng_372_bundled_skills_reference_supported_commands() {
 }
 
 #[test]
-fn eng_373_active_distribution_guidance_is_fork_local() {
+fn active_distribution_guidance_is_fork_local() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut violations = Vec::new();
 
@@ -456,7 +456,7 @@ fn eng_373_active_distribution_guidance_is_fork_local() {
 }
 
 #[test]
-fn eng_374_nix_options_match_runtime_configuration() {
+fn nix_options_match_runtime_configuration() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
     let readme =
@@ -525,7 +525,7 @@ fn eng_374_nix_options_match_runtime_configuration() {
 }
 
 #[test]
-fn eng_375_package_metadata_declares_apache_2_0() {
+fn package_metadata_declares_apache_2_0() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let cargo = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml must be readable");
     let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
@@ -552,7 +552,7 @@ fn eng_375_package_metadata_declares_apache_2_0() {
 }
 
 #[test]
-fn eng_376_privacy_contract_is_fork_local_and_backend_aware() {
+fn privacy_contract_is_fork_local_and_backend_aware() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let privacy =
         fs::read_to_string(root.join("data-privacy.md")).expect("privacy guide must be readable");
@@ -592,7 +592,7 @@ fn eng_376_privacy_contract_is_fork_local_and_backend_aware() {
 }
 
 #[test]
-fn eng_377_telemetry_contract_matches_current_storage_and_workers() {
+fn telemetry_contract_matches_current_storage_and_workers() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let summary = fs::read_to_string(root.join("docs/contracts/telemetry-streams-summary.md"))
         .expect("telemetry summary must be readable");
@@ -695,7 +695,7 @@ fn eng_377_telemetry_contract_matches_current_storage_and_workers() {
 }
 
 #[test]
-fn eng_378_active_docs_distinguish_untracked_and_known_human_evidence() {
+fn active_docs_distinguish_untracked_and_known_human_evidence() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let agents = fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md must be readable");
     let opencode = fs::read_to_string(root.join("agent-support/opencode/README.md"))
@@ -746,7 +746,7 @@ fn eng_378_active_docs_distinguish_untracked_and_known_human_evidence() {
 }
 
 #[test]
-fn eng_379_active_docs_use_the_configured_authorship_backend() {
+fn active_docs_use_the_configured_authorship_backend() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let agents = fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md must be readable");
     let rewrite = fs::read_to_string(root.join("docs/architecture/rewrite-ops-spec.md"))
@@ -819,7 +819,7 @@ fn eng_379_active_docs_use_the_configured_authorship_backend() {
 }
 
 #[test]
-fn eng_380_visual_studio_docs_match_install_and_detection_behavior() {
+fn visual_studio_docs_match_install_and_detection_behavior() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = fs::read_to_string(root.join("agent-support/visualstudio/README.md"))
         .expect("Visual Studio README must be readable");
@@ -890,7 +890,7 @@ fn eng_380_visual_studio_docs_match_install_and_detection_behavior() {
 }
 
 #[test]
-fn eng_381_docs_distinguish_serialization_from_storage_profile_compliance() {
+fn docs_distinguish_serialization_from_storage_profile_compliance() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = fs::read_to_string(root.join("README.md")).expect("README must be readable");
     let contracts = fs::read_to_string(root.join("docs/contracts/README.md"))
@@ -946,7 +946,7 @@ fn eng_381_docs_distinguish_serialization_from_storage_profile_compliance() {
 }
 
 #[test]
-fn eng_382_current_architecture_source_paths_resolve() {
+fn current_architecture_source_paths_resolve() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let paths = [
         "AGENTS.md",
@@ -1011,7 +1011,7 @@ fn eng_382_current_architecture_source_paths_resolve() {
 }
 
 #[test]
-fn eng_383_checkpoint_preset_registry_drives_help_and_contract() {
+fn checkpoint_preset_registry_drives_help_and_contract() {
     use git_ai::operations::commands::checkpoint_agent::presets::{
         checkpoint_preset_help, human_checkpoint_preset_names, resolve_preset,
         supported_agent_preset_names, test_checkpoint_preset_names,
@@ -1084,7 +1084,7 @@ fn eng_383_checkpoint_preset_registry_drives_help_and_contract() {
 }
 
 #[test]
-fn eng_384_intellij_docs_describe_the_plugin_instead_of_the_template() {
+fn intellij_docs_describe_the_plugin_instead_of_the_template() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let docs_root = root.join("agent-support/intellij");
     let readme =
@@ -1213,7 +1213,7 @@ fn eng_384_intellij_docs_describe_the_plugin_instead_of_the_template() {
 }
 
 #[test]
-fn eng_385_design_and_execution_records_have_one_lifecycle_status() {
+fn design_and_execution_records_have_one_lifecycle_status() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let decisions_root = root.join("docs/decisions");
     let mut documents = Vec::new();
@@ -1327,7 +1327,7 @@ fn eng_385_design_and_execution_records_have_one_lifecycle_status() {
 }
 
 #[test]
-fn eng_386_coverage_docs_match_the_manual_workflow_and_make_targets() {
+fn coverage_docs_match_the_manual_workflow_and_make_targets() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let guide =
         fs::read_to_string(root.join("docs/COVERAGE.md")).expect("coverage guide must be readable");
@@ -1430,7 +1430,7 @@ fn coverage_defaults_agree(makefile: &str, workflow: &str) -> bool {
 }
 
 #[test]
-fn eng_409_coverage_defaults_allow_coordinated_changes_but_reject_drift() {
+fn coverage_defaults_allow_coordinated_changes_but_reject_drift() {
     let makefile = "# Updated baseline\nCOVERAGE_THRESHOLD ?= 65\n";
     let workflow = "env:\r\n  # Independently worded comment\r\n  COVERAGE_THRESHOLD: 65\r\n";
     assert!(coverage_defaults_agree(makefile, workflow));
@@ -1445,7 +1445,7 @@ fn eng_409_coverage_defaults_allow_coordinated_changes_but_reject_drift() {
 }
 
 #[test]
-fn eng_387_repository_declares_one_rust_minimum() {
+fn repository_declares_one_rust_minimum() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let cargo_toml =
         fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml must be readable");
@@ -1548,7 +1548,7 @@ fn eng_387_repository_declares_one_rust_minimum() {
 }
 
 #[test]
-fn eng_388_readme_qualifies_the_no_heuristics_claim() {
+fn readme_qualifies_the_no_heuristics_claim() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = fs::read_to_string(root.join("README.md")).expect("README.md must be readable");
     let vscode = fs::read_to_string(root.join("agent-support/vscode/README.md"))
@@ -1610,7 +1610,7 @@ fn eng_388_readme_qualifies_the_no_heuristics_claim() {
 }
 
 #[test]
-fn eng_391_vscode_cursor_readme_matches_installer_lifecycle() {
+fn vscode_cursor_readme_matches_installer_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = fs::read_to_string(root.join("agent-support/vscode/README.md"))
         .expect("VS Code README must be readable");
@@ -1668,7 +1668,7 @@ fn eng_391_vscode_cursor_readme_matches_installer_lifecycle() {
 }
 
 #[test]
-fn eng_392_privacy_docs_disclose_editor_telemetry_gate() {
+fn privacy_docs_disclose_editor_telemetry_gate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let privacy =
         fs::read_to_string(root.join("data-privacy.md")).expect("privacy guide must be readable");
@@ -1734,7 +1734,7 @@ fn eng_392_privacy_docs_disclose_editor_telemetry_gate() {
 }
 
 #[test]
-fn eng_393_nix_development_uses_gnu_make_interface() {
+fn nix_development_uses_gnu_make_interface() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
     let readme =
@@ -1763,7 +1763,7 @@ fn eng_393_nix_development_uses_gnu_make_interface() {
 }
 
 #[test]
-fn eng_394_nix_readme_has_owner_aware_uninstall_sequence() {
+fn nix_readme_has_owner_aware_uninstall_sequence() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme =
         fs::read_to_string(root.join("README-nix.md")).expect("Nix README must be readable");
@@ -1788,7 +1788,7 @@ fn eng_394_nix_readme_has_owner_aware_uninstall_sequence() {
 }
 
 #[test]
-fn eng_395_nix_wrapper_selection_uses_package_outputs() {
+fn nix_wrapper_selection_uses_package_outputs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
     let readme =
@@ -1820,7 +1820,7 @@ fn eng_395_nix_wrapper_selection_uses_package_outputs() {
 }
 
 #[test]
-fn eng_396_remaining_historical_records_are_classified() {
+fn remaining_historical_records_are_classified() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for (relative, lifecycle, authority) in [
         (
@@ -1865,7 +1865,7 @@ fn eng_396_remaining_historical_records_are_classified() {
 }
 
 #[test]
-fn eng_397_cli_output_contract_names_current_json_sources() {
+fn cli_output_contract_names_current_json_sources() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let contract = fs::read_to_string(root.join("docs/contracts/cli-output.md"))
         .expect("CLI output contract must be readable");
@@ -1909,7 +1909,7 @@ fn eng_397_cli_output_contract_names_current_json_sources() {
 }
 
 #[test]
-fn eng_399_opencode_docs_match_managed_plugin_contract() {
+fn opencode_docs_match_managed_plugin_contract() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = fs::read_to_string(root.join("agent-support/opencode/README.md"))
         .expect("OpenCode README must be readable");
@@ -1992,7 +1992,7 @@ fn eng_399_opencode_docs_match_managed_plugin_contract() {
 }
 
 #[test]
-fn eng_400_pi_docs_match_managed_extension_contract() {
+fn pi_docs_match_managed_extension_contract() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = fs::read_to_string(root.join("agent-support/pi/README.md"))
         .expect("Pi README must be readable");
@@ -2053,7 +2053,7 @@ fn eng_400_pi_docs_match_managed_extension_contract() {
 }
 
 #[test]
-fn eng_401_live_architecture_docs_use_stable_source_references() {
+fn live_architecture_docs_use_stable_source_references() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let inventory = fs::read_to_string(root.join("docs/architecture/inventory.md"))
         .expect("architecture inventory must be readable");
@@ -2106,7 +2106,7 @@ fn assert_live_architecture_references(root: &Path, inventory: &str, ownership: 
 }
 
 #[test]
-fn eng_409_architecture_contract_allows_review_wording_and_date_updates() {
+fn architecture_contract_allows_review_wording_and_date_updates() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let inventory = fs::read_to_string(root.join("docs/architecture/inventory.md")).unwrap();
     let ownership = fs::read_to_string(root.join("docs/architecture/state-ownership.md")).unwrap();

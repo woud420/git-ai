@@ -1046,7 +1046,7 @@ def handle_error(err):
 // 3. Verify blame attribution after each commit
 // ---------------------------------------------------------------------------
 #[test]
-fn test_issue_394_multiuser_reformat_ai_attribution() {
+fn test_multiuser_reformat_ai_attribution() {
     let repo = TestRepo::new();
     let file_path = repo.path().join("hello.js");
 

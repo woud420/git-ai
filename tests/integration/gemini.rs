@@ -355,7 +355,7 @@ fn test_gemini_e2e_human_checkpoint() {
 }
 
 #[test]
-fn test_issue_1951_gemini_ignores_internal_files() {
+fn test_gemini_ignores_internal_files() {
     let repo = TestRepo::new();
     let tracked_path = repo.path().join("tracked.txt");
     fs::write(&tracked_path, "tracked\n").unwrap();
@@ -602,7 +602,7 @@ crate::reuse_tests_in_worktree!(
     test_gemini_preset_handles_missing_file,
     test_gemini_e2e_with_attribution,
     test_gemini_e2e_human_checkpoint,
-    test_issue_1951_gemini_ignores_internal_files,
+    test_gemini_ignores_internal_files,
     test_gemini_e2e_multiple_tool_calls,
     test_gemini_e2e_with_resync,
     test_gemini_e2e_partial_staging,

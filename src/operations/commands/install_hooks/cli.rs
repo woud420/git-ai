@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn eng_389_rejects_empty_or_option_shaped_api_values() {
+    fn rejects_empty_or_option_shaped_api_values() {
         for option in ["--api-base", "--api-key"] {
             for value in ["", "  ", "--help", "-h", "--dry-run", "--skils", " --help"] {
                 let args = [option.to_string(), value.to_string()];
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn eng_389_explicit_values_do_not_hide_following_safety_flags() {
+    fn explicit_values_do_not_hide_following_safety_flags() {
         let options = parsed_install_options(&[
             "--api-base".to_string(),
             "https://api.example".to_string(),
@@ -290,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn eng_408_uninstall_parsing_separates_help_preview_and_apply() {
+    fn uninstall_parsing_separates_help_preview_and_apply() {
         for flag in ["--help", "-h"] {
             assert_eq!(
                 parse_uninstall_action(&[flag.to_string()]).unwrap(),

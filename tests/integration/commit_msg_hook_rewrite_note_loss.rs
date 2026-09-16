@@ -26,7 +26,7 @@ fn install_subject_rewriting_commit_msg_hook(repo: &TestRepo) {
 
 #[cfg(unix)]
 #[test]
-fn eng_216_commit_msg_hook_rewriting_subject_still_writes_authorship_note() {
+fn commit_msg_hook_rewriting_subject_still_writes_authorship_note() {
     let repo = TestRepo::new();
     let app_path = repo.path().join("app.py");
 

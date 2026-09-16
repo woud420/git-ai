@@ -24,7 +24,7 @@ fn get_json_with_env(repo: &TestRepo, key: &str, envs: &[(&str, &str)]) -> Value
 }
 
 #[test]
-fn eng_374_nix_documented_updates_preserve_other_settings_and_replace_lists() {
+fn nix_documented_updates_preserve_other_settings_and_replace_lists() {
     let readme = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README-nix.md"),
     )

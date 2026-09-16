@@ -2808,7 +2808,7 @@ fn leading_dropped_commits_before_first_match(range_diff: &str) -> usize {
 }
 
 #[test]
-fn test_eng_279_reset_keep_discards_divergent_trunk_mappings() {
+fn test_reset_keep_discards_divergent_trunk_mappings() {
     use std::fs;
 
     const TRUNK_COMMIT_COUNT: usize = 65;

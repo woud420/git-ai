@@ -27,7 +27,7 @@ fn benchmark_checkpoint() -> Checkpoint {
     let mut checkpoint = Checkpoint::new(
         CheckpointKind::AiAgent,
         "acca49ac01ce3faf77458c5e2170e81d533fbb1c2f38e6ee2d2a57600828bd54".to_string(),
-        "ENG-364 Benchmark <eng364@example.invalid>".to_string(),
+        "Checkpoint Tests <fixture@example.invalid>".to_string(),
         vec![WorkingLogEntry::new(
             "sample.txt".to_string(),
             "37f8c7fa59d1dc54eb1a3b9e063b2e8a496322b9c9bb29f60f637510100a8c08".to_string(),
@@ -135,7 +135,7 @@ fn v2_benchmark_record_is_655_bytes_and_roundtrips() {
 #[test]
 fn v2_benchmark_record_matches_the_independent_golden_bytes() {
     let encoded = wire_v2::encode(&benchmark_checkpoint()).unwrap();
-    let expected = r#"{"a":"ENG-364 Benchmark <eng364@example.invalid>","d":"acca49ac01ce3faf77458c5e2170e81d533fbb1c2f38e6ee2d2a57600828bd54","e":[["sample.txt","37f8c7fa59d1dc54eb1a3b9e063b2e8a496322b9c9bb29f60f637510100a8c08",[[0,0,"s_6825489e8808db::t_dd4d4964d7d736",1788375035718],[0,65,"s_6825489e8808db::t_dd4d4964d7d736",1788375035718]],[[2,4,"s_6825489e8808db::t_dd4d4964d7d736",null]]]],"g":"1.6.16","i":["mock_ai","ai-thread-1788375035675706000","unknown"],"k":1,"m":{"edit_kind":"file_edit"},"r":"t_dd4d4964d7d736","s":[1,2,3,4],"t":1788375035,"v":2,"y":"a13f0762-1a2a-4a59-bd88-bba7783711db","c":"0983d6ab788414f217a574d33c7ebc9d82c0a2a8ef649c695cc5aa8212f84a84"}"#;
+    let expected = r#"{"a":"Checkpoint Tests <fixture@example.invalid>","d":"acca49ac01ce3faf77458c5e2170e81d533fbb1c2f38e6ee2d2a57600828bd54","e":[["sample.txt","37f8c7fa59d1dc54eb1a3b9e063b2e8a496322b9c9bb29f60f637510100a8c08",[[0,0,"s_6825489e8808db::t_dd4d4964d7d736",1788375035718],[0,65,"s_6825489e8808db::t_dd4d4964d7d736",1788375035718]],[[2,4,"s_6825489e8808db::t_dd4d4964d7d736",null]]]],"g":"1.6.16","i":["mock_ai","ai-thread-1788375035675706000","unknown"],"k":1,"m":{"edit_kind":"file_edit"},"r":"t_dd4d4964d7d736","s":[1,2,3,4],"t":1788375035,"v":2,"y":"a13f0762-1a2a-4a59-bd88-bba7783711db","c":"2cfd54d7318248031fb841828ed3304a4842eb487cf4489567087b58d8373eef"}"#;
 
     assert_eq!(std::str::from_utf8(&encoded).unwrap(), expected);
 }
@@ -272,8 +272,8 @@ fn v2_record_sorts_agent_metadata_before_signing() {
 fn v2_record_rejects_a_tampered_payload() {
     let mut encoded = wire_v2::encode(&benchmark_checkpoint()).unwrap();
     let offset = encoded
-        .windows(b"Benchmark".len())
-        .position(|window| window == b"Benchmark")
+        .windows(b"Checkpoint".len())
+        .position(|window| window == b"Checkpoint")
         .unwrap();
     encoded[offset] = b'b';
 

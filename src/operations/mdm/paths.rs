@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_normalize_windows_path_for_shell_converts_windows_path() {
-        // Fixes #1413: use forward-slash Windows paths that work in both git bash AND PowerShell
+        // Use forward-slash Windows paths that work in both git bash and PowerShell.
         let path = PathBuf::from(r"C:\Users\Administrator\.git-ai\bin\git-ai.exe");
         let result = normalize_windows_path_for_shell(&path);
         assert_eq!(

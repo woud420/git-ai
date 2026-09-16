@@ -13,7 +13,7 @@ fn parent_count(repo: &TestRepo, sha: &str) -> usize {
 }
 
 /// Test that single-parent squash merges work even when the parent is not reachable
-/// from the base ref (partial clone scenario). This is the core fix from PR #918.
+/// from the base ref in a partial clone.
 #[test]
 fn test_squash_merge_single_parent_not_on_base_ref() {
     let repo = direct_test_repo();

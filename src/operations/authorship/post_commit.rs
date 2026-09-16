@@ -313,7 +313,7 @@ where
         }
     }
 
-    // INITIAL attributions (prev-commit uncommitted files) lack checkpoints. See #356.
+    // INITIAL attributions for previously uncommitted files lack checkpoints.
     let initial_attributions_for_pathspecs = working_log.read_initial_attributions();
     for file_path in initial_attributions_for_pathspecs.files.keys() {
         pathspecs.insert(file_path.clone());
@@ -356,7 +356,7 @@ where
                 // Same bounding as recovery: on the daemon fast-forward `update-ref`
                 // path `parent_sha` is the far-behind old branch tip, so diff against
                 // the finalized commit's immediate parent to avoid buffering the whole
-                // pulled range (PD-23 / #1677). No-hooks agents (Devin/Codex Cloud)
+                // pulled range. No-hooks agents (Devin/Codex Cloud)
                 // can be active during a pull, so this path is exposed too.
                 let diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
                 repo.diff_added_lines(&diff_base, &commit_sha, None)

@@ -355,7 +355,7 @@ fn test_squash_merge_preserves_custom_attributes_from_config() {
     ]);
 }
 
-/// Regression test for #950: squash rebase should preserve all AI attribution
+/// Squash rebase should preserve all AI attribution
 /// even when two sessions have interleaved lines
 #[test]
 fn test_squash_rebase_preserves_interleaved_attribution() {

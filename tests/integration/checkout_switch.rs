@@ -417,7 +417,7 @@ fn test_checkout_pathspec_multiple_files() {
     file_c.assert_lines_and_blame(vec!["Modified C by AI".ai()]);
 }
 
-/// Regression test for #957: `checkout --merge` that produces conflict markers in the
+/// A `checkout --merge` that produces conflict markers in the
 /// working tree must not corrupt AI attribution for lines that came from an AI session.
 ///
 /// Bug: `restore_stashed_va` reads working-tree files to merge VA snapshots, but

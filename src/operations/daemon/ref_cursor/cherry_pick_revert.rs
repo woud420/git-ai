@@ -102,7 +102,7 @@ impl RefCursor {
         let is_no_commit = args.iter().any(|arg| arg == "--no-commit" || arg == "-n");
         let is_continue = args.iter().any(|arg| arg == "--continue");
         let is_skip = args.iter().any(|arg| arg == "--skip");
-        // DEFERRED (code-review #13): on `revert --continue` (resuming after a
+        // DEFERRED: on `revert --continue` (resuming after a
         // conflict) the original source OIDs are not on the command line and we
         // carry no `pending_revert_source_oids` from the interrupted revert, so
         // revert_source_oids ends up empty. handle_revert_commit then falls back

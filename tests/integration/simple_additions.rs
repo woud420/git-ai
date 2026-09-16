@@ -1175,8 +1175,8 @@ fn test_ai_deletion_with_human_checkpoint_in_same_commit() {
         "Base Line 2".human(),
         "AI: Line 1".ai(),
         "AI: Line 3".ai(),
-        "Human: Line 1".human(), // Should be human, not AI (Bug #193)
-        "Human: Line 2".human(), // Should be human, not AI (Bug #193)
+        "Human: Line 1".human(), // Should be human, not AI
+        "Human: Line 2".human(), // Should be human, not AI
         "AI: New Line 1".ai(),
         "AI: New Line 2".ai(),
         "Base Line 3".human(),
@@ -1188,7 +1188,7 @@ fn test_ai_deletion_with_human_checkpoint_in_same_commit() {
     let stats: serde_json::Value = serde_json::from_str(&stats_output).unwrap();
 
     // Expected: 2 human additions, 2 AI additions
-    // Bug #193 causes: 0 human additions, 4 AI additions
+    // Incorrect classification would report 0 human additions and 4 AI additions.
     assert_eq!(
         stats["human_additions"].as_u64().unwrap(),
         2,

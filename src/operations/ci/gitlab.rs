@@ -57,12 +57,12 @@ struct GitLabMergeRequestDetails {
 /// - `head_sha`: the source branch tip. We already get this from `mr.sha`
 ///   on the list endpoint, so we don't deserialize it here.
 ///
-/// The #1473 retain filter in `CiContext::run_with_options` computes
+/// The linear-history retain filter in `CiContext::run_with_options` computes
 /// `base_sha..merge_commit_sha` to find commits the MR introduced. For a
 /// squash-on-linear-main scenario with `main = B0→B1→B2→B3` and squash
 /// commit `S`, the filter needs a range that yields exactly `{S}`. Using
 /// `base_sha` (the merge-base `B0`) gives `{B1,B2,B3,S}` and lets the walk
-/// match the PR commit count again — recreating the original #1473 bug.
+/// match the MR commit count again, misclassifying the squash as a rebase.
 /// Using `start_sha` (the target tip `B3`) gives `{S}` and squash is
 /// correctly detected.
 ///
@@ -103,7 +103,7 @@ fn gitlab_api_get(
 /// Returns `None` whenever anything goes wrong (transport error, non-200,
 /// malformed body, missing `diff_refs`, both SHAs null); callers fall back to
 /// the legacy empty-string behavior, which keeps GitLab safe but unprotected
-/// from the #1473 misclassification for that one MR.
+/// from squash/rebase misclassification for that one MR.
 fn fetch_mr_base_sha(
     api_url: &str,
     auth_header_name: &str,
@@ -419,9 +419,10 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
     let repo = find_repository_in_path(&clone_dir)?;
 
     // Fetch diff_refs.base_sha from the single-MR endpoint. The list endpoint
-    // we hit earlier doesn't include diff_refs; without base_sha the #1473
-    // retain filter in CiContext::run_with_options skips, so squash merges on
-    // a linear target branch can still be misclassified as rebases. None here
+    // we hit earlier doesn't include diff_refs; without base_sha the
+    // linear-history retain filter in CiContext::run_with_options skips, so
+    // squash merges on a linear target branch can still be misclassified as
+    // rebases. None here
     // -> fall back to empty string (legacy behavior, no protection).
     let base_sha = fetch_mr_base_sha(&api_url, auth_header_name, &auth_token, &project_id, mr.iid)
         .unwrap_or_else(|| {
@@ -648,7 +649,7 @@ mod tests {
 
     /// Happy path: both SHAs present, we MUST pick start_sha. This is the
     /// load-bearing test — picking base_sha here recreates the original
-    /// #1473 bug for GitLab squash MRs.
+    /// squash/rebase misclassification for GitLab squash MRs.
     #[test]
     fn test_fetch_mr_base_sha_prefers_start_sha_over_base_sha() {
         let mut server = mockito::Server::new();

@@ -26,7 +26,7 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
 
     // Ensure parent directory exists before writing. This guards against
     // environments (e.g. nushell) where the parent may not yet exist when
-    // write_atomic is reached. See #1039.
+    // write_atomic is reached.
     ensure_parent_dir(&target_path)?;
 
     let tmp_path = target_path.with_extension("tmp");
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(target_content, "relative symlink content");
     }
 
-    /// Regression test for #1039: write_atomic should create parent directories
+    /// write_atomic should create parent directories
     /// if they do not exist, preventing "No such file or directory" errors.
     #[test]
     fn test_write_atomic_creates_parent_dirs() {
@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(content, "{\"key\": \"value\"}");
     }
 
-    /// Regression test for #1039: ensure_parent_dir handles nested missing dirs.
+    /// ensure_parent_dir handles nested missing directories.
     #[test]
     fn test_ensure_parent_dir_creates_nested() {
         let temp_dir = TempDir::new().unwrap();
@@ -208,7 +208,7 @@ mod tests {
         assert!(file_path.parent().unwrap().exists());
     }
 
-    /// Regression test for #1039: ensure_parent_dir is a no-op for root-level paths.
+    /// ensure_parent_dir is a no-op for root-level paths.
     #[test]
     fn test_ensure_parent_dir_no_parent() {
         // A path with no parent component should not error

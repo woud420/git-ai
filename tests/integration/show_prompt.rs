@@ -171,7 +171,7 @@ fn show_prompt_with_offset_skips_occurrences() {
     );
 }
 
-/// Regression test for #861: `show-prompt --commit <rev>` must scope its output
+/// `show-prompt --commit <rev>` must scope its output
 /// to the note attached to that specific commit.
 ///
 /// The same prompt ID can appear in several commits of a single agent session.
@@ -266,7 +266,7 @@ fn show_prompt_commit_flag_scopes_to_requested_commit() {
         "second commit note records total_additions=99"
     );
 
-    // And the two scoped outputs must genuinely differ (the core of #861).
+    // The two scoped outputs must genuinely differ.
     assert_ne!(
         first["prompt"], second["prompt"],
         "--commit must scope output to the requested commit, not return identical records"

@@ -154,7 +154,7 @@ impl ActorDaemonCoordinator {
         self.persist_pending_rebase_state(family, cmd, pull_uses_rebase)?;
         self.persist_failed_cherry_pick_state(cmd)?;
 
-        // Fix #957: `checkout/switch --merge` exits with code 1 when it produces
+        // `checkout/switch --merge` exits with code 1 when it produces
         // conflict markers but HEAD still moves to the target branch.  We must not
         // return early here — fall through so apply_checkout_switch_working_log_side_effect
         // and recent_checkout_switch_prerequisite_from_command can migrate the working log.

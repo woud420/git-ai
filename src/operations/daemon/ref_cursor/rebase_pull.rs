@@ -130,7 +130,7 @@ impl RefCursor {
         Ok(())
     }
 
-    // DEFERRED (code-review #14): this finder scans the reflog from
+    // DEFERRED: this finder scans the reflog from
     // reflog_start_offset and takes the first unconsumed entry matching the
     // message/transition; it does not use the command's ingress hint (the
     // reflog position at which THIS command began) to bound the search. In

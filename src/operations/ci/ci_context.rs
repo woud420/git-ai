@@ -276,7 +276,7 @@ impl CiContext {
                     let mut new_commits =
                         self.get_rebased_commits(merge_commit_sha, original_commits.len());
 
-                    // #1473: on a linear base branch the first-parent walk above can
+                    // On a linear base branch the first-parent walk above can
                     // return pre-existing base commits rather than rebased PR commits,
                     // so a squash merge's count matches a rebase's and gets
                     // misclassified (PR notes then land on unrelated commits). Restrict
@@ -284,7 +284,7 @@ impl CiContext {
                     // (`base_sha..merge_commit_sha`; see gitrevisions(7)) — a squash
                     // yields exactly one, so it can't look like a rebase. An empty
                     // `base_sha` (transient API failure) safely skips the filter and
-                    // falls back to the pre-#1473 behavior.
+                    // falls back to the unfiltered behavior.
                     if !base_sha.is_empty() {
                         let introduced: std::collections::HashSet<String> =
                             CommitRange::new_infer_refname(

@@ -52,7 +52,7 @@ fn benchmark_checkpoint(repo: &TestRepo, index: usize) -> Checkpoint {
     let mut checkpoint = Checkpoint::new(
         CheckpointKind::AiAgent,
         "acca49ac01ce3faf77458c5e2170e81d533fbb1c2f38e6ee2d2a57600828bd54".to_string(),
-        "ENG-364 Benchmark <eng364@example.invalid>".to_string(),
+        "Checkpoint Tests <fixture@example.invalid>".to_string(),
         vec![WorkingLogEntry::new(
             "sample.txt".to_string(),
             blob_sha,

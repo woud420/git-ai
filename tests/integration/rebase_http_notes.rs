@@ -1,4 +1,4 @@
-//! ENG-212 regression coverage for rewrite source-note recovery under the HTTP backend.
+//! Rewrite source-note recovery under the HTTP backend.
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
@@ -73,13 +73,13 @@ fn add_broken_origin(repo: &TestRepo) {
         .unwrap();
 }
 
-/// ENG-212: when a rewrite source note exists only on the HTTP backend, fetch
+/// When a rewrite source note exists only on the HTTP backend, fetch
 /// and cache it before falling back to a Git refs fetch that may require
 /// unavailable SSH credentials.
 #[test]
 fn test_rebase_fetches_http_only_source_note_before_broken_git_remote() {
     let server = ReferenceServer::start("127.0.0.1:0").expect("start notes server");
-    let mut repo = TestRepo::new_with_daemon_env(&[("GIT_AI_API_KEY", "eng-212-test-key")]);
+    let mut repo = TestRepo::new_with_daemon_env(&[("GIT_AI_API_KEY", "test-api-key")]);
     let main_branch = commit_untracked_base(&repo);
 
     repo.git(&["checkout", "-b", "feature"]).unwrap();
@@ -119,21 +119,19 @@ fn test_rebase_fetches_http_only_source_note_before_broken_git_remote() {
     feature.assert_committed_lines(crate::lines!["Human line".human(), "AI line".ai()]);
 }
 
-/// ENG-212: a source with no note anywhere must not abort the whole rewrite
+/// A source with no note anywhere must not abort the whole rewrite
 /// when another source already has a local HTTP-cache note that can migrate.
 #[test]
 fn test_rebase_preserves_local_note_when_sibling_source_fetch_fails() {
     let server = ReferenceServer::start("127.0.0.1:0").expect("start notes server");
     let backend_url = server.base_url();
-    let repo = TestRepo::new_with_daemon_env_and_patch(
-        &[("GIT_AI_API_KEY", "eng-212-test-key")],
-        |patch| {
+    let repo =
+        TestRepo::new_with_daemon_env_and_patch(&[("GIT_AI_API_KEY", "test-api-key")], |patch| {
             patch.notes_backend = Some(NotesBackendConfig {
                 kind: NotesBackendKind::Http,
                 backend_url: Some(backend_url),
             });
-        },
-    );
+        });
     let main_branch = commit_untracked_base(&repo);
 
     repo.git(&["checkout", "-b", "feature"]).unwrap();

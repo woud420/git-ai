@@ -29,9 +29,7 @@ pub(super) fn enrich_authorized_events(
             // Delay only after repository authorization, immediately before the
             // file snapshot and transcript/model enrichment.
             // https://github.com/microsoft/vscode/issues/315926
-            tracing::debug!(
-                "Sleeping 80ms for VS Code Copilot PostToolUse file-write race (vscode#315926)"
-            );
+            tracing::debug!("Sleeping 80ms for VS Code Copilot PostToolUse file-write race");
             std::thread::sleep(std::time::Duration::from_millis(80));
         }
         enrich_native_events(&data, events);

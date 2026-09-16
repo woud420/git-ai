@@ -130,7 +130,7 @@ fn fetch_mr_base_sha(
         println!(
             "[GitLab CI] Note: diff_refs.start_sha missing for MR !{}; \
              using diff_refs.base_sha (merge-base) as fallback. \
-             The #1473 retain filter may be weakened for this MR.",
+             The linear-history retain filter may be weakened for this MR.",
             iid
         );
         Some(sha)
@@ -427,7 +427,7 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
         .unwrap_or_else(|| {
             println!(
                 "[GitLab CI] Warning: could not fetch diff_refs.base_sha for MR !{}; \
-                     proceeding without the #1473 retain filter (legacy behavior)",
+                     proceeding without the linear-history retain filter (legacy behavior)",
                 mr.iid
             );
             String::new()

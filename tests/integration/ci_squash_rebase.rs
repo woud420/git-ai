@@ -742,11 +742,11 @@ fn test_ci_local_merge_squash_on_linear_main_does_not_note_base_commits() {
     );
     assert!(
         repo.read_authorship_note(&b2_sha).is_none(),
-        "#1473 regression: unrelated base commit B2 ({b2_sha}) must not receive a note"
+        "unrelated base commit B2 ({b2_sha}) must not receive a note"
     );
     assert!(
         repo.read_authorship_note(&b3_sha).is_none(),
-        "#1473 regression: unrelated base commit B3 ({b3_sha}) must not receive a note"
+        "unrelated base commit B3 ({b3_sha}) must not receive a note"
     );
 }
 
@@ -1743,11 +1743,11 @@ fn test_ci_squash_merge_not_misclassified_as_rebase_on_linear_main() {
     );
     assert!(
         repo.read_authorship_note(&b2_sha).is_none(),
-        "#1473 regression: unrelated base commit B2 ({b2_sha}) must not receive a note"
+        "unrelated base commit B2 ({b2_sha}) must not receive a note"
     );
     assert!(
         repo.read_authorship_note(&b3_sha).is_none(),
-        "#1473 regression: unrelated base commit B3 ({b3_sha}) must not receive a note"
+        "unrelated base commit B3 ({b3_sha}) must not receive a note"
     );
 }
 

@@ -1093,11 +1093,11 @@ console.log('b')
     // Verify blame: the 2 new wrapper lines should be AI, and the 3
     // reformatted function lines' attribution is what issue #394 questions.
     let blame_output = repo.git_ai(&["blame", "hello.js"]).unwrap();
-    eprintln!("=== git-ai blame output (issue #394) ===\n{blame_output}");
+    eprintln!("=== git-ai blame output after multi-user reformat ===\n{blame_output}");
 
     let stats = head_stats(&repo);
     eprintln!(
-        "=== commit stats (issue #394) ===\nhuman_additions={}, ai_additions={}, ai_accepted={}",
+        "=== commit stats after multi-user reformat ===\nhuman_additions={}, ai_additions={}, ai_accepted={}",
         stats.human_additions, stats.ai_additions, stats.ai_accepted
     );
 

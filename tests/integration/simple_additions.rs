@@ -1192,12 +1192,12 @@ fn test_ai_deletion_with_human_checkpoint_in_same_commit() {
     assert_eq!(
         stats["human_additions"].as_u64().unwrap(),
         2,
-        "Human additions should be 2, not 0 (Bug #193)"
+        "Human additions should be 2, not 0"
     );
     assert_eq!(
         stats["ai_additions"].as_u64().unwrap(),
         2,
-        "AI additions should be 2, not 4 (Bug #193)"
+        "AI additions should be 2, not 4"
     );
 }
 

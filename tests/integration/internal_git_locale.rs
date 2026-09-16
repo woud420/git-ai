@@ -1,7 +1,5 @@
 #![cfg(unix)]
 
-// Regression coverage for ENG-322 and upstream git-ai-project/git-ai#1294.
-
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{TestRepo, real_git_executable};
 use crate::repos::write_executable_script;

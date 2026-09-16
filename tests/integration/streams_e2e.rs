@@ -776,8 +776,6 @@ fn test_copilot_agent_streams_otel_path_resolution() {
     assert!(otel_stream.shared);
 }
 
-// Regression coverage for ENG-324 and upstream git-ai-project/git-ai#2204 and
-// git-ai-project/git-ai#2223.
 #[test]
 fn codex_subagent_rollouts_sharing_hook_session_register_distinct_streams() {
     let repo = TestRepo::new_with_daemon_env_and_patch(&[], |patch| {

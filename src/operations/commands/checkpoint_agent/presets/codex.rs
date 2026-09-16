@@ -529,7 +529,6 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    // Regression coverage for ENG-336.
     fn parse_does_not_scan_codex_home_before_authorized_enrichment() {
         let temp = tempfile::tempdir().unwrap();
         let sessions = temp.path().join("sessions/2026/07/25");

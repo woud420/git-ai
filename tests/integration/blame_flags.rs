@@ -1030,7 +1030,7 @@ fn test_blame_mark_unknown_backward_compatible() {
 }
 
 // =============================================================================
-// Tests for .git-blame-ignore-revs auto-detection (Issue #363)
+// Tests for .git-blame-ignore-revs auto-detection.
 // =============================================================================
 
 #[test]

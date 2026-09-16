@@ -1111,7 +1111,6 @@ fn test_with_duplicate_lines() {
 
 #[test]
 fn test_ai_deletion_with_human_checkpoint_in_same_commit() {
-    // Regression test for issue #193
     // When both human and AI checkpoints happen in the same commit,
     // and AI deletes its own lines, human additions should still be
     // attributed correctly (not claimed by AI)
@@ -1604,13 +1603,11 @@ fn test_deletion_of_multiple_lines_by_ai() {
     ]);
 }
 
-/// Regression test for issue #356
 /// When AI edits multiple files in the same session, but they are committed
 /// in separate batches, the second batch loses AI attribution.
-/// See: https://github.com/git-ai-project/git-ai/issues/356
 #[test]
 fn test_multi_file_batch_commits_preserve_attribution() {
-    // This test reproduces the exact scenario from issue #356:
+    // This test reproduces the partial-commit sequence:
     // 1. AI edits two files (file_a.txt and file_b.txt)
     // 2. User commits file_a.txt first -> AI attribution correct ✓
     // 3. User commits file_b.txt second -> AI attribution should be preserved
@@ -1645,7 +1642,7 @@ fn test_multi_file_batch_commits_preserve_attribution() {
     repo.git(&["add", "file_a.txt"]).unwrap();
     repo.commit("Add file A").unwrap();
 
-    // Second commit: file_b.txt (this is where attribution is lost in issue #356)
+    // Second commit: file_b.txt, where attribution was previously lost.
     repo.git(&["add", "file_b.txt"]).unwrap();
     repo.commit("Add file B").unwrap();
 
@@ -1657,7 +1654,7 @@ fn test_multi_file_batch_commits_preserve_attribution() {
         "Line 3 from AI".ai(),
     ]);
 
-    // Verify file_b.txt ALSO has correct AI attribution (this fails in issue #356)
+    // Verify file_b.txt also has correct AI attribution.
     let mut file_b = repo.filename("file_b.txt");
     file_b.assert_lines_and_blame(crate::lines![
         "AI content for file B".ai(),
@@ -1666,7 +1663,7 @@ fn test_multi_file_batch_commits_preserve_attribution() {
     ]);
 }
 
-/// Additional test for issue #356 with modifications instead of new files
+/// The same partial-commit sequence with modifications instead of new files.
 #[test]
 fn test_multi_file_batch_commits_modifications() {
     // Similar to above, but with modifications to existing files
@@ -1710,7 +1707,7 @@ fn test_multi_file_batch_commits_modifications() {
     let mut file_b = repo.filename("file_b.txt");
     file_b.assert_lines_and_blame(crate::lines![
         "Original content B".human(),
-        "AI added line B".ai(), // This fails in issue #356 - shows as human
+        "AI added line B".ai(), // This was previously misattributed as human.
     ]);
 }
 

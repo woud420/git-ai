@@ -9,7 +9,7 @@
 //! 3. CWD != repo root, edits in several repos + CWD repo itself
 //! 4. CWD is a parent directory above all repos (e.g. ~/projects)
 //! 5. CWD is a parent directory above all repos, edits in several repo subpaths
-//! 6. Agent preset (e.g. Claude) with CWD in repo A editing files in repo B (issue #871)
+//! 6. Agent preset (e.g. Claude) with CWD in repo A editing files in repo B
 
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
@@ -666,7 +666,6 @@ fn test_parent_cwd_blame_correct_across_repos() {
 
 // ---------------------------------------------------------------------------
 // Scenario 6: Agent preset (Claude) with CWD in repo A, editing files in repo B
-// Regression test for issue #871
 // ---------------------------------------------------------------------------
 
 /// When Claude Code is started in repo A but edits a file in repo B,
@@ -1074,7 +1073,7 @@ fn test_nested_subrepo_blame_attribution_mock_ai() {
 // ===========================================================================
 // Scenario 8: Nested subrepo with Claude preset
 //
-// Mirrors scenario 6 (issue #871) but with the subrepo nested inside the
+// Mirrors scenario 6 but with the subrepo nested inside the
 // parent repo instead of being a sibling repo.
 // ===========================================================================
 
@@ -1240,7 +1239,7 @@ fn test_claude_preset_nested_subrepo_pre_post_cycle() {
 }
 
 // ===========================================================================
-// Issue #954 regression: CWD is a completely unrelated non-git directory
+// CWD is a completely unrelated non-git directory
 //
 // When Claude (or any agent) is launched from a directory that is not inside
 // any git repository (e.g. /tmp, ~/), all AI attribution was dropped because
@@ -1248,7 +1247,6 @@ fn test_claude_preset_nested_subrepo_pre_post_cycle() {
 // that were not children of the CWD directory.
 // ===========================================================================
 
-/// Regression test for issue #954:
 /// When CWD is a non-git directory completely unrelated to the target repo
 /// (not a parent/ancestor of the target), checkpoint must still write to the
 /// target repo's working logs so that the commit carries AI attribution.
@@ -1307,7 +1305,7 @@ fn test_non_git_cwd_unrelated_to_target_repo_mock_ai() {
     let _ = fs::remove_dir_all(&cwd_workspace);
 }
 
-/// Issue #954 variant: non-git CWD, multiple files in multiple separate repos.
+/// Non-git CWD with multiple files in multiple separate repos.
 /// Verifies that all target repos receive correct attribution.
 #[test]
 fn test_non_git_cwd_multiple_target_repos() {
@@ -1357,7 +1355,7 @@ fn test_non_git_cwd_multiple_target_repos() {
     let _ = fs::remove_dir_all(&cwd_workspace);
 }
 
-/// Issue #954 variant: Claude preset with non-git CWD and file in a separate repo.
+/// Claude preset with non-git CWD and a file in a separate repo.
 /// Verifies that the Claude PostToolUse checkpoint records prompts correctly.
 #[test]
 fn test_claude_preset_non_git_cwd() {

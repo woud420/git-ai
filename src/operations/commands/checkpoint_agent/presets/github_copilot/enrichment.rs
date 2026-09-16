@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn cli_parse_has_no_discovered_source_and_authorized_enrichment_restores_it() {
-        // ENG-338: inject the fixture root directly because Windows known-home
+        // Inject the fixture root directly because Windows known-home
         // discovery does not honor HOME or USERPROFILE overrides.
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path();

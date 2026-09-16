@@ -603,8 +603,8 @@ fn test_reset_with_directory_pathspec() {
 }
 
 /// Test that resetting a large commit (500+ lines across many files) preserves AI
-/// authorship correctly.  This is the scenario from issue #1025: the previous
-/// implementation ran `git blame target..target` for every changed file in the
+/// authorship correctly. The previous implementation ran
+/// `git blame target..target` for every changed file in the
 /// post-reset hook, which (a) is O(files × file_size) wasted work and (b) always
 /// produced zero AI attributions because the range is empty.  The fix creates an
 /// empty target VA directly, halving the blame work with no correctness change.

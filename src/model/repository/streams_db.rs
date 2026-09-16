@@ -87,7 +87,7 @@ const MIGRATIONS: &[&str] = &[
     "#,
     // Version 4: Add stream_kind column with compound PK (session_id, stream_kind, stream_path).
     // The path is part of the PK to prevent collisions when two physically distinct files
-    // produce the same session_id (issue #1461).
+    // produce the same session_id.
     r#"
     BEGIN;
     CREATE TABLE tracked_streams_v4 (

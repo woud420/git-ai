@@ -900,7 +900,7 @@ fn test_rebase_with_conflicts() {
     feature_file.assert_lines_and_blame(crate::lines!["// AI feature".ai()]);
 }
 
-/// ENG-289 regression: a conflicted rebase whose `git rebase --continue`
+/// A conflicted rebase whose `git rebase --continue`
 /// fails at least once before succeeding must still migrate line-level
 /// attribution exactly like a clean single-continue rebase. The failed
 /// attempts run through trace2 like any other git command, but they change
@@ -1191,9 +1191,9 @@ fn test_rebase_exec() {
     f2.assert_lines_and_blame(crate::lines!["// AI 2".ai()]);
 }
 
-/// Test rebase with merge commits (--rebase-merges)
-/// This test verifies the BFS fix for issue #328 where walk_commits_to_base
-/// was only following parent(0), missing side branch commits.
+/// Rebase with merge commits (`--rebase-merges`).
+/// The commit walk must follow every parent; following only parent(0) misses
+/// side-branch commits.
 ///
 /// The test checks that authorship notes for rebased commits include files
 /// from side branches (reached via parent(1) of merge commits).
@@ -2083,8 +2083,8 @@ fn test_rebase_non_head_attribution_survives_slow_path() {
     ]);
 }
 
-/// Regression test: interactive rebase that drops a commit must preserve attribution
-/// on surviving commits (issue #970).
+/// An interactive rebase that drops a commit must preserve attribution on
+/// surviving commits.
 ///
 /// When an interactive rebase uses `drop` to skip commit B from [A, B, C], the
 /// surviving rebased commits A′ and C′ must retain the attribution originally
@@ -2293,8 +2293,8 @@ fn test_rebase_file_delete_recreate_after_hunk_modification() {
     ]);
 }
 
-/// Regression test for issue #919: daemon panics on multi-byte UTF-8 characters
-/// during rebase authorship tracking. The `→` character (U+2192, 3 bytes in UTF-8)
+/// The daemon must not panic on multi-byte UTF-8 characters during rebase
+/// authorship tracking. The `→` character (U+2192, 3 bytes in UTF-8)
 /// placed so that byte index 40 falls inside its encoding triggers a panic in
 /// `run_diff_tree_with_hunks` when `&line[..40]` is used instead of `line.get(..40)`.
 #[test]
@@ -2352,10 +2352,10 @@ fn test_rebase_preserves_authorship_with_multibyte_utf8_in_diff_context() {
     ]);
 }
 
-/// Regression test for issue #1214: after squash rebase of 3 commits (2 AI + 1 human),
-/// the merged note loses the humans block entirely — known-human line attribution is gone.
+/// After a squash rebase of 3 commits (2 AI + 1 human), the merged note must
+/// preserve the humans block and its known-human line attribution.
 ///
-/// Repro from the issue:
+/// Reproduction:
 /// 1. AI commit 1: AI adds lines to a file (with some lines the human later overrides)
 /// 2. Human commit: human edits the same file (known_human checkpoint)
 /// 3. AI commit 2: AI adds more lines

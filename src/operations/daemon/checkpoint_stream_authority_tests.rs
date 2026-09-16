@@ -416,7 +416,7 @@ fn checkpoint_stream_authority_binds_pi_header_id_under_host_session_root() {
 #[serial]
 fn checkpoint_stream_authority_binds_windsurf_id_to_host_transcript_name() {
     let fixture = CheckpointStreamFixture::new();
-    // ENG-338: inject the home directory directly because Windows known-home
+    // Inject the home directory directly because Windows known-home
     // discovery does not honor HOME or USERPROFILE overrides.
     let home = fixture._temp.path().join("windsurf-home");
     let transcripts = home.join(".windsurf/transcripts");

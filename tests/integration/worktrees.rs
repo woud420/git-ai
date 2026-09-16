@@ -383,7 +383,7 @@ crate::worktree_test_wrappers! {
 
 crate::worktree_test_wrappers! {
     fn stats_head_arg_uses_worktree_head() {
-        // Regression test for issue #285: `git-ai stats head` in a worktree was
+        // `git-ai stats head` in a worktree was
         // resolving HEAD to the *main* repository's HEAD instead of the worktree's
         // own HEAD, so it reported 100% human even for AI-heavy commits.
         let repo = TestRepo::new();

@@ -632,7 +632,7 @@ fn test_cherry_pick_preserves_custom_attributes_from_config() {
     ]);
 }
 
-/// Regression test for #952: Failed cherry-pick with bad args should not corrupt state
+/// A failed cherry-pick with bad args should not corrupt state
 /// for subsequent valid cherry-picks.
 ///
 /// Bug: git-ai pre-hook writes a CherryPickStart with empty source_commits when given
@@ -686,7 +686,7 @@ fn test_cherry_pick_bad_args_dont_corrupt_subsequent_attribution() {
     ]);
 }
 
-/// Regression test for #951: cherry-pick --skip should preserve attribution for the
+/// Cherry-pick --skip should preserve attribution for the
 /// remaining commits in the sequence.
 ///
 /// Bug: when a cherry-pick becomes "empty" (its changes are already present) and the
@@ -750,7 +750,7 @@ fn test_cherry_pick_skip_preserves_subsequent_attribution() {
     ]);
 }
 
-/// Regression test for #955: cherry-pick from a remote repo whose notes have not been
+/// Cherry-pick from a remote repo whose notes have not been
 /// fetched locally should still produce correct AI attribution.
 ///
 /// Bug: the post-cherry-pick hook looked up notes for the source commit to copy

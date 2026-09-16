@@ -213,7 +213,7 @@ fn find_next_sha(s: &str) -> Option<(String, &str)> {
     None
 }
 
-// DEFERRED (code-review #15): old->new merge commits are paired greedily by
+// DEFERRED: old->new merge commits are paired greedily by
 // first parent-set match (the inner loop `break`s on the first new_merge whose
 // parents all map). When two sibling merges in the same range share an
 // identical parent mapping, the first-match pairing can attach old_merge A's
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn test_find_next_sha_returns_full_sha256_oid() {
-        // Regression (#10): a 64-char SHA-256 OID must be returned in full, not
+        // A 64-char SHA-256 OID must be returned in full, not
         // truncated to the first 40 chars.
         let sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         assert_eq!(sha256.len(), 64);
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_parse_range_diff_output_sha256() {
-        // Regression (#10): range-diff with 64-char OIDs must map the full OIDs,
+        // Range-diff with 64-char OIDs must map the full OIDs,
         // not 40-char truncations.
         let old = "1111111111111111111111111111111111111111111111111111111111111111";
         let new = "2222222222222222222222222222222222222222222222222222222222222222";

@@ -270,7 +270,7 @@ fn test_blame_after_merge_conflict_resolution() {
     ]);
 }
 
-/// Regression test for #953: a merge conflict resolved by AI (mock_ai) via checkpoint,
+/// A merge conflict resolved by AI (mock_ai) via checkpoint,
 /// committed without an active AI coding session, must produce correct attribution.
 ///
 /// Scenario: Two branches diverge on the same line.  The merge conflicts.  An AI tool

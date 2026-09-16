@@ -118,7 +118,7 @@ fn apply_worktree_state(
         .rfind(|change| change.reference == "HEAD");
 
     let (head, branch, detached) = if let Some(head_change) = head_change {
-        // DEFERRED (code-review #12): `detached` is inferred as "no unique
+        // DEFERRED: `detached` is inferred as "no unique
         // branch ref moved with HEAD". When a checkout/switch to an EXISTING
         // branch produces an ambiguous ref-change pairing (e.g. multiple
         // refs/heads/* share the same old->new as HEAD, so

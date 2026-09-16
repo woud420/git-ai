@@ -377,7 +377,7 @@ fn test_composite_pk_allows_same_session_id_different_streams() {
 fn test_composite_pk_allows_same_session_id_different_paths() {
     let (db, _temp) = create_test_db();
 
-    // This is the #1461 scenario: same session_id, same stream_kind, different paths
+    // Different paths may share the same session_id and stream_kind.
     let mut stream1 = create_test_stream("colliding-session");
     stream1.stream_path = "/worktree-a/transcript.jsonl".to_string();
     db.insert_stream(&stream1).unwrap();

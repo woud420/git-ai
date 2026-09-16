@@ -245,9 +245,9 @@ fn test_revert_multiple_commits_restores_each_original_attribution() {
     // recovery for the 2nd+ reverted commit in a single multi-commit revert is a
     // known pre-existing limitation (the source note is located via
     // first-parent of the reverted commit, which for chained deletes does not
-    // hold that file's original attestation — see the deferred #13 note in
-    // ref_cursor.rs). This test pins the batched path's behavior so the
-    // spawn-count reduction is verified behavior-preserving.
+    // hold that file's original attestation — see the deferred limitation in
+    // `ref_cursor/cherry_pick_revert.rs`). This test pins the batched path's
+    // behavior so the spawn-count reduction is verified behavior-preserving.
     repo.git(&["revert", "--no-edit", &del_a, &del_b, &del_c])
         .unwrap();
 

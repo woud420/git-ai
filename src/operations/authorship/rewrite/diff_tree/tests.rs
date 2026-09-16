@@ -143,7 +143,7 @@ fn test_is_tree_pair_separator_invalid() {
 
 #[test]
 fn test_is_tree_pair_separator_accepts_sha256_pair() {
-    // Regression (#10): a SHA-256 tree-pair separator is "64hex 64hex"
+    // A SHA-256 tree-pair separator is "64hex 64hex"
     // (129 bytes), not the hard-coded 81-byte SHA-1 shape.
     let a = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     let b = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";

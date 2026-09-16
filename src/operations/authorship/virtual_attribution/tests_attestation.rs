@@ -38,7 +38,7 @@ fn test_authorship_log_with_metadata_flattens_and_copies_metadata() {
     assert_eq!(metadata.sessions["s"].agent_id.id, "first");
 }
 
-/// Regression (#11): the attestation emit order must be deterministic.
+/// The attestation emit order must be deterministic.
 /// `attributions` is a HashMap and per-file entries are grouped in a
 /// HashMap<author_id, ...>, so naive iteration emits files and entries in a
 /// process-randomised order, making byte-identical commits produce

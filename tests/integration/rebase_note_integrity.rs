@@ -10,7 +10,7 @@
 /// `existing_files`, which includes files introduced by commits K+1, K+2, … (future
 /// commits).
 ///
-/// Concrete example from PR #967 (5-commit chain):
+/// Concrete five-commit example:
 ///   - Commit f70ab45e (early – daemon changes only): note shows `revert_hooks.rs`
 ///     attributed, but revert_hooks.rs was first introduced in a LATER commit
 ///     (f1fdede4). Every intermediate commit ended up with the same large set of
@@ -1217,7 +1217,7 @@ fn test_rebase_metadata_only_notes_survive_slow_path() {
         "fn ai_added() {}".ai()
     ]);
 
-    // Verify human-only commit still has a note after rebase (the fix for #1079).
+    // Verify the human-only commit still has a note after rebase.
     let post_rebase_human_sha = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
     let post_note = repo.read_authorship_note(&post_rebase_human_sha);
     assert!(

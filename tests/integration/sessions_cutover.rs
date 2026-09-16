@@ -1517,9 +1517,9 @@ fn test_show_prompt_finds_old_format_prompt_in_history() {
 }
 
 // Test 17: git-ai stats --json works correctly with old-format notes.
-// After the stats simplification (PR #1154), prompt-era fields like total_additions,
-// total_deletions, and overriden_lines are no longer surfaced. Stats are now purely
-// diff-based. This test verifies that old-format notes don't break stats and that
+// Stats now derive purely from diffs; prompt-era fields like total_additions,
+// total_deletions, and overriden_lines are not surfaced. This test verifies that
+// old-format notes don't break stats and that
 // diff-based ai_accepted still works correctly.
 #[test]
 fn test_stats_json_works_with_old_format_notes() {

@@ -1012,7 +1012,7 @@ mod tests {
         );
     }
 
-    /// Regression test for #1039: install_hooks_at should succeed even when
+    /// install_hooks_at should succeed even when
     /// the parent directory does not yet exist.
     #[test]
     fn test_install_hooks_creates_missing_parent_dir() {

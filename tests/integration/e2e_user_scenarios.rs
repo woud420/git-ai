@@ -1037,9 +1037,8 @@ def handle_error(err):
 }
 
 // ---------------------------------------------------------------------------
-// Test: Issue #394 — Multi-user collaboration with code reformatting and AI
+// Test: Multi-user collaboration with code reformatting and AI
 //
-// Scenario from https://github.com/git-ai-project/git-ai/issues/394:
 // 1. User test-a creates a single-line function and commits
 // 2. User test-b checkpoints, reformats + wraps that function with AI lines,
 //    checkpoints as AI, and commits
@@ -1091,7 +1090,7 @@ console.log('b')
         .unwrap();
 
     // Verify blame: the 2 new wrapper lines should be AI, and the 3
-    // reformatted function lines' attribution is what issue #394 questions.
+    // reformatted function lines should retain AI attribution.
     let blame_output = repo.git_ai(&["blame", "hello.js"]).unwrap();
     eprintln!("=== git-ai blame output (issue #394) ===\n{blame_output}");
 
@@ -1101,7 +1100,7 @@ console.log('b')
         stats.human_additions, stats.ai_additions, stats.ai_accepted
     );
 
-    // Issue #394 reported 60% test-b / 40% AI (3 reformatted function lines
+    // A misclassification reports 60% test-b / 40% AI (3 reformatted function lines
     // attributed to the committer instead of AI).  Current behaviour: all 5
     // lines are attributed to AI (the entire diff between the pre-edit and
     // post-edit checkpoints is AI), so the original split no longer reproduces.

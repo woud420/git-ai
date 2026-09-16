@@ -9224,7 +9224,7 @@ fn test_human_conflict_resolves_all_ai_lines_replaced() {
     );
 }
 
-/// Regression test for #1079: when the ONLY AI-tracked file is the conflict file,
+/// When the ONLY AI-tracked file is the conflict file,
 /// and the human resolves with completely different content, the original authorship
 /// note must still be remapped to the rebased commit.  Before this fix the slow path
 /// produced no note (content-diff found no matching AI lines) and the metadata-only
@@ -9293,7 +9293,7 @@ fn test_human_conflict_ai_file_is_conflict_file_note_preserved() {
     assert_note_files_exact(&repo, &chain[0], "c1_files", &[]);
 }
 
-/// Regression test for #1079: three AI commits on a feature branch; the second
+/// With three AI commits on a feature branch, the second
 /// commit's file conflicts with upstream.  After human conflict resolution and
 /// `rebase --continue`, ALL three rebased commits must retain their authorship
 /// notes.  Before the fix, the conflict commit's note was lost (content-diff

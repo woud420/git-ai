@@ -1644,7 +1644,7 @@ fn test_ci_rebase_merge_multiple_commits_standard_human() {
     ]);
 }
 
-/// Regression test for #1473: a squash merge of a multi-commit PR onto a *linear*
+/// A squash merge of a multi-commit PR onto a *linear*
 /// main branch must not be misclassified as a rebase merge and pollute unrelated
 /// base commits. Drives `CiContext::run_with_options` directly (still supported).
 #[test]

@@ -1074,7 +1074,7 @@ fn test_rebase_empty_file_does_not_panic_or_pollute_attribution() {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #1079: conflict rebase — AI file IS the conflict file
+// Conflict rebase where the AI-authored file is the conflict file
 // ---------------------------------------------------------------------------
 
 /// When the ONLY AI-tracked file is the one that has a merge conflict, and the
@@ -1145,7 +1145,7 @@ fn test_rebase_conflict_on_ai_file_preserves_note() {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #1079: metadata-only notes must survive slow-path rebase
+// Metadata-only notes must survive slow-path rebase
 // ---------------------------------------------------------------------------
 
 /// When a rebase forces the slow path (AI-tracked file blobs differ between

@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn completion_log_waiters_preserve_caller_owned_policies() {
-        // ENG-356: exact-count fixture logs must have no background writer.
+        // Exact-count fixture logs must have no background writer.
         let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
         let family = repo.daemon_family_key();
         let log = "{\"status\":\"ok\"}\n{\"status\":\"error\",\"sync_tracked\":true,\"test_sync_session\":\"other\",\"error\":\"before baseline\"}\n{\"kind\":\"checkpoint\",\"status\":\"ok\",\"sync_tracked\":true,\"test_sync_session\":\"wanted\"}\n";

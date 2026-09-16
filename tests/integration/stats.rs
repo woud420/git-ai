@@ -806,7 +806,6 @@ fn test_post_commit_large_ignored_files_do_not_trigger_skip_warning() {
 #[test]
 fn test_stats_ignores_renamed_files() {
     // Test that stats correctly ignores pure renames (no content changes)
-    // Reproduces issue #923
     let repo = TestRepo::new();
 
     // Initial commit with files in a directory

@@ -181,7 +181,7 @@ fn test_working_dir_diff_stats_with_rename() {
     );
 }
 
-/// Regression for ENG-326: stored NFC paths must match canonically equivalent
+/// Stored NFC paths must match canonically equivalent
 /// NFD paths emitted by Git without widening the status diff to unrelated files.
 #[test]
 fn test_status_normalizes_canonically_equivalent_non_ascii_pathspecs() {

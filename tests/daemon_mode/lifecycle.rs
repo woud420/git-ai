@@ -213,8 +213,8 @@ fn process_exists(pid: u32) -> bool {
     }
 }
 
-/// Regression test for issue #919: daemon must recover from panics in the
-/// side-effect pipeline and continue processing subsequent commands.
+/// The daemon must recover from panics in the side-effect pipeline and continue
+/// processing subsequent commands.
 ///
 /// This test:
 /// 1. Starts a dedicated daemon with a file-based panic flag.

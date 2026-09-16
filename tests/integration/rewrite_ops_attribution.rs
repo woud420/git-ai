@@ -16,6 +16,34 @@ use serde_json::json;
 // Category 0: Trace2 ref-cursor branch lifecycle
 // =============================================================================
 
+#[test]
+fn test_update_ref_zero_delete_recreate_preserves_attribution() {
+    let repo = TestRepo::new();
+    let path = repo.path().join("main.txt");
+    fs::write(&path, "untracked\n").unwrap();
+    repo.stage_all_and_commit("untracked base").unwrap();
+    let mut file = repo.filename("main.txt");
+    file.assert_committed_lines(crate::lines!["untracked".unattributed_human()]);
+
+    repo.git_ai(&["checkpoint", "human", "main.txt"]).unwrap();
+    fs::write(&path, "untracked\nai\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "main.txt"]).unwrap();
+    repo.stage_all_and_commit("ai addition").unwrap();
+    file.assert_committed_lines(crate::lines!["untracked".unattributed_human(), "ai".ai()]);
+
+    let head = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+    let reference = "refs/heads/zero-delete";
+    repo.git(&["update-ref", reference, &head]).unwrap();
+    repo.git(&["update-ref", reference, &"0".repeat(head.len()), &head])
+        .unwrap();
+    assert!(repo.git(&["show-ref", "--verify", reference]).is_err());
+    file.assert_committed_lines(crate::lines!["untracked".unattributed_human(), "ai".ai()]);
+
+    repo.git(&["update-ref", reference, &head]).unwrap();
+    repo.git(&["checkout", "zero-delete"]).unwrap();
+    file.assert_committed_lines(crate::lines!["untracked".unattributed_human(), "ai".ai()]);
+}
+
 /// Deleting a branch removes its reflog file. Recreating the same branch name
 /// starts a new reflog generation at byte 0, so the daemon cursor must clear any
 /// offset it learned from the previous generation.

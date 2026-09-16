@@ -2,9 +2,9 @@ use crate::error::GitAiError;
 use crate::model::domain::{
     AnalysisResult, CommandClass, Confidence, NormalizedCommand, ResetKind, SemanticEvent,
 };
+use crate::model::git_oid::{is_non_zero_oid, is_zero_oid};
 use crate::operations::daemon::analyzers::{AnalysisView, CommandAnalyzer, command_args};
 use crate::operations::git::cli_parser::explicit_rebase_branch_arg;
-use crate::operations::git::oid::{is_non_zero_oid, is_zero_oid};
 
 #[derive(Default)]
 pub struct HistoryAnalyzer;

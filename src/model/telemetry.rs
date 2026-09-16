@@ -6,7 +6,7 @@
 //! `observability` do not have to reach into `operations::daemon` just to name
 //! the payload type.
 
-use crate::metrics::MetricEvent;
+use crate::model::metrics::types::MetricEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

@@ -1,15 +1,9 @@
-//! Layer import-direction policy for `src/**/*.rs`.
+//! Layer dependency guard for `src/**/*.rs`.
 //!
-//! Enforces the intended dependency direction from
-//! `docs/decisions/2026-07-20-layered-architecture-plan.md`: the pure domain
-//! (`model`, excluding the persistence adapter `model/repository`) and the
-//! network adapters (`clients`) must not depend on layers above them. This is
-//! GPT's "dependency enforcement" as a ~100-line policy test, not a framework.
-//!
-//! The test scans `use crate::…` (and a few infra crates) lines per layer and
-//! fails on any forbidden import direction. Inline fully-qualified paths are not
-//! scanned; a small number of known residual leaks that cannot be fixed
-//! surgically within P9.2 are listed in `ALLOWED_EXCEPTIONS` with a reason.
+//! Enforces the audited boundaries in `docs/architecture/inventory.md`.
+//! This lexical check covers flat/multiline imports and rooted paths; nested
+//! import groups fail closed. It is not a Rust resolver: macros, re-exports,
+//! trait implementations and file-relative paths in inline modules need review.
 
 use std::path::{Path, PathBuf};
 
@@ -23,142 +17,111 @@ struct Rule {
     /// Human-readable layer name for messages.
     layer: &'static str,
     /// `src`-relative path prefix the rule applies to (POSIX separators).
-    applies_to: &'static str,
+    applies_to: &'static [&'static str],
+    /// Empty outside the audited pure core; otherwise every crate path must match.
+    allowed_crate_prefixes: &'static [&'static str],
     /// Sub-prefixes under `applies_to` that are exempt from this rule.
     excluding: &'static [&'static str],
     /// Crate-root module segments forbidden as the first segment after `crate::`.
     forbidden_crate_modules: &'static [&'static str],
     /// External crate roots forbidden as the first path segment (e.g. `tokio`).
     forbidden_extern_crates: &'static [&'static str],
-    /// Full multi-segment `use` targets forbidden by prefix (checked with
-    /// `starts_with` on the full path after `use ` / `use crate::`).  Each
-    /// entry is the literal prefix to deny, e.g. `"std::fs"` or
-    /// `"crate::model::repository"`.  Applied to both crate-relative and
-    /// extern paths as written in the source.
+    /// Module prefixes denied in imports and, for the pure core/model, inline paths.
     forbidden_prefixes: &'static [&'static str],
 }
 
+const PURE_CORE_FORBIDDEN_PREFIXES: &[&str] = &[
+    "std::fs",
+    "std::io",
+    "std::env",
+    "std::process",
+    "std::net",
+    "std::os",
+    "crate::model::repository",
+    "crate::model::clock",
+];
+const PURE_CORE_FORBIDDEN_CRATES: &[&str] = &[
+    "tokio",
+    "rusqlite",
+    "ureq",
+    "interprocess",
+    "serde_json",
+    "rand",
+    "tracing",
+    "chrono",
+];
+const PURE_GIT_KERNELS: &[&str] = &[
+    "src/operations/git/cli_parser.rs",
+    "src/operations/git/command_classification.rs",
+    "src/operations/git/command_policy.rs",
+];
+
 const RULES: &[Rule] = &[
-    // Pure core domain: no orchestration/interface/network/config, no async or
-    // sqlite infra.
     Rule {
-        layer: "model (pure domain)",
-        applies_to: "src/model",
-        excluding: &["src/model/repository"],
-        forbidden_crate_modules: &["operations", "cli", "clients", "config"],
+        layer: "model (adapter-independent)",
+        applies_to: &["src/model/"],
+        allowed_crate_prefixes: &[],
+        excluding: &["src/model/repository/"],
+        forbidden_crate_modules: &["operations", "cli", "clients", "config", "metrics"],
         forbidden_extern_crates: &["tokio", "rusqlite"],
-        forbidden_prefixes: &[],
+        forbidden_prefixes: &["crate::model::repository"],
     },
-    // Persistence adapter: may import model + config + infra, but not the
-    // orchestration or interface layers.
     Rule {
         layer: "model/repository (persistence adapter)",
-        applies_to: "src/model/repository",
+        applies_to: &["src/model/repository/"],
+        allowed_crate_prefixes: &[],
         excluding: &[],
         forbidden_crate_modules: &["operations", "cli"],
         forbidden_extern_crates: &[],
         forbidden_prefixes: &[],
     },
-    // Network adapters: may import model + config, but not operations.
     Rule {
         layer: "clients (network adapter)",
-        applies_to: "src/clients",
+        applies_to: &["src/clients/"],
+        allowed_crate_prefixes: &[],
         excluding: &[],
         forbidden_crate_modules: &["operations"],
         forbidden_extern_crates: &[],
         forbidden_prefixes: &[],
     },
-    // Daemon pure core — analyzers: no I/O, no config, no network, no async.
-    // Legitimate imports today: crate::error, crate::model::domain,
-    // crate::operations::daemon::analyzers, crate::operations::git::{cli_parser,
-    // repo_state, command_classification}, std::{path, collections, sync}.
     Rule {
         layer: "daemon analyzers (pure core)",
-        applies_to: "src/operations/daemon/analyzers",
+        applies_to: &["src/operations/daemon/analyzers/"],
+        allowed_crate_prefixes: &[
+            "crate::error",
+            "crate::model",
+            "crate::operations::daemon::analyzers",
+            "crate::operations::git::cli_parser",
+            "crate::operations::git::command_classification",
+            "crate::operations::git::command_policy",
+        ],
         excluding: &[],
-        forbidden_crate_modules: &[
-            "cli",
-            "clients",
-            "config",
-            "notes",
-            "tokio_runtime",
-            "observability",
-            "metrics",
-            "process_timeout",
-            "repo_url",
-            "feature_flags",
-            "diagnostic_sentinels",
-        ],
-        forbidden_extern_crates: &["tokio", "rusqlite", "ureq", "interprocess", "serde_json"],
-        forbidden_prefixes: &[
-            "std::fs",
-            "std::io",
-            "std::process",
-            "std::net",
-            "std::os",
-            "tokio::fs",
-            "tokio::net",
-            "tokio::process",
-            "crate::model::repository",
-            "crate::operations::daemon::family_actor",
-            "crate::operations::daemon::ref_cursor",
-            "crate::operations::daemon::trace_normalizer",
-        ],
+        forbidden_crate_modules: &[],
+        forbidden_extern_crates: PURE_CORE_FORBIDDEN_CRATES,
+        forbidden_prefixes: PURE_CORE_FORBIDDEN_PREFIXES,
     },
-    // Daemon pure core — reducer: no I/O, no config, no network, no async.
-    // Legitimate imports today: crate::error, crate::model::domain,
-    // crate::operations::daemon::analyzers, std::path.
     Rule {
         layer: "daemon reducer (pure core)",
-        applies_to: "src/operations/daemon/reducer.rs",
+        applies_to: &["src/operations/daemon/reducer.rs"],
+        allowed_crate_prefixes: &[
+            "crate::error",
+            "crate::model",
+            "crate::operations::daemon::analyzers",
+        ],
         excluding: &[],
-        forbidden_crate_modules: &[
-            "cli",
-            "clients",
-            "config",
-            "notes",
-            "tokio_runtime",
-            "observability",
-            "metrics",
-            "process_timeout",
-            "repo_url",
-            "feature_flags",
-            "diagnostic_sentinels",
-        ],
-        forbidden_extern_crates: &["tokio", "rusqlite", "ureq", "interprocess", "serde_json"],
-        forbidden_prefixes: &[
-            "std::fs",
-            "std::io",
-            "std::process",
-            "std::net",
-            "std::os",
-            "tokio::fs",
-            "tokio::net",
-            "tokio::process",
-            "crate::model::repository",
-            "crate::operations::daemon::family_actor",
-            "crate::operations::daemon::ref_cursor",
-            "crate::operations::daemon::trace_normalizer",
-        ],
+        forbidden_crate_modules: &[],
+        forbidden_extern_crates: PURE_CORE_FORBIDDEN_CRATES,
+        forbidden_prefixes: PURE_CORE_FORBIDDEN_PREFIXES,
     },
-];
-
-/// Known residual leaks that cannot be fixed surgically without a larger
-/// refactor. Each entry is one deliberate escape hatch; the list is empty
-/// after P9.3 moved the last exception (`transcript::Message`).
-const ALLOWED_EXCEPTIONS: &[(&str, &str)] = &[];
-
-/// Files in the daemon pure core whose non-test content is checked for IO
-/// substrings that use-line scanning cannot catch (e.g. `.canonicalize()`,
-/// inline `std::process::` paths).  See the two scanner-gap notes
-/// in the map for reducer.rs and generic.rs.
-const PURE_CORE_IO_CHECK_FILES: &[&str] = &[
-    "src/operations/daemon/reducer.rs",
-    "src/operations/daemon/analyzers/mod.rs",
-    "src/operations/daemon/analyzers/generic.rs",
-    "src/operations/daemon/analyzers/history.rs",
-    "src/operations/daemon/analyzers/transport.rs",
-    "src/operations/daemon/analyzers/workspace.rs",
+    Rule {
+        layer: "Git grammar and command policy (pure core)",
+        applies_to: PURE_GIT_KERNELS,
+        allowed_crate_prefixes: &["crate::operations::git::command_policy"],
+        excluding: &[],
+        forbidden_crate_modules: &[],
+        forbidden_extern_crates: PURE_CORE_FORBIDDEN_CRATES,
+        forbidden_prefixes: PURE_CORE_FORBIDDEN_PREFIXES,
+    },
 ];
 
 /// Substrings whose presence in non-test code signals filesystem or process IO.
@@ -168,6 +131,14 @@ const PURE_CORE_FORBIDDEN_IO_SUBSTRINGS: &[&str] = &[
     "std::fs::",
     "std::io::",
     "File::open",
+    ".exists(",
+    ".try_exists(",
+    ".metadata(",
+    ".symlink_metadata(",
+    ".read_dir(",
+    ".is_file(",
+    ".is_dir(",
+    "::now(",
 ];
 
 /// The stream-adapter layer owns transcript parsing and discovery policy.
@@ -178,7 +149,7 @@ const PURE_CORE_FORBIDDEN_IO_SUBSTRINGS: &[&str] = &[
 const STREAMS_FORBIDDEN_DEPENDENCIES: &[&str] = &["crate::operations::daemon"];
 
 fn rule_applies(rule: &Rule, rel: &str) -> bool {
-    if !rel.starts_with(rule.applies_to) {
+    if !rule.applies_to.iter().any(|prefix| rel.starts_with(prefix)) {
         return false;
     }
     !rule.excluding.iter().any(|ex| rel.starts_with(ex))
@@ -199,8 +170,7 @@ fn expand_use_path(path: &str) -> Vec<String> {
     };
     let prefix = &path[..brace_start];
     let Some(brace_end) = path.find('}') else {
-        // Malformed — just return as-is; the outer check will not match.
-        return vec![path.to_string()];
+        panic!("layer_import_policy: incomplete import `{path}`");
     };
     let inner = &path[brace_start + 1..brace_end];
     if inner.contains('{') {
@@ -212,47 +182,28 @@ fn expand_use_path(path: &str) -> Vec<String> {
     }
     inner
         .split(',')
-        .map(|m| format!("{}{}", prefix, m.trim()))
+        .map(str::trim)
+        .filter(|member| !member.is_empty())
+        .map(|member| format!("{prefix}{member}"))
         .collect()
 }
 
-/// Extract the first path segment and expanded full paths from a `use` line.
-///
-/// Returns `(is_crate_relative, first_segment, expanded_full_paths)` where
-/// `expanded_full_paths` are fully-qualified paths starting with either
-/// `"crate::"` (for crate-relative imports) or the crate name (for extern
-/// imports), suitable for `starts_with` matching against `forbidden_prefixes`.
-///
-/// Brace groups are expanded so that `use std::{fs, io};` yields two entries
-/// `["std::fs", "std::io"]`.
-fn parse_use_target(line: &str) -> Option<(bool, &str, Vec<String>)> {
-    let line = line.trim();
-    // Accept both `use …` and `pub use …` (and `pub(crate) use …`).
-    let rest = line
+/// Expand one complete import statement; nested groups remain unsupported.
+fn parse_use_target(statement: &str) -> Option<(bool, &str, Vec<String>)> {
+    let statement = statement.trim();
+    let target = statement
         .strip_prefix("pub(crate) use ")
-        .or_else(|| line.strip_prefix("pub use "))
-        .or_else(|| line.strip_prefix("use "))?;
-    const SEP: [char; 5] = [':', ';', '{', ' ', ','];
-    if let Some(after_crate) = rest.strip_prefix("crate::") {
-        let seg = after_crate.split(SEP).next()?;
-        // Slice full_target from after_crate so it contains only the path
-        // after "crate::" (without the prefix itself), then expand brace groups
-        // and re-attach the "crate::" prefix for matching.
-        // Use ';' as the sole terminator so that spaces inside brace groups
-        // (e.g. `{repository, domain}`) are not treated as end-of-path.
-        let target_end = after_crate.find(';').unwrap_or(after_crate.len());
-        let raw_target = &after_crate[..target_end];
-        let expanded = expand_use_path(raw_target)
-            .into_iter()
-            .map(|m| format!("crate::{m}"))
-            .collect();
-        return Some((true, seg, expanded));
-    }
-    let seg = rest.split(SEP).next()?;
-    let target_end = rest.find(';').unwrap_or(rest.len());
-    let raw_target = &rest[..target_end];
-    let expanded = expand_use_path(raw_target);
-    Some((false, seg, expanded))
+        .or_else(|| statement.strip_prefix("pub use "))
+        .or_else(|| statement.strip_prefix("use "))?
+        .trim_end_matches(';')
+        .trim();
+    let is_crate = target.starts_with("crate::");
+    let first = target
+        .strip_prefix("crate::")
+        .unwrap_or(target)
+        .split([':', ';', '{', ' ', ','])
+        .next()?;
+    Some((is_crate, first, expand_use_path(target)))
 }
 
 fn collect_src_files(root: &Path) -> Vec<(String, String)> {
@@ -325,97 +276,191 @@ fn non_test_content(content: &str) -> &str {
     }
 }
 
-#[test]
-fn src_layers_respect_import_direction() {
-    let root = repo_root();
-    let files = collect_src_files(&root);
-    let mut violations = Vec::new();
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with("::"))
+}
 
-    for (rel, content) in &files {
-        let excepted = ALLOWED_EXCEPTIONS.iter().any(|(f, _)| f == rel);
-        for rule in RULES {
-            if !rule_applies(rule, rel) {
+fn resolve_relative_path(rel: &str, path: &str) -> String {
+    let path = path
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("::");
+    if !path.starts_with("self::") && !path.starts_with("super::") {
+        return path.to_string();
+    }
+    let mut module: Vec<_> = rel
+        .strip_prefix("src/")
+        .unwrap()
+        .trim_end_matches(".rs")
+        .split('/')
+        .collect();
+    if module.last() == Some(&"mod") {
+        module.pop();
+    }
+    let mut tail = path.strip_prefix("self::").unwrap_or(path);
+    while let Some(rest) = tail.strip_prefix("super::") {
+        assert!(
+            module.pop().is_some(),
+            "relative import escapes crate: {rel}: {path}"
+        );
+        tail = rest;
+    }
+    format!("crate::{}::{tail}", module.join("::"))
+}
+
+fn source_violations(rel: &str, content: &str) -> Vec<String> {
+    // A complete use statement wins over its inner paths, so brace prefixes
+    // cannot be mistaken for dependencies on the whole parent module.
+    static PATHS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\buse\s+[A-Za-z_:][A-Za-z_0-9:*,{}\s]*;|\b(?:crate|self|super|std|tokio|rusqlite|ureq|interprocess|serde_json|rand|tracing|chrono)(?:::[A-Za-z_][A-Za-z_0-9]*)+").unwrap()
+    });
+    let rules: Vec<_> = RULES
+        .iter()
+        .filter(|rule| rule_applies(rule, rel))
+        .collect();
+    if rules.is_empty() {
+        return Vec::new();
+    }
+    let pure = rules
+        .iter()
+        .any(|rule| !rule.allowed_crate_prefixes.is_empty());
+    let content = content
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("//") {
+                ""
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let production_end = if pure {
+        non_test_content(&content).len()
+    } else {
+        content.find("#[cfg(test)]\nmod ").unwrap_or(content.len())
+    };
+    let mut violations = Vec::new();
+    for matched in PATHS.find_iter(&content) {
+        let imported = parse_use_target(matched.as_str());
+        let is_import = imported.is_some();
+        let after_test_module = matched.start() >= production_end;
+        // Keep the original whole-file import check. Relative paths inside
+        // inline test modules cannot be resolved from the filename alone.
+        if after_test_module && !is_import {
+            continue;
+        }
+        // Preserve the existing import-only scope for persistence/client tests.
+        if imported.is_none() && !pure && !rel.starts_with("src/model/") {
+            continue;
+        }
+        if imported.is_none() && rel.starts_with("src/model/repository/") {
+            continue;
+        }
+        let paths =
+            imported.map_or_else(|| vec![matched.as_str().to_string()], |(_, _, paths)| paths);
+        for path in paths {
+            if is_import {
+                let words: Vec<_> = path.split_whitespace().collect();
+                if !matches!(words.as_slice(), [_] | [_, "as", _]) {
+                    violations.push(format!(
+                        "{rel}: split comments and imports so `{path}` can be checked"
+                    ));
+                    continue;
+                }
+            }
+            if after_test_module && (path.starts_with("super::") || path.starts_with("self::")) {
                 continue;
             }
-            for (lineno, line) in content.lines().enumerate() {
-                let Some((is_crate, seg, expanded_paths)) = parse_use_target(line) else {
-                    continue;
-                };
-                let forbidden_first_seg = if is_crate {
-                    rule.forbidden_crate_modules.contains(&seg)
+            let mut path = resolve_relative_path(rel, &path);
+            if is_import {
+                path = path
+                    .strip_suffix("::self")
+                    .or_else(|| path.strip_suffix("::*"))
+                    .unwrap_or(&path)
+                    .to_string();
+            }
+            for rule in &rules {
+                let is_crate = path.starts_with("crate::");
+                let root = path
+                    .strip_prefix("crate::")
+                    .unwrap_or(&path)
+                    .split("::")
+                    .next()
+                    .unwrap();
+                let forbidden_root = if is_crate {
+                    rule.forbidden_crate_modules
                 } else {
-                    rule.forbidden_extern_crates.contains(&seg)
+                    rule.forbidden_extern_crates
                 };
-                // Prefix check: match each expanded path against each forbidden
-                // prefix. Brace groups are already expanded by parse_use_target.
-                let forbidden_prefix = expanded_paths.iter().any(|expanded| {
-                    rule.forbidden_prefixes
-                        .iter()
-                        .any(|p| expanded.starts_with(p))
-                });
-                if (forbidden_first_seg || forbidden_prefix) && !excepted {
+                let forbidden = matches!(path.as_str(), "crate" | "self" | "super")
+                    || forbidden_root.contains(&root)
+                    || rule.forbidden_prefixes.iter().any(|prefix| {
+                        path_has_prefix(&path, prefix)
+                            || (is_import && path_has_prefix(prefix, &path))
+                    })
+                    || (is_crate
+                        && !rule.allowed_crate_prefixes.is_empty()
+                        && !rule
+                            .allowed_crate_prefixes
+                            .iter()
+                            .any(|prefix| path_has_prefix(&path, prefix)));
+                if forbidden {
+                    let line = content[..matched.start()]
+                        .bytes()
+                        .filter(|byte| *byte == b'\n')
+                        .count()
+                        + 1;
                     violations.push(format!(
-                        "{rel}:{}: {} layer must not `use {}{}::…`  ({})",
-                        lineno + 1,
-                        rule.layer,
-                        if is_crate { "crate::" } else { "" },
-                        seg,
-                        line.trim(),
+                        "{rel}:{line}: {} must not depend on `{path}`",
+                        rule.layer
                     ));
                 }
             }
         }
     }
+    if pure {
+        for forbidden in PURE_CORE_FORBIDDEN_IO_SUBSTRINGS {
+            if let Some(offset) = content[..production_end].find(forbidden) {
+                let line = content[..offset]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count()
+                    + 1;
+                violations.push(format!(
+                    "{rel}:{line}: pure core must not contain `{forbidden}`"
+                ));
+            }
+        }
+    }
+    violations
+}
 
-    // Guard against stale exceptions: every listed file must still exist.
-    for (f, _) in ALLOWED_EXCEPTIONS {
-        assert!(
-            files.iter().any(|(rel, _)| rel == f),
-            "ALLOWED_EXCEPTIONS lists {f}, which no longer exists — remove its entry"
-        );
+#[test]
+fn src_layers_respect_import_direction() {
+    let root = repo_root();
+    let files = collect_src_files(&root);
+    for rule in RULES {
+        for prefix in rule.applies_to {
+            assert!(
+                files.iter().any(|(rel, _)| rel.starts_with(prefix)),
+                "layer policy scope {prefix} matches no source files"
+            );
+        }
+    }
+    let mut violations = Vec::new();
+
+    for (rel, content) in &files {
+        violations.extend(source_violations(rel, content));
     }
 
     assert!(
         violations.is_empty(),
         "layer import-direction violations:\n  {}",
-        violations.join("\n  ")
-    );
-}
-
-/// Textual IO-freedom check for the daemon pure core.
-///
-/// Closes two scanner gaps noted in the analysis map:
-/// (1) inline fully-qualified calls like `crate::ops::foo::bar()` have no `use`
-///     statement and are invisible to the import scanner.
-/// (2) methods on `std::path::Path` (e.g. `.canonicalize()`) perform real
-///     filesystem syscalls with no import signature.
-///
-/// This test scans the non-test portion of each pure-core file for substrings
-/// that indicate filesystem or process IO and fails if any are found.
-#[test]
-fn daemon_pure_core_is_io_free() {
-    let root = repo_root();
-    let files = collect_src_files(&root);
-    let mut violations = Vec::new();
-
-    for check_rel in PURE_CORE_IO_CHECK_FILES {
-        let Some((_, content)) = files.iter().find(|(rel, _)| rel == check_rel) else {
-            panic!("pure-core IO check: expected file {check_rel} not found in src/");
-        };
-        let production = non_test_content(content);
-        for forbidden in PURE_CORE_FORBIDDEN_IO_SUBSTRINGS {
-            if let Some(offset) = production.find(forbidden) {
-                let lineno = production[..offset].bytes().filter(|b| *b == b'\n').count() + 1;
-                violations.push(format!(
-                    "{check_rel}:{lineno}: pure core must not contain `{forbidden}`"
-                ));
-            }
-        }
-    }
-
-    assert!(
-        violations.is_empty(),
-        "daemon pure-core IO violations:\n  {}",
         violations.join("\n  ")
     );
 }
@@ -539,6 +584,143 @@ mod tests {
             expanded
                 .iter()
                 .any(|p| p.starts_with("crate::model::repository"))
+        );
+    }
+}
+
+#[test]
+fn policy_rejects_upward_dependency_syntax() {
+    let reducer = "src/operations/daemon/reducer.rs";
+    let cases = [
+        (reducer, "use crate::operations::git::oid::is_zero_oid;"),
+        (reducer, "use crate::{operations::git::oid, model::domain};"),
+        (
+            reducer,
+            "use crate::operations::{\n git::oid,\n daemon::analyzers,\n};",
+        ),
+        (reducer, "use crate::operations::git::oid as ids;"),
+        (
+            reducer,
+            "fn f() { use crate::{operations::git::oid, model::domain}; }",
+        ),
+        (reducer, "use crate::model as m;"),
+        (reducer, "use crate::model::{self as m, domain};"),
+        (reducer, "use crate::model::*;"),
+        (reducer, "use std as platform;"),
+        (
+            reducer,
+            "let x = 0; // use the canonical value\nuse crate::operations::git::oid::is_zero_oid;",
+        ),
+        (reducer, "#[cfg(test)]\nmod tests {}\nuse std::fs::File;"),
+        (
+            reducer,
+            "fn f() { let url = \"http://example\"; crate::operations::git::oid::is_zero_oid(\"0\"); }",
+        ),
+        (
+            reducer,
+            "fn f() { crate::operations::git::oid::is_zero_oid(\"0\"); }",
+        ),
+        (reducer, "use super::super::git::oid;"),
+        (
+            reducer,
+            "fn f() { super::super::git::oid::is_zero_oid(\"0\"); }",
+        ),
+        (reducer, "use crate::operations::daemon::actor_coordinator;"),
+        (
+            "src/operations/daemon/analyzers/history.rs",
+            "use crate::operations::git::repository::Repository;",
+        ),
+        (
+            "src/model/domain.rs",
+            "use crate::model::repository::notes_db;",
+        ),
+        ("src/model/domain.rs", "use crate::metrics::MetricEvent;"),
+        ("src/model/domain.rs", "use super::repository::notes_db;"),
+    ];
+    let missed: Vec<_> = cases
+        .into_iter()
+        .filter(|(file, source)| source_violations(file, source).is_empty())
+        .collect();
+    assert!(
+        missed.is_empty(),
+        "policy missed forbidden dependencies: {missed:?}"
+    );
+}
+
+#[test]
+fn policy_accepts_audited_pure_dependencies() {
+    for (file, source) in [
+        (
+            "src/operations/daemon/reducer.rs",
+            "use crate::model::domain::{\n FamilyState,\n RefChange,\n};",
+        ),
+        (
+            "src/operations/daemon/reducer.rs",
+            "use crate::{error::GitAiError, model::domain};",
+        ),
+        (
+            "src/operations/daemon/reducer.rs",
+            "fn f() { crate::model::git_oid::is_zero_oid(\"0\"); }",
+        ),
+        (
+            "src/operations/daemon/analyzers/history.rs",
+            "use crate::operations::git::cli_parser::explicit_rebase_branch_arg;",
+        ),
+        (
+            "src/operations/daemon/analyzers/generic.rs",
+            "use crate::operations::git::command_classification::is_definitely_read_only_command;",
+        ),
+        (
+            "src/operations/daemon/analyzers/generic.rs",
+            "use crate::operations::git::command_policy::{is_repo_admin_command, is_transport_command};",
+        ),
+        (
+            "src/operations/git/command_classification.rs",
+            "use super::command_policy;",
+        ),
+        ("src/model/stat_snapshot.rs", "use std::fs::Metadata;"),
+        ("src/model/stream_types.rs", "use std::io::BufRead;"),
+    ] {
+        assert!(
+            source_violations(file, source).is_empty(),
+            "unexpected violation: {file}: {source}"
+        );
+    }
+}
+
+#[test]
+fn policy_rejects_effects_in_pure_git_kernels() {
+    for file in [
+        "src/operations/git/cli_parser.rs",
+        "src/operations/git/command_classification.rs",
+        "src/operations/git/command_policy.rs",
+    ] {
+        for source in [
+            "use std::fs::File;",
+            "fn f() { std::env::var(\"HOME\"); }",
+            "fn f() { crate::model::clock::now_secs(); }",
+            "use crate::operations::daemon::family_actor;",
+            "fn f() { rand::rng(); }",
+        ] {
+            assert!(
+                !source_violations(file, source).is_empty(),
+                "policy missed effect: {file}: {source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn policy_covers_future_analyzer_files() {
+    let file = "src/operations/daemon/analyzers/future.rs";
+    for source in [
+        "fn f(path: &std::path::Path) { path.exists(); }",
+        "fn f() { std::time::SystemTime::now(); }",
+        "fn f() { crate::model::clock::now_secs(); }",
+    ] {
+        assert!(
+            !source_violations(file, source).is_empty(),
+            "new analyzer escaped pure-core policy: {source}"
         );
     }
 }

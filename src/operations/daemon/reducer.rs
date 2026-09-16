@@ -2,8 +2,8 @@ use crate::error::GitAiError;
 use crate::model::domain::{
     AnalysisResult, AppliedCommand, FamilyState, GlobalState, NormalizedCommand, WorktreeState,
 };
+use crate::model::git_oid::is_zero_oid;
 use crate::operations::daemon::analyzers::{AnalysisView, AnalyzerRegistry};
-use crate::operations::git::oid::is_zero_oid;
 use std::path::PathBuf;
 
 /// Convenience wrapper around [`reduce_family_command_with_ref_snapshot`] for
@@ -360,8 +360,22 @@ mod tests {
     }
 
     #[test]
-    fn reducer_removes_refs_deleted_with_full_width_zero_oid() {
-        for zero_oid in ["0".repeat(40), "0".repeat(64)] {
+    fn reducer_preserves_ref_deletion_and_raw_observation_semantics() {
+        for (new, deleted) in [
+            (String::new(), true),
+            (" \t\n".to_string(), true),
+            ("0".repeat(40), true),
+            ("0".repeat(64), true),
+            ("0".repeat(39), false),
+            ("0".repeat(41), false),
+            ("0".repeat(63), false),
+            ("0".repeat(65), false),
+            (format!(" {}", "0".repeat(40)), false),
+            (format!("{}\n", "0".repeat(64)), false),
+            ("abc".to_string(), false),
+            ("A".repeat(40), false),
+            ("f".repeat(64), false),
+        ] {
             let mut state = family_state();
             state.refs.insert(
                 "refs/heads/feature".to_string(),
@@ -372,12 +386,18 @@ mod tests {
             cmd.ref_changes = vec![RefChange {
                 reference: "refs/heads/feature".to_string(),
                 old: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
-                new: zero_oid,
+                new: new.clone(),
             }];
-
-            let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
-
-            assert!(!state.refs.contains_key("refs/heads/feature"));
+            let observed = cmd.ref_changes.clone();
+            let (applied, analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+            assert_eq!(
+                state.refs.get("refs/heads/feature"),
+                if deleted { None } else { Some(&new) },
+                "new ref value: {new:?}",
+            );
+            assert_eq!(applied.command.ref_changes, observed);
+            assert_eq!(applied.analysis, analysis);
+            assert_eq!(applied.seq, 1);
         }
     }
 

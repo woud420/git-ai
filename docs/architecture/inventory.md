@@ -1,131 +1,79 @@
 # Architecture Inventory
 
-Snapshot of every `src/` module classified by layer, with the known violations
-of the intended dependency direction. Produced 2026-07-21 and source-map
-references refreshed 2026-09-06; update alongside layer-moving PRs. The
-intended direction and the plan that consumes this inventory live in
-`../decisions/2026-07-20-layered-architecture-plan.md`.
-
-Layers: **Domain** (pure logic/types) · **Git adapter** · **Persistence
-adapter** · **Network adapter** · **Orchestration** · **Interface**
-(dispatch/CLI) · **Integration adapter** (agent/IDE) · **Mixed**.
+Boundary inventory checked against implementation on 2026-09-15. This classifies
+responsibility groups and the enforced dependency subset; it is not an exhaustive
+module list or a claim that the whole dependency graph is acyclic. The
+[layer boundary audit](layer-boundary-audit.md) records evidence and measured
+coordinator boundaries. The [P9 plan](../decisions/2026-07-20-layered-architecture-plan.md)
+is a historical roadmap.
 
 ## Classification
 
-| Module | Layer | Notes |
-|---|---|---|
-| `model/{authorship_log, domain, stream_types}` | Domain | pure |
-| `model/{attribution, diff_json, stream_watermark, telemetry}` | Domain | pure DTOs/value types moved in during P9.2 |
-| `model/{api_types, working_log, authorship_log_serialization}` | Domain | P9.2 leaks resolved; P9.3 residual resolved (`transcript::Message` now lives in `model/transcript.rs`) |
-| `model/{attribution_tracker, imara_diff_utils, move_detection, hunk_shift, transcript}` | Domain | pure attribution algebra moved in from `operations/authorship` during P9.3 |
-| `model/repository/*` (5 dbs + sqlite helpers + `lock_file`) | Persistence | singletons by design until P9.5 |
-| `error/`, `repo_url.rs`, `uuid.rs`, `checkpoint_content_budget.rs` | Domain | pure |
-| `feature_flags.rs` | Domain/config | reads `GIT_AI_*` env by design; P9 target: fold under `config/` |
-| `config/*` | Orchestration (bootstrap) | still imports `Repository` for the prompt-storage checks; the `is_allowed_repository` wrapper moved out in P9.2 (see below) |
-| `clients/{api, auth, http}` | Network adapter | dependency-clean after P9.2: no `operations/` imports |
-| `clients/git_cli/` | Git adapter (spawn layer) | dependency-clean: no `operations/` imports |
-| `operations/git/*` | Git adapter | `repository/`, `refs`, `notes_api` (notes choke point), `cat_file` (batched object reads), `oid` (object ID syntax), `status`, `repo_state`, `repo_storage`, `sync_authorship`, `fast_reader`, `cli_parser`, `command_classification`, `authorship_traversal`, `path_format` (POSIX normalization + quoted-path unescaping, ex-`utils.rs`) |
-| `operations/daemon/*` | Orchestration | actors/coordinator/reducer/analyzers/ref_cursor + socket listeners; reducer + analyzers are IO-free (keep it that way) |
-| `operations/commands/*` | Orchestration | command handlers; several still oversized (see `.file-length-baseline.txt`) |
-| `operations/authorship/*` | Mixed by design | `virtual_attribution/`, `range_authorship`, `rewrite*` entangle computation with git/notes IO; the pure Domain modules (`attribution_tracker/`, `hunk_shift`, `imara_diff_utils`, `move_detection`, `transcript`) moved to `model/` in P9.3 |
-| `operations/{mdm, streams, ci}` | Integration adapter | agent/IDE installers, transcript readers, CI context |
-| `cli/*`, `main.rs` | Interface | argv[0] dispatch is load-bearing |
-| `model/metrics/{types, events, attrs, pos_encoded}` | Domain | canonical metric event DTOs and positional encoding |
-| `metrics/mod.rs`, `metrics/local_stats/*`, `metrics/model_pricing.rs` | Domain + Orchestration mix | compatibility re-exports, event emission, local aggregation, and embedded pricing lookup |
-| `tokio_runtime.rs`, `process_timeout.rs`, `http.rs`(clients) | Infrastructure glue | |
-| `observability/` | Orchestration | telemetry DTO leak resolved in P9.2; still dispatches to daemon submit fns (orchestration→orchestration, allowed) |
-| `notes/reference_server` | Test/reference infra | in-memory HTTP-contract server |
+All module paths below are under `src/`.
 
-## Cross-layer violations (P9.2 work list — RESOLVED)
+| Module | Responsibility and actual boundary |
+|---|---|
+| `model/{domain,attribution,diff_json,stream_watermark,telemetry,git_oid}` | Domain DTOs/value logic. Domain includes concrete Git concepts. `git_oid` owns the existing OID syntax predicates; `operations::git::oid` re-exports them. |
+| `model/{authorship_log,working_log,authorship_log_serialization,checkpoint_delivery,metrics}` | Domain data/serialization plus timestamp or random-ID convenience constructors in working-log, delivery, metric and authorship-serialization code. Do not equate all constructors with pure computation. |
+| `model/{attribution_tracker,imara_diff_utils,move_detection,hunk_shift,transcript}` | Attribution computation and transcript values. `attribution_tracker/diff_pipeline.rs` samples `Instant` and emits tracing diagnostics around calculation. |
+| `model/clock.rs` | Ambient wall-clock reads. Reducer/analyzer kernels do not use it. |
+| `model/stream_types.rs`, `model/stat_snapshot.rs` | Stream shapes/readers consume supplied `BufRead`; stat DTO conversion consumes supplied `fs::Metadata`. Neither fact proves the whole model IO-free or that these types open files. |
+| `model/jj*` | Native jj observation/operation/view/registration values and validation. Path byte encoding is platform-specific value conversion; journal persistence is separate. |
+| `model/repository/` | SQLite stores, checkpoint outbox and file-lock/storage primitives. Connection ownership varies; see `state-ownership.md` and the persistence contract. |
+| `error/` | Shared `GitAiError` representation bridges IO, Git CLI, SQLite, persistence and API errors. Naming this type does not execute an adapter, but it is not an isolated domain-error package. |
+| `repo_url.rs`, `uuid.rs`, `checkpoint_content_budget.rs` | Mixed facilities: repository-backed URL resolution, random UUID creation, and config-backed budget construction respectively; not a pure-domain group. |
+| `feature_flags.rs`, `config/` | Bootstrap/configuration and ambient environment/file reads. Config still uses Git repository context for prompt-storage decisions. |
+| `clients/{api,auth,http}`, `clients/git_cli/` | Network/auth and Git process adapters. No operations imports; the import policy does not prove all adapter internals pure. |
+| `operations/git/{cli_parser,command_classification,command_policy}` | Pure parsing/classification of supplied strings. An explicit guarded kernel inside the Git directory; `repo_state` is not part of it. |
+| `operations/git/` remainder | Git/ref/object/notes/repository adapters and some mixed workflows. `notes_store` wakes daemon uploads; `trace2_validation` runs daemon self-checks. These existing couplings prevent a directory-wide DAG claim. |
+| `operations/daemon/{reducer,analyzers}` | Value-only reduction and built-in classification, with explicit permitted dependencies on model values/error representation and the pure Git kernels. Custom registered analyzers are outside the built-in source guard. |
+| `operations/daemon/` remainder | Trace normalization/enrichment, actors, sequencers, sockets, checkpoint/rewrite execution, workers and evidence capture. `actor_coordinator_*` files extend one coordinator; they are not separate state owners. |
+| `operations/authorship/` | Mixed computation + Git/notes IO by design: virtual attribution, range authorship and rewrite modules compose the model algebra with storage. |
+| `operations/{commands,mdm,streams,ci,jj,workspace_context}` | Commands, integrations, stream readers and VCS-specific observation workflows. Actual adapter/orchestration dependencies remain visible; no blanket purity claim. |
+| `metrics/`, `observability/` | Event emission, aggregation, pricing and diagnostics; compatibility re-exports do not make these pure model owners. |
+| `cli/`, `main.rs` | Interface and dispatch; `argv[0]` behavior is load-bearing. |
+| `tokio_runtime.rs`, `process_timeout.rs`, `notes/reference_server` | Runtime/process glue and reference HTTP-contract infrastructure. |
 
-All seven are addressed by the P9.2 layer-purity PR. The intended direction is
-now enforced by `tests/integration/layer_import_policy.rs` (scans `use crate::…`
-per layer; see [Enforcement](#enforcement)).
+## Enforcement
 
-1. ✅ `model/api_types.rs` imported `operations::commands::diff::FileDiffJson`.
-   `FileDiffJson` (+ its serializer) moved to new `model/diff_json.rs`; `diff.rs`
-   and `api_types.rs` now import it from model (no re-export).
-2. ✅ `model/working_log.rs` imported `Attribution`/`LineAttribution` from
-   `operations::authorship::attribution_tracker`. Both types (+ impls) moved to
-   new `model/attribution.rs`; the tracker keeps a curated `pub use` re-export
-   sourced from model, so its many operations-layer users stay valid.
-3. ✅ `model/authorship_log_serialization.rs` took `&Repository`. The
-   repo-touching `get_line_attribution` (git-notes fallback) moved to
-   `operations/authorship/line_lookup.rs` as a free function; pure parse/
-   serialize stays in model. `blame.rs` callers flipped.
-4. ✅ `model/repository/streams_db.rs` imported
-   `operations::streams::watermark`. The whole module moved to
-   `model/stream_watermark.rs` (git-mv, same ratchet ceiling under the new
-   path); all src/test users flipped; `streams/mod.rs` re-exports from model.
-5. ⚠️ CORRECTED: `clients/api/client.rs` never imported
-   `operations::git::repository::Repository` — the documented type import did
-   not exist. It *did* import two identity helper *functions*
-   (`current_git_committer_identity_resolution`, `parse_git_var_identity`),
-   which is still a `clients → operations` leak. Inverted: the git-identity
-   resolution moved to `operations::git::repository::resolve_api_author_identity`
-   and the `ApiContext` constructors now accept an
-   `AuthorIdentityResolver = fn() -> Option<String>` (orchestration callers pass
-   the git-adapter resolver). `clients/**` is now free of `operations` imports.
-6. ✅ `config/mod.rs` imported `Repository` for `is_allowed_repository`. The
-   pure `is_allowed_repository_with_context(remotes, repo_root)` stays in config;
-   the Repository-consuming wrapper moved to
-   `impl Repository { fn is_collection_allowed(&self, &Config) -> bool }` in the
-   git adapter. The ~4 gate call sites (checkpoint gate, daemon commit/amend
-   gates, stream-worker transcript gate) flipped, preserving the
-   `has_allowed_repositories` fast path. (config still imports `Repository` for
-   `should_exclude_prompts` / `effective_prompt_storage`; config is not covered
-   by the enforced layer rules.)
-7. ✅ `observability/mod.rs` used `operations::daemon::TelemetryEnvelope` in a
-   pub fn signature. The `TelemetryEnvelope` DTO moved to `model/telemetry.rs`
-   (composed of `metrics::MetricEvent` + serde types); observability and the
-   daemon telemetry modules import it from model. `daemon.rs` re-exports it from
-   model for the existing `operations::daemon::TelemetryEnvelope` path.
+`tests/integration/layer_import_policy.rs` is a bounded source check in the
+existing integration-test style. It rejects forbidden imports/qualified accesses
+and tests the syntax forms it recognizes. Its permitted directions are the
+contract; it does not establish semantic purity for arbitrary external code,
+macros, callbacks or re-exports.
 
-### Enforcement
+- Model code outside `model/repository/` must not depend on operations, CLI,
+  clients, config, persistence or the orchestration `metrics` facade, nor access
+  Tokio or rusqlite. Model metric DTO consumers import `model::metrics`.
+- Persistence imports must not name operations or CLI; client imports must not
+  name operations. Inline accesses in these adapter layers retain the older
+  import-only scope. Relative paths inside inline test modules need manual review.
+- The reducer may depend on model values, shared errors and built-in analyzers.
+  Built-in analyzers may additionally use the explicitly named pure Git parsing
+  and policy modules. Arbitrary `operations::git` dependencies are forbidden.
+- Those Git kernels are guarded as part of the closure. Reducer/analyzer guards
+  also reject ambient state, process, filesystem/network IO and timing/random
+  facilities. The shared error type is a representation dependency, not an
+  adapter operation.
 
-`tests/integration/layer_import_policy.rs` fails on forbidden `use crate::…`
-directions:
-- `src/model/**` (excluding `src/model/repository/**`): no `use crate::{operations,
-  cli, clients, config}` and no `use {tokio, rusqlite}`.
-- `src/model/repository/**`: no `use crate::{operations, cli}`.
-- `src/clients/**`: no `use crate::operations`.
+There is no exception list. A passing test establishes this bounded dependency
+boundary, not whole-model determinism or whole-crate acyclicity. The historical
+P9.2 leaks are resolved; future movements must update this inventory and policy
+fixtures together instead of expanding an exception list.
 
-The `ALLOWED_EXCEPTIONS` list in the test is now empty: the last residual
-(`model/api_types.rs` holding `Vec<transcript::Message>`) was resolved in P9.3
-when `transcript.rs` moved to `model/transcript.rs`.
+## Retained distinctions
 
-## Ambient state access (outside `config/` and `cli/`)
+- `DiffHunk` in `model/hunk_shift.rs` is attribution algebra;
+  `DiffHunk` in `operations/commands/diff.rs` is a command DTO. Both remain in use.
+- `model/attribution.rs` owns `Attribution`/`LineAttribution`; the tracker retains
+  its curated re-export. `model/imara_diff_utils.rs` owns `ByteDiff`.
+- Path formatting belongs to `operations/git/path_format.rs`, executable
+  discovery/spawn to `cli/git_ai_exe.rs`, CLI environment checks to
+  `cli/environment.rs`, and locks to `model/repository/lock_file.rs`.
+- Daemon/self-check workflows live in `operations/daemon/self_check.rs`
+  and `operations/daemon/attribution_self_check.rs`, Git trace2 checks in
+  `operations/git/trace2_validation.rs`, and self-check blame classification in
+  `operations/commands/blame/self_check_validation.rs`.
 
-- `feature_flags.rs` — `GIT_AI_*` env (by design; folds under config).
-- `metrics/mod.rs` — `current_dir`.
-- `operations/daemon/self_check.rs`, `operations/daemon/attribution_self_check.rs` — `current_exe`.
-- `observability/mod.rs` — `var_os`.
-- Test-support env vars (`GIT_AI_TEST_*`) are cfg-gated and exempt.
-
-## Duplicated / repeatedly-converted types
-
-- `DiffHunk`: `model/hunk_shift.rs` (moved from operations in P9.3) vs `operations/commands/diff.rs`.
-  The `model/hunk_shift.rs` copy is the attribution algebra type; the `diff.rs` copy is a command-layer DTO.
-  Consolidation is deferred — both are in use.
-- `ByteDiff` (`model/imara_diff_utils.rs`, moved P9.3): now has a canonical model-level home; consumers
-  that previously re-adapted inline can import from `crate::model::imara_diff_utils`.
-- `Attribution`/`LineAttribution`: owned by `model/attribution.rs` (moved in P9.2); the
-  `model/attribution_tracker` module re-exports them for its users.
-
-## Dissolution maps (no module may be named utils/helpers/common)
-
-`utils.rs` — dissolved (DRY E2): `normalize_to_posix` + `unescape_git_path` →
-`operations/git/path_format.rs` (git adapter); git-exe discovery/spawn +
-Windows process-creation flags → `cli/git_ai_exe.rs`; terminal/
-background-agent/superuser detection → `cli/environment.rs`; `LockFile` →
-`model/repository/lock_file.rs` (persistence adapter).
-
-`diagnostics.rs` — dissolved (DRY E3): daemon-readiness self-check + shared
-`DiagnosticCheckResult`/`CommandRecord`/`GitDiagnosticTarget` types/command-running
-infra → `operations/daemon/self_check.rs`; attribution self-check (checkpoint →
-commit → blame round trip) → `operations/daemon/attribution_self_check.rs`;
-trace2 global-config and trace2-file self-checks → `operations/git/trace2_validation.rs`
-(git adapter); self-check blame-result classification → `operations/commands/blame/
-self_check_validation.rs`; daemon family-status polling helpers →
-`operations/daemon/control_api.rs` (next to the `FamilyStatus` DTO they query).
-Burns down opportunistically with the ratchet.
+Existing mixed boundaries are documented, not permission to introduce new
+`common`, `shared`, `utils` or `helpers` modules. Prefer existing concrete owners.

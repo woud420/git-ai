@@ -177,6 +177,7 @@ mod tls_native_certs;
 mod uninstall;
 mod usage_period;
 mod utf8_filenames;
+mod virtual_attribution_metadata;
 mod virtual_attribution_unit;
 mod windsurf;
 mod workspace_context;

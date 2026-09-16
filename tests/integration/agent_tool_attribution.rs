@@ -4,15 +4,9 @@ use crate::test_utils::{CodexHookInput, checkpoint_codex, fixture_path};
 use serde_json::json;
 use std::fs;
 
-// =============================================================================
-// Issue #1204: Codex, Cursor, and multi-agent attribution failures
-// https://github.com/git-ai-project/git-ai/issues/1204
-//
-// These tests verify:
-// 1. Codex exec_command tool produces correct attribution
-// 2. Cursor Shell tool pre/post cycle produces correct attribution
-// 3. Multi-agent sessions don't steal each other's attribution
-// =============================================================================
+// Attribution coverage for agent-specific command tools and concurrent sessions.
+// Codex exec-command edits and Cursor Shell hook cycles must produce attribution
+// without allowing concurrent agent sessions to claim each other's changes.
 
 // ---------------------------------------------------------------------------
 // Problem 1: Codex exec_command tool should be treated as Bash

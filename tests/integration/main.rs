@@ -7,6 +7,7 @@ mod test_utils;
 // Test modules (one per original test file)
 mod agent_commits_blame;
 mod agent_presets_comprehensive;
+mod agent_tool_attribution;
 mod agent_usage_repo_url;
 mod agent_v1;
 mod ai_reflow_attribution;
@@ -90,7 +91,6 @@ mod install_manifest;
 mod internal_git_locale;
 mod internal_machine_commands;
 mod internal_spawn_safety;
-mod issue_1204_multi_agent;
 mod jetbrains_download;
 mod jetbrains_ide_types;
 mod jj_admission_platform;

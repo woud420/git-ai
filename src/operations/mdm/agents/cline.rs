@@ -588,7 +588,6 @@ mod tests {
 
     #[test]
     #[serial]
-    // Regression coverage for ENG-337.
     fn test_cline_partial_managed_install_honors_platform_contract() {
         with_temp_home(|home| {
             let storage = home.join("cline-storage");

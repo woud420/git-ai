@@ -1035,7 +1035,6 @@ fn assert_edge_recovery_attribution(repo: &TestRepo, file_name: &str) {
     ]);
 }
 
-// Regression coverage for ENG-315 and upstream git-ai-project/git-ai#2214.
 #[test]
 fn test_edge_extension_recovery_metric_preserves_known_identity() {
     const FILE_NAME: &str = "known-edge.txt";

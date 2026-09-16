@@ -177,7 +177,6 @@ const STALE_DISTRIBUTION_FRAGMENTS: &[&str] = &[
     "Learn more at [usegitai.com]",
 ];
 
-// Regression coverage for ENG-351.
 #[test]
 fn review_workflow_has_no_unused_bot_assumptions() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -210,7 +209,6 @@ fn review_workflow_has_no_unused_bot_assumptions() {
     );
 }
 
-// Regression coverage for ENG-352.
 #[test]
 fn active_fork_surfaces_do_not_maintain_graphite_compatibility() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

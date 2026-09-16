@@ -1558,7 +1558,6 @@ mod tests {
 
     #[test]
     fn test_capture_result_preserves_partial_timeout_output() {
-        // Regression coverage for ENG-340.
         let timeout = Duration::from_millis(300);
         let output = crate::process_timeout::partial_output_fixture(timeout).unwrap();
         let err = capture_result("partial-output fixture", timeout, output).unwrap_err();

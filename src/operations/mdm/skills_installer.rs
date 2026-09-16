@@ -477,7 +477,6 @@ mod tests {
 
     #[test]
     fn test_install_and_uninstall_skills_lifecycle() {
-        // Regression coverage for ENG-339.
         let temp = tempfile::tempdir().unwrap();
         let paths = SkillsPaths {
             source: temp.path().join(".git-ai/skills"),

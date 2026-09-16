@@ -2,7 +2,6 @@ use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use std::fs;
 
-// Regression coverage for ENG-316 and upstream git-ai-project/git-ai#2176.
 struct DivergedWorktree {
     repo: TestRepo,
     primary_commit: String,
@@ -82,7 +81,6 @@ fn record_parity(
 
 #[test]
 fn user_revision_commands_normalize_lowercase_head_in_linked_worktree() {
-    // Regression coverage for ENG-316.
     let fixture = diverged_worktree_with_lowercase_head();
     let repo = &fixture.repo;
     let mut matching = Vec::new();
@@ -125,7 +123,6 @@ fn user_revision_commands_normalize_lowercase_head_in_linked_worktree() {
 
 #[test]
 fn ranges_normalize_both_endpoints_and_preserve_head_suffixes() {
-    // Regression coverage for ENG-316.
     let fixture = diverged_worktree_with_lowercase_head();
     let repo = &fixture.repo;
     let mut matching = Vec::new();
@@ -173,7 +170,6 @@ fn ranges_normalize_both_endpoints_and_preserve_head_suffixes() {
 
 #[test]
 fn revision_names_that_merely_begin_with_head_are_not_rewritten() {
-    // Regression coverage for ENG-316.
     let fixture = diverged_worktree_with_lowercase_head();
     let repo = &fixture.repo;
 
@@ -197,7 +193,6 @@ fn revision_names_that_merely_begin_with_head_are_not_rewritten() {
 
 #[test]
 fn non_ascii_revision_names_are_not_rewritten_or_sliced_mid_character() {
-    // Regression coverage for ENG-316.
     let fixture = diverged_worktree_with_lowercase_head();
     let repo = &fixture.repo;
     repo.git(&["branch", "中文分支", &fixture.primary_commit])

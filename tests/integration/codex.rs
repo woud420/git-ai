@@ -68,7 +68,6 @@ fn test_codex_preset_structured_hook_input() {
     }
 }
 
-// Regression coverage for ENG-324 and upstream git-ai-project/git-ai#2204.
 #[test]
 fn test_codex_subagent_stream_identity_comes_from_rollout_filename() {
     let parent_id = "01a00000-0000-7000-8000-0000000000aa";

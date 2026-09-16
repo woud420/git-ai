@@ -378,7 +378,7 @@ fn commit_reflog_boundary_skips_untraced_duplicate_message() {
 }
 
 #[test]
-fn eng_216_commit_reflog_subject_rewrite_falls_back_to_hinted_entry() {
+fn commit_reflog_subject_rewrite_falls_back_to_hinted_entry() {
     let temp = tempfile::tempdir().unwrap();
     let worktree = temp.path().join("repo");
     let git_dir = worktree.join(".git");
@@ -420,7 +420,7 @@ fn eng_216_commit_reflog_subject_rewrite_falls_back_to_hinted_entry() {
 }
 
 #[test]
-fn eng_216_commit_reflog_subject_rewrite_fallback_does_not_guess_without_hint() {
+fn commit_reflog_subject_rewrite_fallback_does_not_guess_without_hint() {
     let temp = tempfile::tempdir().unwrap();
     let worktree = temp.path().join("repo");
     let git_dir = worktree.join(".git");
@@ -447,7 +447,7 @@ fn eng_216_commit_reflog_subject_rewrite_fallback_does_not_guess_without_hint() 
 }
 
 #[test]
-fn eng_216_commit_reflog_subject_rewrite_fallback_stays_in_command_time_window() {
+fn commit_reflog_subject_rewrite_fallback_stays_in_command_time_window() {
     let temp = tempfile::tempdir().unwrap();
     let worktree = temp.path().join("repo");
     let git_dir = worktree.join(".git");

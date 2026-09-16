@@ -3,7 +3,7 @@ use std::{fs, path::Path};
 const SETUP: &str = "uses: ./.github/actions/setup-rust";
 
 #[test]
-fn eng_411_callers_preserve_toolchain_selection() {
+fn callers_preserve_toolchain_selection() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for (relative, expected) in [
         (
@@ -45,7 +45,7 @@ fn eng_411_callers_preserve_toolchain_selection() {
 }
 
 #[test]
-fn eng_411_setup_forwards_inputs_and_owns_the_installer_pin() {
+fn setup_forwards_inputs_and_owns_the_installer_pin() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let action = fs::read_to_string(root.join(".github/actions/setup-rust/action.yml")).unwrap();
     let pin = action
@@ -68,7 +68,7 @@ fn eng_411_setup_forwards_inputs_and_owns_the_installer_pin() {
 }
 
 #[test]
-fn eng_411_filtered_workflows_watch_shared_setup() {
+fn filtered_workflows_watch_shared_setup() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for (workflow, count) in [
         ("lint-format", 2),

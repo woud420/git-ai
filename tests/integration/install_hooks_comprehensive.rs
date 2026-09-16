@@ -245,7 +245,7 @@ fn isolated_install_command(root: &Path) -> Command {
 }
 
 #[test]
-fn eng_390_root_help_matches_focused_command_contracts() {
+fn root_help_matches_focused_command_contracts() {
     let temp = tempfile::tempdir().unwrap();
     let output = isolated_install_command(temp.path())
         .arg("--help")
@@ -353,7 +353,7 @@ fn install_rejects_unknown_options_before_side_effects() {
 }
 
 #[test]
-fn eng_389_invalid_api_values_leave_test_home_unchanged() {
+fn invalid_api_values_leave_test_home_unchanged() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let config = repo.test_home_path().join(".git-ai/config.json");
     let global = repo.test_home_path().join(".gitconfig");
@@ -387,7 +387,7 @@ fn eng_389_invalid_api_values_leave_test_home_unchanged() {
 }
 
 #[test]
-fn eng_408_uninstall_help_and_invalid_options_preserve_managed_files() {
+fn uninstall_help_and_invalid_options_preserve_managed_files() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let (extension, overrides) = seed_pi_uninstall_files(&repo);
     let config = repo.test_home_path().join(".git-ai/config.json");
@@ -419,7 +419,7 @@ fn eng_408_uninstall_help_and_invalid_options_preserve_managed_files() {
 }
 
 #[test]
-fn eng_408_uninstall_preview_and_apply_respect_file_ownership() {
+fn uninstall_preview_and_apply_respect_file_ownership() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let (extension, overrides) = seed_pi_uninstall_files(&repo);
     for flag in ["--dry-run", "--dry-run=true"] {
@@ -448,7 +448,7 @@ fn seed_pi_uninstall_files(repo: &TestRepo) -> (std::path::PathBuf, std::path::P
 }
 
 #[test]
-fn eng_400_documented_pi_preview_does_not_apply_removal() {
+fn documented_pi_preview_does_not_apply_removal() {
     let readme = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("agent-support/pi/README.md"),
     )

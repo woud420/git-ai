@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 #[test]
-fn eng_394_documented_nix_cleanup_removes_runtime_state_before_the_package() {
+fn documented_nix_cleanup_removes_runtime_state_before_the_package() {
     let readme =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README-nix.md")).unwrap();
     let uninstall = readme

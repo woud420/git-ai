@@ -1253,7 +1253,7 @@ fn test_claude_preset_nested_subrepo_pre_post_cycle() {
 /// (not a parent/ancestor of the target), checkpoint must still write to the
 /// target repo's working logs so that the commit carries AI attribution.
 #[test]
-fn test_issue_954_non_git_cwd_unrelated_to_target_repo_mock_ai() {
+fn test_non_git_cwd_unrelated_to_target_repo_mock_ai() {
     // Create a non-git workspace directory (simulates launching from /tmp or ~/)
     // This directory is a SIBLING of the target repo, not its parent.
     let cwd_workspace = create_unique_workspace("git-ai-954-non-git-cwd");
@@ -1310,7 +1310,7 @@ fn test_issue_954_non_git_cwd_unrelated_to_target_repo_mock_ai() {
 /// Issue #954 variant: non-git CWD, multiple files in multiple separate repos.
 /// Verifies that all target repos receive correct attribution.
 #[test]
-fn test_issue_954_non_git_cwd_multiple_target_repos() {
+fn test_non_git_cwd_multiple_target_repos() {
     let cwd_workspace = create_unique_workspace("git-ai-954-multi-target-cwd");
 
     let repo_a = TestRepo::new();
@@ -1360,7 +1360,7 @@ fn test_issue_954_non_git_cwd_multiple_target_repos() {
 /// Issue #954 variant: Claude preset with non-git CWD and file in a separate repo.
 /// Verifies that the Claude PostToolUse checkpoint records prompts correctly.
 #[test]
-fn test_issue_954_claude_preset_non_git_cwd() {
+fn test_claude_preset_non_git_cwd() {
     let cwd_workspace = create_unique_workspace("git-ai-954-claude-cwd");
     let mut repo_target = TestRepo::new();
 

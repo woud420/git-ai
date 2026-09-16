@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 #[test]
-fn eng_410_unix_setup_accepts_the_supported_make_range() {
+fn unix_setup_accepts_the_supported_make_range() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let action_path = root.join(".github/actions/setup-gnu-make");
     let action = fs::read_to_string(action_path.join("action.yml")).unwrap();

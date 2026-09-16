@@ -1139,7 +1139,7 @@ fn test_rebase_conflict_on_ai_file_preserves_note() {
     assert!(
         post_note.is_some(),
         "AI authorship note must survive conflict rebase where the AI file IS the \
-         conflict file (issue #1079). The original note should be remapped to the \
+         conflict file. The original note should be remapped to the \
          rebased commit to preserve AI provenance."
     );
 }
@@ -1222,7 +1222,7 @@ fn test_rebase_metadata_only_notes_survive_slow_path() {
     let post_note = repo.read_authorship_note(&post_rebase_human_sha);
     assert!(
         post_note.is_some(),
-        "human-only commit must retain its metadata-only note after slow-path rebase (issue #1079)"
+        "human-only commit must retain its metadata-only note after slow-path rebase"
     );
 }
 
@@ -1295,7 +1295,7 @@ fn test_rebase_mixed_ai_and_human_commits_all_retain_notes_after_slow_path() {
         let note = repo.read_authorship_note(sha);
         assert!(
             note.is_some(),
-            "rebased commit {} must have an authorship note after slow-path rebase (issue #1079)",
+            "rebased commit {} must have an authorship note after slow-path rebase",
             &sha[..8]
         );
     }

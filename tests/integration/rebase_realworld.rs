@@ -9370,7 +9370,7 @@ fn test_human_conflict_multicommit_chain_middle_conflict_all_notes_preserved() {
     let note_c1 = repo.read_authorship_note(&chain[0]);
     assert!(
         note_c1.is_some(),
-        "C1' (file_a.py, no conflict) must retain authorship note after conflict rebase (issue #1079)"
+        "C1' (file_a.py, no conflict) must retain authorship note after conflict rebase"
     );
     assert_note_files_exact(&repo, &chain[0], "c1_files", &["file_a.py"]);
 
@@ -9387,7 +9387,7 @@ fn test_human_conflict_multicommit_chain_middle_conflict_all_notes_preserved() {
     let note_c3 = repo.read_authorship_note(&chain[2]);
     assert!(
         note_c3.is_some(),
-        "C3' (file_c.py, no conflict) must retain authorship note after conflict rebase (issue #1079)"
+        "C3' (file_c.py, no conflict) must retain authorship note after conflict rebase"
     );
     assert_note_files_exact(&repo, &chain[2], "c3_files", &["file_c.py"]);
 }

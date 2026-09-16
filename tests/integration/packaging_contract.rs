@@ -5,7 +5,7 @@ fn repo_file(path: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
     fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!(
-            "ENG-218 requires packaging artifact {}: {error}",
+            "packaging contract requires artifact {}: {error}",
             path.display()
         )
     })
@@ -17,7 +17,7 @@ fn workflow_job(workflow: &str, job_name: &str) -> String {
     assert_eq!(
         lines.next(),
         Some(job_header.as_str()),
-        "ENG-218 requires the {job_name} release job"
+        "packaging contract requires the {job_name} release job"
     );
 
     let mut job = String::new();

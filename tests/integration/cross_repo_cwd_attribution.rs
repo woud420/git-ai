@@ -736,7 +736,7 @@ fn test_claude_preset_cross_repo_cwd_records_prompts_in_target_repo() {
     let ai_files = working_log.all_ai_touched_files().unwrap_or_default();
     assert!(
         !ai_files.is_empty(),
-        "Issue #871 regression: Working log entries should exist in repo B \
+        "Working log entries should exist in repo B \
          when Claude checkpoint is run from repo A's CWD."
     );
 
@@ -746,14 +746,14 @@ fn test_claude_preset_cross_repo_cwd_records_prompts_in_target_repo() {
     // The core assertion: sessions must NOT be empty
     assert!(
         !commit.authorship_log.metadata.sessions.is_empty(),
-        "Issue #871 regression: Sessions should not be empty in repo B's git note \
+        "Sessions should not be empty in repo B's git note \
          when Claude Code is started in repo A but edits files in repo B."
     );
 
     // Verify attestations are present too
     assert!(
         !commit.authorship_log.attestations.is_empty(),
-        "Issue #871 regression: AI attestations should be present in repo B \
+        "AI attestations should be present in repo B \
          when checkpoint is run from repo A's CWD with Claude preset."
     );
 }
@@ -830,7 +830,7 @@ fn test_claude_preset_cross_repo_cwd_pre_tool_use_records_in_target_repo() {
     // Verify attestations are present
     assert!(
         !commit.authorship_log.attestations.is_empty(),
-        "Issue #871 regression: AI attestations should be present in repo B \
+        "AI attestations should be present in repo B \
          when PreToolUse + PostToolUse checkpoints run from repo A's CWD."
     );
 }
@@ -1288,7 +1288,7 @@ fn test_non_git_cwd_unrelated_to_target_repo_mock_ai() {
     let ai_files = working_log.all_ai_touched_files().unwrap_or_default();
     assert!(
         !ai_files.is_empty(),
-        "Issue #954: Working log entries should exist in the target repo \
+        "Working log entries should exist in the target repo \
          when checkpoint is run from a non-git CWD that is unrelated to the target repo. \
          Found no AI-touched files in working log."
     );
@@ -1297,7 +1297,7 @@ fn test_non_git_cwd_unrelated_to_target_repo_mock_ai() {
     let commit = repo_target.stage_all_and_commit("add AI jwt auth").unwrap();
     assert!(
         !commit.authorship_log.attestations.is_empty(),
-        "Issue #954: AI attribution should be present when Claude is launched from \
+        "AI attribution should be present when Claude is launched from \
          a non-git directory (e.g. /tmp) and writes files to a separate git repo. \
          Expected non-empty attestations but got none."
     );
@@ -1341,14 +1341,14 @@ fn test_non_git_cwd_multiple_target_repos() {
     let commit_a = repo_a.stage_all_and_commit("AI edits in A").unwrap();
     assert!(
         !commit_a.authorship_log.attestations.is_empty(),
-        "Issue #954 (multi): repo_a should have AI attestations when checkpoint \
+        "repo_a should have AI attestations when checkpoint \
          runs from a non-git CWD."
     );
 
     let commit_b = repo_b.stage_all_and_commit("AI edits in B").unwrap();
     assert!(
         !commit_b.authorship_log.attestations.is_empty(),
-        "Issue #954 (multi): repo_b should have AI attestations when checkpoint \
+        "repo_b should have AI attestations when checkpoint \
          runs from a non-git CWD."
     );
 
@@ -1410,19 +1410,19 @@ fn test_claude_preset_non_git_cwd() {
     let ai_files = working_log.all_ai_touched_files().unwrap_or_default();
     assert!(
         !ai_files.is_empty(),
-        "Issue #954 (claude): Working log entries should exist in target repo \
+        "Working log entries should exist in target repo \
          when Claude PostToolUse fires from a non-git CWD."
     );
 
     let commit = repo_target.stage_all_and_commit("AI auth changes").unwrap();
     assert!(
         !commit.authorship_log.metadata.sessions.is_empty(),
-        "Issue #954 (claude): Sessions should not be empty in target repo's git note \
+        "Sessions should not be empty in target repo's git note \
          when Claude is launched from a non-git CWD."
     );
     assert!(
         !commit.authorship_log.attestations.is_empty(),
-        "Issue #954 (claude): AI attestations should be present when Claude is launched \
+        "AI attestations should be present when Claude is launched \
          from a non-git CWD."
     );
 

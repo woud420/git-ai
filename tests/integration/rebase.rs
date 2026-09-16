@@ -2497,7 +2497,7 @@ sed -i.bak '3s/pick/fixup/' "$1"
     let squashed_log = repo.require_authorship_log(&squashed_sha);
     assert!(
         !squashed_log.metadata.humans.is_empty(),
-        "Post-squash: humans metadata block must be preserved (issue #1214)"
+        "Post-squash: humans metadata block must be preserved"
     );
     for record in squashed_log.metadata.humans.values() {
         assert_eq!(

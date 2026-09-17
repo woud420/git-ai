@@ -321,9 +321,7 @@ impl VirtualAttributions {
         }
     }
 
-    /// Prune INITIAL-only prompts with no committed lines, and sessions with no
-    /// attestation entries.
-    pub(super) fn prune_unreferenced_metadata(&self, authorship_log: &mut AuthorshipLog) {
+    pub(super) fn prune_unreferenced_initial_prompts(&self, authorship_log: &mut AuthorshipLog) {
         if !self.initial_only_prompt_ids.is_empty() {
             let committed_prompt_ids: HashSet<&String> = authorship_log
                 .attestations
@@ -336,6 +334,12 @@ impl VirtualAttributions {
                     || committed_prompt_ids.contains(prompt_id)
             });
         }
+    }
+
+    /// Prune INITIAL-only prompts with no committed lines, and sessions with no
+    /// attestation entries.
+    pub(super) fn prune_unreferenced_metadata(&self, authorship_log: &mut AuthorshipLog) {
+        self.prune_unreferenced_initial_prompts(authorship_log);
 
         let committed_session_ids: HashSet<String> = authorship_log
             .attestations

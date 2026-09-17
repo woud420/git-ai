@@ -1,7 +1,9 @@
 use crate::error::GitAiError;
 use crate::model::authorship_log::{LineRange, SessionRecord};
 use crate::model::authorship_log_serialization::{AuthorshipLog, generate_trace_id};
-use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
+use crate::model::session_recovery_candidate::{
+    SessionEventRecoveryCandidate, distance_to_event_second,
+};
 use crate::model::working_log::AgentId;
 use crate::operations::authorship::recovery_stores::RecoveryStores;
 use crate::operations::git::repository::Repository;
@@ -13,8 +15,6 @@ use super::{
     FileTimestampsByPath, RecoveryMetricInput, SESSION_EVENT_RECOVERY_WINDOW_NS, add_attestation,
     record_recovery_metric, unknown_lines_by_file,
 };
-
-const NS_PER_SECOND: u128 = 1_000_000_000;
 
 pub(super) struct SessionEventCandidateSelection<'a> {
     pub(super) candidate: &'a SessionEventRecoveryCandidate,
@@ -196,16 +196,6 @@ pub(super) fn session_event_distance(
         .min()
 }
 
-fn distance_to_event_second(timestamp_ns: u128, event_ts: u32) -> u128 {
-    let start_ns = event_ts as u128 * NS_PER_SECOND;
-    let end_ns = start_ns.saturating_add(NS_PER_SECOND - 1);
-    if timestamp_ns < start_ns {
-        start_ns - timestamp_ns
-    } else {
-        timestamp_ns.saturating_sub(end_ns)
-    }
-}
-
 pub(super) fn insert_session_event_record(
     authorship_log: &mut AuthorshipLog,
     candidate: &SessionEventRecoveryCandidate,
@@ -237,6 +227,7 @@ pub(super) fn session_event_model(candidate: &SessionEventRecoveryCandidate) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::session_recovery_candidate::NS_PER_SECOND;
     use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
 
     fn session_event_candidate(

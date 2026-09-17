@@ -16,3 +16,15 @@ pub(crate) struct SessionEventRecoveryCandidate {
     pub external_tool_use_id: Option<String>,
     pub repo_url: Option<String>,
 }
+
+pub(crate) const NS_PER_SECOND: u128 = 1_000_000_000;
+
+pub(crate) fn distance_to_event_second(timestamp_ns: u128, event_ts: u32) -> u128 {
+    let start_ns = event_ts as u128 * NS_PER_SECOND;
+    let end_ns = start_ns.saturating_add(NS_PER_SECOND - 1);
+    if timestamp_ns < start_ns {
+        start_ns - timestamp_ns
+    } else {
+        timestamp_ns.saturating_sub(end_ns)
+    }
+}

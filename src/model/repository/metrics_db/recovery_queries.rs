@@ -1,14 +1,14 @@
 use crate::error::GitAiError;
 use crate::metrics::attrs::attr_pos;
 use crate::metrics::types::MetricEventId;
+pub(crate) use crate::model::session_recovery_candidate::NS_PER_SECOND;
+use crate::model::session_recovery_candidate::distance_to_event_second;
 use rusqlite::{params, params_from_iter};
 use serde_json::Value;
 
 use super::MetricsDatabase;
 use super::event_writes::sparse_object_string;
 use super::types::SessionEventRecoveryCandidate;
-
-pub(crate) const NS_PER_SECOND: u128 = 1_000_000_000;
 
 impl MetricsDatabase {
     pub(crate) fn session_event_candidates_near_timestamps(
@@ -228,16 +228,6 @@ fn min_distance_to_event_ts(timestamps_ns: &[u128], event_ts: u32) -> Option<u12
         .iter()
         .map(|timestamp_ns| distance_to_event_second(*timestamp_ns, event_ts))
         .min()
-}
-
-fn distance_to_event_second(timestamp_ns: u128, event_ts: u32) -> u128 {
-    let start_ns = event_ts as u128 * NS_PER_SECOND;
-    let end_ns = start_ns.saturating_add(NS_PER_SECOND - 1);
-    if timestamp_ns < start_ns {
-        start_ns - timestamp_ns
-    } else {
-        timestamp_ns.saturating_sub(end_ns)
-    }
 }
 
 fn recovery_attrs_from_event_json(event_json: &str) -> (Option<String>, Option<String>) {

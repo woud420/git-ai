@@ -136,20 +136,7 @@ impl VirtualAttributions {
             }
         }
 
-        // Remove INITIAL-only prompts without committed lines (same logic as the
-        // primary method — see comment there).
-        if !self.initial_only_prompt_ids.is_empty() {
-            let committed_prompt_ids: std::collections::HashSet<&String> = authorship_log
-                .attestations
-                .iter()
-                .flat_map(|file_att| file_att.entries.iter())
-                .map(|entry| &entry.hash)
-                .collect();
-            authorship_log.metadata.prompts.retain(|prompt_id, _| {
-                !self.initial_only_prompt_ids.contains(prompt_id)
-                    || committed_prompt_ids.contains(prompt_id)
-            });
-        }
+        self.prune_unreferenced_initial_prompts(&mut authorship_log);
 
         Ok(authorship_log)
     }

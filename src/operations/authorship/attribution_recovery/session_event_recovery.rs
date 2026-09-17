@@ -1,7 +1,9 @@
 use crate::error::GitAiError;
 use crate::model::authorship_log::{LineRange, SessionRecord};
 use crate::model::authorship_log_serialization::{AuthorshipLog, generate_trace_id};
-use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
+use crate::model::session_recovery_candidate::{
+    SessionEventRecoveryCandidate, distance_to_event_second,
+};
 use crate::model::working_log::AgentId;
 use crate::operations::authorship::recovery_stores::RecoveryStores;
 use crate::operations::git::repository::Repository;
@@ -13,8 +15,6 @@ use super::{
     FileTimestampsByPath, RecoveryMetricInput, SESSION_EVENT_RECOVERY_WINDOW_NS, add_attestation,
     record_recovery_metric, unknown_lines_by_file,
 };
-
-const NS_PER_SECOND: u128 = 1_000_000_000;
 
 pub(super) struct SessionEventCandidateSelection<'a> {
     pub(super) candidate: &'a SessionEventRecoveryCandidate,
@@ -196,16 +196,6 @@ pub(super) fn session_event_distance(
         .min()
 }
 
-fn distance_to_event_second(timestamp_ns: u128, event_ts: u32) -> u128 {
-    let start_ns = event_ts as u128 * NS_PER_SECOND;
-    let end_ns = start_ns.saturating_add(NS_PER_SECOND - 1);
-    if timestamp_ns < start_ns {
-        start_ns - timestamp_ns
-    } else {
-        timestamp_ns.saturating_sub(end_ns)
-    }
-}
-
 pub(super) fn insert_session_event_record(
     authorship_log: &mut AuthorshipLog,
     candidate: &SessionEventRecoveryCandidate,
@@ -237,6 +227,7 @@ pub(super) fn session_event_model(candidate: &SessionEventRecoveryCandidate) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::session_recovery_candidate::NS_PER_SECOND;
     use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
 
     fn session_event_candidate(
@@ -334,5 +325,77 @@ mod tests {
 
         assert_eq!(selection.candidate.session_id, "s_bucket");
         assert_eq!(selection.distance_ns, 2_500_000_001);
+    }
+
+    #[test]
+    fn session_event_distance_preserves_inclusive_bucket_boundaries() {
+        let cases = [
+            (0, 0, 0),
+            (0, 999_999_999, 0),
+            (0, 1_000_000_000, 1),
+            (2, 0, 2_000_000_000),
+            (2, 1_999_999_999, 1),
+            (2, 2_000_000_000, 0),
+            (2, 2_500_000_000, 0),
+            (2, 2_999_999_999, 0),
+            (2, 3_000_000_000, 1),
+            (u32::MAX, 4_294_967_294_999_999_999, 1),
+            (u32::MAX, 4_294_967_295_000_000_000, 0),
+            (u32::MAX, 4_294_967_295_999_999_999, 0),
+            (u32::MAX, 4_294_967_296_000_000_000, 1),
+            (0, u128::MAX, u128::MAX - 999_999_999),
+            (u32::MAX, u128::MAX, u128::MAX - 4_294_967_295_999_999_999),
+        ];
+        for (event_ts, timestamp_ns, expected) in cases {
+            let candidate = session_event_candidate(1, "s_bucket", "external", event_ts, None);
+            assert_eq!(
+                session_event_distance(&candidate, &[timestamp_ns]),
+                Some(expected),
+                "event={event_ts}, timestamp={timestamp_ns}"
+            );
+        }
+    }
+
+    #[test]
+    fn session_event_distance_uses_nearest_timestamp_and_rejects_empty_input() {
+        let candidate = session_event_candidate(1, "s_bucket", "external", 2, None);
+        assert_eq!(session_event_distance(&candidate, &[]), None);
+        assert_eq!(
+            session_event_distance(&candidate, &[1_999_999_998, 3_000_000_000]),
+            Some(1)
+        );
+        assert_eq!(
+            session_event_distance(&candidate, &[3_000_000_000, 1_999_999_998]),
+            Some(1)
+        );
+        assert_eq!(
+            session_event_distance(&candidate, &[u128::MAX, 2_500_000_000, 2_500_000_000]),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn session_event_selection_keeps_window_endpoint_and_newest_row_tiebreak() {
+        let repo_url = "https://github.com/acme/repo";
+        let candidates = vec![
+            session_event_candidate(9, "s_newer", "newer", 2, Some(repo_url)),
+            session_event_candidate(3, "s_older", "older", 2, Some(repo_url)),
+        ];
+        let selection =
+            select_best_session_event_candidate(&candidates, &[5_999_999_999], repo_url).unwrap();
+        assert_eq!(selection.candidate.row_id, 9);
+        assert_eq!(selection.distance_ns, 3_000_000_000);
+        assert!(
+            select_best_session_event_candidate(&candidates, &[6_000_000_000], repo_url).is_none()
+        );
+        assert!(select_best_session_event_candidate(&candidates, &[], repo_url).is_none());
+        let reversed: Vec<_> = candidates.into_iter().rev().collect();
+        assert_eq!(
+            select_best_session_event_candidate(&reversed, &[5_999_999_999], repo_url)
+                .unwrap()
+                .candidate
+                .row_id,
+            9
+        );
     }
 }

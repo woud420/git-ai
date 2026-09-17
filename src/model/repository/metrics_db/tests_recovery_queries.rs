@@ -111,3 +111,54 @@ fn test_session_event_candidates_parse_required_and_optional_metadata() {
         Some("https://github.com/acme/repo")
     );
 }
+
+#[test]
+fn session_event_candidates_preserve_bucket_boundaries_and_row_order() {
+    for event_ts in [0, 2, u32::MAX] {
+        let (mut db, _temp_dir) = create_test_db();
+        // Complete retention before inserting historical boundary fixtures so this
+        // test exercises recovery selection rather than the independent age policy.
+        db.prune_old_metrics_if_due().unwrap();
+        let ids = db
+            .insert_events(&[
+                session_event_json(event_ts, "session-first", "external-first", "codex", None),
+                session_event_json(event_ts, "session-second", "external-second", "codex", None),
+            ])
+            .unwrap();
+        let start = u128::from(event_ts) * 1_000_000_000;
+        let end = start + 999_999_999;
+        let mut cases = vec![
+            (vec![], 0, false),
+            (vec![start], 0, true),
+            (vec![end], 0, true),
+            (vec![end + 1], 0, false),
+            (vec![end + 1], 1, true),
+            (vec![end + 3_000_000_000], 3_000_000_000, true),
+            (vec![end + 3_000_000_001], 3_000_000_000, false),
+            (vec![u128::MAX], 0, false),
+            (vec![u128::MAX], u128::MAX - end, true),
+            (vec![u128::MAX, start, start], 0, true),
+        ];
+        if start > 0 {
+            cases.extend([
+                (vec![start - 1], 0, false),
+                (vec![start - 1], 1, true),
+                (vec![start - 1, end + 1], 0, false),
+            ]);
+        }
+        for (timestamps, window, expected) in cases {
+            let candidates = db
+                .session_event_candidates_near_timestamps(&timestamps, window)
+                .unwrap();
+            let actual: Vec<_> = candidates
+                .iter()
+                .map(|candidate| candidate.row_id)
+                .collect();
+            let expected_ids = if expected { ids.clone() } else { vec![] };
+            assert_eq!(
+                actual, expected_ids,
+                "event={event_ts}, timestamps={timestamps:?}, window={window}"
+            );
+        }
+    }
+}

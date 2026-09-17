@@ -41,3 +41,8 @@ fuzz/corpus/
 .worktrees/
 .claude/worktrees/
 
+# Local experiment outputs
+/autoresearch/
+
+# Agent-local state
+.claude/settings.local.json

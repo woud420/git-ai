@@ -5,11 +5,13 @@ pub(super) use jsonl::{read_jsonl_byte_stream, read_jsonl_event_batch, read_lead
 
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::{RecordIndexWatermark, WatermarkStrategy};
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 
-fn transcript_open_error(path: &Path, error: std::io::Error, open_error_verb: &str) -> StreamError {
+pub(super) fn transcript_open_error(
+    path: &Path,
+    error: std::io::Error,
+    open_error_verb: &str,
+) -> StreamError {
     match error.kind() {
         std::io::ErrorKind::NotFound => StreamError::Fatal {
             message: format!("Transcript file not found: {}", path.display()),
@@ -97,14 +99,7 @@ pub(super) fn read_json_array_stream(
         });
     }
 
-    let file = File::open(path).map_err(|error| transcript_open_error(path, error, "read"))?;
-
-    let reader = BufReader::new(file);
-    let mut parsed: serde_json::Value =
-        serde_json::from_reader(reader).map_err(|error| StreamError::Parse {
-            line: 0,
-            message: format!("Invalid JSON in {}: {}", path.display(), error),
-        })?;
+    let mut parsed: serde_json::Value = super::bounded_json::read_json_file(path)?;
 
     let records = match parsed
         .as_object_mut()

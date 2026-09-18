@@ -238,7 +238,9 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                 crate::config::save_file_config(&file_config)?;
                 println!("[max_checkpoint_total_lines]: {}", lines);
             }
-            "max_transcript_line_bytes" | "max_transcript_batch_bytes" => {
+            "max_transcript_line_bytes"
+            | "max_transcript_batch_bytes"
+            | "max_transcript_file_bytes" => {
                 let bytes = value
                     .parse::<usize>()
                     .ok()
@@ -249,10 +251,14 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                             key, value
                         )
                     })?;
-                if key == "max_transcript_line_bytes" {
-                    file_config.max_transcript_line_bytes = Some(bytes);
-                } else {
-                    file_config.max_transcript_batch_bytes = Some(bytes);
+                match key {
+                    "max_transcript_line_bytes" => {
+                        file_config.max_transcript_line_bytes = Some(bytes)
+                    }
+                    "max_transcript_batch_bytes" => {
+                        file_config.max_transcript_batch_bytes = Some(bytes)
+                    }
+                    _ => file_config.max_transcript_file_bytes = Some(bytes),
                 }
                 crate::config::save_file_config(&file_config)?;
                 println!("[{}]: {}", key, bytes);

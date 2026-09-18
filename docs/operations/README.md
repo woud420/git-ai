@@ -19,6 +19,14 @@ and internal databases live under `~/.git-ai/internal/`. `git-ai daemon`
 subcommands and `git-ai status` cover inspection; `GIT_AI_DEBUG=1` enables
 debug logging, `GIT_AI_DEBUG_PERFORMANCE=1` timing output.
 
+Whole-file JSON transcripts (Amp, Continue, and Copilot) have a 64 MiB read
+limit. Oversized files remain pending without advancing their transcript
+cursor. To admit a larger file, set a positive byte limit with
+`git-ai config set max_transcript_file_bytes 134217728` and run
+`git-ai bg restart`. `GIT_AI_MAX_TRANSCRIPT_FILE_BYTES` overrides the file
+setting. The limit also applies to transcript model probes; it bounds input
+bytes, not the memory used by parsed JSON or the daemon as a whole.
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

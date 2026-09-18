@@ -61,6 +61,7 @@ pub fn handle_config(args: &[String]) {
                 || key == "daemon_memory_limit_mb"
                 || key == "max_transcript_line_bytes"
                 || key == "max_transcript_batch_bytes"
+                || key == "max_transcript_file_bytes"
             {
                 println!("Run `git-ai bg restart` for changes to take effect.");
             }
@@ -81,6 +82,7 @@ pub fn handle_config(args: &[String]) {
                 "daemon_memory_limit_mb"
                     | "max_transcript_line_bytes"
                     | "max_transcript_batch_bytes"
+                    | "max_transcript_file_bytes"
             ) {
                 println!("Run `git-ai bg restart` for changes to take effect.");
             }

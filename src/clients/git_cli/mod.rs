@@ -16,6 +16,8 @@ use crate::process_spawn::is_interactive_terminal;
 use std::os::windows::process::CommandExt;
 
 pub mod profile;
+mod timed;
+pub(crate) use timed::exec_git_with_timeout;
 
 pub use profile::{
     InternalGitHooksGuard, InternalGitProfile, args_with_disabled_hooks_if_needed,

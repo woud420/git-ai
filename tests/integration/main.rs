@@ -148,6 +148,7 @@ mod repository_unit;
 mod reset;
 mod revision_normalization;
 mod rewrite_ops_attribution;
+mod sandbox_socket_access;
 mod secrets_benchmark;
 mod session_event_attribution;
 mod session_event_repo_url;

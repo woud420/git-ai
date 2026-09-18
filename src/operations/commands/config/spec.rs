@@ -176,6 +176,16 @@ const CONFIG_KEY_SPECS: &[ConfigKeySpec] = &[
         show_in_help: true,
     },
     ConfigKeySpec {
+        name: "feature_flags.whitelist_agent_sandboxes",
+        aliases: NO_ALIASES,
+        value_kind: ConfigValueKind::Boolean,
+        sensitive: false,
+        nesting: ConfigNesting::None,
+        mutation: ConfigMutation::Replace,
+        help: "feature_flags.whitelist_agent_sandboxes  Allow the active trace socket in supported agent sandboxes on install-hooks (bool; default false)",
+        show_in_help: true,
+    },
+    ConfigKeySpec {
         name: "api_base_url",
         aliases: NO_ALIASES,
         value_kind: ConfigValueKind::String,

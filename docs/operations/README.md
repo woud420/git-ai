@@ -27,6 +27,9 @@ cursor. To admit a larger file, set a positive byte limit with
 setting. The limit also applies to transcript model probes; it bounds input
 bytes, not the memory used by parsed JSON or the daemon as a whole.
 
+For opt-in agent sandbox access to the trace socket, see
+[sandbox socket permissions](sandbox-socket-permissions.md).
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

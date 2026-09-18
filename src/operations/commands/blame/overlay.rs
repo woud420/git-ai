@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use super::human_authors::read_hunk_authorship;
 use crate::error::GitAiError;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::working_log::CheckpointKind;
 use crate::operations::authorship::line_lookup::get_line_attribution;
-use crate::operations::git::notes_api::read_authorship_v3;
 use crate::operations::git::repository::Repository;
 
 use super::{BlameHunk, GitAiBlameOptions};
@@ -37,8 +37,7 @@ pub(super) fn overlay_ai_authorship(
     // Track commit SHAs that have real (non-simulated) authorship notes
     let mut commits_with_notes: HashSet<String> = HashSet::new();
 
-    // Group hunks by commit SHA to avoid repeated lookups
-    let mut commit_authorship_cache: HashMap<String, Option<AuthorshipLog>> = HashMap::new();
+    let commit_authorship_cache = read_hunk_authorship(repo, blame_hunks)?;
     // Simulated authorship logs for agent commits without notes. We keep these separate
     // from commit_authorship_cache so a single agent commit can be handled across multiple
     // blame hunks without being limited to the first hunk's line range.
@@ -46,18 +45,10 @@ pub(super) fn overlay_ai_authorship(
     // Cache for foreign prompts to avoid repeated grepping
     let mut foreign_prompts_cache: HashMap<String, Option<PromptRecord>> = HashMap::new();
     for hunk in blame_hunks {
-        // Check if we've already looked up this commit's authorship
-        let authorship_log = if let Some(cached) = commit_authorship_cache.get(&hunk.commit_sha) {
-            cached.clone()
-        } else {
-            // Try to get authorship log for this commit
-            let authorship = read_authorship_v3(repo, &hunk.commit_sha).ok();
-            commit_authorship_cache.insert(hunk.commit_sha.clone(), authorship.clone());
-            authorship
-        };
+        let authorship_log = commit_authorship_cache.get(&hunk.commit_sha);
 
         // If we have AI authorship data, look up the author for lines in this hunk
-        if let Some(ref authorship_log) = authorship_log {
+        if let Some(authorship_log) = authorship_log {
             commits_with_notes.insert(hunk.commit_sha.clone());
 
             // Collect humans from this authorship log
@@ -220,8 +211,7 @@ pub(super) fn overlay_ai_authorship(
     }
 
     // Collect all authorship logs we've seen (for JSON output to find other files)
-    let mut authorship_logs: Vec<AuthorshipLog> =
-        commit_authorship_cache.into_values().flatten().collect();
+    let mut authorship_logs: Vec<AuthorshipLog> = commit_authorship_cache.into_values().collect();
     authorship_logs.extend(simulated_authorship_logs.into_values());
 
     // Convert HashSet to Vec and sort for deterministic output

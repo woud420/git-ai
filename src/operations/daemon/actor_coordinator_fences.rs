@@ -31,7 +31,7 @@ impl ActorDaemonCoordinator {
                     state
                         .entries
                         .values()
-                        .any(|entry| !matches!(entry, FamilySequencerEntry::PendingRoot))
+                        .any(|entry| !matches!(entry, FamilySequencerEntry::PendingRoot { .. }))
                 }) {
                     return true;
                 }
@@ -80,7 +80,7 @@ impl ActorDaemonCoordinator {
             state
                 .entries
                 .values()
-                .any(|entry| !matches!(entry, FamilySequencerEntry::PendingRoot))
+                .any(|entry| !matches!(entry, FamilySequencerEntry::PendingRoot { .. }))
         });
         let busy = self.pending_checkpoint_admissions.load(Ordering::Acquire) > 0
             || self.queued_trace_payloads.load(Ordering::Acquire) > 0
@@ -118,24 +118,11 @@ impl ActorDaemonCoordinator {
             }
         })?;
         for (family, state) in sequencers.iter() {
-            let Some((order, entry)) = state.entries.first_key_value() else {
-                continue;
-            };
-            if matches!(entry, FamilySequencerEntry::PendingRoot) {
-                continue;
-            }
-            let entry_root_sid = match entry {
-                FamilySequencerEntry::ReadyCommand(command) => Some(command.root_sid.as_str()),
-                _ => None,
-            };
-            if !self.family_entry_blocked_by_prior_open_trace_root(
-                family,
-                order.started_at_ns,
-                entry_root_sid,
-            )? {
+            if !self.ready_family_orders(family, state)?.is_empty() {
                 return Ok(true);
             }
         }
+
         Ok(false)
     }
 

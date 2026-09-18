@@ -3,7 +3,7 @@ use crate::model::imara_diff_utils::{
     content_eq_ignoring_line_endings, normalize_line_endings, split_lines_with_terminators,
 };
 
-pub(super) fn diff_hunks_between_contents(old_content: &str, new_content: &str) -> Vec<DiffHunk> {
+pub(crate) fn diff_hunks_between_contents(old_content: &str, new_content: &str) -> Vec<DiffHunk> {
     let normalized_old = normalize_line_endings(old_content);
     let normalized_new = normalize_line_endings(new_content);
     let old_lines = split_lines_with_terminators(&normalized_old);

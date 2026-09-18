@@ -74,6 +74,41 @@ pub fn transcript_sweep_triggers_for_events(
     triggers
 }
 
+pub fn apply_fetch_notes_sync_side_effect(
+    worktree: &str,
+    cmd: &crate::model::domain::NormalizedCommand,
+) {
+    if cmd.raw_argv.is_empty() {
+        return;
+    }
+    let parsed = parsed_invocation_for_normalized_command(cmd);
+    let [remote] = parsed.command_args.as_slice() else {
+        return;
+    };
+    // More complex forms can select multiple remotes or carry option values.
+    // Do not guess their destination from mutable config after the command.
+    if parsed.command.as_deref() != Some("fetch") || remote.starts_with('-') {
+        return;
+    }
+
+    // Normalization already resolved -C. Other globals can redirect transport
+    // or repository selection and are not preserved by the notes sync helper.
+    let mut globals = parsed.global_args.iter();
+    while let Some(arg) = globals.next() {
+        match arg.as_str() {
+            "-C" if globals.next().is_some() => {}
+            value if value.starts_with("-C") && value.len() > 2 => {}
+            _ => return,
+        }
+    }
+
+    if let Err(error) =
+        apply_pull_notes_sync_side_effect(worktree, parsed.command.as_deref(), &parsed.command_args)
+    {
+        tracing::warn!(%remote, %error, "best-effort fetch notes sync failed");
+    }
+}
+
 pub fn apply_pull_notes_sync_side_effect(
     worktree: &str,
     command: Option<&str>,
@@ -82,9 +117,13 @@ pub fn apply_pull_notes_sync_side_effect(
     use crate::config::NotesBackendKind;
 
     let repo = find_repository_in_path(worktree)?;
+    let config = crate::config::Config::fresh();
+    if command == Some("fetch") && !repo.is_collection_allowed(&config) {
+        return Ok(());
+    }
     let parsed = parsed_invocation_for_side_effect(command, args);
     let remote = fetch_remote_from_args(&repo, &parsed)?;
-    let notes_backend = crate::config::Config::fresh().notes_backend_kind();
+    let notes_backend = config.notes_backend_kind();
 
     tracing::info!(
         command = command.unwrap_or("pull"),

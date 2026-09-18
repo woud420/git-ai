@@ -321,7 +321,7 @@ pub struct PersistedWorkingLog {
     /// On Windows, this uses the \\?\ UNC prefix format
     #[allow(dead_code)]
     pub canonical_workdir: PathBuf,
-    pub dirty_files: Option<HashMap<String, Arc<str>>>,
+    pub dirty_files: Option<Arc<HashMap<String, Arc<str>>>>,
     pub initial_file: PathBuf,
 }
 
@@ -339,7 +339,7 @@ impl PersistedWorkingLog {
             base_commit: base_commit.to_string(),
             repo_workdir: repo_root,
             canonical_workdir,
-            dirty_files,
+            dirty_files: dirty_files.map(Arc::new),
             initial_file,
         }
     }
@@ -355,7 +355,7 @@ impl PersistedWorkingLog {
                 .collect::<HashMap<_, _>>()
         });
 
-        self.dirty_files = normalized_dirty_files;
+        self.dirty_files = normalized_dirty_files.map(Arc::new);
     }
 
     pub fn reset_working_log(&self) -> Result<(), GitAiError> {

@@ -214,13 +214,8 @@ fn extract_model_from_copilot_otel_sqlite(
 }
 
 fn extract_model_from_amp_thread_json(path: &Path) -> Result<Option<String>, StreamError> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return Ok(None),
-    };
-
-    let json: serde_json::Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
+    let json: serde_json::Value = match super::bounded_json::read_json_file(path) {
+        Ok(value) => value,
         Err(_) => return Ok(None),
     };
 

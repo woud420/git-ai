@@ -346,6 +346,16 @@ const CONFIG_KEY_SPECS: &[ConfigKeySpec] = &[
         show_in_help: true,
     },
     ConfigKeySpec {
+        name: "max_transcript_file_bytes",
+        aliases: NO_ALIASES,
+        value_kind: ConfigValueKind::Integer,
+        sensitive: false,
+        nesting: ConfigNesting::None,
+        mutation: ConfigMutation::Replace,
+        help: "max_transcript_file_bytes         Whole-file JSON transcript limit in bytes",
+        show_in_help: true,
+    },
+    ConfigKeySpec {
         name: "daemon_memory_limit_mb",
         aliases: NO_ALIASES,
         value_kind: ConfigValueKind::Integer,

@@ -43,6 +43,7 @@
 
 pub mod agent;
 pub mod agents;
+pub(crate) mod bounded_json;
 pub(crate) mod codex_model;
 pub(crate) mod copilot_model;
 pub(crate) mod jsonl_scan;

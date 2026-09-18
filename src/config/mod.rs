@@ -27,7 +27,10 @@ pub(crate) mod tests;
 // --- Public re-exports (preserve every crate::config::X path) ---
 
 pub use author::AuthorConfig;
-pub use budgets::{DEFAULT_MAX_TRANSCRIPT_BATCH_BYTES, DEFAULT_MAX_TRANSCRIPT_LINE_BYTES};
+pub use budgets::{
+    DEFAULT_MAX_TRANSCRIPT_BATCH_BYTES, DEFAULT_MAX_TRANSCRIPT_FILE_BYTES,
+    DEFAULT_MAX_TRANSCRIPT_LINE_BYTES,
+};
 #[cfg(any(test, feature = "test-support"))]
 pub use file::ConfigPatch;
 pub use file::{
@@ -86,6 +89,7 @@ pub struct Config {
     pub(crate) max_checkpoint_total_lines: usize,
     pub(crate) max_transcript_line_bytes: usize,
     pub(crate) max_transcript_batch_bytes: usize,
+    pub(crate) max_transcript_file_bytes: usize,
     pub(crate) daemon_memory_limit_mb: Option<u64>,
 }
 

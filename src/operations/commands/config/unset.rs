@@ -190,11 +190,13 @@ pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
                     println!("- [max_checkpoint_total_lines]: {}", v);
                 }
             }
-            "max_transcript_line_bytes" | "max_transcript_batch_bytes" => {
-                let old_value = if key == "max_transcript_line_bytes" {
-                    file_config.max_transcript_line_bytes.take()
-                } else {
-                    file_config.max_transcript_batch_bytes.take()
+            "max_transcript_line_bytes"
+            | "max_transcript_batch_bytes"
+            | "max_transcript_file_bytes" => {
+                let old_value = match key {
+                    "max_transcript_line_bytes" => file_config.max_transcript_line_bytes.take(),
+                    "max_transcript_batch_bytes" => file_config.max_transcript_batch_bytes.take(),
+                    _ => file_config.max_transcript_file_bytes.take(),
                 };
                 crate::config::save_file_config(&file_config)?;
                 if let Some(value) = old_value {

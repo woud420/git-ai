@@ -48,6 +48,7 @@ pub(crate) fn is_ai_blame_author(author: &str) -> bool {
         "copilot",
         "cursor",
         "codex",
+        "opencode",
         "gemini",
         "amp",
         "windsurf",
@@ -107,6 +108,7 @@ mod tests {
             "Codex-Cloud <codex@example.com>",
             "Git-AI-Cloud-Agent <cloud@example.com>",
             "gEmInI <gemini@example.com>",
+            "OpenCode <agent@example.com>",
         ] {
             assert!(is_ai_blame_author(author), "{author} should be AI");
         }
@@ -118,6 +120,7 @@ mod tests {
             "Human Developer <user@example.com>",
             "Human Developer <amp@example.com>",
             "Human Developer <codex@example.com>",
+            "Human Developer <opencode@example.com>",
             "Human Developer <agent-v1@example.com>",
             "Human Developer",
         ] {

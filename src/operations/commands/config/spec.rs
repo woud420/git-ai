@@ -332,7 +332,7 @@ const CONFIG_KEY_SPECS: &[ConfigKeySpec] = &[
         sensitive: false,
         nesting: ConfigNesting::None,
         mutation: ConfigMutation::Replace,
-        help: "max_transcript_line_bytes         Single JSONL transcript line limit in bytes",
+        help: "max_transcript_line_bytes         Transcript line or SQLite event limit in bytes",
         show_in_help: true,
     },
     ConfigKeySpec {
@@ -342,7 +342,7 @@ const CONFIG_KEY_SPECS: &[ConfigKeySpec] = &[
         sensitive: false,
         nesting: ConfigNesting::None,
         mutation: ConfigMutation::Replace,
-        help: "max_transcript_batch_bytes         JSONL transcript batch limit in bytes",
+        help: "max_transcript_batch_bytes         JSONL or SQLite transcript batch limit in bytes",
         show_in_help: true,
     },
     ConfigKeySpec {

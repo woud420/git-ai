@@ -40,6 +40,15 @@ limit with `git-ai config set max_metrics_flush_chunk_bytes 16777216` and run
 the file setting. This bounds stored JSON bytes per read, not total RSS or the
 serialized HTTP envelope size.
 
+OpenCode and Copilot OTEL SQLite readers plan their batches from stored TEXT
+byte lengths before loading payloads. `max_transcript_line_bytes` limits one
+logical event, including its parts or attributes, and
+`max_transcript_batch_bytes` limits the combined payload (both default to
+8 MiB). OpenCode keeps messages with the same timestamp together; a group
+that exceeds the batch limit remains pending. Oversized events remain
+retryable without advancing the cursor. Raise the relevant positive limit
+with `git-ai config set` and restart the daemon to resume ingestion.
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

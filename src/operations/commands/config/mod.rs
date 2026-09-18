@@ -62,6 +62,7 @@ pub fn handle_config(args: &[String]) {
                 || key == "max_transcript_line_bytes"
                 || key == "max_transcript_batch_bytes"
                 || key == "max_transcript_file_bytes"
+                || key == "max_metrics_flush_chunk_bytes"
             {
                 println!("Run `git-ai bg restart` for changes to take effect.");
             }
@@ -83,6 +84,7 @@ pub fn handle_config(args: &[String]) {
                     | "max_transcript_line_bytes"
                     | "max_transcript_batch_bytes"
                     | "max_transcript_file_bytes"
+                    | "max_metrics_flush_chunk_bytes"
             ) {
                 println!("Run `git-ai bg restart` for changes to take effect.");
             }

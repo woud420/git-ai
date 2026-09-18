@@ -30,6 +30,16 @@ cursor. To admit a larger file, set a positive byte limit with
 setting. The limit also applies to transcript model probes; it bounds input
 bytes, not the memory used by parsed JSON or the daemon as a whole.
 
+Metrics flushes claim at most `max_metrics_flush_chunk_bytes` of queued JSON
+per batch (8 MiB by default), before parsing or uploading. This applies to
+both the daemon and `git-ai flush-metrics-db`. A single record above the limit
+stays pending without a processing lock or failed-upload attempt; it can
+block later records and cause `git-ai await` to time out. Increase the positive
+limit with `git-ai config set max_metrics_flush_chunk_bytes 16777216` and run
+`git-ai bg restart` to resume. `GIT_AI_MAX_METRICS_FLUSH_CHUNK_BYTES` overrides
+the file setting. This bounds stored JSON bytes per read, not total RSS or the
+serialized HTTP envelope size.
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

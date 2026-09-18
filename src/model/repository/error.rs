@@ -22,6 +22,11 @@ pub enum PersistenceError {
     /// A `Mutex` was poisoned, most likely because another thread panicked
     /// while holding the lock.
     LockPoisoned { what: &'static str },
+    ReadBudgetExceeded {
+        resource: String,
+        actual_bytes: u64,
+        limit_bytes: u64,
+    },
     /// The on-disk schema version is ahead of what this binary supports.
     Migration {
         db: &'static str,
@@ -123,6 +128,14 @@ impl fmt::Display for PersistenceError {
                 ..
             } => write!(f, "{} {}: {}", db, operation, message),
             PersistenceError::LockPoisoned { what } => write!(f, "{} lock poisoned", what),
+            PersistenceError::ReadBudgetExceeded {
+                resource,
+                actual_bytes,
+                limit_bytes,
+            } => write!(
+                f,
+                "{resource} requires {actual_bytes} bytes, exceeding the {limit_bytes} byte read budget"
+            ),
             PersistenceError::Migration {
                 db,
                 found,

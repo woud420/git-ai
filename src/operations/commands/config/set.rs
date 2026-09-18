@@ -242,7 +242,8 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
             }
             "max_transcript_line_bytes"
             | "max_transcript_batch_bytes"
-            | "max_transcript_file_bytes" => {
+            | "max_transcript_file_bytes"
+            | "max_metrics_flush_chunk_bytes" => {
                 let bytes = value
                     .parse::<usize>()
                     .ok()
@@ -260,7 +261,10 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                     "max_transcript_batch_bytes" => {
                         file_config.max_transcript_batch_bytes = Some(bytes)
                     }
-                    _ => file_config.max_transcript_file_bytes = Some(bytes),
+                    "max_transcript_file_bytes" => {
+                        file_config.max_transcript_file_bytes = Some(bytes)
+                    }
+                    _ => file_config.max_metrics_flush_chunk_bytes = Some(bytes),
                 }
                 crate::config::save_file_config(&file_config)?;
                 println!("[{}]: {}", key, bytes);

@@ -3,83 +3,10 @@ use rusqlite::params;
 
 use super::MetricsDatabase;
 use super::schema::MAX_METRIC_UPLOAD_ATTEMPTS;
-use super::types::MetricRecord;
-
-pub(crate) const RETRYABLE_METRIC_IDS_SQL: &str = "SELECT id FROM metrics \
-     WHERE delivered_ts IS NULL \
-       AND processing_started_at IS NULL \
-       AND next_retry_at <= ?1 \
-       AND attempts < 6 \
-     ORDER BY next_retry_at ASC, id DESC \
-     LIMIT ?2";
 
 pub(crate) const METRIC_PROCESSING_LOCK_TIMEOUT_SECS: u64 = 10 * 60;
 
 impl MetricsDatabase {
-    /// Atomically claim a due batch of pending metrics for upload.
-    pub fn dequeue_pending_batch(&mut self, limit: usize) -> Result<Vec<MetricRecord>, GitAiError> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-
-        let now = current_unix_ts();
-        self.release_stale_processing_locks(now)?;
-
-        let tx = self.conn.transaction()?;
-        let ids = {
-            let mut stmt = tx.prepare(RETRYABLE_METRIC_IDS_SQL)?;
-            let rows = stmt.query_map(params![now as i64, limit as i64], |row| {
-                row.get::<_, i64>(0)
-            })?;
-            let mut ids = Vec::new();
-            for row in rows {
-                ids.push(row?);
-            }
-            ids
-        };
-
-        if ids.is_empty() {
-            tx.commit()?;
-            return Ok(Vec::new());
-        }
-
-        let mut locked_ids = Vec::with_capacity(ids.len());
-        {
-            let mut stmt = tx.prepare_cached(
-                "UPDATE metrics \
-                 SET processing_started_at = ?1 \
-                 WHERE id = ?2 \
-                   AND delivered_ts IS NULL \
-                   AND processing_started_at IS NULL",
-            )?;
-            for id in ids {
-                if stmt.execute(params![now as i64, id])? > 0 {
-                    locked_ids.push(id);
-                }
-            }
-        }
-
-        let mut records = Vec::with_capacity(locked_ids.len());
-        {
-            let mut stmt = tx.prepare_cached(
-                "SELECT id, event_json, attempts, next_retry_at FROM metrics WHERE id = ?1",
-            )?;
-            for id in locked_ids {
-                records.push(stmt.query_row(params![id], |row| {
-                    Ok(MetricRecord {
-                        id: row.get(0)?,
-                        event_json: row.get(1)?,
-                        attempts: row.get::<_, i64>(2)?.max(0) as u32,
-                        next_retry_at: row.get::<_, i64>(3)?.max(0) as u64,
-                    })
-                })?);
-            }
-        }
-
-        tx.commit()?;
-        Ok(records)
-    }
-
     /// Mark records as delivered after a successful upload.
     pub fn mark_records_delivered(
         &mut self,

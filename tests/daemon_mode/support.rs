@@ -21,6 +21,9 @@ mod checkpoint;
 #[path = "trace_listener.rs"]
 mod trace_listener;
 
+#[path = "trace_normalization.rs"]
+mod trace_normalization;
+
 #[path = "load.rs"]
 mod load;
 

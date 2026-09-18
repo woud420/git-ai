@@ -2,6 +2,9 @@
 #[path = "integration/repos/mod.rs"]
 mod repos;
 
+#[path = "notes_sync_regression/transport_timeout.rs"]
+mod transport_timeout;
+
 use git_ai::model::repository::notes_db::NotesDatabase;
 use git_ai::notes::reference_server::ReferenceServer;
 use repos::test_repo::{DaemonTestScope, TestRepo, real_git_executable};

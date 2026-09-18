@@ -1,22 +1,14 @@
 use crate::operations::git::refs::{
-    AI_AUTHORSHIP_PUSH_REFSPEC, copy_ref, fallback_merge_notes_ours, merge_notes_from_ref,
-    ref_exists, tracking_ref_for_remote,
+    copy_ref, fallback_merge_notes_ours, merge_notes_from_ref, ref_exists, tracking_ref_for_remote,
 };
-use crate::{
-    clients::git_cli::exec_git, error::GitAiError, operations::git::cli_parser::ParsedGitInvocation,
-};
+use crate::{error::GitAiError, operations::git::cli_parser::ParsedGitInvocation};
+
+mod transport;
+#[cfg(test)]
+use transport::disabled_hooks_config;
+use transport::{build_authorship_fetch_args, build_authorship_push_args, exec_notes_transport};
 
 use super::repository::Repository;
-
-#[cfg(windows)]
-fn disabled_hooks_config() -> &'static str {
-    "core.hooksPath=NUL"
-}
-
-#[cfg(not(windows))]
-fn disabled_hooks_config() -> &'static str {
-    "core.hooksPath=/dev/null"
-}
 
 /// Result of checking for authorship notes on a remote
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +49,7 @@ pub fn fetch_remote_from_args(
         .or_else(|| repository.get_default_remote().ok().flatten());
 
     remote.map(|r| r.to_string()).ok_or_else(|| {
+        // Daemon side-effect status persists this exact legacy Display text.
         GitAiError::Generic(
             "Could not determine a remote for fetch/push operation. \
                  No remote was specified in args, no upstream is configured, \
@@ -94,6 +87,7 @@ pub fn push_remote_from_args(
         .or_else(|| repository.get_default_remote().ok().flatten());
 
     remote.map(|r| r.to_string()).ok_or_else(|| {
+        // Daemon side-effect status persists this exact legacy Display text.
         GitAiError::Generic(
             "Could not determine a remote for push operation. \
                  No remote was specified in args, no upstream is configured, \
@@ -246,7 +240,7 @@ pub fn fetch_authorship_notes(
 
     tracing::debug!("fetch command: {:?}", fetch_authorship);
 
-    match exec_git(&fetch_authorship) {
+    match exec_notes_transport(&fetch_authorship) {
         Ok(output) => {
             tracing::debug!(
                 "fetch stdout: '{}'",
@@ -352,7 +346,7 @@ pub fn push_authorship_notes(repository: &Repository, remote_name: &str) -> Resu
 
         tracing::debug!("pushing authorship refs (no force): {:?}", &push_args);
 
-        match exec_git(&push_args) {
+        match exec_notes_transport(&push_args) {
             Ok(_) => return Ok(()),
             Err(e) => {
                 tracing::debug!("authorship push failed: {}", e);
@@ -367,8 +361,15 @@ pub fn push_authorship_notes(repository: &Repository, remote_name: &str) -> Resu
         }
     }
 
-    Err(last_error
-        .unwrap_or_else(|| GitAiError::Generic("notes push exhausted retries".to_string())))
+    Err(last_error.unwrap_or_else(|| {
+        crate::model::repository::error::PersistenceError::Io {
+            operation: "push notes",
+            path: String::new(),
+            kind: std::io::ErrorKind::Other,
+            message: "notes push exhausted retries".to_string(),
+        }
+        .into()
+    }))
 }
 
 /// Fetch remote notes into a tracking ref and merge into local refs/notes/ai.
@@ -385,7 +386,7 @@ fn fetch_and_merge_tracking_notes(repository: &Repository, remote_name: &str) {
     tracing::debug!("pre-push authorship fetch: {:?}", &fetch_args);
 
     // Fetch is best-effort; if it fails (e.g., no remote notes yet), continue
-    if exec_git(&fetch_args).is_err() {
+    if exec_notes_transport(&fetch_args).is_err() {
         return;
     }
 
@@ -481,41 +482,6 @@ fn extract_repository_arg_from_args(args: &[String]) -> Option<String> {
     }
 
     None
-}
-
-fn with_disabled_hooks(mut args: Vec<String>) -> Vec<String> {
-    args.push("-c".to_string());
-    args.push(disabled_hooks_config().to_string());
-    args
-}
-
-fn build_authorship_fetch_args(
-    global_args: Vec<String>,
-    remote_name: &str,
-    fetch_refspec: &str,
-) -> Vec<String> {
-    let mut args = with_disabled_hooks(global_args);
-    args.push("fetch".to_string());
-    args.push("--no-tags".to_string());
-    args.push("--recurse-submodules=no".to_string());
-    args.push("--no-write-fetch-head".to_string());
-    args.push("--no-write-commit-graph".to_string());
-    args.push("--no-auto-maintenance".to_string());
-    args.push(remote_name.to_string());
-    args.push(fetch_refspec.to_string());
-    args
-}
-
-fn build_authorship_push_args(global_args: Vec<String>, remote_name: &str) -> Vec<String> {
-    let mut args = with_disabled_hooks(global_args);
-    args.push("push".to_string());
-    args.push("--quiet".to_string());
-    args.push("--no-recurse-submodules".to_string());
-    args.push("--no-verify".to_string());
-    args.push("--no-signed".to_string());
-    args.push(remote_name.to_string());
-    args.push(AI_AUTHORSHIP_PUSH_REFSPEC.to_string());
-    args
 }
 
 #[cfg(test)]

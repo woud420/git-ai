@@ -1,66 +1,37 @@
-use std::io::Read;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
+
+mod output;
+#[cfg(windows)]
+mod windows;
+use output::{
+    OutputEvent, OutputState, collect_output_until, drain_output_events, spawn_output_reader,
+};
 
 const OUTPUT_DRAIN_GRACE: Duration = Duration::from_millis(200);
 const OUTPUT_DRAIN_POLL: Duration = Duration::from_millis(10);
 
+#[cfg(all(test, unix))]
+mod tests;
+
 #[derive(Debug, Clone)]
-pub(crate) struct TimedCommandOutput {
+pub(crate) struct TimedCommandOutput<Buffer = String> {
     pub status: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
+    pub stdout: Buffer,
+    pub stderr: Buffer,
     pub timed_out: bool,
     pub diagnostics: Vec<String>,
     pub wait_error: Option<String>,
 }
 
-enum OutputEvent {
-    Stdout(Vec<u8>),
-    Stderr(Vec<u8>),
-    StdoutDone,
-    StderrDone,
-    StdoutError(String),
-    StderrError(String),
-}
-
-#[derive(Default)]
-struct OutputState {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    stdout_done: bool,
-    stderr_done: bool,
-    diagnostics: Vec<String>,
-}
-
 struct PipedChild {
     child: Child,
+    #[cfg(windows)]
+    job: windows::Job,
     rx: Receiver<OutputEvent>,
     output: OutputState,
-}
-
-impl OutputState {
-    fn complete(&self) -> bool {
-        self.stdout_done && self.stderr_done
-    }
-
-    fn finish(
-        self,
-        status: Option<i32>,
-        timed_out: bool,
-        wait_error: Option<String>,
-    ) -> TimedCommandOutput {
-        TimedCommandOutput {
-            status,
-            stdout: String::from_utf8_lossy(&self.stdout).trim().to_string(),
-            stderr: String::from_utf8_lossy(&self.stderr).trim().to_string(),
-            timed_out,
-            diagnostics: self.diagnostics,
-            wait_error,
-        }
-    }
 }
 
 pub(crate) fn run_command_with_timeout(
@@ -84,10 +55,7 @@ pub(crate) fn run_command_with_timeout_and_env(
     env_set: &[(&str, &str)],
 ) -> Result<TimedCommandOutput, String> {
     let mut command = Command::new(program);
-    command
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.args(args);
     for key in env_remove {
         command.env_remove(key);
     }
@@ -98,14 +66,47 @@ pub(crate) fn run_command_with_timeout_and_env(
         command.current_dir(cwd);
     }
 
-    let running = spawn_piped(command)?;
-    wait_with_timeout(running, timeout, poll_interval)
+    run_prepared_command_with_timeout(command, timeout, poll_interval)
+        .map(TimedCommandOutput::into_text)
+        .map_err(|error| format!("failed to execute: {error}"))
 }
 
-fn spawn_piped(mut command: Command) -> Result<PipedChild, String> {
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("failed to execute: {}", e))?;
+pub(crate) fn run_prepared_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> std::io::Result<TimedCommandOutput<Vec<u8>>> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let running = spawn_piped(command)?;
+    Ok(wait_with_timeout(running, timeout, poll_interval))
+}
+
+impl TimedCommandOutput<Vec<u8>> {
+    fn into_text(self) -> TimedCommandOutput {
+        TimedCommandOutput {
+            status: self.status,
+            stdout: String::from_utf8_lossy(&self.stdout).trim().to_string(),
+            stderr: String::from_utf8_lossy(&self.stderr).trim().to_string(),
+            timed_out: self.timed_out,
+            diagnostics: self.diagnostics,
+            wait_error: self.wait_error,
+        }
+    }
+}
+
+fn spawn_piped(mut command: Command) -> std::io::Result<PipedChild> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    let (mut child, job) = windows::spawn(&mut command)?;
+    #[cfg(not(windows))]
+    let mut child = command.spawn()?;
 
     let (tx, rx) = mpsc::channel();
     let mut output = OutputState::default();
@@ -119,16 +120,24 @@ fn spawn_piped(mut command: Command) -> Result<PipedChild, String> {
     }
     drop(tx);
 
-    Ok(PipedChild { child, rx, output })
+    Ok(PipedChild {
+        child,
+        #[cfg(windows)]
+        job,
+        rx,
+        output,
+    })
 }
 
 fn wait_with_timeout(
     running: PipedChild,
     timeout: Duration,
     poll_interval: Duration,
-) -> Result<TimedCommandOutput, String> {
+) -> TimedCommandOutput<Vec<u8>> {
     let PipedChild {
         mut child,
+        #[cfg(windows)]
+        job,
         rx,
         mut output,
     } = running;
@@ -148,9 +157,12 @@ fn wait_with_timeout(
                         "output collection did not finish after the child exited; descendant processes may still be holding stdout/stderr open".to_string(),
                     );
                 }
-                return Ok(output.finish(status.code(), false, None));
+                return output.finish(status.code(), false, None);
             }
             Ok(None) if start.elapsed() >= timeout => {
+                #[cfg(windows)]
+                job.terminate(&mut output.diagnostics);
+                kill_process_group(&child, &mut output.diagnostics);
                 let kill_result = child.kill();
                 match &kill_result {
                     Ok(()) => output
@@ -192,12 +204,15 @@ fn wait_with_timeout(
                         "output collection incomplete after timeout; descendant processes may still be holding stdout/stderr open".to_string(),
                     );
                 }
-                return Ok(output.finish(status, true, None));
+                return output.finish(status, true, None);
             }
             Ok(None) => {
                 std::thread::sleep(poll_interval);
             }
             Err(e) => {
+                #[cfg(windows)]
+                job.terminate(&mut output.diagnostics);
+                kill_process_group(&child, &mut output.diagnostics);
                 let _ = child.kill();
                 let _ = child.wait();
                 collect_output_until(
@@ -206,10 +221,23 @@ fn wait_with_timeout(
                     Instant::now() + OUTPUT_DRAIN_GRACE,
                     OUTPUT_DRAIN_POLL,
                 );
-                return Ok(output.finish(None, false, Some(e.to_string())));
+                return output.finish(None, false, Some(e.to_string()));
             }
         }
     }
+}
+
+fn kill_process_group(child: &Child, diagnostics: &mut Vec<String>) {
+    #[cfg(unix)]
+    {
+        // Every child from spawn_piped leads its own group; include SSH and
+        // credential helpers that would otherwise retain the capture pipes.
+        if unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) } == 0 {
+            diagnostics.push("sent kill to child process group".to_string());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (child, diagnostics);
 }
 
 #[cfg(test)]
@@ -224,12 +252,13 @@ pub(crate) fn partial_output_fixture(timeout: Duration) -> Result<TimedCommandOu
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut running = spawn_piped(command)?;
+    let mut running =
+        spawn_piped(command).map_err(|error| format!("failed to execute: {error}"))?;
     let deadline = Instant::now() + FIXTURE_READY_TIMEOUT;
     loop {
         drain_output_events(&running.rx, &mut running.output);
         if running.output.stdout == b"out" && running.output.stderr == b"err" {
-            return wait_with_timeout(running, timeout, OUTPUT_DRAIN_POLL);
+            return Ok(wait_with_timeout(running, timeout, OUTPUT_DRAIN_POLL).into_text());
         }
 
         match running.child.try_wait() {
@@ -311,83 +340,4 @@ fn partial_output_command() -> (&'static str, [&'static str; 3]) {
             "[Console]::Out.Write('out'); [Console]::Out.Flush(); [Console]::Error.Write('err'); [Console]::Error.Flush(); Start-Sleep -Seconds 60",
         ],
     )
-}
-
-fn spawn_output_reader<R>(mut reader: R, tx: Sender<OutputEvent>, stdout: bool)
-where
-    R: Read + Send + 'static,
-{
-    std::thread::spawn(move || {
-        let mut buf = [0_u8; 8192];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let event = if stdout {
-                        OutputEvent::Stdout(buf[..n].to_vec())
-                    } else {
-                        OutputEvent::Stderr(buf[..n].to_vec())
-                    };
-                    if tx.send(event).is_err() {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    let event = if stdout {
-                        OutputEvent::StdoutError(e.to_string())
-                    } else {
-                        OutputEvent::StderrError(e.to_string())
-                    };
-                    let _ = tx.send(event);
-                    return;
-                }
-            }
-        }
-
-        let event = if stdout {
-            OutputEvent::StdoutDone
-        } else {
-            OutputEvent::StderrDone
-        };
-        let _ = tx.send(event);
-    });
-}
-
-fn collect_output_until(
-    rx: &Receiver<OutputEvent>,
-    output: &mut OutputState,
-    deadline: Instant,
-    poll_interval: Duration,
-) {
-    while !output.complete() && Instant::now() < deadline {
-        drain_output_events(rx, output);
-        if output.complete() {
-            break;
-        }
-        std::thread::sleep(poll_interval);
-    }
-    drain_output_events(rx, output);
-}
-
-fn drain_output_events(rx: &Receiver<OutputEvent>, output: &mut OutputState) {
-    while let Ok(event) = rx.try_recv() {
-        match event {
-            OutputEvent::Stdout(bytes) => output.stdout.extend(bytes),
-            OutputEvent::Stderr(bytes) => output.stderr.extend(bytes),
-            OutputEvent::StdoutDone => output.stdout_done = true,
-            OutputEvent::StderrDone => output.stderr_done = true,
-            OutputEvent::StdoutError(err) => {
-                output
-                    .diagnostics
-                    .push(format!("failed to read stdout: {}", err));
-                output.stdout_done = true;
-            }
-            OutputEvent::StderrError(err) => {
-                output
-                    .diagnostics
-                    .push(format!("failed to read stderr: {}", err));
-                output.stderr_done = true;
-            }
-        }
-    }
 }

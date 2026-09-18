@@ -264,7 +264,7 @@ pub fn trace_listener_loop_actor(
                 tracing::debug!(%error, "trace connection bootstrap timeout setup failed");
             }
             let mut reader = TraceReader::new(stream);
-            let mut observed_roots = std::collections::BTreeSet::new();
+            let mut observed_roots = std::collections::BTreeMap::new();
             match bootstrap_trace_connection_actor_reader(
                 &mut reader,
                 coordinator.clone(),
@@ -447,7 +447,7 @@ pub fn handle_windows_trace_pipe_connection(
     }
     let reader = TraceReader::new(&mut server);
     if let Err(e) =
-        handle_trace_connection_actor_reader(reader, coordinator, std::collections::BTreeSet::new())
+        handle_trace_connection_actor_reader(reader, coordinator, std::collections::BTreeMap::new())
     {
         tracing::debug!(%e, "trace connection error");
     }
@@ -461,5 +461,5 @@ pub fn handle_trace_connection_actor(
 ) -> Result<(), GitAiError> {
     coordinator.trace_unidentified_connection_opened()?;
     let reader = TraceReader::new(stream);
-    handle_trace_connection_actor_reader(reader, coordinator, std::collections::BTreeSet::new())
+    handle_trace_connection_actor_reader(reader, coordinator, std::collections::BTreeMap::new())
 }

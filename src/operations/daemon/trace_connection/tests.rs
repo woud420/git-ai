@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::io::Cursor;
 
 #[tokio::test]
@@ -8,7 +8,7 @@ async fn invalid_trace_bytes_stop_admission_and_release_unidentified_connection(
     coordinator.trace_unidentified_connection_opened().unwrap();
     let reader = TraceReader::new(Cursor::new([0xff, b'\n']));
     assert!(
-        handle_trace_connection_actor_reader(reader, coordinator.clone(), BTreeSet::new()).is_err()
+        handle_trace_connection_actor_reader(reader, coordinator.clone(), BTreeMap::new()).is_err()
     );
     assert!(coordinator.is_shutting_down());
     assert!(
@@ -41,7 +41,7 @@ async fn worker_read_error_releases_its_existing_root_registration() {
         handle_trace_connection_actor_reader(
             reader,
             coordinator.clone(),
-            BTreeSet::from(["root".to_string()])
+            BTreeMap::from([("root".to_string(), true)])
         )
         .is_err()
     );

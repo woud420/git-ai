@@ -40,6 +40,8 @@ mod repository_context;
 mod trace_frame_limits;
 #[path = "trace_normalization.rs"]
 mod trace_normalization;
+#[path = "trace_completed_roots.rs"]
+mod trace_completed_roots;
 
 #[path = "load.rs"]
 mod load;

@@ -24,7 +24,7 @@ pub const TRACE_CONNECTION_BOOTSTRAP_MAX_LINES: usize = 8;
 pub fn bootstrap_trace_connection_actor_reader<R: Read>(
     reader: &mut TraceReader<R>,
     coordinator: Arc<ActorDaemonCoordinator>,
-    observed_roots: &mut std::collections::BTreeSet<String>,
+    observed_roots: &mut std::collections::BTreeMap<String, bool>,
 ) -> Result<TraceConnectionBootstrap, GitAiError> {
     for _ in 0..TRACE_CONNECTION_BOOTSTRAP_MAX_LINES {
         let line = match read_trace_line(reader, &coordinator) {
@@ -65,7 +65,7 @@ pub fn trace_bootstrap_read_timed_out(error: &GitAiError) -> bool {
 pub fn handle_trace_connection_actor_reader<R: Read>(
     mut reader: TraceReader<R>,
     coordinator: Arc<ActorDaemonCoordinator>,
-    mut observed_roots: std::collections::BTreeSet<String>,
+    mut observed_roots: std::collections::BTreeMap<String, bool>,
 ) -> Result<(), GitAiError> {
     let result = (|| {
         while let Some(line) = read_trace_line(&mut reader, &coordinator)? {
@@ -84,7 +84,7 @@ pub fn handle_trace_connection_actor_reader<R: Read>(
 pub fn process_trace_connection_line(
     line: &str,
     coordinator: Arc<ActorDaemonCoordinator>,
-    observed_roots: &mut std::collections::BTreeSet<String>,
+    observed_roots: &mut std::collections::BTreeMap<String, bool>,
 ) -> Result<Option<TraceLineOutcome>, GitAiError> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -126,8 +126,17 @@ pub fn process_trace_connection_line(
         if event == "def_repo" && sid == root_sid {
             bootstrap_complete = true;
         }
-        if observed_roots.insert(root_sid.clone()) {
-            let _ = coordinator.trace_root_connection_opened(&root_sid);
+        let by_root_frame = sid == root_sid;
+        match observed_roots.entry(root_sid.clone()) {
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(coordinator.trace_connection_identified(&root_sid, by_root_frame)?);
+            }
+            std::collections::btree_map::Entry::Occupied(mut slot)
+                if by_root_frame && !*slot.get() =>
+            {
+                slot.insert(coordinator.trace_connection_identified(&root_sid, true)?);
+            }
+            _ => {}
         }
         if was_unidentified {
             coordinator.trace_unidentified_connection_identified_or_closed()?;

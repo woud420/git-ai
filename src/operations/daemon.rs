@@ -37,6 +37,7 @@ pub(crate) mod actor_coordinator_side_effects;
 pub(crate) mod actor_coordinator_trace;
 pub(crate) mod actor_coordinator_worktree;
 pub(crate) mod actor_types;
+mod completed_roots;
 // Compiled out of test-support library builds: the checkpoint path's
 // test-support stub never consults the limiter, while lib unit tests
 // (cfg(test)) exercise it directly.
@@ -127,6 +128,8 @@ mod stream_worker_tests;
 #[cfg(test)]
 mod telemetry_worker_tests;
 
+#[cfg(test)]
+mod tests_completed_roots;
 #[cfg(test)]
 mod tests_coordinator;
 #[cfg(test)]

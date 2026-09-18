@@ -22,15 +22,28 @@ fn captured_pipe(
 
 #[test]
 fn windows_daemon_start_without_powershell_closes_captured_pipes() {
+    const PROBE: &str = "GIT_AI_TEST_NO_POWERSHELL_PROBE";
+    if std::env::var_os(PROBE).is_some() {
+        assert!(Command::new("powershell.exe").output().is_err());
+        return;
+    }
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let empty_path = tempfile::tempdir().unwrap();
+    // Windows executable lookup can use the parent's PATH. Probe from a child
+    // whose inherited environment matches the bg-start process itself.
+    let probe = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "support::lifecycle::windows_start::windows_daemon_start_without_powershell_closes_captured_pipes",
+            "--nocapture",
+        ])
+        .env(PROBE, "1")
+        .env("PATH", empty_path.path())
+        .output()
+        .unwrap();
     assert!(
-        Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "exit 0"])
-            .env("PATH", empty_path.path())
-            .output()
-            .is_err(),
-        "fixture must prevent PowerShell resolution",
+        probe.status.success(),
+        "fixture must prevent PowerShell resolution: {probe:?}",
     );
     let _cleanup = DetachedDaemonCleanup(&repo);
     let git = real_git_executable();

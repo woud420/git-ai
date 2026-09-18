@@ -2,6 +2,19 @@ use crate::config::{AuthorConfig, CodexHooksFormat, NotesBackendKind};
 use serde_json::Value;
 use std::collections::HashMap;
 
+pub(super) fn validate_feature_flags(flags: &Value) -> Result<(), String> {
+    for spec in super::spec::config_key_specs() {
+        if let Some(name) = spec.name.strip_prefix("feature_flags.")
+            && spec.value_kind == super::spec::ConfigValueKind::Boolean
+            && let Some(value) = flags.get(name)
+            && !value.is_boolean()
+        {
+            return Err(format!("{} must be true or false", spec.name));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn parse_key_path(key: &str) -> Vec<String> {
     key.split('.').map(|s| s.to_string()).collect()
 }

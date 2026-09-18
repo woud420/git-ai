@@ -11,6 +11,7 @@ pub mod hooks_merge_flat;
 pub mod jetbrains;
 pub mod paths;
 pub mod plugin_drop;
+pub(crate) mod sandbox_socket;
 pub mod skills_installer;
 pub mod spinner;
 #[cfg(test)]

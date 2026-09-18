@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn transcript_byte_budgets_round_trip_and_environment_takes_precedence() {
+fn ingestion_byte_budgets_round_trip_and_environment_takes_precedence() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     for (key, variable, default) in [
         (
@@ -18,6 +18,11 @@ fn transcript_byte_budgets_round_trip_and_environment_takes_precedence() {
             "max_transcript_file_bytes",
             "GIT_AI_MAX_TRANSCRIPT_FILE_BYTES",
             64 * 1024 * 1024,
+        ),
+        (
+            "max_metrics_flush_chunk_bytes",
+            "GIT_AI_MAX_METRICS_FLUSH_CHUNK_BYTES",
+            8 * 1024 * 1024,
         ),
     ] {
         assert_eq!(get_json(&repo, key), default);

@@ -346,6 +346,16 @@ const CONFIG_KEY_SPECS: &[ConfigKeySpec] = &[
         show_in_help: true,
     },
     ConfigKeySpec {
+        name: "max_metrics_flush_chunk_bytes",
+        aliases: NO_ALIASES,
+        value_kind: ConfigValueKind::Integer,
+        sensitive: false,
+        nesting: ConfigNesting::None,
+        mutation: ConfigMutation::Replace,
+        help: "max_metrics_flush_chunk_bytes         Queued metrics payload limit per flush batch in bytes",
+        show_in_help: true,
+    },
+    ConfigKeySpec {
         name: "daemon_memory_limit_mb",
         aliases: NO_ALIASES,
         value_kind: ConfigValueKind::Integer,

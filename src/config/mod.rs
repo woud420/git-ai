@@ -28,8 +28,8 @@ pub(crate) mod tests;
 
 pub use author::AuthorConfig;
 pub use budgets::{
-    DEFAULT_MAX_TRANSCRIPT_BATCH_BYTES, DEFAULT_MAX_TRANSCRIPT_FILE_BYTES,
-    DEFAULT_MAX_TRANSCRIPT_LINE_BYTES,
+    DEFAULT_MAX_METRICS_FLUSH_CHUNK_BYTES, DEFAULT_MAX_TRANSCRIPT_BATCH_BYTES,
+    DEFAULT_MAX_TRANSCRIPT_FILE_BYTES, DEFAULT_MAX_TRANSCRIPT_LINE_BYTES,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use file::ConfigPatch;
@@ -90,6 +90,7 @@ pub struct Config {
     pub(crate) max_transcript_line_bytes: usize,
     pub(crate) max_transcript_batch_bytes: usize,
     pub(crate) max_transcript_file_bytes: usize,
+    pub(crate) max_metrics_flush_chunk_bytes: usize,
     pub(crate) daemon_memory_limit_mb: Option<u64>,
 }
 

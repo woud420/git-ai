@@ -41,6 +41,7 @@ pub(crate) fn create_test_config(
         max_transcript_line_bytes: super::super::DEFAULT_MAX_TRANSCRIPT_LINE_BYTES,
         max_transcript_batch_bytes: super::super::DEFAULT_MAX_TRANSCRIPT_BATCH_BYTES,
         max_transcript_file_bytes: super::super::DEFAULT_MAX_TRANSCRIPT_FILE_BYTES,
+        max_metrics_flush_chunk_bytes: super::super::DEFAULT_MAX_METRICS_FLUSH_CHUNK_BYTES,
         daemon_memory_limit_mb: None,
     }
 }

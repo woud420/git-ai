@@ -179,7 +179,14 @@ fn flush_pending_metrics_from_db(
     // are honored at delivery time.
     let config = Config::fresh();
     flush_pending_metric_records_with(
-        |limit| lock_db().and_then(|mut l| l.dequeue_pending_batch(limit)),
+        |limit| {
+            lock_db().and_then(|mut l| {
+                l.dequeue_pending_batch_with_byte_limit(
+                    limit,
+                    config.max_metrics_flush_chunk_bytes(),
+                )
+            })
+        },
         |event| should_deliver_metric_event(event, &config),
         |ids| lock_db().and_then(|mut l| l.mark_records_delivered(ids, current_unix_ts())),
         |ids, error| {

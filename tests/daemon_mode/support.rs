@@ -38,6 +38,8 @@ mod trace_listener;
 mod repository_context;
 #[path = "trace_frame_limits.rs"]
 mod trace_frame_limits;
+#[path = "trace_normalization.rs"]
+mod trace_normalization;
 
 #[path = "load.rs"]
 mod load;

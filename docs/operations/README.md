@@ -21,6 +21,7 @@ debug logging, `GIT_AI_DEBUG_PERFORMANCE=1` timing output.
 
 For opt-in agent sandbox access to the trace socket, see
 [sandbox socket permissions](sandbox-socket-permissions.md).
+See [socket health checks](socket-health.md) for liveness warnings and limits.
 
 Whole-file JSON transcripts (Amp, Continue, and Copilot) have a 64 MiB read
 limit. Oversized files remain pending without advancing their transcript

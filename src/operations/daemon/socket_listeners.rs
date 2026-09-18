@@ -14,8 +14,6 @@ use named_pipe::{
     PipeClient as WindowsPipeClient, PipeOptions as WindowsPipeOptions,
     PipeServer as WindowsPipeServer,
 };
-#[cfg(windows)]
-use std::path::Path;
 
 #[cfg(windows)]
 fn worker_panicked_error(what: &str) -> GitAiError {

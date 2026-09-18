@@ -184,6 +184,7 @@ pub fn daemon_socket_health_check_loop(
 ) {
     let started = std::time::Instant::now();
     let interval = daemon_socket_health_check_interval().max(1);
+    let mut socket_health = super::socket_health::SocketHealthMonitor::from_env();
     tracing::info!(
         interval,
         control = %control_socket_path.display(),
@@ -237,6 +238,8 @@ pub fn daemon_socket_health_check_loop(
             coordinator.request_shutdown();
             return;
         }
+
+        socket_health.check(&coordinator, &control_socket_path, &trace_socket_path);
 
         if let Err(error) = coordinator.reap_idle_trace_roots() {
             tracing::warn!(%error, "idle trace-root reclamation failed");

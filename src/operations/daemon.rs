@@ -74,6 +74,7 @@ pub(crate) mod side_effect_helpers;
 mod side_effect_test_hooks;
 pub(crate) mod side_effects_commit;
 pub(crate) mod side_effects_git_ops;
+pub(crate) mod socket_health;
 pub(crate) mod socket_listeners;
 pub(crate) mod trace_connection;
 pub(crate) mod trace_helpers;

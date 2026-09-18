@@ -54,6 +54,7 @@ impl ActorDaemonCoordinator {
             commit_file_timestamp_snapshots_by_root: Mutex::new(HashMap::new()),
             recent_replay_prerequisites_by_family: Mutex::new(HashMap::new()),
             side_effect_errors_by_family: Mutex::new(HashMap::new()),
+            error_log_policy: Mutex::new(Default::default()),
             side_effect_exec_locks: Mutex::new(HashMap::new()),
             command_side_effect_semaphore: Semaphore::new(COMMAND_SIDE_EFFECT_CONCURRENCY),
             self_ref: std::sync::OnceLock::new(),

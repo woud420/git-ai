@@ -423,15 +423,19 @@ impl ActorDaemonCoordinator {
                         match futures::FutureExt::catch_unwind(caught).await {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(error)) => {
-                                tracing::error!(
-                                    component = "daemon",
-                                    phase = "trace_ingest_worker",
-                                    reason = "ingest_error",
-                                    sequence = processed_seq,
-                                    root_sid = ?ordered_payload_root,
-                                    %error,
-                                    "trace ingest error"
-                                );
+                                if super::error_log_policy::is_discovery_miss(&error) {
+                                    tracing::debug!(
+                                        component = "daemon", phase = "trace_ingest_worker",
+                                        reason = "repository_unavailable", sequence = processed_seq,
+                                        root_sid = ?ordered_payload_root, %error, "trace ingest error"
+                                    );
+                                } else {
+                                    tracing::error!(
+                                        component = "daemon", phase = "trace_ingest_worker",
+                                        reason = "ingest_error", sequence = processed_seq,
+                                        root_sid = ?ordered_payload_root, %error, "trace ingest error"
+                                    );
+                                }
                                 Err(error)
                             }
                             Err(panic_payload) => {

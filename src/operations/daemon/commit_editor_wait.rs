@@ -36,7 +36,10 @@ impl CommitEditorWaits {
             let primary = trace_argv_primary_command(&argv);
             if sid == root && primary.as_deref() == Some("commit") {
                 self.roots.entry(root.into()).or_default().is_commit = true;
-            } else if sid != root && trace_invocation_may_mutate_refs(primary.as_deref(), &argv) {
+            } else if sid != root
+                && (primary.is_none()
+                    || trace_invocation_may_mutate_refs(primary.as_deref(), &argv))
+            {
                 let state = self.roots.entry(root.into()).or_default();
                 state.must_remain_ordered = true;
                 state.editor_child = None;

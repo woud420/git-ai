@@ -64,6 +64,16 @@ fn read_only_nested_git_does_not_end_the_commit_editor_wait() {
 }
 
 #[test]
+fn an_unclassified_nested_start_restores_the_barrier() {
+    let mut waits = CommitEditorWaits::default();
+    start(&mut waits, "commit");
+    editor(&mut waits);
+    waits.observe(&json!({"event":"start","sid":"root/child","argv":[]}));
+    assert!(!waits.is_waiting("root"));
+    assert!(editor(&mut waits).is_none());
+}
+
+#[test]
 fn overlapping_or_unidentified_editors_keep_the_root_ordered() {
     for child_id in [json!(8), Value::Null] {
         let mut waits = CommitEditorWaits::default();

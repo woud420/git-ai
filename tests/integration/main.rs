@@ -32,6 +32,7 @@ mod checkpoint_explicit_paths;
 mod checkpoint_journal;
 mod checkpoint_perf;
 mod checkpoint_size;
+mod checkpoint_snapshot_sharing;
 mod checkpoint_telemetry;
 mod checkpoint_unit;
 mod cherry_pick;

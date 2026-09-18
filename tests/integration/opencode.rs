@@ -5,6 +5,9 @@ use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 
+#[path = "opencode_plugin_module.rs"]
+mod plugin_module;
+
 fn parse_and_enrich_opencode(hook_input: &str) -> Result<Vec<ParsedHookEvent>, GitAiError> {
     let preset = resolve_preset("opencode")?;
     let mut events = preset.parse(hook_input, "t_test")?;

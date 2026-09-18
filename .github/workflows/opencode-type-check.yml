@@ -36,3 +36,5 @@ jobs:
       - name: Run type check
         run: npm run type-check
 
+      - name: Test plugin entrypoint and checkpoint hooks
+        run: npm test

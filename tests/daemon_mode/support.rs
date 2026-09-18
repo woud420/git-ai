@@ -32,6 +32,8 @@ mod trace_listener;
 
 #[path = "repository_context.rs"]
 mod repository_context;
+#[path = "trace_frame_limits.rs"]
+mod trace_frame_limits;
 
 #[path = "load.rs"]
 mod load;
@@ -404,7 +406,6 @@ fn trace_command_frames_emit_a_complete_deterministic_lifecycle() {
     );
 }
 
-#[cfg(not(windows))]
 fn write_trace_frames_to_stream(stream: &mut impl Write, payloads: &[Value]) {
     for payload in payloads {
         let raw = serde_json::to_string(payload).expect("failed to serialize trace payload");

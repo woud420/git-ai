@@ -1,8 +1,9 @@
 use super::daemon_config::DaemonConfig;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead};
+use std::io;
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
@@ -66,13 +67,8 @@ pub fn pid_metadata_path(config: &DaemonConfig) -> PathBuf {
 /// Reads the PID from daemon.pid.json and constructs the log path.
 pub fn daemon_log_file_path(config: &DaemonConfig) -> Result<PathBuf, GitAiError> {
     let meta_path = pid_metadata_path(config);
-    let contents = fs::read_to_string(&meta_path).map_err(|e| {
-        GitAiError::Generic(format!(
-            "failed to read daemon pid metadata at {}: {}",
-            meta_path.display(),
-            e
-        ))
-    })?;
+    let contents = fs::read_to_string(&meta_path)
+        .map_err(|e| daemon_io_error("read daemon pid metadata", meta_path.display(), e))?;
     let meta: DaemonPidMeta = serde_json::from_str(&contents)?;
     let log_dir = config.internal_dir.join("daemon").join("logs");
     Ok(log_dir.join(format!("{}.log", meta.pid)))
@@ -91,13 +87,8 @@ pub fn write_pid_metadata(config: &DaemonConfig) -> Result<(), GitAiError> {
 /// Read the PID of the currently running daemon from the pid metadata file.
 pub fn read_daemon_pid(config: &DaemonConfig) -> Result<u32, GitAiError> {
     let meta_path = pid_metadata_path(config);
-    let contents = fs::read_to_string(&meta_path).map_err(|e| {
-        GitAiError::Generic(format!(
-            "failed to read daemon pid metadata at {}: {}",
-            meta_path.display(),
-            e
-        ))
-    })?;
+    let contents = fs::read_to_string(&meta_path)
+        .map_err(|e| daemon_io_error("read daemon pid metadata", meta_path.display(), e))?;
     let meta: DaemonPidMeta = serde_json::from_str(&contents)?;
     Ok(meta.pid)
 }
@@ -202,10 +193,18 @@ pub fn setup_daemon_log_file(config: &DaemonConfig) -> Result<DaemonLogGuard, Gi
     // open log file descriptor. The file is kept alive by the returned guard.
     unsafe {
         if libc::dup2(fd, libc::STDOUT_FILENO) == -1 {
-            return Err(GitAiError::Generic("dup2 stdout failed".to_string()));
+            return Err(daemon_io_error(
+                "redirect daemon stdout",
+                log_path.display(),
+                io::Error::last_os_error(),
+            ));
         }
         if libc::dup2(fd, libc::STDERR_FILENO) == -1 {
-            return Err(GitAiError::Generic("dup2 stderr failed".to_string()));
+            return Err(daemon_io_error(
+                "redirect daemon stderr",
+                log_path.display(),
+                io::Error::last_os_error(),
+            ));
         }
     }
 
@@ -253,24 +252,18 @@ pub fn redirect_windows_stdio_stream(
         )
     };
     if fd == -1 {
+        let error = io::Error::last_os_error();
         unsafe {
             drop(File::from_raw_handle(raw_handle));
         }
-        return Err(GitAiError::Generic(format!(
-            "open_osfhandle failed for daemon log stream {}: {}",
-            std_fd,
-            std::io::Error::last_os_error()
-        )));
+        return Err(daemon_io_error("open daemon log handle", std_fd, error));
     }
 
     let dup_result = unsafe { libc::dup2(fd, std_fd) };
     if dup_result == -1 {
         let err = std::io::Error::last_os_error();
         let _ = unsafe { libc::close(fd) };
-        return Err(GitAiError::Generic(format!(
-            "dup2 failed for daemon log stream {}: {}",
-            std_fd, err
-        )));
+        return Err(daemon_io_error("redirect daemon log stream", std_fd, err));
     }
     if unsafe { libc::close(fd) } == -1 {
         tracing::debug!(
@@ -282,11 +275,11 @@ pub fn redirect_windows_stdio_stream(
 
     let set_handle_result = unsafe { SetStdHandle(std_handle, file.as_raw_handle()) };
     if set_handle_result == 0 {
-        return Err(GitAiError::Generic(format!(
-            "SetStdHandle failed for daemon log stream {}: {}",
+        return Err(daemon_io_error(
+            "set daemon standard handle",
             std_fd,
-            std::io::Error::last_os_error()
-        )));
+            io::Error::last_os_error(),
+        ));
     }
 
     Ok(())
@@ -336,67 +329,16 @@ pub fn process_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
-pub fn read_json_line<R: BufRead>(reader: &mut R) -> Result<Option<String>, GitAiError> {
-    let mut line = String::new();
-    let read = reader.read_line(&mut line)?;
-    if read == 0 {
-        return Ok(None);
+pub(super) fn daemon_io_error(
+    operation: &'static str,
+    path: impl ToString,
+    error: io::Error,
+) -> GitAiError {
+    PersistenceError::Io {
+        operation,
+        path: path.to_string(),
+        kind: error.kind(),
+        message: error.to_string(),
     }
-    Ok(Some(line))
-}
-
-pub fn read_json_line_bounded<R: BufRead>(
-    reader: &mut R,
-    max_bytes: usize,
-) -> Result<Option<String>, GitAiError> {
-    let read_limit = u64::try_from(max_bytes)
-        .unwrap_or(u64::MAX)
-        .saturating_add(1);
-    let mut limited = std::io::Read::take(&mut *reader, read_limit);
-    let mut line = String::new();
-    let read = limited.read_line(&mut line)?;
-    if read == 0 {
-        return Ok(None);
-    }
-    if read > max_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("daemon control frame exceeds {max_bytes} bytes"),
-        )
-        .into());
-    }
-    Ok(Some(line))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn bounded_json_line_rejects_oversized_input_without_consuming_the_tail() {
-        let mut reader = Cursor::new(b"1234567890\nnext\n".to_vec());
-
-        let error = read_json_line_bounded(&mut reader, 8).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "IO error: daemon control frame exceeds 8 bytes"
-        );
-        assert_eq!(reader.position(), 9);
-    }
-
-    #[test]
-    fn bounded_json_line_accepts_a_frame_at_the_limit() {
-        let mut reader = Cursor::new(b"1234567\nnext\n".to_vec());
-
-        assert_eq!(
-            read_json_line_bounded(&mut reader, 8).unwrap(),
-            Some("1234567\n".to_string())
-        );
-        assert_eq!(
-            read_json_line_bounded(&mut reader, 8).unwrap(),
-            Some("next\n".to_string())
-        );
-    }
+    .into()
 }

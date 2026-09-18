@@ -60,6 +60,7 @@ pub(crate) mod health;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) mod jj_observer;
 pub(crate) mod jj_observer_control;
+pub(crate) mod json_lines;
 pub(crate) mod lifecycle;
 pub(crate) mod log_setup;
 pub(crate) mod memory_watchdog;
@@ -73,6 +74,7 @@ mod side_effect_test_hooks;
 pub(crate) mod side_effects_commit;
 pub(crate) mod side_effects_git_ops;
 pub(crate) mod socket_listeners;
+pub(crate) mod trace_connection;
 pub(crate) mod trace_helpers;
 pub(crate) mod transport_error;
 
@@ -88,6 +90,8 @@ pub use daemon_config::*;
 #[doc(hidden)]
 pub use git_op_side_effects::*;
 #[doc(hidden)]
+pub use json_lines::*;
+#[doc(hidden)]
 pub use lifecycle::*;
 #[doc(hidden)]
 pub use log_setup::*;
@@ -95,6 +99,8 @@ pub use log_setup::*;
 pub use side_effect_helpers::*;
 #[doc(hidden)]
 pub use socket_listeners::*;
+#[doc(hidden)]
+pub use trace_connection::*;
 #[doc(hidden)]
 pub use trace_helpers::*;
 

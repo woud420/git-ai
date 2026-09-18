@@ -7,6 +7,7 @@ use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 
 mod args;
 mod computation;
+mod human_authors;
 mod hunk_parser;
 mod json_output;
 mod output;

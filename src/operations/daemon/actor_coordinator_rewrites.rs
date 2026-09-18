@@ -2,6 +2,7 @@
 use super::*;
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
+use crate::operations::authorship::rewrite::RebaseRange;
 use crate::operations::daemon::cherry_pick_helpers::rebase_new_tip_from_command;
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::oid::is_non_zero_oid;
@@ -77,12 +78,24 @@ impl ActorDaemonCoordinator {
             .filter(|rc| is_non_zero_oid(&rc.new))
             .map(|rc| rc.new.clone())
             .next();
+        // --update-refs can move intermediate branches too; argv's HEAD was
+        // resolved against the operation's original tip, not each branch tip.
+        let original_rebase_head = cmd
+            .ref_changes
+            .iter()
+            .find(|change| change.reference == "HEAD" && is_non_zero_oid(&change.old))
+            .map(|change| change.old.as_str())
+            .unwrap_or("");
 
         // If we have a pending original head from a failed rebase, use it as old_tip
         // with the branch ref update as new_tip. This handles rebase --skip/--continue
         // where HEAD can contain extra checkout/detach movement that is not the
         // rebased branch tip.
-        if let Some((original_head, stored_onto)) = pending_original_head
+        if let Some(actor_types::PendingRebase {
+            original_head,
+            onto: stored_onto,
+            range,
+        }) = pending_original_head
             && let Some(new_tip) = rebase_new_tip_from_command(cmd, &original_head)
         {
             if original_head != new_tip && !is_ancestor_commit(&repo, &original_head, &new_tip) {
@@ -102,6 +115,7 @@ impl ActorDaemonCoordinator {
                         &new_tip,
                         rebase_onto.as_deref(),
                         crate::operations::authorship::rewrite::RewriteMetricOperation::Rebase,
+                        Some(&range),
                     )?;
                 repo.storage.rename_working_log(&original_head, &new_tip)?;
                 let conflict_base = rebase_onto.clone();
@@ -146,6 +160,7 @@ impl ActorDaemonCoordinator {
                     new_tip,
                     rewrite_onto.as_deref(),
                     crate::operations::authorship::rewrite::RewriteMetricOperation::Rebase,
+                    Some(&RebaseRange::from_command(cmd, original_rebase_head, rewrite_onto.as_deref())),
                 )?
             } else if cmd.primary_command.as_deref() == Some("update-ref") {
                 crate::operations::authorship::rewrite::handle_non_fast_forward_rewrite_with_operation(
@@ -154,6 +169,7 @@ impl ActorDaemonCoordinator {
                     new_tip,
                     rewrite_onto.as_deref(),
                     crate::operations::authorship::rewrite::RewriteMetricOperation::UpdateRef,
+                    None,
                 )?
             } else {
                 crate::operations::authorship::rewrite::handle_non_fast_forward_rewrite_with_operation(
@@ -162,6 +178,7 @@ impl ActorDaemonCoordinator {
                     new_tip,
                     rewrite_onto.as_deref(),
                     crate::operations::authorship::rewrite::RewriteMetricOperation::NonFastForward,
+                    None,
                 )?
             };
             repo.storage.rename_working_log(old_tip, new_tip)?;

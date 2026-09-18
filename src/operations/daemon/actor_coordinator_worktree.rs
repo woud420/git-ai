@@ -18,6 +18,7 @@ impl ActorDaemonCoordinator {
         worktree: &Path,
         original_head: String,
         onto: Option<String>,
+        range: crate::operations::authorship::rewrite::RebaseRange,
     ) -> Result<(), GitAiError> {
         let mut map = self
             .pending_rebase_original_head_by_worktree
@@ -25,7 +26,14 @@ impl ActorDaemonCoordinator {
             .map_err(|_| PersistenceError::LockPoisoned {
                 what: "pending rebase original-head map",
             })?;
-        map.insert(Self::worktree_state_key(worktree), (original_head, onto));
+        map.insert(
+            Self::worktree_state_key(worktree),
+            actor_types::PendingRebase {
+                original_head,
+                onto,
+                range,
+            },
+        );
         Ok(())
     }
 
@@ -46,7 +54,7 @@ impl ActorDaemonCoordinator {
     pub(crate) fn take_pending_rebase_original_head_for_worktree(
         &self,
         worktree: &Path,
-    ) -> Result<Option<(String, Option<String>)>, GitAiError> {
+    ) -> Result<Option<actor_types::PendingRebase>, GitAiError> {
         let mut map = self
             .pending_rebase_original_head_by_worktree
             .lock()

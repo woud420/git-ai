@@ -15,6 +15,8 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 
+mod rebase_range;
+
 struct EnvVarGuard {
     key: &'static str,
     original: Option<OsString>,

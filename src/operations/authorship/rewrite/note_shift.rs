@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
@@ -8,9 +8,9 @@ use crate::operations::git::repository::Repository;
 
 use super::diff_tree::compute_diff_trees_streaming;
 
-struct PendingShift {
+struct PendingShift<'a> {
     new_sha: String,
-    log: AuthorshipLog,
+    raw_note: &'a str,
 }
 
 /// Serialize `log` to a note, write it for `commit_sha`, and return the
@@ -21,6 +21,7 @@ pub(super) fn write_authorship_log(
     log: &AuthorshipLog,
 ) -> Result<String, GitAiError> {
     let serialized = log.serialize_to_string().map_err(|e| {
+        // This diagnostic propagates to persisted daemon completion errors.
         GitAiError::Generic(format!("failed to serialize rewrite authorship log: {}", e))
     })?;
     let entries = vec![(commit_sha.to_string(), serialized)];
@@ -71,10 +72,7 @@ fn shift_authorship_notes_with_existing_mode(
     }
 
     // Batch-read all notes for source and target commits in O(1) git calls
-    let all_shas: Vec<String> = mappings
-        .iter()
-        .flat_map(|(src, dst)| [src.clone(), dst.clone()])
-        .collect();
+    let all_shas = super::diff_tree::unique_pair_shas(mappings);
     let notes_map = notes_api::read_notes_batch(repo, &all_shas)?;
 
     let mut pending: Vec<PendingShift> = Vec::new();
@@ -82,38 +80,50 @@ fn shift_authorship_notes_with_existing_mode(
     let mut diff_pairs: Vec<(String, String)> = Vec::new();
     let mut existing_by_target: HashMap<String, AuthorshipLog> = HashMap::new();
 
-    for (source_sha, new_sha) in mappings {
+    let mut inspected_targets = HashSet::new();
+    let mut blocked_targets = HashSet::new();
+    for (_, new_sha) in mappings {
+        if !inspected_targets.insert(new_sha) {
+            continue;
+        }
         if let Some(existing_raw) = notes_map.get(new_sha) {
-            if let Ok(existing_log) = AuthorshipLog::deserialize_from_string(existing_raw) {
-                if !existing_log.attestations.is_empty() {
+            match AuthorshipLog::deserialize_from_string(existing_raw) {
+                Ok(log) if !log.attestations.is_empty() => {
                     if merge_existing_targets {
-                        existing_by_target
-                            .entry(new_sha.clone())
-                            .or_insert(existing_log);
+                        existing_by_target.insert(new_sha.clone(), log);
                     } else {
-                        continue;
+                        blocked_targets.insert(new_sha);
                     }
                 }
-            } else {
-                continue;
+                Ok(_) => {}
+                Err(_) => {
+                    blocked_targets.insert(new_sha);
+                }
             }
+        }
+    }
+    for (source_sha, new_sha) in mappings {
+        if blocked_targets.contains(new_sha) {
+            continue;
         }
 
         let Some(raw_note) = notes_map.get(source_sha) else {
             continue;
         };
 
-        let Ok(log) = AuthorshipLog::deserialize_from_string(raw_note) else {
+        // Validate one source at a time; retain only borrowed raw text while
+        // diff-tree runs, rather than every expanded authorship log.
+        if AuthorshipLog::deserialize_from_string(raw_note).is_err() {
             if !merge_existing_targets {
                 verbatim_writes.push((new_sha.clone(), raw_note.clone()));
             }
             continue;
-        };
+        }
 
         diff_pairs.push((source_sha.clone(), new_sha.clone()));
         pending.push(PendingShift {
             new_sha: new_sha.clone(),
-            log,
+            raw_note,
         });
     }
 
@@ -133,6 +143,7 @@ fn shift_authorship_notes_with_existing_mode(
     let mut all_writes = verbatim_writes;
     for (sha, log) in merged_by_target {
         let serialized = log.serialize_to_string().map_err(|e| {
+            // Keep the persisted completion-error display stable.
             GitAiError::Generic(format!("failed to serialize shifted authorship log: {}", e))
         })?;
         all_writes.push((sha, serialized));
@@ -144,13 +155,15 @@ fn shift_authorship_notes_with_existing_mode(
     Ok(all_writes)
 }
 
-fn apply_chunk_shifts(
+fn apply_chunk_shifts<'a>(
     merged_by_target: &mut HashMap<String, AuthorshipLog>,
     chunk: Vec<super::DiffTreeResult>,
-    pending_iter: &mut impl Iterator<Item = PendingShift>,
+    pending_iter: &mut impl Iterator<Item = PendingShift<'a>>,
 ) {
     for (diff_result, shift) in chunk.into_iter().zip(pending_iter) {
-        let mut log = shift.log;
+        let Ok(mut log) = AuthorshipLog::deserialize_from_string(shift.raw_note) else {
+            continue;
+        };
 
         for (old_path, new_path) in diff_result.renames {
             for attestation in &mut log.attestations {
@@ -213,64 +226,4 @@ pub(super) fn merge_authorship_logs(target: &mut AuthorshipLog, source: &Authors
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::model::authorship_log::LineRange;
-    use crate::model::authorship_log_serialization::AttestationEntry;
-
-    use super::*;
-    use crate::operations::authorship::rewrite::DiffTreeResult;
-
-    fn log_for(file: &str, hash: &str) -> AuthorshipLog {
-        let mut log = AuthorshipLog::new();
-        log.get_or_create_file(file)
-            .add_entry(AttestationEntry::new(
-                hash.to_string(),
-                vec![LineRange::Single(1)],
-            ));
-        log
-    }
-
-    #[test]
-    fn apply_chunk_shifts_merges_sources_for_one_target_across_chunks() {
-        let target = "b".repeat(40);
-        let pending = vec![
-            PendingShift {
-                new_sha: target.clone(),
-                log: log_for("first.rs", "1111111111111111"),
-            },
-            PendingShift {
-                new_sha: target.clone(),
-                log: log_for("second.rs", "2222222222222222"),
-            },
-        ];
-        let mut pending_iter = pending.into_iter();
-        let mut merged_by_target = HashMap::new();
-
-        apply_chunk_shifts(
-            &mut merged_by_target,
-            vec![DiffTreeResult::default()],
-            &mut pending_iter,
-        );
-        apply_chunk_shifts(
-            &mut merged_by_target,
-            vec![DiffTreeResult::default()],
-            &mut pending_iter,
-        );
-
-        assert_eq!(pending_iter.count(), 0);
-        let merged = merged_by_target.get(&target).expect("merged target");
-        assert_eq!(merged.metadata.base_commit_sha, target);
-        assert!(
-            merged
-                .attestations
-                .iter()
-                .any(|attestation| attestation.file_path == "first.rs")
-        );
-        assert!(
-            merged
-                .attestations
-                .iter()
-                .any(|attestation| attestation.file_path == "second.rs")
-        );
-    }
-}
+mod tests;

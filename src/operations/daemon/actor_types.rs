@@ -219,6 +219,7 @@ pub struct ActorDaemonCoordinator {
     pub(crate) recent_replay_prerequisites_by_family:
         Mutex<HashMap<String, VecDeque<RecentReplayPrerequisite>>>,
     pub(crate) side_effect_errors_by_family: Mutex<HashMap<String, BTreeMap<u64, String>>>,
+    pub(crate) error_log_policy: Mutex<super::error_log_policy::ErrorLogPolicy>,
     pub(crate) side_effect_exec_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     pub(crate) command_side_effect_semaphore: Semaphore,
     /// Weak self-reference set by `register_self` after the coordinator is

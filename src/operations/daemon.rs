@@ -62,6 +62,7 @@ pub(crate) mod jj_observer_control;
 pub(crate) mod lifecycle;
 pub(crate) mod log_setup;
 pub(crate) mod memory_watchdog;
+mod orphan_branch;
 pub(crate) mod parent_diff_batch;
 pub(crate) mod revert_rebase_helpers;
 pub(crate) mod self_check;
@@ -73,6 +74,7 @@ pub(crate) mod side_effects_git_ops;
 pub(crate) mod socket_listeners;
 pub(crate) mod trace_helpers;
 mod working_log_discard;
+mod workspace_side_effects;
 
 // Re-export types and functions that external code accesses as
 // `crate::operations::daemon::X`.  Only modules that define such public items

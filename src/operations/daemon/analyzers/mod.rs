@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 pub mod generic;
 pub mod history;
+mod orphan_checkout;
 mod removal;
 pub mod transport;
 pub mod workspace;
+mod workspace_evidence;
 
 #[derive(Debug, Clone)]
 pub struct AnalysisView<'a> {

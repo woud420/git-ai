@@ -1,7 +1,7 @@
 use super::*;
 
 // range-diff retains patches and pairwise matching costs for its input commits.
-const MAX_RANGE_DIFF_COMMITS: usize = 1000;
+pub(super) const MAX_RANGE_DIFF_COMMITS: usize = 1000;
 
 pub(super) fn bounded_new_base(
     repo: &Repository,

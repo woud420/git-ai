@@ -143,6 +143,7 @@ mod rebase_http_notes;
 mod rebase_merge_commit_note_leak;
 mod rebase_note_integrity;
 mod rebase_realworld;
+mod rebase_squash_boundaries;
 mod refs_unit;
 mod regular_file;
 mod repo_storage_unit;

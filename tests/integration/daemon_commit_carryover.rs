@@ -4,6 +4,8 @@ use git_ai::operations::daemon::DaemonConfig;
 use std::fs;
 use std::time::{Duration, SystemTime};
 
+mod stale_checkpoint;
+
 #[test]
 fn test_daemon_commit_uses_immutable_commit_content_not_next_worktree_edit() {
     let repo = TestRepo::new_dedicated_daemon();

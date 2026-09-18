@@ -184,8 +184,18 @@ so no cursor predates the first traced command.
   remotes. Git Notes sync serves the `git_notes` backend and SQLite's
   compatibility fallback; a missing `refs/notes/ai` ref is a no-op, not an
   error. The `http` backend skips ref pushes and warms its remote-backed cache
-  after pulls and clones. All other authorship reads and writes go through the
-  configured notes backend.
+  after pulls and clones. Successful `git fetch <remote>` calls reuse that
+  backend-aware synchronization asynchronously, without changing `FETCH_HEAD`.
+  This fetch support is best effort and requires repository collection opt-in:
+  metadata errors are logged without failing Git or daemon completion.
+  Only one explicit repository argument is supported;
+  options, refspecs, implicit remotes, dry runs, and multi-remote forms do not
+  trigger synchronization. Global options other than `-C` also skip sync,
+  because command-scoped configuration can redirect the original transport.
+  The HTTP warmer retains its existing bounded remote-HEAD/local-HEAD behavior,
+  so it does not promise to cache every fetched
+  commit. All other authorship reads and writes go through the configured notes
+  backend.
 
 ## Reads must not sync
 

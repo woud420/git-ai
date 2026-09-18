@@ -197,6 +197,21 @@ daemon processing time (I3).
    and daemon processing are real evidence and must survive.
 
 `reset --hard` discards the work; discarded content gets no reconstruction.
+For a successful same-HEAD hard reset, a cursor-owned identity reflog entry is
+an ordered workspace discard boundary. The async family worker checks recorded
+paths against that immutable HEAD tree with one metadata-only `cat-file` batch,
+then removes their old checkpoints and INITIAL attribution. It does not inspect
+the later index or worktree, delete surviving untracked-path evidence, or change
+committed notes. The existing sequencer places later checkpoints after this
+boundary. The reducer preserves the remembered branch for this identity record.
+
+This is best-effort coverage of paths in the canonical HEAD tree, bounded to
+4,096 distinct recorded paths and 1 MiB of query input. Missing reflog evidence,
+query budget/encoding failures, and failed commands do not infer a discard.
+Index-only additions, untracked obstructions, sparse/replacement-object views,
+and recursive submodule effects are outside this profile. Those cases require
+additional operation-time evidence before broader support can be claimed.
+
 Pathspec reset (`git reset -- path`) only unstages; it does not move HEAD and
 needs no committed-record migration.
 

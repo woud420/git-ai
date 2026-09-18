@@ -427,7 +427,11 @@ impl ActorDaemonCoordinator {
                     kind,
                     old_head,
                     new_head,
-                } if !old_head.is_empty() && !new_head.is_empty() && old_head != new_head => {
+                } if !old_head.is_empty()
+                    && !new_head.is_empty()
+                    && (old_head != new_head
+                        || matches!(kind, crate::model::domain::ResetKind::Hard)) =>
+                {
                     Self::handle_reset(&worktree, kind, old_head, new_head)?;
                 }
                 _ => {}

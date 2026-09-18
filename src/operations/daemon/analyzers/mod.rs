@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 pub mod generic;
 pub mod history;
+mod reset;
 pub mod transport;
 pub mod workspace;
 

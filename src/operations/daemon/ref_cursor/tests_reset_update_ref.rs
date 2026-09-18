@@ -4,6 +4,56 @@ use crate::model::domain::{FamilyKey, WorktreeState};
 use std::fs;
 
 #[test]
+fn reset_cursor_without_reflog_does_not_infer_identity_from_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("repo");
+    let git_dir = worktree.join(".git");
+    crate::operations::git::test_utils::seed_valid_git_dir(&git_dir);
+    let family = FamilyKey::new(git_dir.to_string_lossy().to_string());
+    let mut state = family_state(&family);
+    state.refs.insert("HEAD".to_string(), A.to_string());
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command_with_worktree(&family, Some(worktree), &["reset", "--hard", "HEAD"]);
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+    assert!(cmd.ref_changes.is_empty());
+}
+
+#[test]
+fn reset_cursor_consumes_same_head_boundary_before_later_reset() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("repo");
+    let git_dir = worktree.join(".git");
+    let head_log = git_dir.join("logs/HEAD");
+    fs::create_dir_all(head_log.parent().unwrap()).unwrap();
+    crate::operations::git::test_utils::seed_valid_git_dir(&git_dir);
+    fs::write(
+        &head_log,
+        format!(
+            "{A} {A} Test User <test@example.com> 0 +0000\treset: moving to HEAD\n\
+             {A} {B} Test User <test@example.com> 0 +0000\treset: moving to {B}\n"
+        ),
+    )
+    .unwrap();
+    let family = FamilyKey::new(git_dir.to_string_lossy().to_string());
+    let state = family_state(&family);
+    let mut cursor = RefCursor::new(family.clone());
+    let mut first = command_with_worktree(
+        &family,
+        Some(worktree.clone()),
+        &["reset", "--hard", "HEAD"],
+    );
+    first.reflog_start_offsets.insert(head_key(&git_dir), 0);
+    cursor.enrich_command(&mut first, &state).unwrap();
+    assert_eq!(first.ref_changes, vec![ref_change("HEAD", A, A)]);
+
+    let mut later = command_with_worktree(&family, Some(worktree), &["reset", "--soft", B]);
+    cursor.enrich_command(&mut later, &state).unwrap();
+    assert_eq!(later.ref_changes, vec![ref_change("HEAD", A, B)]);
+    cursor.enrich_command(&mut first, &state).unwrap();
+    assert!(first.ref_changes.is_empty());
+}
+
+#[test]
 fn first_observed_head_boundary_skips_prior_reset_history() {
     let temp = tempfile::tempdir().unwrap();
     let worktree = temp.path().join("repo");

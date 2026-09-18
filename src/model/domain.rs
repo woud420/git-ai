@@ -183,6 +183,11 @@ pub enum SemanticEvent {
         head: String,
         files: Vec<String>,
     },
+    OrphanBranchCreated {
+        old_head: String,
+        branch: String,
+        discard_tracked: bool,
+    },
     CheckoutPaths,
     RestorePaths,
     CleanedWorkspace,

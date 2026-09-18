@@ -33,7 +33,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                 });
             }
             "checkout" => {
-                if is_path_checkout(&args) {
+                if let Some(event) =
+                    super::orphan_checkout::analyze_orphan_checkout(cmd, state.worktree)
+                {
+                    events.push(event);
+                } else if is_path_checkout(&args) {
                     events.push(SemanticEvent::CheckoutPaths);
                 } else if let Some(change) = cmd.ref_changes.first() {
                     events.push(SemanticEvent::RefUpdated {
@@ -44,7 +48,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                 }
             }
             "switch" => {
-                if let Some(change) = cmd.ref_changes.first() {
+                if let Some(event) =
+                    super::orphan_checkout::analyze_orphan_checkout(cmd, state.worktree)
+                {
+                    events.push(event);
+                } else if let Some(change) = cmd.ref_changes.first() {
                     events.push(SemanticEvent::RefUpdated {
                         reference: change.reference.clone(),
                         old: change.old.clone(),

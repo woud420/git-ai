@@ -181,7 +181,10 @@ pub fn apply_checkout_switch_working_log_side_effect(
     };
     let repo = find_repository_in_path(&worktree.to_string_lossy())?;
     let parsed = parsed_invocation_for_normalized_command(cmd);
-    let (old_head, new_head) = ActorDaemonCoordinator::resolve_heads_for_command(cmd);
+    let (mut old_head, new_head) = ActorDaemonCoordinator::resolve_heads_for_command(cmd);
+    if is_zero_oid(&old_head) {
+        old_head = "initial".to_string();
+    }
 
     if cmd.primary_command.as_deref() == Some("checkout") {
         let pathspecs = parsed.pathspecs();

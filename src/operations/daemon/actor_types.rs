@@ -169,6 +169,8 @@ pub enum RecentReplayPrerequisite {
 #[derive(Debug, Default, Clone)]
 #[doc(hidden)]
 pub struct TraceIngressState {
+    pub(crate) completed_roots: super::completed_roots::CompletedRoots,
+    pub(crate) roots_seen_own_start: HashSet<String>,
     pub(crate) root_worktrees: HashMap<String, PathBuf>,
     pub(crate) root_families: HashMap<String, String>,
     pub(crate) root_argv: HashMap<String, Vec<String>>,

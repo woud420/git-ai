@@ -7,14 +7,20 @@ use std::sync::Arc;
 
 pub fn finalize_trace_connection_roots(
     coordinator: Arc<ActorDaemonCoordinator>,
-    observed_roots: std::collections::BTreeSet<String>,
+    observed_roots: std::collections::BTreeMap<String, bool>,
 ) -> Result<(), GitAiError> {
     if observed_roots.is_empty() {
         coordinator.trace_unidentified_connection_identified_or_closed()?;
         return Ok(());
     }
 
-    let roots = observed_roots.into_iter().collect::<Vec<_>>();
+    let roots = observed_roots
+        .into_iter()
+        .filter_map(|(root, registered)| registered.then_some(root))
+        .collect::<Vec<_>>();
+    if roots.is_empty() {
+        return Ok(());
+    }
     let close_marker_roots = coordinator.record_trace_connection_close(&roots)?;
     coordinator.enqueue_trace_connection_close_markers(close_marker_roots)
 }

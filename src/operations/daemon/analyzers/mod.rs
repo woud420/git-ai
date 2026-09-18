@@ -6,12 +6,23 @@ use std::sync::Arc;
 
 pub mod generic;
 pub mod history;
+mod removal;
 pub mod transport;
 pub mod workspace;
 
 #[derive(Debug, Clone)]
 pub struct AnalysisView<'a> {
     pub refs: &'a HashMap<String, String>,
+    pub worktree: Option<&'a crate::model::domain::WorktreeState>,
+}
+
+impl<'a> AnalysisView<'a> {
+    pub fn from_refs(refs: &'a HashMap<String, String>) -> Self {
+        Self {
+            refs,
+            worktree: None,
+        }
+    }
 }
 
 pub trait CommandAnalyzer: Send + Sync {
@@ -55,7 +66,7 @@ impl AnalyzerRegistry {
         }
 
         let workspace: Arc<dyn CommandAnalyzer> = Arc::new(workspace::WorkspaceAnalyzer);
-        for command in ["stash", "checkout", "switch"] {
+        for command in ["stash", "checkout", "switch", "rm"] {
             registry.register_command(command, workspace.clone());
         }
 

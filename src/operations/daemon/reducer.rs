@@ -56,6 +56,10 @@ pub fn reduce_family_command_with_ref_snapshot(
         &cmd,
         AnalysisView {
             refs: analysis_refs,
+            worktree: canonical_worktree
+                .as_ref()
+                .or(cmd.worktree.as_ref())
+                .and_then(|path| state.worktrees.get(path)),
         },
     )?;
     apply_ref_changes(state, &cmd);
@@ -76,7 +80,7 @@ pub fn reduce_global_command(
     analyzers: &AnalyzerRegistry,
 ) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
     let empty_refs = std::collections::HashMap::new();
-    let analysis = analyzers.analyze(&cmd, AnalysisView { refs: &empty_refs })?;
+    let analysis = analyzers.analyze(&cmd, AnalysisView::from_refs(&empty_refs))?;
     state.applied_seq = state.applied_seq.saturating_add(1);
     let applied = AppliedCommand {
         seq: state.applied_seq,

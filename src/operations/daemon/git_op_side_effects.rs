@@ -1,9 +1,8 @@
+pub use super::working_log_discard::remove_working_log_attributions_for_pathspecs;
 use crate::error::GitAiError;
-use crate::model::working_log::InitialAttributions;
 use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
 use crate::operations::daemon::side_effect_helpers::{
-    matches_any_pathspec, parsed_invocation_for_normalized_command,
-    parsed_invocation_for_side_effect,
+    parsed_invocation_for_normalized_command, parsed_invocation_for_side_effect,
 };
 use crate::operations::git::cli_parser::summarize_rebase_args;
 use crate::operations::git::find_repository_in_path;
@@ -171,46 +170,6 @@ pub fn apply_pull_fast_forward_working_log_side_effect(
 ) -> Result<(), GitAiError> {
     let repo = find_repository_in_path(worktree)?;
     repo.storage.rename_working_log(old_head, new_head)?;
-    Ok(())
-}
-
-pub fn remove_working_log_attributions_for_pathspecs(
-    repository: &Repository,
-    head: &str,
-    pathspecs: &[String],
-) -> Result<(), GitAiError> {
-    let working_log = repository.storage.working_log_for_base_commit(head)?;
-
-    let initial = working_log.read_initial_attributions();
-    if !initial.files.is_empty() {
-        let filtered_files = initial
-            .files
-            .into_iter()
-            .filter(|(file, _)| !matches_any_pathspec(file, pathspecs))
-            .collect();
-        let mut filtered_blobs = initial.file_blobs;
-        filtered_blobs.retain(|file, _| !matches_any_pathspec(file, pathspecs));
-        working_log.write_initial(InitialAttributions {
-            files: filtered_files,
-            prompts: initial.prompts,
-            file_blobs: filtered_blobs,
-            humans: initial.humans,
-            sessions: initial.sessions,
-        })?;
-    }
-
-    let checkpoints = working_log.read_all_checkpoints()?;
-    let filtered: Vec<_> = checkpoints
-        .into_iter()
-        .map(|mut checkpoint| {
-            checkpoint
-                .entries
-                .retain(|entry| !matches_any_pathspec(&entry.file, pathspecs));
-            checkpoint
-        })
-        .filter(|checkpoint| !checkpoint.entries.is_empty())
-        .collect();
-    working_log.write_all_checkpoints(&filtered)?;
     Ok(())
 }
 

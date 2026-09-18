@@ -179,6 +179,10 @@ pub enum SemanticEvent {
     },
     NotesUpdated,
     ReplaceUpdated,
+    WorkingTreeFilesRemoved {
+        head: String,
+        files: Vec<String>,
+    },
     CheckoutPaths,
     RestorePaths,
     CleanedWorkspace,

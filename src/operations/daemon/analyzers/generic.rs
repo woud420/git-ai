@@ -114,9 +114,7 @@ mod tests {
         let result = analyzer
             .analyze(
                 &cmd,
-                AnalysisView {
-                    refs: &std::collections::HashMap::new(),
-                },
+                AnalysisView::from_refs(&std::collections::HashMap::new()),
             )
             .unwrap();
         assert!(matches!(result.class, CommandClass::RefMutation));
@@ -128,9 +126,7 @@ mod tests {
         let result = analyzer
             .analyze(
                 &command("custom-weird-command"),
-                AnalysisView {
-                    refs: &std::collections::HashMap::new(),
-                },
+                AnalysisView::from_refs(&std::collections::HashMap::new()),
             )
             .unwrap();
         assert!(!result.events.is_empty());
@@ -147,9 +143,7 @@ mod tests {
             let result = analyzer
                 .analyze(
                     &command(command_name),
-                    AnalysisView {
-                        refs: &std::collections::HashMap::new(),
-                    },
+                    AnalysisView::from_refs(&std::collections::HashMap::new()),
                 )
                 .unwrap();
             assert_eq!(

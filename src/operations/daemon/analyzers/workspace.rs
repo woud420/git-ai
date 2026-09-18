@@ -20,6 +20,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
 
         let mut events = Vec::new();
         match name {
+            "rm" => {
+                if let Some(event) = super::removal::analyze_removal(cmd, state.worktree) {
+                    events.push(event);
+                }
+            }
             "stash" => {
                 let stash_args = stash_command_args(cmd);
                 events.push(SemanticEvent::StashOperation {
@@ -128,7 +133,7 @@ mod tests {
         refs.insert("HEAD".to_string(), "abc123".to_string());
         let cmd = command("stash", &["git", "stash", "apply", "stash@{0}"]);
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
         assert!(result.events.iter().any(|event| matches!(
             event,

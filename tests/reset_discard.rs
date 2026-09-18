@@ -316,7 +316,10 @@ subdir_test_variants! {
         let repo = TestRepo::new();
         commit_base(&repo);
         checkpoint_replacement(&repo, "mock_ai");
-        repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+        let subdir = repo.path().join("nested");
+        fs::create_dir(&subdir).unwrap();
+        repo.git_from_working_dir(&subdir, &["reset", "--hard", "HEAD"])
+            .unwrap();
         assert_untracked_recreation(&repo);
     }
 }

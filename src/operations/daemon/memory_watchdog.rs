@@ -1,7 +1,7 @@
-//! Daemon peak-RSS memory watchdog.
+//! Daemon resident-memory watchdog.
 //!
 //! When `daemon_memory_limit_mb` is configured, a dedicated OS thread samples
-//! the process's peak RSS once per poll interval — entirely off the trace2
+//! the process's current RSS once per poll interval — entirely off the trace2
 //! ingestion path — and aborts the daemon at 85% of the configured limit,
 //! preserving headroom before the hard ceiling. Before aborting it flushes a
 //! durable stderr diagnostic and gives one direct daemon-log upload a bounded
@@ -9,6 +9,10 @@
 //! restart the daemon: normal demand starts a fresh daemon later, and the
 //! checkpoint outbox preserves durability across the abort.
 
+mod rss;
+mod sampler;
+
+use sampler::{MemoryUsage, RssSampler};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -22,8 +26,6 @@ use super::telemetry_worker::{EmergencyLogUploadStatus, upload_emergency_daemon_
 const EMERGENCY_PERCENT: u64 = 85;
 const EMERGENCY_LOG_UPLOAD_TIMEOUT: Duration = Duration::from_millis(500);
 const WATCHDOG_POLL_INTERVAL: Duration = Duration::from_secs(1);
-#[cfg(feature = "test-support")]
-pub(super) const TEST_PEAK_RSS_SEQUENCE_ENV: &str = "GIT_AI_TEST_DAEMON_PEAK_RSS_MB_SEQUENCE";
 #[cfg(feature = "test-support")]
 pub(super) const TEST_POLL_INTERVAL_ENV: &str = "GIT_AI_TEST_DAEMON_MEMORY_POLL_MS";
 
@@ -61,7 +63,7 @@ pub(super) fn start(coordinator: Arc<ActorDaemonCoordinator>, limit_bytes: u64) 
 }
 
 fn run_watchdog(coordinator: Arc<ActorDaemonCoordinator>, thresholds: MemoryThresholds) {
-    let mut sampler = PeakRssSampler::new();
+    let mut sampler = RssSampler::new();
     let mut measurement_failed = false;
     let poll_interval = watchdog_poll_interval();
 
@@ -78,56 +80,62 @@ fn run_watchdog(coordinator: Arc<ActorDaemonCoordinator>, thresholds: MemoryThre
             return;
         }
 
-        let peak_rss_bytes = match sampler.sample() {
+        let usage = match sampler.sample() {
             Ok(bytes) => {
                 if measurement_failed {
-                    tracing::info!("daemon peak-RSS measurement recovered");
+                    tracing::info!("daemon RSS measurement recovered");
                     measurement_failed = false;
                 }
                 bytes
             }
             Err(error) => {
                 if !measurement_failed {
-                    tracing::warn!(%error, "failed measuring daemon peak RSS; watchdog will retry");
+                    tracing::warn!(%error, "failed measuring daemon RSS; watchdog will retry");
                     measurement_failed = true;
                 }
                 continue;
             }
         };
 
-        match decision_for_peak_rss(peak_rss_bytes, thresholds) {
+        match decision_for_rss(usage.current_bytes, thresholds) {
             MemoryWatchdogDecision::Continue => {}
             MemoryWatchdogDecision::Abort => {
-                record_memory_emergency(peak_rss_bytes, thresholds, "abort");
+                record_memory_emergency(usage, thresholds, "abort");
                 std::process::abort();
             }
         }
     }
 }
 
-fn record_memory_emergency(
-    peak_rss_bytes: u64,
-    thresholds: MemoryThresholds,
-    action: &'static str,
-) {
+fn record_memory_emergency(usage: MemoryUsage, thresholds: MemoryThresholds, action: &'static str) {
     tracing::error!(
-        peak_rss_bytes,
+        current_rss_bytes = usage.current_bytes,
+        peak_rss_bytes = ?usage.peak_bytes,
         memory_emergency_threshold_bytes = thresholds.emergency_bytes,
         memory_limit_bytes = thresholds.limit_bytes,
         action,
         "daemon memory emergency threshold reached"
     );
+    let peak = usage
+        .peak_bytes
+        .map_or_else(|| "unavailable".to_string(), |bytes| bytes.to_string());
     eprintln!(
-        "[git-ai] daemon memory emergency threshold reached (peak RSS {peak_rss_bytes} bytes, emergency threshold {} bytes, hard limit {} bytes); {action}ing immediately without draining",
-        thresholds.emergency_bytes, thresholds.limit_bytes
+        "[git-ai] daemon memory emergency threshold reached (current RSS {} bytes, peak RSS {peak} bytes, emergency threshold {} bytes, hard limit {} bytes); {action}ing immediately without draining",
+        usage.current_bytes, thresholds.emergency_bytes, thresholds.limit_bytes
     );
     let _ = io::stderr().flush();
 
     let mut fields = BTreeMap::new();
     fields.insert(
-        "peak_rss_bytes".to_string(),
-        DaemonLogFieldValue::from(peak_rss_bytes),
+        "current_rss_bytes".to_string(),
+        DaemonLogFieldValue::from(usage.current_bytes),
     );
+    if let Some(peak_bytes) = usage.peak_bytes {
+        fields.insert(
+            "peak_rss_bytes".to_string(),
+            DaemonLogFieldValue::from(peak_bytes),
+        );
+    }
     fields.insert(
         "memory_emergency_threshold_bytes".to_string(),
         DaemonLogFieldValue::from(thresholds.emergency_bytes),
@@ -172,138 +180,14 @@ fn watchdog_poll_interval() -> Duration {
     WATCHDOG_POLL_INTERVAL
 }
 
-struct PeakRssSampler {
-    #[cfg(feature = "test-support")]
-    test_samples: Option<std::collections::VecDeque<u64>>,
-    #[cfg(feature = "test-support")]
-    last_test_sample: Option<u64>,
-}
-
-impl PeakRssSampler {
-    fn new() -> Self {
-        #[cfg(feature = "test-support")]
-        {
-            let test_samples = std::env::var(TEST_PEAK_RSS_SEQUENCE_ENV)
-                .ok()
-                .and_then(|raw| {
-                    raw.split(',')
-                        .map(|part| part.trim().parse::<u64>().ok())
-                        .collect::<Option<std::collections::VecDeque<_>>>()
-                })
-                .filter(|samples| !samples.is_empty());
-            Self {
-                test_samples,
-                last_test_sample: None,
-            }
-        }
-
-        #[cfg(not(feature = "test-support"))]
-        Self {}
-    }
-
-    fn sample(&mut self) -> io::Result<u64> {
-        #[cfg(feature = "test-support")]
-        if let Some(samples) = self.test_samples.as_mut() {
-            let sample_mb = samples
-                .pop_front()
-                .or(self.last_test_sample)
-                .expect("test RSS sequence is non-empty");
-            self.last_test_sample = Some(sample_mb);
-            return sample_mb
-                .checked_mul(crate::config::MEBIBYTE_BYTES)
-                .ok_or_else(|| io::Error::other("test peak RSS sample overflowed bytes"));
-        }
-
-        peak_rss_bytes()
-    }
-}
-
-pub(super) fn decision_for_peak_rss(
-    peak_rss_bytes: u64,
+pub(super) fn decision_for_rss(
+    rss_bytes: u64,
     thresholds: MemoryThresholds,
 ) -> MemoryWatchdogDecision {
-    if peak_rss_bytes >= thresholds.emergency_bytes {
+    if rss_bytes >= thresholds.emergency_bytes {
         return MemoryWatchdogDecision::Abort;
     }
     MemoryWatchdogDecision::Continue
-}
-
-#[cfg(unix)]
-pub(super) fn peak_rss_bytes() -> io::Result<u64> {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-    let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let max_rss = unsafe { usage.assume_init() }.ru_maxrss;
-    let max_rss = u64::try_from(max_rss)
-        .map_err(|_| io::Error::other("getrusage returned a negative peak RSS"))?;
-
-    // macOS reports ru_maxrss in bytes; other Unixes report kibibytes.
-    #[cfg(target_os = "macos")]
-    return Ok(max_rss);
-
-    #[cfg(not(target_os = "macos"))]
-    max_rss
-        .checked_mul(1024)
-        .ok_or_else(|| io::Error::other("peak RSS overflowed bytes"))
-}
-
-#[cfg(windows)]
-pub(super) fn peak_rss_bytes() -> io::Result<u64> {
-    type Handle = *mut std::ffi::c_void;
-
-    #[repr(C)]
-    struct ProcessMemoryCounters {
-        cb: u32,
-        page_fault_count: u32,
-        peak_working_set_size: usize,
-        working_set_size: usize,
-        quota_peak_paged_pool_usage: usize,
-        quota_paged_pool_usage: usize,
-        quota_peak_non_paged_pool_usage: usize,
-        quota_non_paged_pool_usage: usize,
-        pagefile_usage: usize,
-        peak_pagefile_usage: usize,
-    }
-
-    unsafe extern "system" {
-        fn GetCurrentProcess() -> Handle;
-    }
-
-    #[link(name = "psapi")]
-    unsafe extern "system" {
-        fn GetProcessMemoryInfo(
-            process: Handle,
-            counters: *mut ProcessMemoryCounters,
-            size: u32,
-        ) -> i32;
-    }
-
-    let mut counters = ProcessMemoryCounters {
-        cb: std::mem::size_of::<ProcessMemoryCounters>() as u32,
-        page_fault_count: 0,
-        peak_working_set_size: 0,
-        working_set_size: 0,
-        quota_peak_paged_pool_usage: 0,
-        quota_paged_pool_usage: 0,
-        quota_peak_non_paged_pool_usage: 0,
-        quota_non_paged_pool_usage: 0,
-        pagefile_usage: 0,
-        peak_pagefile_usage: 0,
-    };
-    let result = unsafe {
-        GetProcessMemoryInfo(
-            GetCurrentProcess(),
-            &mut counters,
-            std::mem::size_of::<ProcessMemoryCounters>() as u32,
-        )
-    };
-    if result == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    u64::try_from(counters.peak_working_set_size)
-        .map_err(|_| io::Error::other("peak working set does not fit in u64"))
 }
 
 #[cfg(test)]
@@ -324,11 +208,11 @@ mod tests {
     fn watchdog_aborts_at_the_emergency_threshold() {
         let thresholds = MemoryThresholds::from_limit_bytes(LIMIT);
         assert_eq!(
-            decision_for_peak_rss(thresholds.emergency_bytes - 1, thresholds),
+            decision_for_rss(thresholds.emergency_bytes - 1, thresholds),
             MemoryWatchdogDecision::Continue
         );
         assert_eq!(
-            decision_for_peak_rss(thresholds.emergency_bytes, thresholds),
+            decision_for_rss(thresholds.emergency_bytes, thresholds),
             MemoryWatchdogDecision::Abort
         );
     }
@@ -337,17 +221,12 @@ mod tests {
     fn watchdog_aborts_at_the_hard_threshold() {
         let thresholds = MemoryThresholds::from_limit_bytes(LIMIT);
         assert_eq!(
-            decision_for_peak_rss(thresholds.emergency_bytes - 1, thresholds),
+            decision_for_rss(thresholds.emergency_bytes - 1, thresholds),
             MemoryWatchdogDecision::Continue
         );
         assert_eq!(
-            decision_for_peak_rss(thresholds.limit_bytes, thresholds),
+            decision_for_rss(thresholds.limit_bytes, thresholds),
             MemoryWatchdogDecision::Abort
         );
-    }
-
-    #[test]
-    fn peak_rss_sampler_reports_nonzero_memory() {
-        assert!(peak_rss_bytes().expect("peak RSS should be readable") > 0);
     }
 }

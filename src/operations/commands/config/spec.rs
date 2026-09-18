@@ -352,7 +352,7 @@ const CONFIG_KEY_SPECS: &[ConfigKeySpec] = &[
         sensitive: false,
         nesting: ConfigNesting::None,
         mutation: ConfigMutation::Replace,
-        help: "daemon_memory_limit_mb              Daemon peak-RSS limit in MiB",
+        help: "daemon_memory_limit_mb              Daemon current-RSS limit in MiB",
         show_in_help: true,
     },
     ConfigKeySpec {

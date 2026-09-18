@@ -351,6 +351,12 @@ impl ActorDaemonCoordinator {
         let mut handled_revert_commits = false;
         for event in events {
             match event {
+                crate::model::domain::SemanticEvent::WorkingTreeFilesRemoved { head, files } => {
+                    let repo = find_repository_in_path(&worktree)?;
+                    super::working_log_discard::remove_working_log_attributions_for_files(
+                        &repo, head, files,
+                    )?;
+                }
                 crate::model::domain::SemanticEvent::FetchCompleted { .. } => {
                     apply_fetch_notes_sync_side_effect(&worktree, cmd);
                 }

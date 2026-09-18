@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::domain::{CommandScope, RefChange};
+use crate::model::domain::{CommandScope, RefChange, ResetKind};
 
 fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
     NormalizedCommand {

@@ -125,10 +125,10 @@ fn apply_worktree_state(
     };
     let key = canonical_worktree.unwrap_or_else(|| worktree.clone());
     let previous = state.worktrees.get(&key);
-    let head_change = cmd
-        .ref_changes
-        .iter()
-        .rfind(|change| change.reference == "HEAD");
+    let head_change = cmd.ref_changes.iter().rfind(|change| {
+        change.reference == "HEAD"
+            && (cmd.primary_command.as_deref() != Some("reset") || change.old != change.new)
+    });
 
     let orphan_branch = analysis.events.iter().find_map(|event| match event {
         crate::model::domain::SemanticEvent::OrphanBranchCreated { branch, .. } => {

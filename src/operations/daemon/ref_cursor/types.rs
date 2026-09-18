@@ -135,6 +135,7 @@ pub(super) struct ExpectedTransition {
     pub(super) old_oids: HashSet<String>,
     pub(super) new_oid: Option<String>,
     pub(super) messages: HashSet<String>,
+    pub(super) allow_identity: bool,
 }
 
 impl ExpectedTransition {
@@ -177,11 +178,14 @@ impl ExpectedTransition {
             old_oids,
             new_oid: None,
             messages: HashSet::new(),
+            allow_identity: false,
         }
     }
 
     pub(super) fn matches(&self, entry: &CursorEntry) -> bool {
-        if !valid_ref_transition(&entry.old, &entry.new) {
+        let matches_identity =
+            self.allow_identity && entry.old == entry.new && valid_non_zero_oid(&entry.old);
+        if !(valid_ref_transition(&entry.old, &entry.new) || matches_identity) {
             return false;
         }
         if !self.messages.is_empty() && !self.messages.contains(&entry.message) {

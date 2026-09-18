@@ -6,7 +6,7 @@ use crate::model::domain::{
 use crate::operations::daemon::analyzers::AnalyzerRegistry;
 use std::collections::HashMap;
 
-fn family_state() -> FamilyState {
+pub(super) fn family_state() -> FamilyState {
     FamilyState {
         family_key: FamilyKey::new("family:/tmp/repo"),
         refs: HashMap::new(),
@@ -17,7 +17,7 @@ fn family_state() -> FamilyState {
     }
 }
 
-fn normalized() -> NormalizedCommand {
+pub(super) fn normalized() -> NormalizedCommand {
     NormalizedCommand {
         scope: CommandScope::Family(FamilyKey::new("family:/tmp/repo")),
         family_key: Some(FamilyKey::new("family:/tmp/repo")),

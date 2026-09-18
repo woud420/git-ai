@@ -74,6 +74,7 @@ impl RefCursor {
                     old_oids: [new.clone()].into_iter().collect(),
                     new_oid: None,
                     messages: HashSet::new(),
+                    allow_identity: false,
                 },
             )?
             else {
@@ -303,6 +304,7 @@ impl RefCursor {
                     old_oids: [new.clone()].into_iter().collect(),
                     new_oid: None,
                     messages: HashSet::new(),
+                    allow_identity: false,
                 },
             )?
         {
@@ -446,6 +448,7 @@ impl RefCursor {
                 old_oids,
                 new_oid: Some(new.to_string()),
                 messages: HashSet::new(),
+                allow_identity: false,
             },
             message_prefixes,
         )? {

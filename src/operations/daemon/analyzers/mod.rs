@@ -8,6 +8,7 @@ pub mod generic;
 pub mod history;
 mod orphan_checkout;
 mod removal;
+mod reset;
 pub mod transport;
 pub mod workspace;
 mod workspace_evidence;

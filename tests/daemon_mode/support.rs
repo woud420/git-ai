@@ -24,6 +24,9 @@ mod checkpoint;
 #[path = "trace_listener.rs"]
 mod trace_listener;
 
+#[path = "repository_context.rs"]
+mod repository_context;
+
 #[path = "load.rs"]
 mod load;
 

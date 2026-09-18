@@ -1,15 +1,22 @@
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::operations::git::repo_state::common_dir_for_worktree;
 use serde_json::{Value, json};
 use std::sync::atomic::Ordering;
 
 impl ActorDaemonCoordinator {
     pub(crate) fn enqueue_trace_payload(&self, payload: Value) -> Result<(), GitAiError> {
-        let tx =
-            self.trace_ingest_tx.get().cloned().ok_or_else(|| {
-                GitAiError::Generic("trace ingest worker not started".to_string())
+        let tx = self
+            .trace_ingest_tx
+            .get()
+            .cloned()
+            .ok_or_else(|| PersistenceError::Io {
+                operation: "enqueue trace payload",
+                path: String::new(),
+                kind: std::io::ErrorKind::NotConnected,
+                message: "trace ingest worker not started".to_string(),
             })?;
         let permit = match tx.try_reserve() {
             Ok(permit) => permit,
@@ -23,9 +30,13 @@ impl ActorDaemonCoordinator {
                     "trace ingest queue send failed: worker may have crashed"
                 );
                 self.request_shutdown();
-                return Err(GitAiError::Generic(
-                    "trace ingest queue send failed: worker may have crashed".to_string(),
-                ));
+                return Err(PersistenceError::Io {
+                    operation: "enqueue trace payload",
+                    path: String::new(),
+                    kind: std::io::ErrorKind::BrokenPipe,
+                    message: "trace ingest queue send failed: worker may have crashed".to_string(),
+                }
+                .into());
             }
             Err(tokio::sync::mpsc::error::TrySendError::Full(())) => {
                 self.trace_payloads_dropped_queue_full
@@ -37,9 +48,13 @@ impl ActorDaemonCoordinator {
                     "trace ingest queue is full"
                 );
                 self.request_shutdown();
-                return Err(GitAiError::Generic(
-                    "trace ingest queue is full; daemon shutting down".to_string(),
-                ));
+                return Err(PersistenceError::Io {
+                    operation: "enqueue trace payload",
+                    path: String::new(),
+                    kind: std::io::ErrorKind::WouldBlock,
+                    message: "trace ingest queue is full; daemon shutting down".to_string(),
+                }
+                .into());
             }
         };
         self.record_trace_payload_enqueued(&payload)?;
@@ -228,12 +243,13 @@ impl ActorDaemonCoordinator {
         }
 
         let terminal = is_terminal_root_trace_event(&event, &sid, &root);
-        if command_mutates_refs
-            && !terminal
+        // Only the root's primary def_repo identifies its repository with
+        // authority: -C can conflict with GIT_DIR, and children can use other repos.
+        if sid == root
+            && event == "def_repo"
+            && command_mutates_refs
             && !ingress.root_reflog_start_offsets.contains_key(&root)
             && let Some(worktree) = worktree_hint
-                .clone()
-                .or_else(|| ingress.root_worktrees.get(&root).cloned())
         {
             let offsets =
                 crate::operations::daemon::ref_cursor::capture_reflog_start_offsets_for_worktree(

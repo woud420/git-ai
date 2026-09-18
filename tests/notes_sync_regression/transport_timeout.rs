@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-fn assert_transport_timeout(command: &str, minimum_connections: usize) {
+fn assert_transport_timeout(command: &str, expected_transports: &[&str]) {
     let repo = TestRepo::new();
     let mut file = repo.filename("transport.txt");
     file.set_contents(lines!["preserved AI".ai()]);
@@ -30,13 +30,16 @@ fn assert_transport_timeout(command: &str, minimum_connections: usize) {
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        connections.len()
     });
+    let spawn_dir = tempfile::tempdir().unwrap();
+    let spawn_log = spawn_dir.path().join("git-spawns.log");
+    let spawn_log_path = spawn_log.to_string_lossy().into_owned();
     let request = r#"{"remote_name":"stalled"}"#;
     let mut child = repo.git_ai_command_without_pre_sync_for_test(
         &[command, "--json", request],
         &[
             ("GIT_AI_TEST_NOTES_SYNC_TIMEOUT_MS", "250"),
+            ("GIT_AI_SPAWN_LOG", spawn_log_path.as_str()),
             ("http_proxy", ""),
             ("HTTP_PROXY", ""),
             ("ALL_PROXY", ""),
@@ -48,7 +51,7 @@ fn assert_transport_timeout(command: &str, minimum_connections: usize) {
     let output = child.output().expect("internal notes command must start");
     let elapsed = start.elapsed();
     stop.store(true, Ordering::Relaxed);
-    let connections = server.join().unwrap();
+    server.join().unwrap();
     assert!(
         elapsed < Duration::from_secs(3),
         "{command} waited {elapsed:?} for the stalled remote"
@@ -60,19 +63,23 @@ fn assert_transport_timeout(command: &str, minimum_connections: usize) {
         error["error"].as_str().unwrap().contains("timed out"),
         "{output:?}"
     );
-    assert!(
-        connections >= minimum_connections,
-        "expected fetch/push transport attempts, observed {connections}"
-    );
+    // The deadline includes Git startup, so a loaded Windows runner may time
+    // out before connecting. The parent-side probe still records each attempt.
+    let spawns = fs::read_to_string(spawn_log).unwrap();
+    let transports = spawns
+        .lines()
+        .filter(|line| matches!(*line, "fetch" | "push"))
+        .collect::<Vec<_>>();
+    assert_eq!(transports, expected_transports, "Git spawns: {spawns}");
     file.assert_committed_lines(lines!["preserved AI".ai()]);
 }
 
 #[test]
 fn stalled_notes_fetch_returns_a_timeout_without_changing_local_attribution() {
-    assert_transport_timeout("fetch-authorship-notes", 1);
+    assert_transport_timeout("fetch-authorship-notes", &["fetch"]);
 }
 
 #[test]
 fn stalled_notes_prefetch_and_push_both_have_deadlines() {
-    assert_transport_timeout("push-authorship-notes", 2);
+    assert_transport_timeout("push-authorship-notes", &["fetch", "push"]);
 }

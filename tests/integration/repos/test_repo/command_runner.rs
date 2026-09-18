@@ -69,6 +69,16 @@ impl<'a> RawGitCommand<'a> {
             run_command_output(&mut self.command, &label)
         }
     }
+
+    pub(crate) fn spawn(mut self) -> Result<Child, String> {
+        if self.stdin_data.is_some() {
+            return Err("raw Git spawn does not support buffered stdin".into());
+        }
+        self.command
+            .args(self.args)
+            .spawn()
+            .map_err(|error| format!("failed to spawn raw git {:?}: {error}", self.args))
+    }
 }
 
 /// Run real Git plumbing with a deterministic test identity and hooks disabled.

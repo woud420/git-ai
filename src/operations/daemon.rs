@@ -51,6 +51,7 @@ pub(crate) mod checkpoint_outbox_worker;
 pub(crate) mod checkpoint_stream_authority;
 pub(crate) mod cherry_pick_helpers;
 pub(crate) mod client_helpers;
+pub(crate) mod commit_editor_wait;
 pub(crate) mod daemon_config;
 pub(crate) mod git_op_side_effects;
 pub(crate) mod health;

@@ -175,30 +175,12 @@ impl ActorDaemonCoordinator {
             let state = map
                 .entry(family.to_string())
                 .or_insert_with(FamilySequencerState::new);
-            while let Some(first_entry) = state.entries.first_entry() {
-                if matches!(first_entry.get(), FamilySequencerEntry::PendingRoot) {
-                    break;
-                }
-                let entry_root_sid = match first_entry.get() {
-                    FamilySequencerEntry::ReadyCommand(command) => Some(command.root_sid.as_str()),
-                    _ => None,
-                };
-                if self.family_entry_blocked_by_prior_open_trace_root(
-                    family,
-                    first_entry.key().started_at_ns,
-                    entry_root_sid,
-                )? {
-                    break;
-                }
-                let (order, entry) = first_entry.remove_entry();
-                match entry {
-                    FamilySequencerEntry::PendingRoot => {
-                        unreachable!("pending root should not be removed from sequencer front");
-                    }
-                    other => {
-                        ready.push((order.ordinal, other));
-                    }
-                }
+            for order in self.ready_family_orders(family, state)? {
+                let entry = state
+                    .entries
+                    .remove(&order)
+                    .expect("selected entry remains queued under the sequencer lock");
+                ready.push((order.ordinal, entry));
             }
         }
 
@@ -527,7 +509,7 @@ impl ActorDaemonCoordinator {
                     }
                 }
                 FamilySequencerEntry::Canceled => {}
-                FamilySequencerEntry::PendingRoot => {}
+                FamilySequencerEntry::PendingRoot { .. } => {}
             }
         }
         Ok(())

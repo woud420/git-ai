@@ -72,6 +72,7 @@ pub(crate) mod normalizer_worker;
 mod notes_push_queue;
 mod orphan_branch;
 pub(crate) mod parent_diff_batch;
+pub(crate) mod restore_discard;
 pub(crate) mod revert_rebase_helpers;
 pub(crate) mod self_check;
 pub(crate) mod side_effect_helpers;

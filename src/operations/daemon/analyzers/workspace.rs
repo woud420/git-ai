@@ -25,6 +25,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                     events.push(event);
                 }
             }
+            "restore" => {
+                if let Some(event) = super::super::restore_discard::event(cmd, state.refs) {
+                    events.push(event);
+                }
+            }
             "stash" => {
                 let stash_args = stash_command_args(cmd);
                 events.push(SemanticEvent::StashOperation {

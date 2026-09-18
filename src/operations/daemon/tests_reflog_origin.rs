@@ -86,3 +86,32 @@ async fn child_and_secondary_repositories_cannot_supply_root_reflog_offsets() {
         seed_reflog(&target);
     }
 }
+
+#[tokio::test]
+async fn restore_is_ordered_without_collecting_reflog_offsets() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("target");
+    seed_reflog(&target);
+    let coord = ActorDaemonCoordinator::new();
+    let mut start = json!({
+        "event": "start", "sid": "restore-root",
+        "argv": ["git", "restore", "--source", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--worktree", "--", "file.txt"],
+    });
+    assert!(coord.prepare_trace_payload_for_ingest(&mut start));
+    let mut primary_repo = json!({
+        "event": "def_repo", "sid": "restore-root", "repo": 1, "worktree": target,
+    });
+    assert!(coord.prepare_trace_payload_for_ingest(&mut primary_repo));
+    assert!(
+        primary_repo
+            .get(TRACE_ROOT_REFLOG_START_OFFSETS_FIELD)
+            .is_none()
+    );
+    let ingress = coord.trace_ingress_state.lock().unwrap();
+    assert_eq!(ingress.root_mutating.get("restore-root"), Some(&true));
+    assert!(
+        !ingress
+            .root_reflog_start_offsets
+            .contains_key("restore-root")
+    );
+}

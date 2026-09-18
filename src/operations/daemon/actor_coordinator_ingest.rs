@@ -257,6 +257,9 @@ impl ActorDaemonCoordinator {
             // Its notes sync needs ordering, but fetch-pack has no native ref
             // publication to capture on this latency-sensitive path.
             && effective_primary.as_deref() != Some("fetch-pack")
+            // Restore joins mutation fences, but cannot move refs. Do not add
+            // reflog reads to ingestion merely to order its workspace effect.
+            && effective_primary.as_deref() != Some("restore")
             && !ingress.root_reflog_start_offsets.contains_key(&root)
             && let Some(worktree) = worktree_hint
         {

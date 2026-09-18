@@ -222,6 +222,32 @@ force/patch/ours/theirs forms, omitted sources or separators, pathspec files,
 directories, and recovery from arbitrary sources retain their existing paths.
 Native Git execution, output, and exit status remain unchanged.
 
+### Bounded explicit restore discard
+
+Successful `git restore --source <full-oid> --staged --worktree -- <path>`
+(also `--source=<full-oid>`) retires the selected file's pending attribution
+when the source equals this worktree's prior sequenced HEAD. The path must be
+root-relative and literal: `:(top,literal)<path>`, or a plain path after an
+absolute `-C` that exactly matches the recorded worktree. Other global options,
+ambiguous path syntax, paths over 4096 bytes, and multiple paths are skipped.
+
+Restore participates in mutation fences so later checkpoints cannot be erased
+by delayed processing. It captures no reflog offsets and adds no ingestion IO.
+The reducer uses only this worktree's prior HEAD; another linked worktree's HEAD
+or a later live lookup cannot supply a missing anchor. The asynchronous effect
+uses one metadata-only `cat-file --batch-check` to require an immutable source
+blob, then removes only the exact file from existing working-log records.
+The index and worktree are never read to reconstruct command-time state.
+
+Both destinations are required: a worktree-only restore may leave attributed
+content staged for the next commit. Index-only and worktree-only commands keep
+their existing behavior. This profile does not recover attribution from older
+sources or cover default/index sources, patches, directories, deletions absent
+from the source tree, submodules, pathspec files, or sparse paths that Git skips.
+Failed commands and commands without an exact source/worktree anchor leave
+pending evidence untouched. Native Git output, index updates, and exit status
+remain Git's responsibility.
+
 ## Reads must not sync
 
 Production read commands (`show`, `blame`, `status`, ...) must not trigger a

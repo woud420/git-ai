@@ -200,10 +200,23 @@ home.packages = [
 
 ## Configuration ownership
 
+The packaged `git` and `git-ai` wrappers pass the Nix-store Git executable via
+`GIT_AI_GIT_PATH`; they do not create or rewrite `~/.git-ai/config.json`. A valid
+environment path takes precedence over `git_path` in that file. Invalid paths,
+including paths to the git-ai binary, fall back to the configured path and
+standard Git locations.
+
 Home Manager owns `~/.git-ai/config.json` as a link to generated Nix-store
 content. Change `programs.git-ai.settings` and run `home-manager switch` (or
 the NixOS/nix-darwin rebuild that includes Home Manager). Do not use
 `git-ai config set` to edit this managed file.
+
+Older wrappers may have left a regular file at that path. Before enabling Home
+Manager ownership, back up and inspect the file, move the settings you want to
+keep into `programs.git-ai.settings`, then move the original file aside and
+activate Home Manager. Activation keeps its collision check instead of forcing
+overwrite of an existing user file; retain the backup until you have verified
+the generated configuration.
 
 The NixOS module without Home Manager behaves differently: when `installHooks`
 is enabled, activation copies initial defaults into an absent or symlinked

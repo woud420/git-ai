@@ -80,23 +80,9 @@
           };
         };
 
-        # Wrapped version that sets up the git-ai environment properly
+        # Supply the Nix store Git without taking ownership of user configuration.
         git-ai-wrapped = pkgs.writeShellScriptBin "git-ai" ''
-          # Ensure config directory exists
-          mkdir -p "$HOME/.git-ai"
-
-          # Create config.json if it doesn't exist
-          if [ ! -f "$HOME/.git-ai/config.json" ]; then
-            # Find the system git (not our wrapper)
-            GIT_PATH="${pkgs.git}/bin/git"
-            cat > "$HOME/.git-ai/config.json" <<EOF
-          {
-            "git_path": "$GIT_PATH"
-          }
-          EOF
-          fi
-
-          # Execute git-ai with all arguments
+          export GIT_AI_GIT_PATH="${pkgs.git}/bin/git"
           exec ${git-ai-unwrapped}/bin/git-ai "$@"
         '';
 
@@ -104,22 +90,7 @@
         # This is critical: when symlinked as "git", the wrapper must set argv[0]
         # to "git" so the Rust binary routes to handle_git() instead of handle_git_ai()
         git-wrapper = pkgs.writeShellScriptBin "git" ''
-          # Ensure config directory exists
-          mkdir -p "$HOME/.git-ai"
-
-          # Create config.json if it doesn't exist
-          if [ ! -f "$HOME/.git-ai/config.json" ]; then
-            # Find the system git (not our wrapper)
-            GIT_PATH="${pkgs.git}/bin/git"
-            cat > "$HOME/.git-ai/config.json" <<EOF
-          {
-            "git_path": "$GIT_PATH"
-          }
-          EOF
-          fi
-
-          # Execute git-ai with argv[0] set to "git" to trigger passthrough mode
-          # The -a flag ensures argv[0] is "git" regardless of the actual binary path
+          export GIT_AI_GIT_PATH="${pkgs.git}/bin/git"
           exec -a git ${git-ai-unwrapped}/bin/git-ai "$@"
         '';
 
@@ -320,6 +291,29 @@ GITOGEOF
           {
             # Build check - ensures the package builds
             build = git-ai-unwrapped;
+
+            wrapper-config = pkgs.runCommand "git-ai-wrapper-config-check" { } ''
+              for wrapper in ${git-ai-wrapped}/bin/git-ai ${git-wrapper}/bin/git; do
+                export HOME="$TMPDIR/home-$(basename "$wrapper")"
+                mkdir -p "$HOME"
+                "$wrapper" --version
+                test ! -e "$HOME/.git-ai/config.json"
+
+                mkdir -p "$HOME/.git-ai"
+                printf '%s\n' '{"git_path":"/missing/git","allowed_repositories":[],"custom_attributes":{"owner":"kept"}}' > "$TMPDIR/original.json"
+                cp "$TMPDIR/original.json" "$HOME/.git-ai/config.json"
+                "$wrapper" --version
+                cmp "$TMPDIR/original.json" "$HOME/.git-ai/config.json"
+
+                rm "$HOME/.git-ai/config.json"
+                ln -s "$TMPDIR/original.json" "$HOME/.git-ai/config.json"
+                "$wrapper" --version
+                test -L "$HOME/.git-ai/config.json"
+                cmp "$TMPDIR/original.json" "$HOME/.git-ai/config.json"
+              done
+              test "$(${git-ai-wrapped}/bin/git-ai config git_path)" = '"${pkgs.git}/bin/git"'
+              touch "$out"
+            '';
 
             # Clippy lint check with warnings as errors
             clippy = mkCheck {

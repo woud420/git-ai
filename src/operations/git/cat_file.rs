@@ -18,6 +18,9 @@ use crate::operations::git::repository::Repository;
 pub(crate) enum BatchReadPolicy {
     Strict,
     Tolerant,
+    /// Strict framing, but omit missing blobs and invalid UTF-8 payloads.
+    /// Blame historically treats these individual notes as unavailable.
+    ValidUtf8,
 }
 
 pub(crate) fn batch_read_blob_contents(
@@ -84,7 +87,7 @@ fn parse_batch_output_with_policy(
         };
 
         let (oid, is_missing, size) = match policy {
-            BatchReadPolicy::Strict => {
+            BatchReadPolicy::Strict | BatchReadPolicy::ValidUtf8 => {
                 let parts: Vec<&str> = header.split_whitespace().collect();
                 if parts.len() < 2 {
                     pos = header_end + 1;
@@ -138,7 +141,7 @@ fn parse_batch_output_with_policy(
             BatchReadPolicy::Strict => {
                 String::from_utf8_lossy(&data[content_start..content_end]).to_string()
             }
-            BatchReadPolicy::Tolerant => {
+            BatchReadPolicy::Tolerant | BatchReadPolicy::ValidUtf8 => {
                 let Ok(content) = std::str::from_utf8(&data[content_start..content_end]) else {
                     pos = content_end;
                     if pos < data.len() && data[pos] == b'\n' {
@@ -183,6 +186,19 @@ mod tests {
 
         assert_eq!(result.get("def456"), Some(&"world".to_string()));
         assert!(!result.contains_key("abc123"));
+    }
+
+    #[test]
+    fn utf8_policy_keeps_valid_neighbors_and_rejects_broken_framing() {
+        let data = b"missing missing\nbad blob 2\n\xffx\ngood blob 5\nhello\n";
+        let result = parse_batch_output_with_policy(data, BatchReadPolicy::ValidUtf8).unwrap();
+        assert_eq!(
+            result,
+            HashMap::from([("good".to_owned(), "hello".to_owned())])
+        );
+        for malformed in [b"bad blob invalid\n".as_slice(), b"bad blob 20\npartial\n"] {
+            assert!(parse_batch_output_with_policy(malformed, BatchReadPolicy::ValidUtf8).is_err());
+        }
     }
 
     #[test]

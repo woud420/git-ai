@@ -349,6 +349,9 @@ impl ActorDaemonCoordinator {
         let mut handled_revert_commits = false;
         for event in events {
             match event {
+                crate::model::domain::SemanticEvent::FetchCompleted { .. } => {
+                    apply_fetch_notes_sync_side_effect(&worktree, cmd);
+                }
                 crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
                     apply_clone_notes_sync_side_effect(&worktree)?;
                 }

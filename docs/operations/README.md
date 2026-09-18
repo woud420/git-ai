@@ -37,6 +37,9 @@ limit with `git-ai config set max_metrics_flush_chunk_bytes 16777216` and run
 the file setting. This bounds stored JSON bytes per read, not total RSS or the
 serialized HTTP envelope size.
 
+For opt-in agent sandbox access to the trace socket, see
+[sandbox socket permissions](sandbox-socket-permissions.md).
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

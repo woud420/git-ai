@@ -51,7 +51,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 named_pipe = "0.4.1"
 same-file = "1.0"
 winreg = "0.55"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [features]
 test-support = ["dep:tempfile"]

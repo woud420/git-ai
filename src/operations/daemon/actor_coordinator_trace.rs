@@ -261,6 +261,7 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn clear_trace_root_tracking(&self, root_sid: &str) -> Result<(), GitAiError> {
+        self.clear_commit_editor_wait(root_sid)?;
         {
             let mut ingress =
                 self.trace_ingress_state
@@ -299,6 +300,7 @@ impl ActorDaemonCoordinator {
         ingress.root_open_connections.iter().any(|(root, count)| {
             *count > 0
                 && !ingress.root_definitely_read_only.contains(root)
+                && !self.commit_editor_is_waiting(root)
                 && ingress.root_mutating.get(root).copied().unwrap_or(true)
                 && family.is_none_or(|family| {
                     ingress

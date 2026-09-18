@@ -87,6 +87,7 @@ impl ActorDaemonCoordinator {
             queued_trace_payloads_by_root: Mutex::new(HashMap::new()),
             processed_trace_ingest_seq: AtomicUsize::new(0),
             trace_ingest_progress_notify: Notify::new(),
+            commit_editor_waits: Mutex::new(Default::default()),
             trace_ingress_state: Mutex::new(TraceIngressState::default()),
             accepting_checkpoints: AtomicBool::new(true),
             pending_checkpoint_admissions: AtomicUsize::new(0),

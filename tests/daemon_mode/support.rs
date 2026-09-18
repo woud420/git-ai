@@ -45,6 +45,10 @@ mod http_mock;
 #[path = "family_concurrency.rs"]
 mod family_concurrency;
 
+#[cfg(unix)]
+#[path = "editor_wait.rs"]
+mod editor_wait;
+
 #[path = "outbox_replay.rs"]
 mod outbox_replay;
 

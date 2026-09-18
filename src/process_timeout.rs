@@ -4,6 +4,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 mod output;
+#[cfg(windows)]
+mod windows;
 use output::{
     OutputEvent, OutputState, collect_output_until, drain_output_events, spawn_output_reader,
 };
@@ -26,6 +28,8 @@ pub(crate) struct TimedCommandOutput<Buffer = String> {
 
 struct PipedChild {
     child: Child,
+    #[cfg(windows)]
+    job: windows::Job,
     rx: Receiver<OutputEvent>,
     output: OutputState,
 }
@@ -100,10 +104,8 @@ fn spawn_piped(mut command: Command) -> std::io::Result<PipedChild> {
         command.process_group(0);
     }
     #[cfg(windows)]
-    if !crate::process_spawn::is_interactive_terminal() {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(crate::process_spawn::CREATE_NO_WINDOW);
-    }
+    let (mut child, job) = windows::spawn(&mut command)?;
+    #[cfg(not(windows))]
     let mut child = command.spawn()?;
 
     let (tx, rx) = mpsc::channel();
@@ -118,7 +120,13 @@ fn spawn_piped(mut command: Command) -> std::io::Result<PipedChild> {
     }
     drop(tx);
 
-    Ok(PipedChild { child, rx, output })
+    Ok(PipedChild {
+        child,
+        #[cfg(windows)]
+        job,
+        rx,
+        output,
+    })
 }
 
 fn wait_with_timeout(
@@ -128,6 +136,8 @@ fn wait_with_timeout(
 ) -> TimedCommandOutput<Vec<u8>> {
     let PipedChild {
         mut child,
+        #[cfg(windows)]
+        job,
         rx,
         mut output,
     } = running;
@@ -150,6 +160,8 @@ fn wait_with_timeout(
                 return output.finish(status.code(), false, None);
             }
             Ok(None) if start.elapsed() >= timeout => {
+                #[cfg(windows)]
+                job.terminate(&mut output.diagnostics);
                 kill_process_group(&child, &mut output.diagnostics);
                 let kill_result = child.kill();
                 match &kill_result {
@@ -198,6 +210,8 @@ fn wait_with_timeout(
                 std::thread::sleep(poll_interval);
             }
             Err(e) => {
+                #[cfg(windows)]
+                job.terminate(&mut output.diagnostics);
                 kill_process_group(&child, &mut output.diagnostics);
                 let _ = child.kill();
                 let _ = child.wait();

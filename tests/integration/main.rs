@@ -134,6 +134,7 @@ mod prompt_utils_unit;
 mod pull_rebase_ff;
 mod push_upstream_authorship;
 mod range_authorship_unit;
+mod range_diff_bounds;
 mod realistic_complex_edits;
 mod rebase;
 mod rebase_attribution_remaining;

@@ -81,6 +81,7 @@ pub(crate) mod socket_listeners;
 pub(crate) mod trace_connection;
 pub(crate) mod trace_helpers;
 pub(crate) mod transport_error;
+mod transport_notes;
 mod working_log_discard;
 mod workspace_side_effects;
 

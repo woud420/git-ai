@@ -5,6 +5,12 @@ mod repos;
 #[path = "notes_sync_regression/transport_timeout.rs"]
 mod transport_timeout;
 
+#[path = "notes_sync_regression/transport_hydration.rs"]
+mod transport_hydration;
+
+#[path = "notes_sync_regression/transport_revision_authority.rs"]
+mod transport_revision_authority;
+
 use git_ai::model::repository::notes_db::NotesDatabase;
 use git_ai::notes::reference_server::ReferenceServer;
 use repos::test_repo::{DaemonTestScope, TestRepo, real_git_executable};

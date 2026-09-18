@@ -63,6 +63,9 @@ impl ActorDaemonCoordinator {
 
         trace_side_effect_debug(cmd, applied.seq, events);
 
+        // A transport failure must not strand working logs after Git has already
+        // changed history. Report it only after the independent migrations finish.
+        let transport_result = super::transport_notes::sync_before_rewrite(cmd, events);
         let rebase_mode =
             self.compute_rebase_mode_and_detect_non_ff(cmd, events, pull_uses_rebase)?;
 
@@ -90,7 +93,7 @@ impl ActorDaemonCoordinator {
 
         self.trigger_transcript_sweeps_for_command(cmd, events);
 
-        Ok(())
+        transport_result
     }
 
     /// Classify the command's rebase mode, clear pending rebase state on --abort,
@@ -351,18 +354,8 @@ impl ActorDaemonCoordinator {
         let mut handled_revert_commits = false;
         for event in events {
             match event {
-                crate::model::domain::SemanticEvent::FetchCompleted { .. } => {
-                    apply_fetch_notes_sync_side_effect(&worktree, cmd);
-                }
                 crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
                     apply_clone_notes_sync_side_effect(&worktree)?;
-                }
-                crate::model::domain::SemanticEvent::PullCompleted { .. } => {
-                    apply_pull_notes_sync_side_effect(
-                        &worktree,
-                        cmd.invoked_command.as_deref(),
-                        &cmd.invoked_args,
-                    )?;
                 }
                 crate::model::domain::SemanticEvent::PushCompleted { .. } => {
                     apply_push_side_effect(

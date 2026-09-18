@@ -75,6 +75,7 @@ pub(crate) mod side_effects_git_ops;
 pub(crate) mod socket_listeners;
 pub(crate) mod trace_helpers;
 pub(crate) mod transport_error;
+mod transport_notes;
 
 // Re-export types and functions that external code accesses as
 // `crate::operations::daemon::X`.  Only modules that define such public items

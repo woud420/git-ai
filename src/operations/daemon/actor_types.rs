@@ -193,11 +193,7 @@ pub struct ActorDaemonCoordinator {
             crate::operations::daemon::git_backend::SystemGitBackend,
         >,
     >,
-    pub(crate) normalizer: AsyncMutex<
-        crate::operations::daemon::trace_normalizer::TraceNormalizer<
-            crate::operations::daemon::git_backend::SystemGitBackend,
-        >,
-    >,
+    pub(crate) normalizer: super::normalizer_worker::TraceNormalizerWorker,
     pub(crate) pending_rebase_original_head_by_worktree:
         Mutex<HashMap<String, (String, Option<String>)>>,
     pub(crate) pending_cherry_pick_sources_by_worktree: Mutex<HashMap<String, Vec<String>>>,

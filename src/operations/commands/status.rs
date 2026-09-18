@@ -1,3 +1,5 @@
+mod pending;
+
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
@@ -29,9 +31,10 @@ struct CheckpointInfo {
 #[derive(Serialize)]
 struct StatusOutput {
     stats: CommitStats,
+    /// Daemon-wide advisory; false also covers an unavailable health probe.
+    checkpoint_processing_pending: bool,
     /// Per-checkpoint session breakdown. Omitted entirely when `--diff-only`
-    /// is requested, so consumers that only care about the current diff scope
-    /// get just the diff-scoped `stats`.
+    /// is requested, leaving diff-scoped stats and the pending-work advisory.
     #[serde(skip_serializing_if = "Option::is_none")]
     checkpoints: Option<Vec<CheckpointInfo>>,
 }
@@ -58,6 +61,12 @@ pub fn handle_status(args: &[String]) {
 
 fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
     let repo = find_repository(&[])?;
+    let checkpoint_processing_pending = pending::checkpoint_processing_pending();
+    if checkpoint_processing_pending && !json {
+        eprintln!(
+            "Checkpoint processing is pending in the background service; attribution may be incomplete."
+        );
+    }
     let ignore_patterns = effective_ignore_patterns(&repo, &[], &[]);
     let ignore_matcher = build_ignore_matcher(&ignore_patterns);
 
@@ -77,11 +86,12 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
         if json {
             let output = StatusOutput {
                 stats: CommitStats::default(),
+                checkpoint_processing_pending,
                 checkpoints: if diff_only { None } else { Some(vec![]) },
             };
             let json_str = serde_json::to_string(&output)?;
             println!("{}", json_str);
-        } else {
+        } else if !checkpoint_processing_pending {
             eprintln!(
                 "No checkpoints recorded since last commit ({})",
                 &head_sha[..7]
@@ -172,6 +182,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
     if json {
         let output = StatusOutput {
             stats,
+            checkpoint_processing_pending,
             checkpoints: if diff_only {
                 None
             } else {

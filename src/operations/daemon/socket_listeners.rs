@@ -2,9 +2,10 @@ use super::transport_error::transport_error;
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use serde_json::Value;
 use std::io::{BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // platform-specific imports
@@ -16,11 +17,7 @@ use named_pipe::{
     PipeClient as WindowsPipeClient, PipeOptions as WindowsPipeOptions,
     PipeServer as WindowsPipeServer,
 };
-#[cfg(windows)]
-use std::path::Path;
 
-/// Text-dedup constructor for the control/trace worker-panicked thread-joins
-/// below; Display output is unchanged from the sites it replaces.
 #[cfg(windows)]
 fn worker_panicked_error(what: &str) -> GitAiError {
     transport_error(
@@ -580,6 +577,17 @@ pub fn process_trace_connection_line(
         if was_unidentified {
             coordinator.trace_unidentified_connection_identified_or_closed()?;
         }
+    } else if parsed.get("event").and_then(Value::as_str)
+        == Some(super::socket_health::TRACE_HEALTH_PING_EVENT)
+    {
+        coordinator
+            .trace_health_pings_received
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Ok(Some(TraceLineOutcome {
+            continue_reading: false,
+            #[cfg(not(windows))]
+            bootstrap_complete: false,
+        }));
     }
     // Only enqueue payloads for mutating commands.  Read-only invocations
     // (status, diff, stash list, worktree list, …) are handled inline by

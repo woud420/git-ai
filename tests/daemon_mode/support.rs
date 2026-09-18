@@ -51,6 +51,9 @@ mod transcript_persistence;
 #[path = "health.rs"]
 mod health;
 
+#[path = "socket_health.rs"]
+mod socket_health;
+
 #[path = "http_mock.rs"]
 mod http_mock;
 

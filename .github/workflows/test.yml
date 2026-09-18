@@ -8,7 +8,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/git-ai-transport-probe-target
+      CARGO_TARGET_DIR: ../git-ai-transport-probe-target
       RUST_LOG: info
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

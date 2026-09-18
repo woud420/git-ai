@@ -61,6 +61,7 @@ pub(crate) mod jj_observer_control;
 pub(crate) mod lifecycle;
 pub(crate) mod log_setup;
 pub(crate) mod memory_watchdog;
+pub(crate) mod merge_fast_forward;
 pub(crate) mod parent_diff_batch;
 pub(crate) mod revert_rebase_helpers;
 pub(crate) mod self_check;

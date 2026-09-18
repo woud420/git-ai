@@ -6,6 +6,9 @@ mod completion;
 #[path = "lifecycle.rs"]
 mod lifecycle;
 
+#[path = "startup_lock.rs"]
+mod startup_lock;
+
 #[path = "trace_operations.rs"]
 mod trace_operations;
 

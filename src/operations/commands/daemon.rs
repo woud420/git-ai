@@ -23,6 +23,10 @@ use std::time::{Duration, Instant};
 #[path = "daemon_status.rs"]
 mod status;
 
+#[cfg(test)]
+#[path = "daemon_startup_lock_tests.rs"]
+mod startup_lock_tests;
+
 pub fn handle_daemon(args: &[String]) {
     if args.is_empty() || is_help(args[0].as_str()) {
         print_help();
@@ -275,13 +279,8 @@ fn daemon_startup_is_blocked(config: &DaemonConfig) -> bool {
         return false;
     }
 
-    match LockFile::try_acquire(&config.lock_path) {
-        Some(lock) => {
-            drop(lock);
-            false
-        }
-        None => true,
-    }
+    // The launcher only probes ownership; daemon startup has a longer acquisition budget.
+    LockFile::acquire_with_timeout(&config.lock_path, Duration::from_millis(500)).is_none()
 }
 
 pub(crate) fn daemon_is_up(config: &DaemonConfig) -> bool {

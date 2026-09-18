@@ -30,6 +30,9 @@ mod memory_watchdog;
 #[path = "reingestion.rs"]
 mod reingestion;
 
+#[path = "transcript_persistence.rs"]
+mod transcript_persistence;
+
 #[path = "health.rs"]
 mod health;
 

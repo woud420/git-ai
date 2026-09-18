@@ -120,3 +120,5 @@ mod tests_coordinator_fences;
 mod tests_daemon_units;
 #[cfg(test)]
 mod tests_ingress;
+#[cfg(test)]
+mod tests_reflog_origin;

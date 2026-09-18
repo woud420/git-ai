@@ -436,7 +436,7 @@ impl Config {
         self.max_checkpoint_total_lines
     }
 
-    /// Returns the daemon peak-RSS limit in MiB, or `None` when disabled.
+    /// Returns the daemon current-RSS limit in MiB, or `None` when disabled.
     pub fn daemon_memory_limit_mb(&self) -> Option<u64> {
         self.daemon_memory_limit_mb
     }

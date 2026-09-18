@@ -27,6 +27,9 @@ mod load;
 #[path = "memory_watchdog.rs"]
 mod memory_watchdog;
 
+#[path = "memory_usage.rs"]
+mod memory_usage;
+
 #[path = "reingestion.rs"]
 mod reingestion;
 

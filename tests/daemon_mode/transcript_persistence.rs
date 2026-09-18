@@ -6,11 +6,15 @@ use git_ai::model::repository::streams_db::StreamsDatabase;
 fn transcript_batch_retries_after_atomic_persistence_failure() {
     let storage = tempfile::tempdir().unwrap();
     let metrics_path = storage.path().join("metrics.db");
+    let claude_config = storage.path().join("claude");
     let repo = TestRepo::new_with_daemon_env_and_patch(
-        &[(
-            "GIT_AI_TEST_METRICS_DB_PATH",
-            metrics_path.to_str().unwrap(),
-        )],
+        &[
+            (
+                "GIT_AI_TEST_METRICS_DB_PATH",
+                metrics_path.to_str().unwrap(),
+            ),
+            ("CLAUDE_CONFIG_DIR", claude_config.to_str().unwrap()),
+        ],
         |patch| {
             patch.telemetry = Some("off".into());
             patch.feature_flags = Some(json!({"transcript_sweep": false}));
@@ -23,7 +27,8 @@ fn transcript_batch_retries_after_atomic_persistence_failure() {
     let mut file = repo.filename("edited.txt");
     file.assert_committed_lines(lines!["base".unattributed_human()]);
 
-    let connection = rusqlite::Connection::open(&metrics_path).unwrap();
+    let connection =
+        git_ai::model::repository::sqlite::open_with_memory_limits(&metrics_path).unwrap();
     connection
         .execute_batch(
             "CREATE TRIGGER reject_second_transcript_event BEFORE INSERT ON metrics
@@ -31,7 +36,7 @@ fn transcript_batch_retries_after_atomic_persistence_failure() {
              BEGIN SELECT RAISE(ABORT, 'test transcript insert failure'); END;",
         )
         .unwrap();
-    let directory = repo.daemon_home_path().join(".claude/projects/persistence");
+    let directory = claude_config.join("projects/persistence");
     fs::create_dir_all(&directory).unwrap();
     let transcript = directory.join("persistence-session.jsonl");
     let timestamp = chrono::Utc::now().to_rfc3339();
@@ -60,7 +65,11 @@ fn transcript_batch_retries_after_atomic_persistence_failure() {
     })
     .to_string();
     fs::write(&file_path, "base\nAI edit\n").unwrap();
-    repo.checkpoint_with_hook_input("claude", &hook).unwrap();
+    repo.git_ai_with_env(
+        &["checkpoint", "claude", "--hook-input", &hook],
+        &[("CLAUDE_CONFIG_DIR", claude_config.to_str().unwrap())],
+    )
+    .unwrap();
     repo.git_ai(&["await", "--timeout", "30"]).unwrap();
 
     let streams = StreamsDatabase::open(
@@ -104,7 +113,11 @@ fn transcript_batch_retries_after_atomic_persistence_failure() {
         .execute_batch("DROP TRIGGER reject_second_transcript_event;")
         .unwrap();
     fs::write(&file_path, "base\nAI edit\nAI retry\n").unwrap();
-    repo.checkpoint_with_hook_input("claude", &hook).unwrap();
+    repo.git_ai_with_env(
+        &["checkpoint", "claude", "--hook-input", &hook],
+        &[("CLAUDE_CONFIG_DIR", claude_config.to_str().unwrap())],
+    )
+    .unwrap();
     repo.git_ai(&["await", "--timeout", "30"]).unwrap();
     let persisted = rows();
     assert_eq!(

@@ -6,6 +6,8 @@ use crate::operations::git::notes_api;
 use crate::operations::git::oid::{is_full_oid, is_zero_oid};
 use crate::operations::git::repository::Repository;
 
+mod bounds;
+
 /// Derive old→new commit mappings by running `git range-diff` between the
 /// old and new branch tips, then mapping merge commits structurally.
 pub(super) fn derive_mappings_from_range_diff(
@@ -40,10 +42,14 @@ pub(super) fn derive_mappings_from_range_diff(
         }
         _ => &base,
     };
-    let range_diff_output = run_range_diff(repo, &base, old_tip, onto, new_tip)?;
+    let Some(new_base) = bounds::bounded_new_base(repo, &base, old_tip, onto, new_tip) else {
+        return Ok(Vec::new());
+    };
+    let range_diff_output = run_range_diff(repo, &base, old_tip, &new_base, new_tip)?;
     let mut mappings = parse_range_diff_output(&range_diff_output);
 
-    let merge_mappings = derive_merge_commit_mappings(repo, &base, old_tip, new_tip, &mappings)?;
+    let merge_mappings =
+        derive_merge_commit_mappings(repo, &base, old_tip, &new_base, new_tip, &mappings)?;
     mappings.extend(merge_mappings);
 
     Ok(mappings)
@@ -110,9 +116,9 @@ fn run_range_diff(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Maximum number of unmatched old-range commits buffered before the first
-/// real range-diff match. Small leading groups can represent a valid squash,
-/// but a larger group indicates divergent history such as a restack undo.
+/// Maximum consecutive dropped commits treated as a squash into an adjacent
+/// match. Larger runs indicate divergent history and would otherwise create
+/// a full-tree attribution diff for every unrelated source commit.
 pub(super) const MAX_PENDING_DROPPED_COMMITS: usize = 64;
 
 pub(super) fn parse_range_diff_output(output: &str) -> Vec<(String, String)> {
@@ -140,17 +146,11 @@ pub(super) fn parse_range_diff_output(output: &str) -> Vec<(String, String)> {
 
         match status_char {
             '<' => {
-                // Dropped commit (squashed into a later commit)
-                if !is_zero_oid(&old_sha) {
-                    if let Some(new_sha) = previous_new_sha.as_ref() {
-                        mappings.push((old_sha, new_sha.clone()));
-                    } else if !pending_overflowed {
-                        pending_dropped.push(old_sha);
-                        if pending_dropped.len() > MAX_PENDING_DROPPED_COMMITS {
-                            pending_dropped.clear();
-                            pending_dropped.shrink_to_fit();
-                            pending_overflowed = true;
-                        }
+                if !is_zero_oid(&old_sha) && !pending_overflowed {
+                    pending_dropped.push(old_sha);
+                    if pending_dropped.len() > MAX_PENDING_DROPPED_COMMITS {
+                        pending_dropped.clear();
+                        pending_overflowed = true;
                     }
                 }
             }
@@ -163,10 +163,13 @@ pub(super) fn parse_range_diff_output(output: &str) -> Vec<(String, String)> {
                 if is_zero_oid(&old_sha) || is_zero_oid(&new_sha) {
                     continue;
                 }
-                // Map any preceding dropped commits to this new commit (squash)
+                // Leading drops use the first match; later runs retain the
+                // previous destination, preserving the existing squash direction.
+                let dropped_destination = previous_new_sha.as_ref().unwrap_or(&new_sha);
                 for dropped in pending_dropped.drain(..) {
-                    mappings.push((dropped, new_sha.clone()));
+                    mappings.push((dropped, dropped_destination.clone()));
                 }
+                pending_overflowed = false;
                 previous_new_sha = Some(new_sha.clone());
                 mappings.push((old_sha, new_sha));
             }
@@ -174,6 +177,12 @@ pub(super) fn parse_range_diff_output(output: &str) -> Vec<(String, String)> {
                 // '>' (new commit) or other — skip
                 continue;
             }
+        }
+    }
+
+    if let Some(new_sha) = previous_new_sha {
+        for dropped in pending_dropped {
+            mappings.push((dropped, new_sha.clone()));
         }
     }
 
@@ -222,13 +231,14 @@ fn find_next_sha(s: &str) -> Option<(String, &str)> {
 // instead of taking the first structural match.
 fn derive_merge_commit_mappings(
     repo: &Repository,
-    base: &str,
+    old_base: &str,
     old_tip: &str,
+    new_base: &str,
     new_tip: &str,
     existing_mappings: &[(String, String)],
 ) -> Result<Vec<(String, String)>, GitAiError> {
-    let old_merges = list_merge_commits(repo, base, old_tip)?;
-    let new_merges = list_merge_commits(repo, base, new_tip)?;
+    let old_merges = list_merge_commits(repo, old_base, old_tip)?;
+    let new_merges = list_merge_commits(repo, new_base, new_tip)?;
 
     if old_merges.is_empty() || new_merges.is_empty() {
         return Ok(Vec::new());

@@ -238,6 +238,25 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                 crate::config::save_file_config(&file_config)?;
                 println!("[max_checkpoint_total_lines]: {}", lines);
             }
+            "max_transcript_line_bytes" | "max_transcript_batch_bytes" => {
+                let bytes = value
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|bytes| *bytes > 0)
+                    .ok_or_else(|| {
+                        format!(
+                            "Invalid {} value '{}'. Expected a positive integer in bytes",
+                            key, value
+                        )
+                    })?;
+                if key == "max_transcript_line_bytes" {
+                    file_config.max_transcript_line_bytes = Some(bytes);
+                } else {
+                    file_config.max_transcript_batch_bytes = Some(bytes);
+                }
+                crate::config::save_file_config(&file_config)?;
+                println!("[{}]: {}", key, bytes);
+            }
             "daemon_memory_limit_mb" => {
                 let limit_mb = value.trim().parse::<u64>().map_err(|_| {
                     format!(

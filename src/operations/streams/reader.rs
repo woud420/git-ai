@@ -1,11 +1,12 @@
 //! Shared incremental transcript reader mechanics.
 
-use crate::model::stream_types::{JsonlLineState, StreamBatch, StreamError, read_jsonl_line};
-use crate::model::stream_watermark::{
-    ByteOffsetWatermark, RecordIndexWatermark, WatermarkStrategy,
-};
+mod jsonl;
+pub(super) use jsonl::{read_jsonl_byte_stream, read_jsonl_event_batch, read_leading_jsonl_lines};
+
+use crate::model::stream_types::{StreamBatch, StreamError};
+use crate::model::stream_watermark::{RecordIndexWatermark, WatermarkStrategy};
 use std::fs::File;
-use std::io::{BufReader, Seek, SeekFrom};
+use std::io::BufReader;
 use std::path::Path;
 
 fn transcript_open_error(path: &Path, error: std::io::Error, open_error_verb: &str) -> StreamError {
@@ -131,90 +132,10 @@ pub(super) fn read_json_array_stream(
     })
 }
 
-/// Read a JSONL transcript incrementally using a byte-offset watermark.
-///
-/// Agent-specific readers share the same I/O and malformed-line behavior; only
-/// the reader name and open-error wording vary for compatibility with existing
-/// diagnostics.
-pub(super) fn read_jsonl_byte_stream(
-    path: &Path,
-    watermark: Box<dyn WatermarkStrategy>,
-    session_id: &str,
-    batch_limit: usize,
-    reader_name: &str,
-    open_error_verb: &str,
-) -> Result<StreamBatch, StreamError> {
-    let byte_watermark = watermark
-        .as_any()
-        .downcast_ref::<ByteOffsetWatermark>()
-        .ok_or_else(|| StreamError::Fatal {
-            message: format!(
-                "{} reader requires ByteOffsetWatermark, got incompatible type for session {}",
-                reader_name, session_id
-            ),
-        })?;
-
-    let start_offset = byte_watermark.0;
-    let file =
-        File::open(path).map_err(|error| transcript_open_error(path, error, open_error_verb))?;
-
-    let mut reader = BufReader::new(file);
-    reader
-        .seek(SeekFrom::Start(start_offset))
-        .map_err(|error| StreamError::Transient {
-            message: format!("Failed to seek to offset {}: {}", start_offset, error),
-            retry_after: std::time::Duration::from_secs(5),
-        })?;
-
-    let mut events = Vec::with_capacity(batch_limit);
-    let mut current_offset = start_offset;
-    let mut line_number = 0;
-    let mut line = String::new();
-
-    loop {
-        match read_jsonl_line(&mut reader, &mut line).map_err(|error| StreamError::Transient {
-            message: format!("I/O error reading line: {}", error),
-            retry_after: std::time::Duration::from_secs(5),
-        })? {
-            JsonlLineState::Eof | JsonlLineState::Partial => break,
-            JsonlLineState::Complete(bytes_read) => {
-                line_number += 1;
-                current_offset += bytes_read as u64;
-            }
-        }
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let entry = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::warn!(
-                    line = line_number,
-                    path = %path.display(),
-                    error = %error,
-                    "skipping malformed JSON line"
-                );
-                continue;
-            }
-        };
-
-        events.push(entry);
-        if events.len() >= batch_limit {
-            break;
-        }
-    }
-
-    Ok(StreamBatch {
-        events,
-        new_watermark: Box::new(ByteOffsetWatermark::new(current_offset)),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::stream_watermark::ByteOffsetWatermark;
 
     #[test]
     fn transcript_open_errors_keep_existing_variants_and_messages() {

@@ -9,6 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+mod git_path;
+use git_path::resolve_git_path;
+
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
 
@@ -674,114 +677,6 @@ fn build_feature_flags(file_cfg: &Option<FileConfig>) -> FeatureFlags {
     });
 
     FeatureFlags::from_env_and_file(file_flags)
-}
-
-fn resolve_git_path(file_cfg: &Option<FileConfig>) -> String {
-    // 1) From config file
-    if let Some(cfg) = file_cfg
-        && let Some(path) = cfg.git_path.as_ref()
-    {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            let p = Path::new(trimmed);
-            if is_executable(p) && !path_is_git_ai_binary(p) {
-                return trimmed.to_string();
-            }
-        }
-    }
-
-    // 2) Probe common locations across platforms.
-    // All candidates are guarded by path_is_git_ai_binary so that a git-ai shim at any
-    // of these locations can never be returned as the "real git" (fork bomb prevention).
-    #[cfg(not(windows))]
-    let local_bin_git = format!("{}/.local/bin/git", home_dir().display());
-
-    #[cfg(windows)]
-    let local_app_data_candidates: Vec<String> = std::env::var("LOCALAPPDATA")
-        .ok()
-        .map(|lad| {
-            vec![
-                format!(r"{}\Programs\Git\cmd\git.exe", lad),
-                format!(r"{}\Programs\Git\bin\git.exe", lad),
-            ]
-        })
-        .unwrap_or_default();
-
-    let static_candidates: &[&str] = &[
-        #[cfg(not(windows))]
-        local_bin_git.as_str(),
-        #[cfg(not(windows))]
-        "/opt/homebrew/bin/git",
-        #[cfg(not(windows))]
-        "/usr/local/bin/git",
-        #[cfg(not(windows))]
-        "/usr/bin/git",
-        #[cfg(not(windows))]
-        "/bin/git",
-        #[cfg(not(windows))]
-        "/usr/local/sbin/git",
-        #[cfg(not(windows))]
-        "/usr/sbin/git",
-        #[cfg(windows)]
-        r"C:\Program Files\Git\cmd\git.exe",
-        #[cfg(windows)]
-        r"C:\Program Files\Git\bin\git.exe",
-        #[cfg(windows)]
-        r"C:\Program Files (x86)\Git\cmd\git.exe",
-        #[cfg(windows)]
-        r"C:\Program Files (x86)\Git\bin\git.exe",
-    ];
-
-    #[cfg(windows)]
-    let all_candidates: Vec<&str> = {
-        let mut v: Vec<&str> = static_candidates.to_vec();
-        for c in &local_app_data_candidates {
-            v.push(c.as_str());
-        }
-        v
-    };
-
-    #[cfg(windows)]
-    let candidates: &[&str] = &all_candidates;
-    #[cfg(not(windows))]
-    let candidates: &[&str] = static_candidates;
-
-    if let Some(found) = candidates
-        .iter()
-        .map(Path::new)
-        .find(|p| is_executable(p) && !path_is_git_ai_binary(p))
-    {
-        return found.to_string_lossy().to_string();
-    }
-
-    // 3) Windows-only: try `where.exe git.exe` as a PATH-based fallback
-    #[cfg(windows)]
-    {
-        if let Ok(output) = std::process::Command::new("where.exe")
-            .arg("git.exe")
-            .output()
-            && output.status.success()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let trimmed = line.trim();
-                let p = Path::new(trimmed);
-                if is_executable(p) && !path_is_git_ai_binary(p) {
-                    return trimmed.to_string();
-                }
-            }
-        }
-    }
-
-    eprintln!(
-        "Fatal: Could not locate a real 'git' binary.\n\
-         Expected a valid 'git_path' in {cfg_path} or in standard locations.\n\
-         Please install Git or update your config JSON.",
-        cfg_path = config_file_path()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "~/.git-ai/config.json".to_string()),
-    );
-    std::process::exit(1);
 }
 
 fn is_executable(path: &Path) -> bool {

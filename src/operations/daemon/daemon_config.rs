@@ -1,5 +1,6 @@
 use crate::config;
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use crate::model::repository::lock_file::LockFile;
 #[cfg(not(windows))]
 use interprocess::local_socket::prelude::*;
@@ -189,8 +190,11 @@ impl DaemonConfig {
     }
 
     pub fn from_default_paths() -> Result<Self, GitAiError> {
-        let internal_dir = config::internal_dir_path().ok_or_else(|| {
-            GitAiError::Generic("Unable to determine ~/.git-ai/internal path".to_string())
+        let internal_dir = config::internal_dir_path().ok_or_else(|| PersistenceError::Io {
+            operation: "locate daemon state directory",
+            path: String::new(),
+            kind: std::io::ErrorKind::NotFound,
+            message: "Unable to determine ~/.git-ai/internal path".to_string(),
         })?;
         Ok(Self::from_internal_dir(internal_dir))
     }
@@ -223,7 +227,12 @@ impl DaemonConfig {
         let daemon_dir = self
             .lock_path
             .parent()
-            .ok_or_else(|| GitAiError::Generic("daemon lock path has no parent".to_string()))?;
+            .ok_or_else(|| PersistenceError::Io {
+                operation: "locate daemon lock directory",
+                path: self.lock_path.display().to_string(),
+                kind: std::io::ErrorKind::InvalidInput,
+                message: "daemon lock path has no parent".to_string(),
+            })?;
         fs::create_dir_all(daemon_dir)?;
         fs::create_dir_all(&self.internal_dir)?;
         Ok(())
@@ -299,28 +308,16 @@ impl DaemonLock {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let lock = LockFile::try_acquire(path).ok_or_else(|| {
-            GitAiError::Generic(
-                "git-ai background service is already running (lock held)".to_string(),
-            )
-        })?;
+        let lock =
+            LockFile::acquire_with_timeout(path, Duration::from_secs(3)).ok_or_else(|| {
+                // Preserve the exact legacy startup diagnostic used to identify competing daemons.
+                GitAiError::Generic(
+                    "git-ai background service is already running (lock held)".to_string(),
+                )
+            })?;
         Ok(Self { _lock: lock })
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_completion_log_path_has_stable_family_hash() {
-        let config = DaemonConfig::from_home(Path::new("test-home"));
-
-        assert_eq!(
-            config.test_completion_log_path_for_family("family-key"),
-            PathBuf::from("test-home")
-                .join(".git-ai/internal/daemon/test-completions")
-                .join("02e15fa3779eb41b.jsonl")
-        );
-    }
-}
+mod tests;

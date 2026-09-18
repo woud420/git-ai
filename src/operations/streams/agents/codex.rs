@@ -8,8 +8,6 @@ use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_s
 use crate::operations::streams::reader::read_jsonl_byte_stream;
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
 use crate::operations::streams::timestamp::event_timestamp_or_file_time;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -126,9 +124,9 @@ impl CodexAgent {
     /// `payload.thread_source == "subagent"` and `payload.forked_from_id` containing
     /// the parent session UUID.
     pub fn detect_subagent_parent(path: &Path) -> Option<String> {
-        let file = File::open(path).ok()?;
-        let reader = BufReader::new(file);
-        let first_line = reader.lines().next()?.ok()?;
+        let first_line = crate::operations::streams::reader::read_leading_jsonl_lines(path, 1)
+            .ok()?
+            .next()?;
         if first_line.trim().is_empty() {
             return None;
         }
@@ -233,15 +231,10 @@ impl Agent for CodexAgent {
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
-        use std::fs::File;
-        use std::io::{BufRead, BufReader};
-
-        let file = File::open(stream_path).ok()?;
-        let reader = BufReader::new(file);
-
         // Codex has cwd in session_meta or turn_context payload events
-        for line in reader.lines().take(20) {
-            let Ok(line) = line else { continue };
+        for line in
+            crate::operations::streams::reader::read_leading_jsonl_lines(stream_path, 20).ok()?
+        {
             if line.is_empty() {
                 continue;
             }

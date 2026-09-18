@@ -1,5 +1,8 @@
 use super::repos;
 
+#[path = "transcript_budgets.rs"]
+mod transcript_budgets;
+
 #[path = "completion.rs"]
 mod completion;
 

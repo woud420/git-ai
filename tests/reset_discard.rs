@@ -51,7 +51,8 @@ fn reset_discard_same_head_ai() {
     let repo = TestRepo::new();
     let head = commit_base(&repo);
     checkpoint_replacement(&repo, "mock_ai");
-    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+        .unwrap();
     assert_eq!(repo.git_og(&["rev-parse", "HEAD"]).unwrap().trim(), head);
     assert_untracked_recreation(&repo);
 }
@@ -61,7 +62,8 @@ fn reset_discard_same_head_known_human() {
     let repo = TestRepo::new();
     commit_base(&repo);
     checkpoint_replacement(&repo, "mock_known_human");
-    repo.git(&["reset", "--hard"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard"])
+        .unwrap();
     assert_untracked_recreation(&repo);
 }
 
@@ -73,7 +75,8 @@ fn reset_discard_preserves_untracked_file_evidence() {
     fs::write(repo.path().join("untracked.txt"), "surviving ai\n").unwrap();
     repo.git_ai(&["checkpoint", "mock_ai", "untracked.txt"])
         .unwrap();
-    repo.git(&["reset", "--hard", &head]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", &head])
+        .unwrap();
     assert_eq!(
         fs::read_to_string(repo.path().join("untracked.txt")).unwrap(),
         "surviving ai\n"
@@ -93,7 +96,7 @@ fn reset_discard_alternate_index_preserves_default_staged_evidence() {
     let alternate = temp.path().join("alternate-index");
     let env = [("GIT_INDEX_FILE", alternate.to_str().unwrap())];
     repo.git_og_with_env(&["read-tree", &base], &env).unwrap();
-    repo.git_without_test_sync_for_test(&["reset", "--hard", "HEAD"], &env)
+    repo.git_without_test_sync_for_test(&["--no-replace-objects", "reset", "--hard", "HEAD"], &env)
         .unwrap();
     repo.sync_daemon_force();
     assert_eq!(
@@ -118,7 +121,8 @@ fn reset_discard_skip_worktree_preserves_retained_edit() {
     checkpoint_replacement(&repo, "mock_ai");
     repo.git_og(&["update-index", "--skip-worktree", "tracked.txt"])
         .unwrap();
-    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+        .unwrap();
     assert_eq!(
         fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
         "discarded edit\n"
@@ -142,7 +146,8 @@ fn reset_discard_v4_skip_worktree_preserves_retained_edit() {
         "tracked.txt",
     ])
     .unwrap();
-    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+        .unwrap();
     assert_eq!(
         fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
         "discarded edit\n"
@@ -163,7 +168,8 @@ fn reset_discard_split_index_skip_worktree_preserves_retained_edit() {
     repo.git_og(&["update-index", "--skip-worktree", "tracked.txt"])
         .unwrap();
     repo.git_og(&["update-index", "--split-index"]).unwrap();
-    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+        .unwrap();
     assert_eq!(
         fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
         "discarded edit\n"
@@ -200,7 +206,8 @@ fn reset_discard_fsmonitor_preserves_retained_edit() {
         .unwrap();
     let calls = repo.path().join(".git/fsmonitor-fixture-calls");
     fs::write(&calls, "").unwrap();
-    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+        .unwrap();
     let calls = fs::read_to_string(calls).unwrap();
     assert!(!calls.is_empty() && calls.lines().all(|line| line == "2"));
     assert_eq!(
@@ -224,7 +231,8 @@ fn reset_discard_collection_opt_out_preserves_existing_journal() {
     let log = repo.current_working_logs();
     let before = fs::read(log.checkpoints_file()).unwrap();
     repo.patch_git_ai_config(|patch| patch.allowed_repositories = Some(Vec::new()));
-    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+        .unwrap();
     repo.sync_daemon_force();
     assert!(
         fs::read(log.checkpoints_file()).unwrap() == before,
@@ -246,7 +254,7 @@ fn reset_discard_preserves_checkpoint_after_unsynchronized_reset() {
         TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_SIDE_EFFECT_GATE_FOR_COMMAND", &spec)]);
     commit_base(&repo);
     checkpoint_replacement(&repo, "mock_ai");
-    repo.git_without_test_sync_for_test(&["reset", "--hard", "HEAD"], &[])
+    repo.git_without_test_sync_for_test(&["--no-replace-objects", "reset", "--hard", "HEAD"], &[])
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !gate.with_extension("entered").exists() {
@@ -314,7 +322,8 @@ fn reset_discard_sqlite_and_http_backends() {
         repo.filename("tracked.txt")
             .assert_committed_lines(lines!["base".human()]);
         checkpoint_replacement(&repo, "mock_ai");
-        repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+        repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+            .unwrap();
         fs::write(repo.path().join("tracked.txt"), "discarded edit\n").unwrap();
         repo.git(&["add", "tracked.txt"]).unwrap();
         repo.git(&["commit", "-m", "uncheckpointed recreation"])
@@ -341,7 +350,8 @@ fn reset_discard_preserves_non_hard_modes() {
         let repo = TestRepo::new();
         commit_base(&repo);
         checkpoint_replacement(&repo, "mock_ai");
-        repo.git(&["reset", mode, "HEAD"]).unwrap();
+        repo.git(&["--no-replace-objects", "reset", mode, "HEAD"])
+            .unwrap();
         repo.stage_all_and_commit(mode).unwrap();
         repo.filename("tracked.txt")
             .assert_committed_lines(lines!["discarded edit".ai()]);
@@ -354,7 +364,8 @@ fn reset_discard_preserves_index_only_pathspec_reset() {
     commit_base(&repo);
     checkpoint_replacement(&repo, "mock_ai");
     repo.git(&["add", "tracked.txt"]).unwrap();
-    repo.git(&["reset", "HEAD", "--", "tracked.txt"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "HEAD", "--", "tracked.txt"])
+        .unwrap();
     assert!(repo.git_og(&["diff", "--cached"]).unwrap().is_empty());
     repo.stage_all_and_commit("restage after index reset")
         .unwrap();
@@ -367,7 +378,10 @@ fn reset_discard_preserves_failed_reset_evidence() {
     let repo = TestRepo::new();
     commit_base(&repo);
     checkpoint_replacement(&repo, "mock_ai");
-    assert!(repo.git(&["reset", "--hard", "missing-ref"]).is_err());
+    assert!(
+        repo.git(&["--no-replace-objects", "reset", "--hard", "missing-ref"])
+            .is_err()
+    );
     repo.stage_all_and_commit("after failed reset").unwrap();
     repo.filename("tracked.txt")
         .assert_committed_lines(lines!["discarded edit".ai()]);
@@ -384,7 +398,8 @@ fn reset_discard_preserves_moving_head_behavior() {
     fs::write(repo.path().join("tracked.txt"), "pending ai\n").unwrap();
     repo.git_ai(&["checkpoint", "mock_ai", "tracked.txt"])
         .unwrap();
-    repo.git(&["reset", "--hard", &base]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", &base])
+        .unwrap();
     fs::write(repo.path().join("tracked.txt"), "pending ai\n").unwrap();
     repo.stage_all_and_commit("untracked after moving reset")
         .unwrap();
@@ -400,7 +415,10 @@ fn reset_discard_unborn_head_remains_native_failure() {
     fs::write(repo.path().join("tracked.txt"), "first ai\n").unwrap();
     repo.git_ai(&["checkpoint", "mock_ai", "tracked.txt"])
         .unwrap();
-    assert!(repo.git(&["reset", "--hard", "HEAD"]).is_err());
+    assert!(
+        repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+            .is_err()
+    );
     repo.stage_all_and_commit("first commit").unwrap();
     repo.filename("tracked.txt")
         .assert_committed_lines(lines!["first ai".ai()]);
@@ -411,7 +429,8 @@ fn reset_discard_linked_worktree() {
     let repo = TestRepo::new_worktree();
     commit_base(&repo);
     checkpoint_replacement(&repo, "mock_ai");
-    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+        .unwrap();
     assert_untracked_recreation(&repo);
 }
 
@@ -436,7 +455,8 @@ fn reset_discard_git_process_count_does_not_grow_with_files() {
         }
         repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
         fs::write(&log_path, "").unwrap();
-        repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+        repo.git(&["--no-replace-objects", "reset", "--hard", "HEAD"])
+            .unwrap();
         repo.sync_daemon_force();
         let commands = fs::read_to_string(&log_path).unwrap();
         assert_eq!(
@@ -471,8 +491,56 @@ subdir_test_variants! {
         checkpoint_replacement(&repo, "mock_ai");
         let subdir = repo.path().join("nested");
         fs::create_dir(&subdir).unwrap();
-        repo.git_from_working_dir(&subdir, &["reset", "--hard", "HEAD"])
+        repo.git_from_working_dir(&subdir, &["--no-replace-objects", "reset", "--hard", "HEAD"])
             .unwrap();
         assert_untracked_recreation(&repo);
     }
+}
+
+#[test]
+fn reset_discard_replacement_tree_preserves_untracked_evidence() {
+    let repo = TestRepo::new();
+    let head = commit_base(&repo);
+    repo.git_og(&["read-tree", "--empty"]).unwrap();
+    let tree = repo.git_og(&["write-tree"]).unwrap();
+    let replacement = repo
+        .git_og(&["commit-tree", tree.trim(), "-m", "empty replacement"])
+        .unwrap();
+    repo.git_og(&["replace", &head, replacement.trim()])
+        .unwrap();
+    repo.git_og(&["reset", "--hard", "HEAD"]).unwrap();
+    assert!(
+        repo.git_og(&["ls-files", "--", "tracked.txt"])
+            .unwrap()
+            .is_empty()
+    );
+    checkpoint_replacement(&repo, "mock_ai");
+    let log = repo.current_working_logs();
+    let before = fs::read(log.checkpoints_file()).unwrap();
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    assert!(fs::read(log.checkpoints_file()).unwrap() == before);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "discarded edit\n"
+    );
+    repo.git_og(&["replace", "-d", &head]).unwrap();
+    repo.stage_all_and_commit("retained replacement-view edit")
+        .unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
+fn reset_discard_unproven_object_view_preserves_existing_boundary() {
+    let repo = TestRepo::new();
+    commit_base(&repo);
+    checkpoint_replacement(&repo, "mock_ai");
+    let log = repo.current_working_logs();
+    let before = fs::read(log.checkpoints_file()).unwrap();
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    assert!(fs::read(log.checkpoints_file()).unwrap() == before);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "base\n"
+    );
 }

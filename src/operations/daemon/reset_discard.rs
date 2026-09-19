@@ -17,6 +17,16 @@ pub(super) fn discard_same_head_tracked_paths(
     if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
         return Ok(());
     }
+    // Replacement trees can leave canonical tracked paths untracked. The
+    // command must prove its object view; later replacement refs cannot.
+    let parsed = super::side_effect_helpers::parsed_invocation_for_normalized_command(cmd);
+    if !parsed
+        .global_args
+        .iter()
+        .any(|arg| arg == "--no-replace-objects")
+    {
+        return Ok(());
+    }
     // Version 2 cannot encode skip-worktree entries. Later index reads cannot
     // establish whether the reset actually discarded a sparse working edit.
     if !cmd.index_v2

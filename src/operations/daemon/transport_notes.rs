@@ -58,11 +58,48 @@ fn incoming_revision_oids(cmd: &NormalizedCommand, remote: &str) -> Vec<String> 
 }
 
 fn apply_fetch_notes_sync_side_effect(worktree: &str, cmd: &NormalizedCommand) {
+    if let Some(source) = explicit_fetch_pack_source(cmd) {
+        if let Err(error) =
+            crate::operations::git::sync_authorship::fetch_authorship_notes_from_repository(
+                worktree, &source,
+            )
+        {
+            tracing::warn!(remote = %source, %error, "best-effort fetch-pack notes sync failed");
+        }
+        return;
+    }
     let Some(remote) = explicit_fetch_remote(cmd) else {
         return;
     };
     if let Err(error) = apply_transport_notes_sync_side_effect(worktree, cmd) {
         tracing::warn!(%remote, %error, "best-effort fetch notes sync failed");
+    }
+}
+
+
+// A standalone `fetch-pack --all <absolute path>` names its one source
+// explicitly; other forms can select refs or remotes we must not guess.
+fn explicit_fetch_pack_source(cmd: &NormalizedCommand) -> Option<String> {
+    if cmd.raw_argv.is_empty() {
+        return None;
+    }
+    let parsed = parsed_invocation_for_normalized_command(cmd);
+    if parsed.command.as_deref() != Some("fetch-pack") {
+        return None;
+    }
+    let mut globals = parsed.global_args.iter();
+    while let Some(arg) = globals.next() {
+        match arg.as_str() {
+            "-C" if globals.next().is_some() => {}
+            value if value.starts_with("-C") && value.len() > 2 => {}
+            _ => return None,
+        }
+    }
+    match parsed.command_args.as_slice() {
+        [all, source] if all == "--all" && std::path::Path::new(source).is_absolute() => {
+            Some(source.clone())
+        }
+        _ => None,
     }
 }
 

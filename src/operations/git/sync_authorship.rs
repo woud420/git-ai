@@ -5,7 +5,9 @@ use crate::{error::GitAiError, operations::git::cli_parser::ParsedGitInvocation}
 
 mod send_pack;
 pub use send_pack::send_authorship_notes;
+mod fetch_pack;
 mod transport;
+pub use fetch_pack::fetch_authorship_notes_from_repository;
 #[cfg(test)]
 use transport::disabled_hooks_config;
 use transport::{build_authorship_fetch_args, build_authorship_push_args, exec_notes_transport};
@@ -266,10 +268,16 @@ pub fn fetch_authorship_notes(
         }
     }
 
-    // After successful fetch, merge the tracking ref into refs/notes/ai
+    merge_fetched_authorship_notes(repository, &tracking_ref)
+}
+
+fn merge_fetched_authorship_notes(
+    repository: &Repository,
+    tracking_ref: &str,
+) -> Result<NotesExistence, GitAiError> {
     let local_notes_ref = "refs/notes/ai";
 
-    if crate::operations::git::refs::ref_exists(repository, &tracking_ref) {
+    if crate::operations::git::refs::ref_exists(repository, tracking_ref) {
         if crate::operations::git::refs::ref_exists(repository, local_notes_ref) {
             // Both exist - merge them
             tracing::debug!(
@@ -277,10 +285,10 @@ pub fn fetch_authorship_notes(
                 tracking_ref,
                 local_notes_ref
             );
-            if let Err(e) = merge_notes_from_ref(repository, &tracking_ref) {
+            if let Err(e) = merge_notes_from_ref(repository, tracking_ref) {
                 tracing::debug!("notes merge failed: {}", e);
                 // Fallback: manually merge notes when git notes merge crashes
-                if let Err(e2) = fallback_merge_notes_ours(repository, &tracking_ref) {
+                if let Err(e2) = fallback_merge_notes_ours(repository, tracking_ref) {
                     tracing::debug!("fallback merge also failed: {}", e2);
                     return Err(e2);
                 }
@@ -292,7 +300,7 @@ pub fn fetch_authorship_notes(
                 local_notes_ref,
                 tracking_ref
             );
-            if let Err(e) = copy_ref(repository, &tracking_ref, local_notes_ref) {
+            if let Err(e) = copy_ref(repository, tracking_ref, local_notes_ref) {
                 tracing::debug!("notes copy failed: {}", e);
                 return Err(e);
             }
@@ -314,6 +322,7 @@ fn is_missing_remote_notes_ref_error(error: &GitAiError) -> bool {
         && (stderr_lower.contains("couldn't find remote ref")
             || stderr_lower.contains("could not find remote ref")
             || stderr_lower.contains("remote ref does not exist")
+            || stderr_lower.contains("no such remote ref")
             || stderr_lower.contains("not our ref"))
 }
 /// Maximum number of fetch-merge-push attempts before giving up.

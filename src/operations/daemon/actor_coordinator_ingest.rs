@@ -254,6 +254,9 @@ impl ActorDaemonCoordinator {
             && command_mutates_refs
             // Order optional notes export without reading unrelated local reflogs.
             && effective_primary.as_deref() != Some("send-pack")
+            // Its notes sync needs ordering, but fetch-pack has no native ref
+            // publication to capture on this latency-sensitive path.
+            && effective_primary.as_deref() != Some("fetch-pack")
             && !ingress.root_reflog_start_offsets.contains_key(&root)
             && let Some(worktree) = worktree_hint
         {

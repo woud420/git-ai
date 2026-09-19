@@ -49,6 +49,7 @@ pub(crate) mod error_log_policy;
 // The outbox publish/consume storage layer is unix-only; on other platforms
 // clients get UnsupportedPlatform at publish time and there is nothing to
 // replay.
+pub(crate) mod checkout_discard;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) mod checkpoint_outbox_worker;
 pub(crate) mod checkpoint_stream_authority;

@@ -214,6 +214,10 @@ pub enum SemanticEvent {
     },
     CheckoutPaths,
     RestorePaths,
+    WorkingLogPathDiscarded {
+        base_commit: String,
+        path: String,
+    },
     CleanedWorkspace,
     StashOperation {
         kind: StashOpKind,

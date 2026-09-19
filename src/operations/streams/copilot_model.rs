@@ -12,8 +12,6 @@
 use crate::model::stream_types::StreamError;
 use crate::operations::streams::model_extraction::normalize_model;
 use serde::Deserialize;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,13 +161,8 @@ impl<'de> Deserialize<'de> for CopilotRequestCandidates {
 pub(crate) fn extract_model_from_copilot_session_json(
     path: &Path,
 ) -> Result<Option<String>, StreamError> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(_) => return Ok(None),
-    };
-
     let mut candidates = CopilotModelCandidates::default();
-    if let Ok(state) = serde_json::from_reader::<_, CopilotSessionState>(BufReader::new(file)) {
+    if let Ok(state) = super::bounded_json::read_json_file::<CopilotSessionState>(path) {
         candidates.record_selected(state.input_state.selected_model.identifier.as_deref());
         if state.requests.latest.is_some() {
             candidates.latest_request = state.requests.latest;

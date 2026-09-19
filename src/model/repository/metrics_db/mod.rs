@@ -7,6 +7,7 @@
 use rusqlite::Connection;
 
 mod backfill;
+mod dequeue;
 mod event_writes;
 mod recovery_queries;
 mod reingestion;
@@ -22,16 +23,20 @@ pub use types::{MetricHistoryRecord, MetricMetadataBackfillSummary, MetricRecord
 
 // Re-exports used by integration and unit tests within this module tree.
 #[cfg(test)]
+pub(crate) use dequeue::RETRYABLE_METRIC_IDS_SQL;
+#[cfg(test)]
 pub(crate) use recovery_queries::NS_PER_SECOND;
 #[cfg(test)]
 pub(crate) use schema::MAX_METRIC_UPLOAD_ATTEMPTS;
 #[cfg(test)]
-pub(crate) use upload_queue::{METRIC_PROCESSING_LOCK_TIMEOUT_SECS, RETRYABLE_METRIC_IDS_SQL};
+pub(crate) use upload_queue::METRIC_PROCESSING_LOCK_TIMEOUT_SECS;
 
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests_backfill;
+#[cfg(test)]
+mod tests_dequeue_bytes;
 #[cfg(test)]
 mod tests_event_writes;
 #[cfg(test)]

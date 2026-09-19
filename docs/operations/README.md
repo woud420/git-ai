@@ -22,6 +22,24 @@ debug logging, `GIT_AI_DEBUG_PERFORMANCE=1` timing output.
 For opt-in agent sandbox access to the trace socket, see
 [sandbox socket permissions](sandbox-socket-permissions.md).
 
+Whole-file JSON transcripts (Amp, Continue, and Copilot) have a 64 MiB read
+limit. Oversized files remain pending without advancing their transcript
+cursor. To admit a larger file, set a positive byte limit with
+`git-ai config set max_transcript_file_bytes 134217728` and run
+`git-ai bg restart`. `GIT_AI_MAX_TRANSCRIPT_FILE_BYTES` overrides the file
+setting. The limit also applies to transcript model probes; it bounds input
+bytes, not the memory used by parsed JSON or the daemon as a whole.
+
+Metrics flushes claim at most `max_metrics_flush_chunk_bytes` of queued JSON
+per batch (8 MiB by default), before parsing or uploading. This applies to
+both the daemon and `git-ai flush-metrics-db`. A single record above the limit
+stays pending without a processing lock or failed-upload attempt; it can
+block later records and cause `git-ai await` to time out. Increase the positive
+limit with `git-ai config set max_metrics_flush_chunk_bytes 16777216` and run
+`git-ai bg restart` to resume. `GIT_AI_MAX_METRICS_FLUSH_CHUNK_BYTES` overrides
+the file setting. This bounds stored JSON bytes per read, not total RSS or the
+serialized HTTP envelope size.
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

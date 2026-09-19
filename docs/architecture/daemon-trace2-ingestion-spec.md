@@ -277,7 +277,22 @@ An incomplete capture reports an error through the existing command completion
 path; it never falls back to later remote configuration. Explicit notes commands
 retain their existing destination resolution.
 
-Delivery still uses the existing bounded transport timeout and retry policy,
-and attempts the other captured destinations if one fails. This destination
-capture change does not yet detach network delivery from the family execution
-lock or coalesce queued pushes; those are separate scheduler work.
+Delivery retains the existing bounded transport timeout and retry policy and
+attempts the other captured destinations if one fails. Network delivery runs
+on the daemon's bounded blocking pool outside the family execution lock; only
+the local notes merge takes that lock to serialize with post-commit writers.
+
+The scheduler admits at most 128 requests (including active work), runs at most
+four repository families concurrently, and allows eight distinct pending
+destinations per family. Pending requests with the same worktree context
+coalesce their destinations; different worktree contexts remain separate to
+preserve worktree-specific Git transport configuration. Requests arriving
+during an active delivery require a subsequent pass. Each admitted command
+retains its own completion record, limited to 64 KiB of metadata; destination
+strings retain the capture limit above. Overflow fails the new command through
+the existing error/completion path without dropping earlier admitted requests.
+
+Family-effect fences cover the full delivery lifetime, including queueing,
+transport errors and worker panics. Checkpoints and subsequent commits may
+proceed while transport is blocked, but family sync, global await, idle restart
+and graceful shutdown still wait for delivery and its completion record.

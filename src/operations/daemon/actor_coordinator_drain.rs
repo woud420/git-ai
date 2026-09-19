@@ -241,6 +241,17 @@ impl ActorDaemonCoordinator {
                                     }
                                 }
                             };
+                            let side_effect_result = side_effect_result.and_then(|push| {
+                                if let Some(push) = push {
+                                    self.enqueue_notes_push(family, &applied, order, push)
+                                } else {
+                                    Ok(false)
+                                }
+                            });
+                            if matches!(side_effect_result, Ok(true)) {
+                                continue;
+                            }
+                            let side_effect_result = side_effect_result.map(|_| ());
                             self.record_and_log_side_effect_result(
                                 family,
                                 order,

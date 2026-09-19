@@ -12,17 +12,22 @@ pub use crate::operations::git::oid::{is_full_oid as is_valid_oid, is_zero_oid};
 use crate::operations::git::repository::Repository;
 use crate::operations::git::sync_authorship::{fetch_authorship_notes, fetch_remote_from_args};
 
-pub fn apply_push_side_effect(
+pub(crate) struct PreparedNotesPush {
+    pub(crate) repository: Repository,
+    pub(crate) destinations: Vec<String>,
+}
+
+pub(crate) fn prepare_push_side_effect(
     worktree: &str,
     cmd: &crate::model::domain::NormalizedCommand,
-) -> Result<(), GitAiError> {
+) -> Result<Option<PreparedNotesPush>, GitAiError> {
     use crate::config::NotesBackendKind;
     use crate::operations::git::cli_parser::is_dry_run;
-    use crate::operations::git::sync_authorship::{push_authorship_notes, push_remote_from_args};
+    use crate::operations::git::sync_authorship::push_remote_from_args;
 
     if crate::config::Config::get().notes_backend_kind() == NotesBackendKind::Http {
         tracing::debug!("apply_push_side_effect: skipping authorship push (Http backend)");
-        return Ok(());
+        return Ok(None);
     }
 
     let repo = find_repository_in_path(worktree)?;
@@ -35,7 +40,7 @@ pub fn apply_push_side_effect(
             .any(|a| a == "-d" || a == "--delete")
         || parsed.command_args.iter().any(|a| a == "--mirror")
     {
-        return Ok(());
+        return Ok(None);
     }
 
     let fallback;
@@ -54,13 +59,11 @@ pub fn apply_push_side_effect(
         &fallback
     };
     crate::operations::commands::upgrade::maybe_schedule_background_update_check();
-    let mut first_error = None;
-    for destination in destinations {
-        if let Err(error) = push_authorship_notes(&repo, destination) {
-            first_error.get_or_insert(error);
-        }
-    }
-    first_error.map_or(Ok(()), Err)
+    let destinations = destinations.to_vec();
+    Ok(Some(PreparedNotesPush {
+        repository: repo,
+        destinations,
+    }))
 }
 
 pub fn transcript_sweep_triggers_for_events(

@@ -56,6 +56,7 @@ impl ActorDaemonCoordinator {
             error_log_policy: Mutex::new(Default::default()),
             side_effect_exec_locks: Mutex::new(HashMap::new()),
             command_side_effect_semaphore: Semaphore::new(COMMAND_SIDE_EFFECT_CONCURRENCY),
+            notes_push_queue: Default::default(),
             self_ref: std::sync::OnceLock::new(),
             scheduled_family_drains: Mutex::new(HashMap::new()),
             bash_sessions: Mutex::new(

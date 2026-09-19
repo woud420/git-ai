@@ -383,13 +383,11 @@ impl ActorDaemonCoordinator {
         Ok(())
     }
 
-    pub(crate) fn append_command_completion_log(
-        &self,
+    pub(crate) fn command_completion_entry(
         family: &str,
         applied: &crate::model::domain::AppliedCommand,
         result: &Result<(), GitAiError>,
-        error_order: u64,
-    ) -> Result<(), GitAiError> {
+    ) -> TestCompletionLogEntry {
         let sync_tracked =
             crate::operations::daemon::test_sync::tracks_primary_command_for_test_sync(
                 applied.command.primary_command.as_deref(),
@@ -400,7 +398,7 @@ impl ActorDaemonCoordinator {
                 &parsed_invocation_for_normalized_command(&applied.command),
             );
         let events = &applied.analysis.events;
-        let log_entry = TestCompletionLogEntry {
+        TestCompletionLogEntry {
             seq: applied.seq,
             family_key: family.to_string(),
             kind: "command".to_string(),
@@ -420,7 +418,17 @@ impl ActorDaemonCoordinator {
                 applied.command.primary_command.as_deref(),
                 events,
             ),
-        };
+        }
+    }
+
+    pub(crate) fn append_command_completion_log(
+        &self,
+        family: &str,
+        applied: &crate::model::domain::AppliedCommand,
+        result: &Result<(), GitAiError>,
+        error_order: u64,
+    ) -> Result<(), GitAiError> {
+        let log_entry = Self::command_completion_entry(family, applied, result);
         if let Err(error) = self.maybe_append_test_completion_log(family, &log_entry) {
             let _ = self.record_side_effect_error(family, error_order, &error);
             return Err(error);

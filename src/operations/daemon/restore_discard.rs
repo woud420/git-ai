@@ -135,6 +135,20 @@ mod tests {
     }
 
     #[test]
+    fn restore_discard_handles_backslashes_using_native_path_semantics() {
+        let (mut cmd, refs) = valid();
+        *cmd.raw_argv.last_mut().unwrap() = "dir\\file".into();
+        #[cfg(windows)]
+        assert!(matches!(
+            event(&cmd, &refs),
+            Some(crate::model::domain::SemanticEvent::WorkingLogPathDiscarded { path, .. })
+                if path == "dir/file"
+        ));
+        #[cfg(not(windows))]
+        assert!(event(&cmd, &refs).is_none());
+    }
+
+    #[test]
     fn restore_discard_refuses_ambiguous_or_unrepresentable_paths() {
         let (original, refs) = valid();
         for path in [
@@ -145,7 +159,6 @@ mod tests {
             "file\nnext",
             "file\r",
             "file\0",
-            "dir\\file",
             "file\u{fffd}",
             "",
             "*.txt",

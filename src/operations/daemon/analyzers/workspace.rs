@@ -31,7 +31,7 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                 }
             }
             "mv" => {
-                if let Some(event) = super::super::mv_carryover::event(cmd, state.refs) {
+                if let Some(event) = super::mv_carryover::event(cmd, state.refs) {
                     events.push(event);
                 }
             }

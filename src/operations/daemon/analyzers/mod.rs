@@ -10,6 +10,7 @@ pub mod history;
 mod literal_path;
 mod orphan_checkout;
 mod removal;
+pub(crate) mod mv_carryover;
 mod reset;
 pub(crate) mod restore_discard;
 pub(crate) mod switch_discard;

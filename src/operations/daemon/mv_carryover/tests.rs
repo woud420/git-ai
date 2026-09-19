@@ -1,5 +1,8 @@
 use super::*;
 use crate::model::domain::{CommandScope, Confidence};
+use crate::model::domain::{NormalizedCommand, SemanticEvent};
+use crate::operations::daemon::analyzers::mv_carryover::event;
+use std::collections::HashMap;
 
 fn fixture() -> (NormalizedCommand, HashMap<String, String>) {
     let worktree = std::env::temp_dir().join("mv-root");

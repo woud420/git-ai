@@ -11,18 +11,32 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 impl ActorDaemonCoordinator {
+    #[cfg(test)]
     pub(crate) fn trace_root_connection_opened(&self, root_sid: &str) -> Result<(), GitAiError> {
+        self.trace_connection_identified(root_sid, true).map(|_| ())
+    }
+
+    pub(crate) fn trace_connection_identified(
+        &self,
+        root_sid: &str,
+        by_root_frame: bool,
+    ) -> Result<bool, GitAiError> {
         let mut ingress =
             self.trace_ingress_state
                 .lock()
                 .map_err(|_| PersistenceError::LockPoisoned {
                     what: "trace ingress state",
                 })?;
+        if by_root_frame {
+            ingress.completed_roots.forget(root_sid);
+        } else if ingress.completed_roots.contains(root_sid) {
+            return Ok(false);
+        }
         *ingress
             .root_open_connections
             .entry(root_sid.to_string())
             .or_insert(0) += 1;
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) fn trace_root_needs_close_marker(
@@ -41,6 +55,9 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn clear_trace_ingress_root_locked(ingress: &mut TraceIngressState, root_sid: &str) {
+        if ingress.roots_seen_own_start.remove(root_sid) {
+            ingress.completed_roots.remember(root_sid);
+        }
         ingress.root_worktrees.remove(root_sid);
         ingress.root_families.remove(root_sid);
         ingress.root_argv.remove(root_sid);

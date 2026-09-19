@@ -223,8 +223,11 @@ async fn trace_connection_close_without_atexit_cancels_pending_root() {
     assert!(coord.prepare_trace_payload_for_ingest(&mut start));
     coord.enqueue_trace_payload(start).unwrap();
 
-    finalize_trace_connection_roots(coord.clone(), [sid.to_string()].into_iter().collect())
-        .unwrap();
+    finalize_trace_connection_roots(
+        coord.clone(),
+        [(sid.to_string(), true)].into_iter().collect(),
+    )
+    .unwrap();
     coord.wait_for_trace_ingest_processed_through().await;
 
     assert!(

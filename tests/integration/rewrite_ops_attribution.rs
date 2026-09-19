@@ -266,30 +266,14 @@ fn test_revert_multiple_commits_restores_each_original_attribution() {
     repo.stage_all_and_commit("delete ai c").unwrap();
     let del_c = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
 
-    // Revert all three deletes in ONE command → one revert command, three
-    // destination commits processed by the batched revert path. The revert
-    // CONTENT is restored for every file (each AI line comes back), and the
-    // FIRST reverted commit recovers its original AI attribution. Attribution
-    // recovery for the 2nd+ reverted commit in a single multi-commit revert is a
-    // known pre-existing limitation (the source note is located via
-    // first-parent of the reverted commit, which for chained deletes does not
-    // hold that file's original attestation — see the deferred limitation in
-    // `ref_cursor/cherry_pick_revert.rs`). This test pins the batched path's
-    // behavior so the spawn-count reduction is verified behavior-preserving.
     repo.git(&["revert", "--no-edit", &del_a, &del_b, &del_c])
         .unwrap();
-
-    // Content restored for all three files.
-    let a = repo.read_file("a.txt").unwrap();
-    let b = repo.read_file("b.txt").unwrap();
-    let c = repo.read_file("c.txt").unwrap();
-    assert!(a.contains("AI a"), "a.txt content restored");
-    assert!(b.contains("AI b"), "b.txt content restored");
-    assert!(c.contains("AI c"), "c.txt content restored");
-
-    // First reverted commit recovers original AI attribution.
     repo.filename("a.txt")
         .assert_committed_lines(crate::lines!["a base".human(), "AI a".ai()]);
+    repo.filename("b.txt")
+        .assert_committed_lines(crate::lines!["b base".human(), "AI b".ai()]);
+    repo.filename("c.txt")
+        .assert_committed_lines(crate::lines!["c base".human(), "AI c".ai()]);
 }
 
 #[test]

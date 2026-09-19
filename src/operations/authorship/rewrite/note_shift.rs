@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::hunk_shift::apply_hunk_shifts_to_file_attestation;
+use crate::model::repository::error::PersistenceError;
 use crate::operations::git::notes_api;
 use crate::operations::git::repository::Repository;
 
@@ -13,6 +14,17 @@ struct PendingShift {
     log: AuthorshipLog,
 }
 
+fn serialization_error(context: &str, error: impl std::fmt::Display) -> GitAiError {
+    PersistenceError::Io {
+        // Preserve diagnostics stored in FamilyStatus.last_error.
+        operation: "Generic error",
+        path: String::new(),
+        kind: std::io::ErrorKind::InvalidData,
+        message: format!("failed to serialize {context} authorship log: {error}"),
+    }
+    .into()
+}
+
 /// Serialize `log` to a note, write it for `commit_sha`, and return the
 /// serialized string (used by the metrics path to attach the note text).
 pub(super) fn write_authorship_log(
@@ -20,9 +32,9 @@ pub(super) fn write_authorship_log(
     commit_sha: &str,
     log: &AuthorshipLog,
 ) -> Result<String, GitAiError> {
-    let serialized = log.serialize_to_string().map_err(|e| {
-        GitAiError::Generic(format!("failed to serialize rewrite authorship log: {}", e))
-    })?;
+    let serialized = log
+        .serialize_to_string()
+        .map_err(|e| serialization_error("rewrite", e))?;
     let entries = vec![(commit_sha.to_string(), serialized)];
     notes_api::write_notes_batch(repo, &entries)?;
     Ok(entries
@@ -132,9 +144,9 @@ fn shift_authorship_notes_with_existing_mode(
 
     let mut all_writes = verbatim_writes;
     for (sha, log) in merged_by_target {
-        let serialized = log.serialize_to_string().map_err(|e| {
-            GitAiError::Generic(format!("failed to serialize shifted authorship log: {}", e))
-        })?;
+        let serialized = log
+            .serialize_to_string()
+            .map_err(|e| serialization_error("shifted", e))?;
         all_writes.push((sha, serialized));
     }
 
@@ -152,24 +164,7 @@ fn apply_chunk_shifts(
     for (diff_result, shift) in chunk.into_iter().zip(pending_iter) {
         let mut log = shift.log;
 
-        for (old_path, new_path) in diff_result.renames {
-            for attestation in &mut log.attestations {
-                if attestation.file_path == old_path {
-                    attestation.file_path = new_path.clone();
-                }
-            }
-        }
-
-        if !diff_result.hunks_by_file.is_empty() {
-            log.attestations = log
-                .attestations
-                .iter()
-                .filter_map(|fa| match diff_result.hunks_by_file.get(&fa.file_path) {
-                    Some(hunks) => apply_hunk_shifts_to_file_attestation(fa, hunks),
-                    None => Some(fa.clone()),
-                })
-                .collect();
-        }
+        shift_authorship_log(&mut log, &diff_result);
 
         log.metadata.base_commit_sha = shift.new_sha.clone();
 
@@ -179,6 +174,27 @@ fn apply_chunk_shifts(
                 merged_by_target.insert(shift.new_sha, log);
             }
         }
+    }
+}
+
+pub(crate) fn shift_authorship_log(log: &mut AuthorshipLog, diff_result: &super::DiffTreeResult) {
+    for (old_path, new_path) in &diff_result.renames {
+        for attestation in &mut log.attestations {
+            if attestation.file_path == *old_path {
+                attestation.file_path = new_path.clone();
+            }
+        }
+    }
+
+    if !diff_result.hunks_by_file.is_empty() {
+        log.attestations = log
+            .attestations
+            .iter()
+            .filter_map(|fa| match diff_result.hunks_by_file.get(&fa.file_path) {
+                Some(hunks) => apply_hunk_shifts_to_file_attestation(fa, hunks),
+                None => Some(fa.clone()),
+            })
+            .collect();
     }
 }
 
@@ -219,6 +235,26 @@ mod tests {
 
     use super::*;
     use crate::operations::authorship::rewrite::DiffTreeResult;
+
+    #[test]
+    fn serialization_errors_preserve_diagnostics_and_structured_kind() {
+        for context in ["rewrite", "shifted"] {
+            let error = serialization_error(context, "invalid data");
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "Generic error: failed to serialize {context} authorship log: invalid data"
+                )
+            );
+            assert!(matches!(
+                error,
+                GitAiError::Persistence(PersistenceError::Io {
+                    kind: std::io::ErrorKind::InvalidData,
+                    ..
+                })
+            ));
+        }
+    }
 
     fn log_for(file: &str, hash: &str) -> AuthorshipLog {
         let mut log = AuthorshipLog::new();

@@ -1,6 +1,7 @@
+use super::reset::{infer_reset_kind, same_head_hard_reset};
 use crate::error::GitAiError;
 use crate::model::domain::{
-    AnalysisResult, CommandClass, Confidence, NormalizedCommand, ResetKind, SemanticEvent,
+    AnalysisResult, CommandClass, Confidence, NormalizedCommand, SemanticEvent,
 };
 use crate::model::git_oid::{is_non_zero_oid, is_zero_oid};
 use crate::operations::daemon::analyzers::{AnalysisView, CommandAnalyzer, command_args};
@@ -34,7 +35,9 @@ impl CommandAnalyzer for HistoryAnalyzer {
                 }
             }
             "reset" => {
-                if let Some((old_head, new_head)) = head_change(cmd, state.refs) {
+                if let Some((old_head, new_head)) =
+                    head_change(cmd, state.refs).or_else(|| same_head_hard_reset(cmd, &args))
+                {
                     events.push(SemanticEvent::Reset {
                         kind: infer_reset_kind(&args),
                         old_head,
@@ -363,30 +366,10 @@ fn change_span(changes: &[&crate::model::domain::RefChange]) -> Option<(String, 
     }
     Some((old_head.to_string(), new_head.to_string()))
 }
-
-fn infer_reset_kind(args: &[String]) -> ResetKind {
-    if args.iter().any(|arg| arg == "--soft") {
-        return ResetKind::Soft;
-    }
-    if args.iter().any(|arg| arg == "--mixed") {
-        return ResetKind::Mixed;
-    }
-    if args.iter().any(|arg| arg == "--hard") {
-        return ResetKind::Hard;
-    }
-    if args.iter().any(|arg| arg == "--merge") {
-        return ResetKind::Merge;
-    }
-    if args.iter().any(|arg| arg == "--keep") {
-        return ResetKind::Keep;
-    }
-    ResetKind::Mixed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::domain::{CommandScope, RefChange};
+    use crate::model::domain::{CommandScope, RefChange, ResetKind};
 
     fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {
@@ -400,6 +383,8 @@ mod tests {
             invoked_command: Some(primary.to_string()),
             invoked_args: argv.iter().skip(2).map(|s| s.to_string()).collect(),
             observed_child_commands: Vec::new(),
+            index_write: Default::default(),
+            index_v2: false,
             exit_code: 0,
             started_at_ns: 1,
             finished_at_ns: 2,

@@ -112,10 +112,10 @@ fn apply_worktree_state(
     };
     let key = canonical_worktree.unwrap_or_else(|| worktree.clone());
     let previous = state.worktrees.get(&key);
-    let head_change = cmd
-        .ref_changes
-        .iter()
-        .rfind(|change| change.reference == "HEAD");
+    let head_change = cmd.ref_changes.iter().rfind(|change| {
+        change.reference == "HEAD"
+            && (cmd.primary_command.as_deref() != Some("reset") || change.old != change.new)
+    });
 
     let (head, branch, detached) = if let Some(head_change) = head_change {
         // DEFERRED: `detached` is inferred as "no unique
@@ -266,7 +266,7 @@ mod tests {
     use crate::operations::daemon::analyzers::AnalyzerRegistry;
     use std::collections::HashMap;
 
-    fn family_state() -> FamilyState {
+    pub(super) fn family_state() -> FamilyState {
         FamilyState {
             family_key: FamilyKey::new("family:/tmp/repo"),
             refs: HashMap::new(),
@@ -277,7 +277,7 @@ mod tests {
         }
     }
 
-    fn normalized() -> NormalizedCommand {
+    pub(super) fn normalized() -> NormalizedCommand {
         NormalizedCommand {
             scope: CommandScope::Family(FamilyKey::new("family:/tmp/repo")),
             family_key: Some(FamilyKey::new("family:/tmp/repo")),
@@ -289,6 +289,8 @@ mod tests {
             invoked_command: Some("update-ref".to_string()),
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
+            index_write: Default::default(),
+            index_v2: false,
             exit_code: 0,
             started_at_ns: 1,
             finished_at_ns: 2,
@@ -589,3 +591,7 @@ mod tests {
         assert_eq!(worktree.head.as_deref(), Some("ccc"));
     }
 }
+
+#[cfg(test)]
+#[path = "reducer_reset_tests.rs"]
+mod reset_tests;

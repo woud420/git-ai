@@ -1,3 +1,5 @@
+// Existing Generic parse diagnostics reach persisted command-apply errors;
+// changing their wording would alter that diagnostic contract.
 use super::*;
 
 impl RefCursor {
@@ -86,6 +88,7 @@ impl RefCursor {
                     old_oids: spec.old_oid.iter().cloned().collect(),
                     new_oid: Some(spec.new_oid.clone()),
                     messages: HashSet::new(),
+                    allow_identity: false,
                 },
             )? {
                 self.consume_entry(&entry)?;
@@ -120,6 +123,7 @@ impl RefCursor {
                 old_oids: spec.old_oid.iter().cloned().collect(),
                 new_oid: Some(spec.new_oid.clone()),
                 messages: HashSet::new(),
+                allow_identity: false,
             },
             &[],
         )? {
@@ -134,6 +138,7 @@ impl RefCursor {
                     old_oids: [old.clone()].into_iter().collect(),
                     new_oid: Some(new.clone()),
                     messages: HashSet::new(),
+                    allow_identity: false,
                 },
             )? {
                 self.consume_entry(&head)?;

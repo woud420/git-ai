@@ -1,3 +1,5 @@
+// Existing Generic diagnostics reach persisted daemon errors; their Display
+// text remains byte-stable when changing reset handling.
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
@@ -169,14 +171,18 @@ impl ActorDaemonCoordinator {
         Ok(())
     }
 
-    /// Handle `Reset` event (guarded to non-trivial transitions by the caller).
+    /// Apply a reset with a cursor-owned HEAD record.
     pub(crate) fn handle_reset(
         worktree: &str,
         kind: &crate::model::domain::ResetKind,
         old_head: &str,
         new_head: &str,
+        cmd: &crate::model::domain::NormalizedCommand,
     ) -> Result<(), GitAiError> {
         let repo = find_repository_in_path(worktree)?;
+        if old_head == new_head && matches!(kind, crate::model::domain::ResetKind::Hard) {
+            return super::reset_discard::discard_same_head_tracked_paths(&repo, old_head, cmd);
+        }
         match kind {
             crate::model::domain::ResetKind::Hard => {
                 repo.storage.delete_working_log_for_base_commit(old_head)?;

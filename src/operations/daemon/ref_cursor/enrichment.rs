@@ -28,6 +28,7 @@ impl RefCursor {
             "reset" => {
                 let args = command_args(cmd);
                 let mut expected = self.head_expected_transition(cmd, state);
+                expected.allow_identity = true;
                 let reset_messages = reset_reflog_messages(&args);
                 if !reset_messages.is_empty() {
                     expected = expected
@@ -379,7 +380,9 @@ impl RefCursor {
         let old = entry.old.clone();
         let new = entry.new.clone();
         let mut changes = vec![entry_to_ref_change(&entry)];
-        self.consume_common_refs_matching_transition(&old, &new, &mut changes)?;
+        if old != new {
+            self.consume_common_refs_matching_transition(&old, &new, &mut changes)?;
+        }
         dedup_ref_changes(&mut changes);
         cmd.ref_changes = changes;
         Ok(())
@@ -437,6 +440,7 @@ impl RefCursor {
                     old_oids: [new.clone()].into_iter().collect(),
                     new_oid: None,
                     messages: HashSet::new(),
+                    allow_identity: false,
                 },
             )?
         {

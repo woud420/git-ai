@@ -10,6 +10,7 @@ pub mod git_backend;
 pub mod global_actor;
 pub mod reducer;
 pub mod ref_cursor;
+mod reset_discard;
 pub mod rewrite_metrics;
 pub mod sentry_layer;
 pub mod stream_worker;

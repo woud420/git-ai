@@ -253,3 +253,46 @@ first delayed write command in a cold repo from stock trace2 alone — is
 missing information, not a bug. Every mechanism that tried to paper over that
 gap (timestamps, messages, latest-state guesses, post-hoc offsets) produced
 misattribution and was removed.
+
+
+### Captured destinations for automatic notes pushes
+
+Trace2 root transport frames, or the direct push child of a simple Git alias,
+carry the actual destinations of a successful
+user push, including every configured push URL. The normalizer records at most
+eight distinct destinations of at most 32 KiB each; duplicates do not consume
+additional slots. An unsupported, malformed or oversized transport invalidates
+the entire captured set. This parsing runs inside the existing normalization
+worker and adds no listener I/O, Git invocation or repository lookup.
+
+Automatic notes delivery uses these captured destinations, so a later remote
+configuration change cannot redirect the completed push's notes. Supported
+frames are Git's quoted file receive-pack service, matching HTTP/HTTPS helpers,
+and standard OpenSSH receive-pack arguments. Relative file paths retain parent
+components and use the captured primary worktree root. Custom receive-pack or
+SSH commands/options, unknown helpers, native transports without destination
+frames, aliases with extra global options, and an explicit SSH port with a
+relative remote path remain unsupported.
+An incomplete capture reports an error through the existing command completion
+path; it never falls back to later remote configuration. Explicit notes commands
+retain their existing destination resolution.
+
+Delivery retains the existing bounded transport timeout and retry policy and
+attempts the other captured destinations if one fails. Network delivery runs
+on the daemon's bounded blocking pool outside the family execution lock; only
+the local notes merge takes that lock to serialize with post-commit writers.
+
+The scheduler admits at most 128 requests (including active work), runs at most
+four repository families concurrently, and allows eight distinct pending
+destinations per family. Pending requests with the same worktree context
+coalesce their destinations; different worktree contexts remain separate to
+preserve worktree-specific Git transport configuration. Requests arriving
+during an active delivery require a subsequent pass. Each admitted command
+retains its own completion record, limited to 64 KiB of metadata; destination
+strings retain the capture limit above. Overflow fails the new command through
+the existing error/completion path without dropping earlier admitted requests.
+
+Family-effect fences cover the full delivery lifetime, including queueing,
+transport errors and worker panics. Checkpoints and subsequent commits may
+proceed while transport is blocked, but family sync, global await, idle restart
+and graceful shutdown still wait for delivery and its completion record.

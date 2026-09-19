@@ -31,7 +31,7 @@ impl ActorDaemonCoordinator {
         family: Option<&str>,
         applied: &crate::model::domain::AppliedCommand,
         commit_file_timestamp_snapshots: &mut CommitFileTimestampSnapshotHandles,
-    ) -> Result<(), GitAiError> {
+    ) -> Result<Option<PreparedNotesPush>, GitAiError> {
         // Test-only: allow inducing a panic in the side-effect pipeline to verify
         // that the daemon's catch_unwind recovery keeps the process alive.
         // Uses a file-based flag so the test can remove the file between commands.
@@ -68,12 +68,13 @@ impl ActorDaemonCoordinator {
 
         if cmd.exit_code != 0 {
             match self.handle_failed_command(family, cmd, events, pull_uses_rebase)? {
-                ControlFlow::Break(()) => return Ok(()),
+                ControlFlow::Break(()) => return Ok(None),
                 ControlFlow::Continue(()) => {}
             }
         }
 
-        self.apply_event_side_effects(cmd, events, &rebase_mode, commit_file_timestamp_snapshots)
+        let push = self
+            .apply_event_side_effects(cmd, events, &rebase_mode, commit_file_timestamp_snapshots)
             .await?;
 
         if matches!(cmd.primary_command.as_deref(), Some("checkout" | "switch")) {
@@ -90,7 +91,7 @@ impl ActorDaemonCoordinator {
 
         self.trigger_transcript_sweeps_for_command(cmd, events);
 
-        Ok(())
+        Ok(push)
     }
 
     /// Classify the command's rebase mode, clear pending rebase state on --abort,
@@ -343,12 +344,13 @@ impl ActorDaemonCoordinator {
         events: &[crate::model::domain::SemanticEvent],
         rebase_mode: &RebaseMode,
         commit_file_timestamp_snapshots: &mut CommitFileTimestampSnapshotHandles,
-    ) -> Result<(), GitAiError> {
+    ) -> Result<Option<PreparedNotesPush>, GitAiError> {
         let Some(worktree) = cmd.worktree.as_ref() else {
-            return Ok(());
+            return Ok(None);
         };
         let worktree = worktree.to_string_lossy().to_string();
         let mut handled_revert_commits = false;
+        let mut push = None;
         for event in events {
             match event {
                 crate::model::domain::SemanticEvent::FetchCompleted { .. } => {
@@ -365,11 +367,7 @@ impl ActorDaemonCoordinator {
                     )?;
                 }
                 crate::model::domain::SemanticEvent::PushCompleted { .. } => {
-                    apply_push_side_effect(
-                        &worktree,
-                        cmd.invoked_command.as_deref(),
-                        &cmd.invoked_args,
-                    )?;
+                    push = prepare_push_side_effect(&worktree, cmd)?;
                 }
                 crate::model::domain::SemanticEvent::CherryPickComplete {
                     original_head,
@@ -433,7 +431,7 @@ impl ActorDaemonCoordinator {
                 _ => {}
             }
         }
-        Ok(())
+        Ok(push)
     }
 }
 

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 mod event_handlers;
 mod frame_helpers;
+mod transport_targets;
 
 use frame_helpers::{command_may_mutate_refs, payload_timestamp_ns, select_primary_command};
 
@@ -26,6 +27,10 @@ pub struct PendingTraceCommand {
     pub raw_argv: Vec<String>,
     pub root_cmd_name: Option<String>,
     pub observed_child_commands: Vec<String>,
+    pub transport_targets: Option<Vec<String>>,
+    pub push_alias: Option<bool>,
+    pub push_alias_sid: Option<String>,
+    pub push_alias_targets: Option<Vec<String>>,
     pub invocation_worktree: Option<PathBuf>,
     pub worktree: Option<PathBuf>,
     pub family_key: Option<FamilyKey>,
@@ -258,7 +263,14 @@ impl<B: GitBackend> TraceNormalizer<B> {
         match event {
             "start" => self.handle_start(payload, sid, &root_sid, ts),
             "def_repo" => self.handle_def_repo(payload, sid, &root_sid),
-            "cmd_name" => self.handle_cmd_name(payload, sid, &root_sid),
+            "cmd_name" => {
+                self.observe_push_alias_name(payload, sid, &root_sid);
+                self.handle_cmd_name(payload, sid, &root_sid)
+            }
+            "child_start" => {
+                self.capture_transport_target(payload, sid, &root_sid);
+                Ok(None)
+            }
             "def_param" => self.handle_def_param(payload, &root_sid),
             "exec" => Ok(None),
             "exit" => self.handle_exit(payload, sid, &root_sid, ts, false),

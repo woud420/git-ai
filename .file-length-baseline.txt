@@ -29,7 +29,6 @@ src/operations/commands/install_hooks.rs	1280
 src/operations/commands/log.rs	1399
 src/operations/commands/notes_migrate.rs	850
 src/operations/commands/upgrade.rs	1859
-src/operations/daemon/analyzers/history.rs	924
 src/operations/daemon/checkpoint.rs	1123
 src/operations/daemon/git_backend.rs	813
 src/operations/daemon/rewrite_metrics.rs	674

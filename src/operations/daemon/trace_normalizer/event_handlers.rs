@@ -63,6 +63,9 @@ impl<B: GitBackend> TraceNormalizer<B> {
             raw_argv,
             root_cmd_name: None,
             observed_child_commands: Vec::new(),
+            transport_targets: Some(Vec::new()),
+            push_alias: false,
+            push_alias_sid: None,
             invocation_worktree: worktree.clone(),
             worktree,
             family_key,
@@ -489,6 +492,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
             stash_target_oid: None,
             cherry_pick_source_oids: Vec::new(),
             revert_source_oids: Vec::new(),
+            transport_targets: pending.transport_targets,
             ref_changes,
             confidence,
         };

@@ -216,6 +216,26 @@ Stash is a working-log migration, not a committed-record rewrite.
 - Stash identity is the stash *commit SHA*. `stash@{N}` is mutable and may
   only be resolved inside a cursor-bounded command boundary (ingestion doc).
 
+### Explicit direct fast-forward merge
+
+Successful `git merge --ff-only <target>` (also with the flag after the target)
+migrates pending working-log evidence through the existing pull fast-forward
+handler. The asynchronous side effect requires exactly one cursor-owned,
+non-identity HEAD transition with valid old/new OIDs, verifies ancestry with
+those OIDs, and reuses `RepoStorage::rename_working_log`. Existing destination
+checkpoints are preserved after old-base checkpoints. No live HEAD, index, or
+worktree contents are used to infer the transition, and ingestion is unchanged.
+The Git process budget is constant per command, independent of pending files.
+
+This is a bounded carryover profile: one explicit target, `--ff-only`, and
+optional global `-C` arguments. Other arguments, global overrides, missing or
+ambiguous HEAD evidence, failed commands, and no-op merges do not enter this
+new path. Default/configured fast-forwards and additional merge options
+(including no-commit, squash, octopus, autostash, and conflict controls) retain
+their existing handling. This profile does not extend merge-commit attribution
+or claim coverage for configuration-dependent side effects. Native Git
+execution, output, and exit status are unchanged.
+
 ### Squash merge
 
 Input: exact `source_head`, created `squash_commit`, exact `onto`.

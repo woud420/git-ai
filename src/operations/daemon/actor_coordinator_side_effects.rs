@@ -1,3 +1,5 @@
+// Existing Generic diagnostics are persisted through FamilyStatus.last_error;
+// keep their Display text byte-stable across side-effect changes.
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
@@ -78,7 +80,7 @@ impl ActorDaemonCoordinator {
             self.handle_checkout_switch(family, cmd)?;
         }
 
-        if saw_pull_event {
+        if saw_pull_event || super::merge_fast_forward::has_explicit_fast_forward_transition(cmd) {
             Self::handle_pull_fast_forward_working_log(cmd)?;
         }
 

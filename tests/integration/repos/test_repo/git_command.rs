@@ -71,8 +71,37 @@ impl TestRepo {
         args: &[&str],
         envs: &[(&str, &str)],
     ) -> Result<String, String> {
+        self.git_without_test_sync_at_location(
+            args,
+            envs,
+            GitExecutionLocation::RepoViaC { process_cwd: None },
+        )
+    }
+
+    pub fn git_without_test_sync_from_working_dir_for_test(
+        &self,
+        working_dir: &Path,
+        args: &[&str],
+        envs: &[(&str, &str)],
+    ) -> Result<String, String> {
+        let location = GitExecutionLocation::WorkingDirectory(
+            working_dir
+                .canonicalize()
+                .map_err(|error| error.to_string())?,
+        );
+        self.git_without_test_sync_at_location(args, envs, location)
+    }
+
+    fn git_without_test_sync_at_location(
+        &self,
+        args: &[&str],
+        envs: &[(&str, &str)],
+        location: GitExecutionLocation,
+    ) -> Result<String, String> {
         let mut command = Command::new(real_git_executable());
-        command.arg("-C").arg(&self.path).args(args);
+        let mut command_args = Vec::new();
+        location.configure_command(&mut command, &self.path, &mut command_args);
+        command.args(command_args).args(args);
         self.configure_command_env(&mut command);
         command.envs(envs.iter().copied());
 

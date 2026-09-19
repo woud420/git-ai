@@ -154,3 +154,7 @@ fn delayed_push_alias_uses_the_captured_destination() {
         ],
     );
 }
+
+#[cfg(unix)]
+#[path = "notes_push/queued_delivery.rs"]
+mod queued_delivery;

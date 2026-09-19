@@ -205,6 +205,7 @@ pub struct ActorDaemonCoordinator {
         Mutex<HashMap<String, PendingCherryPickNoCommit>>,
     pub(crate) pending_squash_merge_by_worktree: Mutex<HashMap<String, PendingSquashMerge>>,
     pub(crate) started_at: std::time::Instant,
+    pub(crate) control_admission: super::control_admission::ControlAdmission,
     pub(crate) checkpoint_requests_outstanding: AtomicUsize,
     pub(crate) checkpoint_requests_unadmitted: AtomicUsize,
     pub(crate) checkpoint_requests_rejected: AtomicU64,

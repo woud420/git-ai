@@ -42,6 +42,7 @@ impl ActorDaemonCoordinator {
             pending_cherry_pick_no_commit_by_worktree: Mutex::new(HashMap::new()),
             pending_squash_merge_by_worktree: Mutex::new(HashMap::new()),
             started_at: std::time::Instant::now(),
+            control_admission: Default::default(),
             checkpoint_requests_outstanding: AtomicUsize::new(0),
             checkpoint_requests_unadmitted: AtomicUsize::new(0),
             checkpoint_requests_rejected: std::sync::atomic::AtomicU64::new(0),

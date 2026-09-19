@@ -18,6 +18,9 @@ mod reflog_rewrites;
 #[path = "pull_operations.rs"]
 mod pull_operations;
 
+#[path = "control_admission.rs"]
+mod control_admission;
+
 #[path = "checkpoint.rs"]
 mod checkpoint;
 

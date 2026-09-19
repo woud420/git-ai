@@ -1,3 +1,4 @@
+use super::transport_error::transport_error;
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
@@ -76,7 +77,7 @@ fn control_request_response_timeout(request: &ControlRequest) -> Duration {
 pub fn local_socket_name<'a>(socket_path: &'a Path) -> Result<Name<'a>, GitAiError> {
     socket_path
         .to_fs_name::<GenericFilePath>()
-        .map_err(|e| GitAiError::Generic(format!("invalid daemon socket path: {}", e)))
+        .map_err(|e| transport_error(e.kind(), format!("invalid daemon socket path: {}", e)))
 }
 
 /// Target trace socket receive buffer size in bytes.
@@ -165,12 +166,15 @@ pub fn open_local_socket_stream_with_timeout(
             .wait_mode(ConnectWaitMode::Timeout(timeout))
             .connect_sync()
             .map_err(|e| {
-                GitAiError::Generic(format!(
-                    "timed out after {:?} connecting daemon socket {}: {}",
-                    timeout,
-                    socket_path.display(),
-                    e
-                ))
+                transport_error(
+                    e.kind(),
+                    format!(
+                        "timed out after {:?} connecting daemon socket {}: {}",
+                        timeout,
+                        socket_path.display(),
+                        e
+                    ),
+                )
             })
     }
 }
@@ -182,12 +186,15 @@ fn open_windows_named_pipe_client_with_timeout(
 ) -> Result<WindowsPipeClient, GitAiError> {
     let timeout_ms = timeout.as_millis().min(u32::MAX as u128) as u32;
     WindowsPipeClient::connect_ms(socket_path.as_os_str(), timeout_ms).map_err(|e| {
-        GitAiError::Generic(format!(
-            "timed out after {:?} connecting daemon socket {}: {}",
-            timeout,
-            socket_path.display(),
-            e
-        ))
+        transport_error(
+            e.kind(),
+            format!(
+                "timed out after {:?} connecting daemon socket {}: {}",
+                timeout,
+                socket_path.display(),
+                e
+            ),
+        )
     })
 }
 
@@ -211,18 +218,24 @@ pub fn set_daemon_client_stream_timeouts(
     #[cfg(not(windows))]
     {
         stream.set_recv_timeout(Some(timeout)).map_err(|e| {
-            GitAiError::Generic(format!(
-                "failed to set daemon socket {} recv timeout: {}",
-                socket_path.display(),
-                e
-            ))
+            transport_error(
+                e.kind(),
+                format!(
+                    "failed to set daemon socket {} recv timeout: {}",
+                    socket_path.display(),
+                    e
+                ),
+            )
         })?;
         stream.set_send_timeout(Some(timeout)).map_err(|e| {
-            GitAiError::Generic(format!(
-                "failed to set daemon socket {} send timeout: {}",
-                socket_path.display(),
-                e
-            ))
+            transport_error(
+                e.kind(),
+                format!(
+                    "failed to set daemon socket {} send timeout: {}",
+                    socket_path.display(),
+                    e
+                ),
+            )
         })
     }
 }
@@ -230,12 +243,15 @@ pub fn set_daemon_client_stream_timeouts(
 /// Text-dedup constructor for the write/flush pair below; Display output is
 /// unchanged from the sites it replaces.
 fn daemon_request_io_error(action: &str, socket_path: &Path, e: std::io::Error) -> GitAiError {
-    GitAiError::Generic(format!(
-        "failed {} daemon request to {}: {}",
-        action,
-        socket_path.display(),
-        e
-    ))
+    transport_error(
+        e.kind(),
+        format!(
+            "failed {} daemon request to {}: {}",
+            action,
+            socket_path.display(),
+            e
+        ),
+    )
 }
 
 fn write_all_daemon_client_stream(
@@ -262,10 +278,13 @@ fn read_daemon_client_line(
     loop {
         match reader.read_line(&mut line) {
             Ok(0) => {
-                return Err(GitAiError::Generic(format!(
-                    "daemon socket {} closed without a response",
-                    socket_path.display()
-                )));
+                return Err(transport_error(
+                    std::io::ErrorKind::UnexpectedEof,
+                    format!(
+                        "daemon socket {} closed without a response",
+                        socket_path.display()
+                    ),
+                ));
             }
             Ok(_) => return Ok(line),
             Err(error)
@@ -275,20 +294,26 @@ fn read_daemon_client_line(
                 ) =>
             {
                 if std::time::Instant::now() >= deadline {
-                    return Err(GitAiError::Generic(format!(
-                        "timed out after {:?} reading daemon response from {}",
-                        response_timeout,
-                        socket_path.display()
-                    )));
+                    return Err(transport_error(
+                        std::io::ErrorKind::TimedOut,
+                        format!(
+                            "timed out after {:?} reading daemon response from {}",
+                            response_timeout,
+                            socket_path.display()
+                        ),
+                    ));
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             Err(error) => {
-                return Err(GitAiError::Generic(format!(
-                    "failed reading daemon response from {}: {}",
-                    socket_path.display(),
-                    error
-                )));
+                return Err(transport_error(
+                    error.kind(),
+                    format!(
+                        "failed reading daemon response from {}: {}",
+                        socket_path.display(),
+                        error
+                    ),
+                ));
             }
         }
     }
@@ -326,7 +351,10 @@ fn send_control_request_with_timeouts(
     let line = read_daemon_client_line(&mut response_reader, socket_path, response_timeout)?;
     if line.trim().is_empty() {
         // The rendered error is externally observable; keep it byte-stable.
-        return Err(GitAiError::Generic("empty daemon control response".into()));
+        return Err(transport_error(
+            std::io::ErrorKind::UnexpectedEof,
+            "empty daemon control response".into(),
+        ));
     }
     serde_json::from_str(line.trim()).map_err(GitAiError::from)
 }
@@ -391,12 +419,19 @@ pub fn handle_control_connection_actor_reader<R: Read + Write>(
             continue;
         }
         let parsed = serde_json::from_str::<ControlRequest>(trimmed);
+        let encoded_bytes = line.len();
+        drop(line);
+        let mut checkpoint_admission = None;
         let mut shutdown_after_response = false;
         let response = match parsed {
-            Ok(req) => {
-                shutdown_after_response = matches!(req, ControlRequest::Shutdown);
-                runtime_handle.block_on(async { coordinator.handle_control_request(req).await })
-            }
+            Ok(req) => match coordinator.control_admission.reserve(&req, encoded_bytes) {
+                Ok(admission) => {
+                    checkpoint_admission = admission;
+                    shutdown_after_response = matches!(req, ControlRequest::Shutdown);
+                    runtime_handle.block_on(async { coordinator.handle_control_request(req).await })
+                }
+                Err(response) => response,
+            },
             Err(e) => ControlResponse::err(format!("invalid control request: {}", e)),
         };
         let should_stop = shutdown_after_response && response.ok;
@@ -411,6 +446,7 @@ pub fn handle_control_connection_actor_reader<R: Read + Write>(
             coordinator.request_stop();
         }
         write_result?;
+        drop(checkpoint_admission);
     }
     Ok(())
 }

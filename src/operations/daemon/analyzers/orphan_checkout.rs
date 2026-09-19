@@ -1,6 +1,7 @@
+use super::normalized_args;
 use super::workspace_evidence::{has_only_worktree_globals, ordered_head};
 use crate::model::domain::{NormalizedCommand, SemanticEvent, WorktreeState};
-use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
+use crate::operations::git::cli_parser::parse_git_cli_args;
 
 pub(super) fn analyze_orphan_checkout(
     cmd: &NormalizedCommand,
@@ -10,7 +11,7 @@ pub(super) fn analyze_orphan_checkout(
     if !cmd.ref_changes.is_empty() || !cmd.observed_child_commands.is_empty() {
         return None;
     }
-    let parsed = parsed_invocation_for_normalized_command(cmd);
+    let parsed = parse_git_cli_args(&normalized_args(&cmd.raw_argv));
     if !matches!(parsed.command.as_deref(), Some("checkout" | "switch"))
         || !has_only_worktree_globals(&parsed)
     {

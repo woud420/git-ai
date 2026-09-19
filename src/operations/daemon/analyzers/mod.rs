@@ -9,6 +9,7 @@ pub mod history;
 mod orphan_checkout;
 mod removal;
 mod reset;
+pub(crate) mod switch_discard;
 pub mod transport;
 pub mod workspace;
 mod workspace_evidence;

@@ -194,7 +194,7 @@ pub fn apply_checkout_switch_working_log_side_effect(
 
     if old_head == new_head
         && is_non_zero_oid(&old_head)
-        && super::switch_discard::target(cmd).is_some()
+        && super::analyzers::switch_discard::target(cmd).is_some()
     {
         return super::switch_discard::apply(&repo, &old_head, cmd);
     }

@@ -149,9 +149,9 @@ fn apply_worktree_state(
         // post-command symbolic-ref/branch name rather than inferring from
         // ref-change pairing.
         let branch = if head_change.old == head_change.new {
-            match super::switch_discard::target(cmd) {
-                Some(super::switch_discard::Target::Branch(branch)) => Some(branch),
-                Some(super::switch_discard::Target::Detached) => None,
+            match super::analyzers::switch_discard::target(cmd) {
+                Some(super::analyzers::switch_discard::Target::Branch(branch)) => Some(branch),
+                Some(super::analyzers::switch_discard::Target::Detached) => None,
                 None => unique_branch_for_head_change(cmd, head_change),
             }
         } else {

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod bisect;
 mod event_handlers;
 mod frame_helpers;
 mod index_write;
@@ -13,6 +14,8 @@ mod transport_targets;
 
 use frame_helpers::{command_may_mutate_refs, payload_timestamp_ns, select_primary_command};
 
+#[cfg(test)]
+mod tests_bisect;
 #[cfg(test)]
 mod tests_clone;
 #[cfg(test)]
@@ -34,6 +37,7 @@ pub struct PendingTraceCommand {
     pub push_alias_targets: Option<Vec<String>>,
     pub index_write: crate::model::domain::IndexWriteEvidence,
     pub index_versions: index_write::IndexVersions,
+    bisect_checkout: bisect::BisectCheckoutCapture,
     pub invocation_worktree: Option<PathBuf>,
     pub worktree: Option<PathBuf>,
     pub family_key: Option<FamilyKey>,
@@ -273,6 +277,10 @@ impl<B: GitBackend> TraceNormalizer<B> {
             return Ok(None);
         }
         let ts = payload_timestamp_ns(payload)?;
+
+        if let Some(pending) = self.state.pending.get_mut(&root_sid) {
+            pending.bisect_checkout.observe(payload, sid, &root_sid, ts);
+        }
 
         match event {
             "region_enter" | "data" => {

@@ -217,6 +217,35 @@ impl ActorDaemonCoordinator {
         Ok(())
     }
 
+    pub(crate) fn handle_bisect(
+        &self,
+        family: Option<&str>,
+        cmd: &crate::model::domain::NormalizedCommand,
+    ) -> Result<(), GitAiError> {
+        let (old_head, new_head) = Self::resolve_heads_for_command(cmd);
+        let Some(worktree) = cmd.worktree.as_ref() else {
+            return Ok(());
+        };
+        if old_head.is_empty() || new_head.is_empty() || old_head == new_head {
+            return Ok(());
+        }
+        let repo = find_repository_in_path(&worktree.to_string_lossy())?;
+        if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
+            return Ok(());
+        }
+        let family = family
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| family_key_for_repository(&repo));
+        self.record_recent_replay_prerequisite(
+            &family,
+            RecentReplayPrerequisite::CheckoutSwitchRename {
+                target_head: new_head.clone(),
+                old_head: old_head.clone(),
+            },
+        )?;
+        repo.storage.rename_working_log(&old_head, &new_head)
+    }
+
     /// For checkout/switch: record a recent-replay prerequisite and migrate the
     /// working log to the new HEAD.
     pub(crate) fn handle_checkout_switch(

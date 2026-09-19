@@ -28,6 +28,7 @@ impl RefCursor {
         }
 
         match primary {
+            "bisect" => self.enrich_bisect(cmd, state),
             "commit" => self.enrich_commit(cmd, state),
             "revert" => self.enrich_revert(cmd, state),
             "reset" => {
@@ -118,6 +119,10 @@ impl RefCursor {
                 // race). Keep the in-order cursor as the floor and remember the
                 // ingress offset only as a soft selection hint for disambiguating
                 // colliding entries (e.g. an untraced commit sharing a message).
+                self.command_start_hints.insert(key, offset);
+            } else if cmd.bisect_checkout.is_some() && key.starts_with("worktree:") {
+                // The bisect child receipt establishes its own bounded row;
+                // a late ingress offset must not become a consumed floor.
                 self.command_start_hints.insert(key, offset);
             } else if self.command_start_offset_is_authoritative(&key, offset)? {
                 // No cursor yet (cold start / first traced command). The ingress

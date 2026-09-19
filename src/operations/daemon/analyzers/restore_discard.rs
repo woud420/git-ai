@@ -77,6 +77,7 @@ mod tests {
             transport_targets: None,
             index_v2: false,
             index_write: Default::default(),
+            bisect_checkout: None,
             exit_code: 0,
             started_at_ns: 1,
             finished_at_ns: 2,

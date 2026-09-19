@@ -23,6 +23,7 @@ macro_rules! define_command_policy {
 
 define_command_policy! {
     "add" => POLICY_BUILTIN,
+    "bisect" => POLICY_BUILTIN | POLICY_MAY_MUTATE | POLICY_FAMILY_SEQUENCER,
     "blame" => POLICY_BUILTIN | POLICY_READ_ONLY,
     "branch" => POLICY_BUILTIN | POLICY_MAY_MUTATE | POLICY_FAMILY_SEQUENCER,
     "cat-file" => POLICY_BUILTIN | POLICY_READ_ONLY,

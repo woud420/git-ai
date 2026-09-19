@@ -331,6 +331,7 @@ pub(super) fn command_uses_ref_cursor(primary: &str) -> bool {
         "commit"
             | "revert"
             | "reset"
+            | "bisect"
             | "checkout"
             | "switch"
             | "merge"

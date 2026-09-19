@@ -262,6 +262,9 @@ impl ActorDaemonCoordinator {
             && effective_primary.as_deref() != Some("restore")
             // Moving paths joins mutation fences, but cannot move refs either.
             && effective_primary.as_deref() != Some("mv")
+            // Bisect uses its child receipt in the worker; ordering it must not
+            // add reflog reads to the critical ingestion path.
+            && effective_primary.as_deref() != Some("bisect")
             && !ingress.root_reflog_start_offsets.contains_key(&root)
             && let Some(worktree) = worktree_hint
         {

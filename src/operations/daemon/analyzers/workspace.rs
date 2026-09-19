@@ -59,7 +59,7 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                     });
                 }
             }
-            "switch" => {
+            "switch" | "bisect" => {
                 if let Some(event) =
                     super::orphan_checkout::analyze_orphan_checkout(cmd, state.worktree)
                 {

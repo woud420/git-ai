@@ -51,7 +51,12 @@ impl ActorDaemonCoordinator {
             let state = sequencers
                 .entry(family.to_string())
                 .or_insert_with(FamilySequencerState::new);
-            state.insert_entry(started_at_ns, FamilySequencerEntry::PendingRoot)
+            state.insert_entry(
+                started_at_ns,
+                FamilySequencerEntry::PendingRoot {
+                    root_sid: root_sid.to_string(),
+                },
+            )
         };
 
         self.pending_root_slots_by_root
@@ -235,7 +240,7 @@ impl ActorDaemonCoordinator {
                 )));
             };
             match entry {
-                FamilySequencerEntry::PendingRoot => {
+                FamilySequencerEntry::PendingRoot { .. } => {
                     *entry = replacement;
                 }
                 _ => {
@@ -267,7 +272,9 @@ impl ActorDaemonCoordinator {
             if *open_count == 0 || entry_root_sid == Some(root_sid.as_str()) {
                 continue;
             }
-            if ingress.root_definitely_read_only.contains(root_sid) {
+            if ingress.root_definitely_read_only.contains(root_sid)
+                || self.commit_editor_is_waiting(root_sid)
+            {
                 continue;
             }
             if !ingress.root_mutating.get(root_sid).copied().unwrap_or(true) {

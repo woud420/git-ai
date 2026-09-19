@@ -131,7 +131,7 @@ impl DaemonHealthSnapshot {
                         );
                         entries_observed = entries_observed.saturating_add(1);
                         match entry {
-                            FamilySequencerEntry::PendingRoot => {
+                            FamilySequencerEntry::PendingRoot { .. } => {
                                 health.entries_pending_roots += 1;
                                 entries_pending_roots += 1;
                             }
@@ -397,7 +397,7 @@ fn root_blocks_family(root: &OpenRootSample, family: &FamilyHealth) -> bool {
 
 fn entry_kind(entry: &FamilySequencerEntry) -> &'static str {
     match entry {
-        FamilySequencerEntry::PendingRoot => "pending_root",
+        FamilySequencerEntry::PendingRoot { .. } => "pending_root",
         FamilySequencerEntry::ReadyCommand(_) => "command",
         FamilySequencerEntry::Checkpoint { .. } => "checkpoint",
         FamilySequencerEntry::Canceled => "canceled",
@@ -497,7 +497,12 @@ mod tests {
         {
             let mut sequencers = coordinator.family_sequencers_by_family.lock().unwrap();
             let mut state = FamilySequencerState::new();
-            state.insert_entry(stale_ns, FamilySequencerEntry::PendingRoot);
+            state.insert_entry(
+                stale_ns,
+                FamilySequencerEntry::PendingRoot {
+                    root_sid: "stale-test-root".into(),
+                },
+            );
             sequencers.insert("family".to_string(), state);
         }
         {

@@ -1,5 +1,8 @@
 use super::repos;
 
+#[path = "transcript_budgets.rs"]
+mod transcript_budgets;
+
 #[path = "completion.rs"]
 mod completion;
 
@@ -21,6 +24,8 @@ mod checkpoint;
 #[path = "trace_listener.rs"]
 mod trace_listener;
 
+#[path = "repository_context.rs"]
+mod repository_context;
 #[path = "trace_normalization.rs"]
 mod trace_normalization;
 
@@ -41,6 +46,10 @@ mod http_mock;
 
 #[path = "family_concurrency.rs"]
 mod family_concurrency;
+
+#[cfg(unix)]
+#[path = "editor_wait.rs"]
+mod editor_wait;
 
 #[path = "outbox_replay.rs"]
 mod outbox_replay;

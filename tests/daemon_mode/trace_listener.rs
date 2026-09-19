@@ -42,7 +42,7 @@ fn daemon_symlink_repo_path_trace_and_status_use_same_family() {
     .expect("daemon status request should succeed for aliased path");
     assert!(status.ok, "aliased path daemon status should be ok");
 
-    let checkpoint_baseline = repo.daemon_total_completion_count();
+    let checkpoint_baseline = repo.daemon_checkpoint_completion_count();
     fs::write(repo.path().join("alias.txt"), "alias\nhuman\n")
         .expect("failed writing human aliased file");
     repo.git_ai(&["checkpoint", "human"])

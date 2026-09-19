@@ -59,6 +59,7 @@ impl ActorDaemonCoordinator {
         }
 
         self.maybe_append_pending_root_from_trace_payload(&payload)?;
+        self.update_commit_editor_wait_state(&payload)?;
         let terminal_root_event = is_terminal_root_trace_event(
             &event,
             payload

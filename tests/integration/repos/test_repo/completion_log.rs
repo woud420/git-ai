@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod checkpoint_wait_tests;
+
 type Progress = (u64, usize);
 
 pub(super) fn advance_poll(
@@ -52,6 +55,12 @@ pub(crate) struct DaemonTestCompletionLogEntry {
     /// `TestCompletionLogEntry` in `daemon_config.rs` for what that means.
     #[serde(default)]
     pub(crate) commit_skip_reason: Option<String>,
+}
+
+impl DaemonTestCompletionLogEntry {
+    fn is_tracked_checkpoint(&self) -> bool {
+        self.sync_tracked && self.kind == "checkpoint"
+    }
 }
 
 /// Diagnostic check run by `commit_with_env` after `sync_daemon_force()` has
@@ -138,6 +147,13 @@ impl TestRepo {
     pub(crate) fn daemon_total_completion_count(&self) -> u64 {
         let family_key = self.daemon_family_key();
         self.daemon_completion_entries_for_family(&family_key).len() as u64
+    }
+
+    pub(crate) fn daemon_checkpoint_completion_count(&self) -> u64 {
+        self.daemon_completion_entries()
+            .iter()
+            .filter(|entry| entry.is_tracked_checkpoint())
+            .count() as u64
     }
 
     pub(crate) fn daemon_completion_entries(&self) -> Vec<DaemonTestCompletionLogEntry> {
@@ -246,7 +262,7 @@ impl TestRepo {
     ) -> u64 {
         self.poll_daemon_completion_log(family_key, 0, |entries| {
             let checkpoints =
-                entries.iter().filter(|e| e.sync_tracked && e.kind == "checkpoint");
+                entries.iter().filter(|entry| entry.is_tracked_checkpoint());
             if let Some(error_entry) = checkpoints.clone().find(|e| e.status == "error") {
                 let error = error_entry
                     .error
@@ -351,10 +367,13 @@ impl TestRepo {
         );
     }
 
-    pub(crate) fn wait_for_next_daemon_checkpoint_completion(&self, baseline_count: u64) -> u64 {
-        self.wait_for_daemon_total_completion_count(
-            baseline_count,
-            baseline_count.saturating_add(1),
+    pub(crate) fn wait_for_next_daemon_checkpoint_completion(
+        &self,
+        checkpoint_baseline: u64,
+    ) -> u64 {
+        self.wait_for_daemon_checkpoint_count(
+            &self.daemon_family_key(),
+            checkpoint_baseline.saturating_add(1),
         )
     }
 }

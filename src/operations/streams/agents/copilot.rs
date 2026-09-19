@@ -12,7 +12,6 @@ use crate::operations::streams::reader::{
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
 use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::fs;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -408,9 +407,10 @@ impl Agent for CopilotAgent {
         }
 
         // Fallback: scan first few lines for file paths in tool calls
-        let file = fs::File::open(stream_path).ok()?;
-        let reader = BufReader::new(file);
-        for line in reader.lines().take(20).map_while(Result::ok) {
+
+        for line in
+            crate::operations::streams::reader::read_leading_jsonl_lines(stream_path, 20).ok()?
+        {
             let Some(json) = serde_json::from_str::<serde_json::Value>(&line).ok() else {
                 continue;
             };

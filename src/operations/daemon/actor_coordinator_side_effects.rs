@@ -350,6 +350,9 @@ impl ActorDaemonCoordinator {
         let worktree = worktree.to_string_lossy().to_string();
         let mut handled_revert_commits = false;
         for event in events {
+            if super::workspace_side_effects::apply(&worktree, event)? {
+                continue;
+            }
             match event {
                 crate::model::domain::SemanticEvent::FetchCompleted { .. } => {
                     apply_fetch_notes_sync_side_effect(&worktree, cmd);

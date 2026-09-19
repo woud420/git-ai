@@ -366,6 +366,5 @@ fn change_span(changes: &[&crate::model::domain::RefChange]) -> Option<(String, 
     }
     Some((old_head.to_string(), new_head.to_string()))
 }
-
 #[cfg(test)]
 mod tests;

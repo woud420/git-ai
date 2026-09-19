@@ -76,6 +76,8 @@ mod tests {
             invoked_command: Some("help".to_string()),
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
+            index_write: Default::default(),
+            index_v2: false,
             exit_code: 0,
             started_at_ns: seq,
             finished_at_ns: seq + 1,

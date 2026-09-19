@@ -50,6 +50,8 @@ pub(super) fn command_with_worktree(
         invoked_command: args.first().map(|arg| arg.to_string()),
         invoked_args: args.iter().map(|arg| arg.to_string()).collect(),
         observed_child_commands: Vec::new(),
+        index_write: Default::default(),
+        index_v2: false,
         exit_code: 0,
         started_at_ns: 1,
         finished_at_ns: 2,

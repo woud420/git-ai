@@ -1,3 +1,5 @@
+mod replacement_carryover;
+
 use super::{ExpectedLineExt, TestRepo, fs};
 use crate::repos::test_file::ExpectedLine;
 
@@ -79,21 +81,6 @@ fn unstaged_replacement_does_not_invalidate_committed_ai_evidence() {
             "untracked worktree version".unattributed_human(),
         ]);
     assert_untracked_line(&repo, 1);
-}
-
-#[test]
-fn committing_earlier_ai_checkpoint_preserves_its_attribution() {
-    let repo = seeded_repo();
-    let path = repo.path().join("test.txt");
-    repo.git_ai(&["checkpoint", "human", "test.txt"]).unwrap();
-    fs::write(&path, "first AI version\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-    repo.git(&["add", "test.txt"]).unwrap();
-    fs::write(&path, "later AI version\n").unwrap();
-    repo.git_ai(&["checkpoint", "mock_ai", "test.txt"]).unwrap();
-
-    repo.commit("commit earlier AI checkpoint").unwrap();
-    assert_head_lines(&repo, crate::lines!["first AI version".ai()]);
 }
 
 #[test]

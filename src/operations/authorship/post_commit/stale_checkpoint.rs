@@ -89,16 +89,27 @@ impl CheckpointEvidence<'_> {
                 .filter(|hunk| hunk.old_count > 0)
                 .flat_map(|hunk| hunk.new_start..hunk.new_start.saturating_add(hunk.new_count))
                 .collect();
-            let changed: Vec<_> = diff_hunks_between_contents(observed_content, committed)
-                .into_iter()
-                .filter(|hunk| hunk.old_count > 0 && hunk.old_count == hunk.new_count)
-                .flat_map(|hunk| hunk.new_start..hunk.new_start.saturating_add(hunk.new_count))
-                .filter(|line| committed_lines.contains(line) && modified.contains(line))
-                .collect();
+            let observed_diff = diff_hunks_between_contents(observed_content, committed);
+            let shifts_replacement = observed_diff.iter().any(|hunk| {
+                hunk.old_count > 0 && hunk.new_count > 0 && hunk.old_count != hunk.new_count
+            });
+            // A size-changing replacement shifts later projected attestations too.
+            // Reconcile those committed lines against exact historical content.
+            let mut changed: Vec<_> = if shifts_replacement {
+                modified.intersection(&committed_lines).copied().collect()
+            } else {
+                observed_diff
+                    .into_iter()
+                    .filter(|hunk| hunk.old_count > 0 && hunk.new_count > 0)
+                    .flat_map(|hunk| hunk.new_start..hunk.new_start.saturating_add(hunk.new_count))
+                    .filter(|line| committed_lines.contains(line) && modified.contains(line))
+                    .collect()
+            };
             if changed.is_empty() {
                 continue;
             }
 
+            changed.sort_unstable();
             let checkpoint_attrs = historical_attributions(
                 self.working_log,
                 self.initial,

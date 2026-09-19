@@ -18,6 +18,13 @@ pub fn reconstruct_working_log_after_backward_reset(
     old_tip: &str,
     new_tip: &str,
 ) -> Result<(), GitAiError> {
+    if old_tip == new_tip {
+        return Ok(());
+    }
+
+    // Pending edits survive even when the unwound commits have no usable notes.
+    repo.storage.rename_working_log(old_tip, new_tip)?;
+
     // List all commits being "un-done" (between new_tip exclusive and old_tip inclusive)
     let commits = list_commits_in_range(repo, new_tip, old_tip);
     if commits.is_empty() {
@@ -133,13 +140,17 @@ pub fn reconstruct_working_log_after_backward_reset(
     // this event. Clearing checkpoints.jsonl would lose that data.
     let working_log = repo.storage.working_log_for_base_commit(new_tip)?;
 
-    working_log.write_initial_attributions_with_contents(
+    let mut carried = working_log.read_initial_attributions();
+    let reconstructed = working_log.prepare_initial_attributions_with_contents(
         file_attributions,
         prompts,
         humans,
         file_blobs,
         sessions,
     )?;
+    // Pending INITIAL describes newer edits; historical reconstruction only fills gaps.
+    carried.merge_missing_from(reconstructed);
+    working_log.write_initial(carried)?;
 
     // Delete old working log if it exists
     let _ = repo.storage.delete_working_log_for_base_commit(old_tip);

@@ -425,7 +425,7 @@ impl Config {
         self.transcript_streaming_lookback_days
     }
 
-    /// Returns the daemon peak-RSS limit in MiB, or `None` when disabled.
+    /// Returns the daemon current-RSS limit in MiB, or `None` when disabled.
     pub fn daemon_memory_limit_mb(&self) -> Option<u64> {
         self.daemon_memory_limit_mb
     }

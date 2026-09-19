@@ -23,7 +23,7 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
         &repo,
         &[
             (
-                "GIT_AI_TEST_DAEMON_PEAK_RSS_MB_SEQUENCE",
+                "GIT_AI_TEST_DAEMON_CURRENT_RSS_MB_SEQUENCE",
                 sample_sequence.as_str(),
             ),
             ("GIT_AI_TEST_DAEMON_MEMORY_POLL_MS", "25"),
@@ -83,7 +83,7 @@ fn daemon_memory_limit_below_startup_usage_aborts_without_restart_loop() {
     let mut daemon = DaemonGuard::start_with_env(
         &repo,
         &[
-            ("GIT_AI_TEST_DAEMON_PEAK_RSS_MB_SEQUENCE", "1024"),
+            ("GIT_AI_TEST_DAEMON_CURRENT_RSS_MB_SEQUENCE", "1024"),
             ("GIT_AI_TEST_DAEMON_MEMORY_POLL_MS", "500"),
         ],
     );
@@ -113,7 +113,8 @@ fn daemon_memory_hard_limit_aborts_without_restart() {
     let mut daemon = DaemonGuard::start_with_env(
         &repo,
         &[
-            ("GIT_AI_TEST_DAEMON_PEAK_RSS_MB_SEQUENCE", "100,100,1024"),
+            ("GIT_AI_TEST_DAEMON_CURRENT_RSS_MB_SEQUENCE", "100,100,1024"),
+            ("GIT_AI_TEST_DAEMON_PEAK_RSS_MB_SEQUENCE", "2048"),
             ("GIT_AI_TEST_DAEMON_MEMORY_POLL_MS", "100"),
         ],
     );
@@ -126,6 +127,8 @@ fn daemon_memory_hard_limit_aborts_without_restart() {
         "hard-aborted daemon must not respawn"
     );
     let logs = daemon.diagnostic_contents();
+    assert!(logs.contains("current RSS 1073741824 bytes"), "{logs}");
+    assert!(logs.contains("peak RSS 2147483648 bytes"), "{logs}");
     assert!(
         logs.contains("memory emergency threshold reached"),
         "missing hard-limit diagnostic:\n{logs}"

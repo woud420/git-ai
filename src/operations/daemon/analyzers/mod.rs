@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+pub(crate) mod checkout_discard;
 pub mod generic;
 pub mod history;
+mod literal_path;
 mod orphan_checkout;
 mod removal;
 mod reset;

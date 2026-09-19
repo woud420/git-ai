@@ -120,7 +120,7 @@ fn captured_targets(frames: &[Value], command: &str) -> Option<Vec<String>> {
     for frame in frames {
         normalizer.ingest_payload(frame).unwrap();
     }
-    normalizer.state().pending["root"].transport_targets.clone()
+    finish(normalizer.state.pending.get_mut("root").unwrap())
 }
 
 fn http_frame(target: &str) -> Value {
@@ -176,50 +176,4 @@ fn capture_ignores_nested_transport_and_non_push_commands() {
     );
 }
 
-#[test]
-fn capture_uses_gits_resolved_push_name_for_aliases() {
-    let target = "https://host.test/repo";
-    assert_eq!(
-        captured_targets(
-            &[
-                json!({"event":"cmd_name","sid":"root","name":"push"}),
-                http_frame(target)
-            ],
-            "publish"
-        ),
-        Some(vec![target.to_owned()])
-    );
-}
-
-#[test]
-fn capture_accepts_only_the_direct_push_child_of_a_git_alias() {
-    let alias = json!({"event":"child_start","sid":"root","child_class":"git_alias","use_shell":false,"argv":["git","push","origin"]});
-    let name = json!({"event":"cmd_name","sid":"root/push","name":"push"});
-    let mut transport = http_frame("https://host.test/alias");
-    transport["sid"] = json!("root/push");
-    assert_eq!(
-        captured_targets(&[alias.clone(), name.clone(), transport.clone()], "publish"),
-        Some(vec!["https://host.test/alias".to_owned()])
-    );
-    assert_eq!(
-        captured_targets(&[name, transport.clone()], "publish"),
-        Some(Vec::new())
-    );
-    transport["sid"] = json!("root/push/nested");
-    assert_eq!(
-        captured_targets(&[alias, transport], "publish"),
-        Some(Vec::new())
-    );
-}
-
-#[test]
-fn capture_does_not_guess_the_worktree_of_an_alias_with_extra_global_options() {
-    let alias = json!({"event":"child_start","sid":"root","child_class":"git_alias","use_shell":false,"argv":["git","-C","elsewhere","push","origin"]});
-    let name = json!({"event":"cmd_name","sid":"root/push","name":"push"});
-    let mut transport = http_frame("https://host.test/alias");
-    transport["sid"] = json!("root/push");
-    assert_eq!(
-        captured_targets(&[alias, name, transport], "publish"),
-        Some(Vec::new())
-    );
-}
+mod aliases;

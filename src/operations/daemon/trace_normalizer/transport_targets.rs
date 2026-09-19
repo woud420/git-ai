@@ -2,38 +2,15 @@ use super::{GitBackend, TraceNormalizer};
 use serde_json::Value;
 use std::path::Path;
 
+mod alias;
 mod ssh;
+
+pub(super) use alias::finish;
 
 const MAX_TARGETS: usize = 8;
 const MAX_TARGET_BYTES: usize = 32 * 1024;
 
 impl<B: GitBackend> TraceNormalizer<B> {
-    pub(super) fn observe_push_alias_name(&mut self, payload: &Value, sid: &str, root: &str) {
-        let Some(child) = sid
-            .strip_prefix(root)
-            .and_then(|tail| tail.strip_prefix('/'))
-        else {
-            return;
-        };
-        if child.is_empty()
-            || child.contains('/')
-            || payload.get("name").and_then(Value::as_str) != Some("push")
-        {
-            return;
-        }
-        let Some(pending) = self.state.pending.get_mut(root) else {
-            return;
-        };
-        if !pending.push_alias {
-            return;
-        }
-        match pending.push_alias_sid.as_deref() {
-            None => pending.push_alias_sid = Some(sid.to_owned()),
-            Some(owner) if owner == sid => {}
-            Some(_) => pending.transport_targets = None,
-        }
-    }
-
     pub(super) fn capture_transport_target(&mut self, payload: &Value, sid: &str, root: &str) {
         let Some(pending) = self.state.pending.get_mut(root) else {
             return;
@@ -41,17 +18,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
         let Some(class) = payload.get("child_class").and_then(Value::as_str) else {
             return;
         };
-        if sid == root
-            && class == "git_alias"
-            && payload.get("use_shell").and_then(Value::as_bool) == Some(false)
-        {
-            let argv = crate::operations::daemon::trace_helpers::trace_payload_argv(payload);
-            pending.push_alias = matches!(argv.as_slice(), [git, command, ..]
-                if Path::new(git).file_name().and_then(|name| name.to_str()).is_some_and(|name| matches!(name, "git" | "git.exe"))
-                    && command == "push");
-            if pending.push_alias_sid.is_some() {
-                pending.transport_targets = None;
-            }
+        if alias::capture_parent(pending, payload, sid, root, class) {
             return;
         }
         if sid != root {
@@ -70,14 +37,21 @@ impl<B: GitBackend> TraceNormalizer<B> {
         if !class.starts_with("transport/") && !class.starts_with("remote-") {
             return;
         }
-        let Some(targets) = pending.transport_targets.as_mut() else {
+        let retained_targets = pending.transport_targets.as_ref().map_or(0, Vec::len)
+            + pending.push_alias_targets.as_ref().map_or(0, Vec::len);
+        let captured = if sid == root {
+            &mut pending.transport_targets
+        } else {
+            &mut pending.push_alias_targets
+        };
+        let Some(targets) = captured.as_mut() else {
             return;
         };
         let target = target_from_frame(payload, class, pending.worktree.as_deref());
         match target {
             Some(target) if targets.contains(&target) => {}
-            Some(target) if targets.len() < MAX_TARGETS => targets.push(target),
-            _ => pending.transport_targets = None,
+            Some(target) if retained_targets < MAX_TARGETS => targets.push(target),
+            _ => *captured = None,
         }
     }
 }

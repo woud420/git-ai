@@ -43,14 +43,15 @@ fn assert_note_read_budget(log: &std::path::Path, individual_budget: usize, batc
         "probe must observe real blame execution"
     );
     let individual = commands.matches("notes").count();
-    let batches = commands.matches("cat-file").count();
+    // Packed content uses ordinary cat-file fallbacks outside note batching.
+    let batches = commands.matches("cat-file --batch").count();
     assert!(
         individual <= individual_budget,
         "individual notes reads: {individual}, budget: {individual_budget}"
     );
     assert!(
         batches > 0 && batches <= batch_budget,
-        "batch reads: {batches}, budget: {batch_budget}"
+        "batch reads: {batches}, budget: {batch_budget}; command probe:\n{commands}"
     );
 }
 
@@ -70,7 +71,19 @@ fn blame_batches_note_reads_across_commit_history() {
 
 #[test]
 fn range_stats_batches_note_reads_without_changing_attribution_totals() {
+    check_range_stats_note_reads(false);
+}
+
+#[test]
+fn range_stats_batches_note_reads_when_history_objects_are_packed() {
+    check_range_stats_note_reads(true);
+}
+
+fn check_range_stats_note_reads(packed: bool) {
     let (repo, base) = mixed_history();
+    if packed {
+        repo.git_og(&["repack", "-ad"]).unwrap();
+    }
     let log = repo.path().join("stats-spawns.log");
     let range = format!("{base}..HEAD");
     let output = repo

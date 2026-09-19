@@ -68,7 +68,7 @@ fn overloaded_checkpoint_delivery_preserves_fences_and_replays_the_durable_suffi
     use git_ai::model::checkpoint_request::{
         BaseCommit, CheckpointFile, CheckpointRequest, PreparedPathRole,
     };
-    use git_ai::model::repository::checkpoint_outbox::publish_delivery;
+    use git_ai::model::repository::checkpoint_outbox::{CheckpointOutboxError, publish_delivery};
     use git_ai::model::working_log::AgentId;
     use git_ai::operations::commands::checkpoint_agent::delivery::{
         LiveFallbackClass, deliver_checkpoint_batch,
@@ -192,6 +192,19 @@ fn overloaded_checkpoint_delivery_preserves_fences_and_replays_the_durable_suffi
         "legacy checkpoint RPCs must share the live admission limit"
     );
     assert_eq!(daemon_health(&socket)["checkpoints_outstanding"], json!(16));
+    // The replay worker also locks the outbox. Fixture publication must tolerate
+    // that transient contention, as the production delivery runtime does.
+    let publish = |delivery: &CheckpointDelivery| {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match publish_delivery(outbox.as_path(), delivery) {
+                Err(CheckpointOutboxError::LockBusy) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                result => break result,
+            }
+        }
+    };
     let report = deliver_checkpoint_batch(
         &deliveries[16..],
         |delivery| {
@@ -204,7 +217,7 @@ fn overloaded_checkpoint_delivery_preserves_fences_and_replays_the_durable_suffi
             )
         },
         |delivery| {
-            publish_delivery(outbox.as_path(), delivery)
+            publish(delivery)
                 .inspect_err(|error| eprintln!("fixture publication failed: {error:?}"))
                 .map(|_| ())
         },
@@ -252,7 +265,7 @@ fn overloaded_checkpoint_delivery_preserves_fences_and_replays_the_durable_suffi
             1
         );
     }
-    publish_delivery(outbox.as_path(), &deliveries[16]).unwrap();
+    publish(&deliveries[16]).unwrap();
     wait_for_ready_records_to_drain(outbox.as_path());
     assert_eq!(
         repo.current_working_logs()

@@ -629,9 +629,69 @@ jobs:
             exit 1
           fi
 
+  package-managers:
+    name: Build Homebrew and Chocolatey packages
+    needs: [build, build-macos-intel]
+    if: >-
+      !cancelled() &&
+      (inputs.release_production == true || inputs.dry_run == true) &&
+      needs.build.result == 'success' &&
+      needs.build-macos-intel.result == 'success'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: git-ai-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate packages from verified release binaries
+        shell: bash
+        env:
+          BASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s packaging/managers/tests -v
+          (cd artifacts && sha256sum git-ai-* > SHA256SUMS)
+          python packaging/managers/generate.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --version "${BASE_VERSION#v}" --tag "$BASE_VERSION" \
+            --assets-dir artifacts --output-dir packages
+
+      - name: Test the release Chocolatey package
+        shell: pwsh
+        env:
+          BASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $version = $env:BASE_VERSION.TrimStart('v')
+          choco install git-ai --source "$PWD/packages" --version $version --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Chocolatey installation failed' }
+          $binary = Join-Path $env:ChocolateyInstall 'bin/git-ai.exe'
+          $actual = & $binary --version
+          if ($LASTEXITCODE -ne 0 -or $actual -notmatch [regex]::Escape($version)) {
+            throw "Installed package version mismatch: $actual"
+          }
+          $message = (& $binary upgrade 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 1 -or $message -notmatch 'choco upgrade') {
+            throw 'The package must delegate upgrades to Chocolatey'
+          }
+          choco uninstall git-ai --yes --no-progress
+          if ($LASTEXITCODE -ne 0 -or (Test-Path $binary)) { throw 'Chocolatey uninstall failed' }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: git-ai-package-managers
+          path: packages/*
+          if-no-files-found: error
+          retention-days: 30
+
   create-release:
     name: Create Release
-    needs: [build, build-macos-intel, package-msi, test-msi, release-prod-approval]
+    needs: [build, build-macos-intel, package-msi, test-msi, package-managers, release-prod-approval]
     runs-on: ubuntu-latest
     if: >-
       !cancelled() &&
@@ -640,6 +700,7 @@ jobs:
       needs.build-macos-intel.result == 'success' &&
       needs.package-msi.result == 'success' &&
       needs.test-msi.result == 'success' &&
+      (inputs.release_production != true || needs.package-managers.result == 'success') &&
       (inputs.release_production != true ||
       needs.release-prod-approval.result == 'success')
     environment: release
@@ -688,7 +749,7 @@ jobs:
 
       - name: Move artifacts to release directory
         run: |
-          find artifacts -type f -name "git-ai-*" -exec cp {} release/ \;
+          find artifacts -type f \( -name "git-ai-*" -o -name "git-ai.rb" -o -name "git-ai.*.nupkg" \) -exec cp {} release/ \;
 
       - name: List available artifacts
         run: |
@@ -699,7 +760,7 @@ jobs:
         run: |
           cd release
           shopt -s nullglob
-          artifacts=(git-ai-*)
+          artifacts=(git-ai-* git-ai.r[b] git-ai.*.nupkg)
           if [ ${#artifacts[@]} -gt 0 ]; then
             sha256sum "${artifacts[@]}" | sort > SHA256SUMS
           else
@@ -760,6 +821,8 @@ jobs:
         with:
           subject-path: |
             release/git-ai-*
+            release/git-ai.rb
+            release/git-ai.*.nupkg
             release/install.sh
             release/install.ps1
             release/SHA256SUMS
@@ -810,6 +873,9 @@ jobs:
             - **macOS PKG (Apple Silicon)**: `git-ai-macos-arm64.pkg`
             - **macOS PKG (Universal)**: `git-ai-macos-universal.pkg`
 
+            Stable releases also include `git-ai.rb` and `git-ai.<version>.nupkg`.
+            See the repository's [Homebrew and Chocolatey guide](https://github.com/${{ github.repository }}/blob/${{ steps.release-meta.outputs.tag_name }}/packaging/package-managers.md) for package installation and per-user setup.
+
             ### SHA256 Checksums
             ```
             $(cat release/SHA256SUMS)
@@ -822,6 +888,8 @@ jobs:
             ```
           files: |
             release/git-ai-*
+            release/git-ai.rb
+            release/git-ai.*.nupkg
             release/SHA256SUMS
             release/install.sh
             release/install.ps1

@@ -4,11 +4,14 @@ use crate::config::Config;
 use crate::error::GitAiError;
 use crate::operations::git::repository::Repository;
 
+#[cfg(test)]
+mod batch_input_tests;
 mod diff_tree;
 mod note_shift;
 mod range_diff;
 #[cfg(test)]
 mod range_diff_memory_tests;
+mod rebase_range;
 mod squash_merge;
 
 pub(crate) use diff_tree::compute_diff_trees_batch;
@@ -17,6 +20,7 @@ pub(crate) use note_shift::{
 };
 pub use note_shift::{shift_authorship_notes, shift_authorship_notes_merging_existing};
 pub(crate) use range_diff::list_commits_in_range;
+pub(crate) use rebase_range::RebaseRange;
 
 pub use crate::model::domain::RewriteEvent;
 
@@ -217,6 +221,7 @@ pub(crate) fn handle_rewrite_event_with_metrics(
             new_tip,
             onto.as_deref(),
             RewriteMetricOperation::NonFastForward,
+            None,
         ),
         RewriteEvent::CherryPickComplete {
             sources,
@@ -251,8 +256,10 @@ pub(crate) fn handle_non_fast_forward_rewrite_with_operation(
     new_tip: &str,
     onto: Option<&str>,
     operation: RewriteMetricOperation,
+    rebase_range: Option<&RebaseRange>,
 ) -> Result<RewriteOutcome, GitAiError> {
-    let mappings = range_diff::derive_mappings_from_range_diff(repo, old_tip, new_tip, onto)?;
+    let mappings =
+        range_diff::derive_mappings_from_range_diff(repo, old_tip, new_tip, onto, rebase_range)?;
     if mappings.is_empty() {
         return Ok(RewriteOutcome::empty());
     }

@@ -145,6 +145,13 @@ pub struct PendingSquashMerge {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct PendingRebase {
+    pub original_head: String,
+    pub onto: Option<String>,
+    pub range: crate::operations::authorship::rewrite::RebaseRange,
+}
+
+#[derive(Debug, Clone)]
 #[doc(hidden)]
 pub struct PendingCherryPickNoCommit {
     pub(crate) source_commits: Vec<String>,
@@ -198,8 +205,7 @@ pub struct ActorDaemonCoordinator {
             crate::operations::daemon::git_backend::SystemGitBackend,
         >,
     >,
-    pub(crate) pending_rebase_original_head_by_worktree:
-        Mutex<HashMap<String, (String, Option<String>)>>,
+    pub(crate) pending_rebase_original_head_by_worktree: Mutex<HashMap<String, PendingRebase>>,
     pub(crate) pending_cherry_pick_sources_by_worktree: Mutex<HashMap<String, Vec<String>>>,
     pub(crate) pending_cherry_pick_no_commit_by_worktree:
         Mutex<HashMap<String, PendingCherryPickNoCommit>>,

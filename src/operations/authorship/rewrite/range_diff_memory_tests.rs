@@ -1,5 +1,7 @@
 use super::range_diff::{MAX_PENDING_DROPPED_COMMITS, parse_range_diff_output};
 
+mod post_match;
+
 fn leading_drops(count: usize) -> String {
     (0..count)
         .map(|index| {

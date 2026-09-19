@@ -110,3 +110,5 @@ it does not apply that evidence through the Git reducer.
 - [rewrite-ops-spec.md](rewrite-ops-spec.md)
 - [state-ownership.md](state-ownership.md)
 - [inventory.md](inventory.md)
+
+- [Mutating Git operation coverage and remaining gaps](mutating-git-coverage.md)

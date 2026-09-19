@@ -370,7 +370,7 @@ impl ActorDaemonCoordinator {
             }
             match event {
                 crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
-                    apply_clone_notes_sync_side_effect(&worktree)?;
+                    apply_clone_notes_sync_side_effect(&worktree, cmd)?;
                 }
                 crate::model::domain::SemanticEvent::PushCompleted { .. } => {
                     push = prepare_push_side_effect(&worktree, cmd)?;

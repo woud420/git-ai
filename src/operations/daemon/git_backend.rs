@@ -383,7 +383,8 @@ fn clone_init_positionals(args: &[String]) -> Vec<String> {
 fn takes_value(arg: &str) -> bool {
     matches!(
         arg,
-        "-b" | "--branch"
+        "-b" | "-o"
+            | "--branch"
             | "--origin"
             | "--upload-pack"
             | "--template"

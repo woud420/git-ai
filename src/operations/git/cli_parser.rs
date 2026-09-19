@@ -665,7 +665,7 @@ pub fn extract_clone_target_directory(args: &[String]) -> Option<String> {
             }
 
             // Skip options that take a value
-            if is_flag_with_value(arg) {
+            if matches!(arg.as_str(), "-o" | "--origin") || is_flag_with_value(arg) {
                 i += 2; // Skip both option and its value
                 continue;
             }

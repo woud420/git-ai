@@ -321,6 +321,14 @@ const PUSH_NOTES_MAX_ATTEMPTS: usize = 3;
 
 // for use with post-push hook
 pub fn push_authorship_notes(repository: &Repository, remote_name: &str) -> Result<(), GitAiError> {
+    push_authorship_notes_with_lock(repository, remote_name, None)
+}
+
+pub(crate) fn push_authorship_notes_with_lock(
+    repository: &Repository,
+    remote_name: &str,
+    local_notes_lock: Option<&tokio::sync::Mutex<()>>,
+) -> Result<(), GitAiError> {
     // Belt-and-suspenders: when the HTTP backend is active, notes are not stored
     // in refs/notes/ai so there is nothing to push.
     if crate::config::Config::get().notes_backend_kind() == crate::config::NotesBackendKind::Http {
@@ -339,7 +347,7 @@ pub fn push_authorship_notes(repository: &Repository, remote_name: &str) -> Resu
             );
         }
 
-        fetch_and_merge_tracking_notes(repository, remote_name);
+        fetch_and_merge_tracking_notes(repository, remote_name, local_notes_lock);
 
         // Push notes without force (requires fast-forward)
         let push_args = build_authorship_push_args(repository.global_args_for_exec(), remote_name);
@@ -373,7 +381,11 @@ pub fn push_authorship_notes(repository: &Repository, remote_name: &str) -> Resu
 }
 
 /// Fetch remote notes into a tracking ref and merge into local refs/notes/ai.
-fn fetch_and_merge_tracking_notes(repository: &Repository, remote_name: &str) {
+fn fetch_and_merge_tracking_notes(
+    repository: &Repository,
+    remote_name: &str,
+    local_notes_lock: Option<&tokio::sync::Mutex<()>>,
+) {
     let tracking_ref = tracking_ref_for_remote(remote_name);
     let fetch_refspec = format!("+refs/notes/ai:{}", tracking_ref);
 
@@ -390,6 +402,9 @@ fn fetch_and_merge_tracking_notes(repository: &Repository, remote_name: &str) {
         return;
     }
 
+    // Network I/O must not hold the family lock. Only the local merge shares
+    // the post-commit writer's exclusion, preventing lost concurrent notes.
+    let _guard = local_notes_lock.map(tokio::sync::Mutex::blocking_lock);
     let local_notes_ref = "refs/notes/ai";
 
     if !ref_exists(repository, &tracking_ref) {

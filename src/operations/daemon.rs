@@ -67,6 +67,7 @@ pub(crate) mod memory_watchdog;
 pub(crate) mod merge_fast_forward;
 mod orphan_branch;
 pub(crate) mod normalizer_worker;
+mod notes_push_queue;
 pub(crate) mod parent_diff_batch;
 pub(crate) mod revert_rebase_helpers;
 pub(crate) mod self_check;

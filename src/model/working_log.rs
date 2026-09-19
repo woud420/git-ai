@@ -27,6 +27,26 @@ pub struct InitialAttributions {
     pub sessions: std::collections::BTreeMap<String, SessionRecord>,
 }
 
+impl InitialAttributions {
+    pub(crate) fn merge_missing_from(&mut self, other: Self) {
+        for (key, value) in other.files {
+            self.files.entry(key).or_insert(value);
+        }
+        for (key, value) in other.file_blobs {
+            self.file_blobs.entry(key).or_insert(value);
+        }
+        for (key, value) in other.prompts {
+            self.prompts.entry(key).or_insert(value);
+        }
+        for (key, value) in other.humans {
+            self.humans.entry(key).or_insert(value);
+        }
+        for (key, value) in other.sessions {
+            self.sessions.entry(key).or_insert(value);
+        }
+    }
+}
+
 /// Represents a working log entry for a specific file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkingLogEntry {

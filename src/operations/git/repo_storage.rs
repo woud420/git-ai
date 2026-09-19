@@ -1,3 +1,5 @@
+mod initial;
+
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
@@ -237,22 +239,7 @@ impl RepoStorage {
         // the opposite (new clobbers old). The checkpoints Vec below is already
         // old-then-new, so it needs no such guard.
         let mut merged_initial = old_log.read_initial_attributions();
-        let new_initial = new_log.read_initial_attributions();
-        for (k, v) in new_initial.files {
-            merged_initial.files.entry(k).or_insert(v);
-        }
-        for (k, v) in new_initial.prompts {
-            merged_initial.prompts.entry(k).or_insert(v);
-        }
-        for (k, v) in new_initial.file_blobs {
-            merged_initial.file_blobs.entry(k).or_insert(v);
-        }
-        for (k, v) in new_initial.humans {
-            merged_initial.humans.entry(k).or_insert(v);
-        }
-        for (k, v) in new_initial.sessions {
-            merged_initial.sessions.entry(k).or_insert(v);
-        }
+        merged_initial.merge_missing_from(new_log.read_initial_attributions());
         new_log.write_initial(merged_initial)?;
 
         let mut checkpoints = old_log.read_all_checkpoints()?;
@@ -690,29 +677,14 @@ impl PersistedWorkingLog {
         file_contents: HashMap<String, String>,
         sessions: std::collections::BTreeMap<String, SessionRecord>,
     ) -> Result<(), GitAiError> {
-        let filtered: HashMap<String, Vec<LineAttribution>> = attributions
-            .into_iter()
-            .filter(|(_, attrs)| !attrs.is_empty())
-            .collect();
-        let mut file_blobs = HashMap::new();
-        for file_path in filtered.keys() {
-            let content = file_contents.get(file_path).ok_or_else(|| {
-                persistence_error(
-                    std::io::ErrorKind::NotFound,
-                    format!("INITIAL missing file content snapshot for {}", file_path),
-                )
-            })?;
-            let blob_sha = self.persist_file_version(content)?;
-            file_blobs.insert(file_path.clone(), blob_sha);
-        }
-
-        self.write_initial(InitialAttributions {
-            files: filtered,
+        let initial = self.prepare_initial_attributions_with_contents(
+            attributions,
             prompts,
-            file_blobs,
             humans,
+            file_contents,
             sessions,
-        })
+        )?;
+        self.write_initial(initial)
     }
 
     /// Write a fully-formed INITIAL state, preserving any persisted blob references.

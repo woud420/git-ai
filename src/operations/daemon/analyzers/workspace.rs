@@ -26,7 +26,7 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                 }
             }
             "restore" => {
-                if let Some(event) = super::super::restore_discard::event(cmd, state.refs) {
+                if let Some(event) = super::restore_discard::event(cmd, state.refs) {
                     events.push(event);
                 }
             }

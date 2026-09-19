@@ -1,65 +1,9 @@
 use super::working_log_discard::remove_matching_attributions as remove_working_log_attributions_matching;
-use super::side_effect_helpers::{
-    parsed_invocation_for_normalized_command, proven_literal_worktree_path,
-};
 use crate::clients::git_cli::exec_git_stdin;
 use crate::error::GitAiError;
-use crate::model::domain::{IndexWriteEvidence, NormalizedCommand, SemanticEvent};
+use crate::model::domain::IndexWriteEvidence;
 use crate::operations::git::find_repository_in_path;
-use crate::operations::git::oid::is_non_zero_oid;
 use crate::operations::git::refs::parse_batch_check_blob_oid;
-use std::collections::HashMap;
-
-pub(super) fn event(
-    cmd: &NormalizedCommand,
-    refs: &HashMap<String, String>,
-) -> Option<SemanticEvent> {
-    if cmd.exit_code != 0
-        || cmd.raw_argv.is_empty()
-        || !matches!(cmd.index_write, IndexWriteEvidence::Exact(_))
-    {
-        return None;
-    }
-    let worktree = cmd.worktree.as_deref()?;
-    let head = refs.get("HEAD").filter(|head| is_non_zero_oid(head))?;
-    let parsed = parsed_invocation_for_normalized_command(cmd);
-    if parsed.command.as_deref() != Some("restore") {
-        return None;
-    }
-    let (source, path) = match parsed.command_args.as_slice() {
-        // A worktree-only restore can leave the same edit staged. Discarding
-        // its evidence would misattribute a later commit of that index entry.
-        [
-            source_flag,
-            source,
-            staged_flag,
-            worktree_flag,
-            separator,
-            path,
-        ] if source_flag == "--source"
-            && staged_flag == "--staged"
-            && worktree_flag == "--worktree"
-            && separator == "--" =>
-        {
-            (source.as_str(), path.as_str())
-        }
-        [source_flag, staged_flag, worktree_flag, separator, path]
-            if staged_flag == "--staged" && worktree_flag == "--worktree" && separator == "--" =>
-        {
-            (source_flag.strip_prefix("--source=")?, path.as_str())
-        }
-        _ => return None,
-    };
-    if source != head {
-        return None;
-    }
-
-    let path = proven_literal_worktree_path(&parsed.global_args, worktree, path)?;
-    Some(SemanticEvent::WorkingLogPathDiscarded {
-        base_commit: head.clone(),
-        path,
-    })
-}
 
 pub(super) fn apply(
     worktree: &str,
@@ -108,7 +52,10 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::domain::NormalizedCommand;
     use crate::model::domain::{CommandScope, Confidence};
+    use crate::operations::daemon::analyzers::restore_discard::event;
+    use std::collections::HashMap;
 
     fn command(argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {

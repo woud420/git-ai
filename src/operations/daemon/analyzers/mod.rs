@@ -12,6 +12,7 @@ mod orphan_checkout;
 mod removal;
 mod reset;
 pub(crate) mod switch_discard;
+pub(crate) mod restore_discard;
 pub mod transport;
 pub mod workspace;
 mod workspace_evidence;

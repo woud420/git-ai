@@ -66,6 +66,7 @@ mod tests {
             invoked_command: Some("merge".into()),
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
+            transport_targets: None,
             exit_code: 0,
             started_at_ns: 1,
             finished_at_ns: 2,

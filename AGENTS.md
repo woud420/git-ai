@@ -22,8 +22,9 @@ These commands require GNU Make 4.4.1 or newer. On macOS, Homebrew installs it a
 # Install a git-ai debug build for local dev on the system so that all git commands will route through it.
 # Installs to the same location as real release builds, so it overrides system-wide. It also runs `git-ai install`
 # and restarts the daemon to ensure all latest code changes are fully installed and propagated system-wide.
-# Use this for trying out changes locally -- do not use any other approaches for runing git-ai locally. They will
-# not work, interfere, and break things.
+# Use this when the task includes installing a development build or validating installed integration.
+# For ordinary verification, use the isolated test commands below; they do not replace the installed runtime.
+# Do not substitute an ad hoc daemon launch for the prescribed test harness or installed integration flow.
 make dev
 
 # Build (only use this for checking that your changes compile)

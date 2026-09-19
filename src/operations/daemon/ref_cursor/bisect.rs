@@ -6,6 +6,8 @@ impl RefCursor {
         cmd: &mut NormalizedCommand,
         state: &FamilyState,
     ) -> Result<(), GitAiError> {
+        #[cfg(feature = "test-support")]
+        eprintln!("bisect cursor command: {cmd:?}; refs: {:?}", state.refs);
         let Some(checkout) = cmd.bisect_checkout.as_ref() else {
             return Ok(());
         };
@@ -29,6 +31,8 @@ impl RefCursor {
         };
         let key = head_key(&git_dir);
         let consumed_through = self.reflog_start_offset(&key, &path)?.unwrap_or(0);
+        #[cfg(feature = "test-support")]
+        eprintln!("bisect cursor floor: {consumed_through}; records: {records:?}");
         let start_secs = checkout.started_at_ns / 1_000_000_000;
         let end_secs = checkout.finished_at_ns / 1_000_000_000;
         let mut matches = records.into_iter().filter_map(|record| {

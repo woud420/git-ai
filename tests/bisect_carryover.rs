@@ -10,6 +10,25 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+struct BisectDiagnostics<'a>(&'a TestRepo);
+
+impl Drop for BisectDiagnostics<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let (_, log) = self.0.daemon_diagnostics();
+            let lines: Vec<_> = log
+                .lines()
+                .filter(|line| line.contains("bisect cursor"))
+                .collect();
+            eprintln!("Bisect cursor diagnostics:\n{}", lines.join("\n"));
+            eprintln!(
+                "Bisect completions: {:#?}",
+                self.0.daemon_completion_entries()
+            );
+        }
+    }
+}
+
 fn history() -> (TestRepo, Vec<String>) {
     let repo = TestRepo::new();
     let heads = prepare_history(&repo);
@@ -46,6 +65,7 @@ fn pending_ai(repo: &TestRepo) {
 }
 
 fn assert_pending_commit(repo: &TestRepo) {
+    let _diagnostics = BisectDiagnostics(repo);
     assert_eq!(
         fs::read_to_string(repo.path().join("pending.txt")).unwrap(),
         "base\npending AI\n"
@@ -233,6 +253,7 @@ fn bisect_carryover_delayed_effect_preserves_later_checkpoint() {
     let marker = fs::read_to_string(repo.path().join("history.txt")).unwrap();
     repo.stage_all_and_commit("Commit after delayed bisect and later checkpoint")
         .unwrap();
+    let _diagnostics = BisectDiagnostics(&repo);
     repo.filename("pending.txt").assert_committed_lines(lines![
         "base".human(),
         "pending AI".ai(),

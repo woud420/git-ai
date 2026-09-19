@@ -59,10 +59,17 @@ impl ActorDaemonCoordinator {
         };
         if original_head != new_head {
             if original_head.is_empty() {
-                return Err(GitAiError::Generic(format!(
-                    "cherry-pick complete missing original HEAD sid={}",
-                    cmd.root_sid
-                )));
+                return Err(crate::model::repository::error::PersistenceError::Io {
+                    // The persisted side-effect error retains its original Display.
+                    operation: "Generic error",
+                    path: String::new(),
+                    kind: std::io::ErrorKind::InvalidData,
+                    message: format!(
+                        "cherry-pick complete missing original HEAD sid={}",
+                        cmd.root_sid
+                    ),
+                }
+                .into());
             }
             apply_cherry_pick_complete_rewrite(&repo, original_head, &sources, &destinations)?;
         }
@@ -118,9 +125,9 @@ impl ActorDaemonCoordinator {
                     let push_head =
                         stash_base_head(&repo, stash_sha).or_else(|| head.map(ToOwned::to_owned));
                     if let Some(head_sha) = push_head.as_deref() {
-                        let pathspecs = Self::stash_pathspecs_from_command(cmd);
+                        let (pathspecs, keep_index) = Self::stash_push_options_from_command(cmd);
                         crate::operations::authorship::rewrite_stash::handle_stash_create(
-                            &repo, stash_sha, head_sha, pathspecs,
+                            &repo, stash_sha, head_sha, pathspecs, keep_index,
                         )?;
                     }
                 }

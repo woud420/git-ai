@@ -2,6 +2,7 @@ pub mod agent_detection;
 pub mod attribution_recovery;
 pub mod background_agent;
 pub(crate) mod bash_candidate;
+mod checkpoint_history;
 pub mod conflict_resolution;
 pub mod diff_ai_accepted;
 pub(crate) mod diff_base;

@@ -26,9 +26,8 @@ Untracked line
     fs::write(&file_path, initial).unwrap();
     // Example of a completely untracked edit where we didn't fire a checkpoint call at all
     repo.stage_all_and_commit("Initial commit").unwrap();
-    // Assert after every commit
     let mut file = repo.filename("example.md");
-    // ALWAYS use the helper to assert the lines post-commit AND make sure to always assert line-level after EVERY commit for EVERY test you EVER right. This is CRUCIAL.
+    // Assert committed lines at every transition whose attribution is part of the tested invariant.
     file.assert_committed_lines(lines![
         "Untracked line".unattributed_human(), // 'untracked'
     ]);

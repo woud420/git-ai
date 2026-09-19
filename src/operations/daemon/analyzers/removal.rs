@@ -1,6 +1,7 @@
+use super::normalized_args;
 use crate::model::domain::{NormalizedCommand, SemanticEvent, WorktreeState};
-use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
-use crate::operations::git::oid::is_non_zero_oid;
+use crate::model::git_oid::is_non_zero_oid;
+use crate::operations::git::cli_parser::parse_git_cli_args;
 
 pub(super) fn analyze_removal(
     cmd: &NormalizedCommand,
@@ -17,7 +18,7 @@ pub(super) fn analyze_removal(
         .head
         .as_ref()
         .filter(|head| is_non_zero_oid(head))?;
-    let parsed = parsed_invocation_for_normalized_command(cmd);
+    let parsed = parse_git_cli_args(&normalized_args(&cmd.raw_argv));
     if parsed.command.as_deref() != Some("rm") {
         return None;
     }

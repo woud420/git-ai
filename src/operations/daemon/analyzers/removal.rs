@@ -1,13 +1,14 @@
+use super::normalized_args;
 use super::workspace_evidence::{has_only_worktree_globals, ordered_head};
 use crate::model::domain::{NormalizedCommand, SemanticEvent, WorktreeState};
-use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
+use crate::operations::git::cli_parser::parse_git_cli_args;
 
 pub(super) fn analyze_removal(
     cmd: &NormalizedCommand,
     worktree: Option<&WorktreeState>,
 ) -> Option<SemanticEvent> {
     let head = ordered_head(cmd, worktree)?;
-    let parsed = parsed_invocation_for_normalized_command(cmd);
+    let parsed = parse_git_cli_args(&normalized_args(&cmd.raw_argv));
     if parsed.command.as_deref() != Some("rm") || !has_only_worktree_globals(&parsed) {
         return None;
     }

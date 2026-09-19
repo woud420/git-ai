@@ -367,3 +367,64 @@ fn orphan_checkout_records_unborn_worktree_without_old_head_fallback() {
     assert_eq!(worktree.branch.as_deref(), Some("refs/heads/new-root"));
     assert!(!worktree.detached);
 }
+
+#[test]
+fn reducer_uses_this_worktree_head_and_never_the_family_head() {
+    use crate::model::domain::{FamilyKey, FamilyState, SemanticEvent, WatermarkState};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    let mut cmd = normalized();
+    cmd.raw_argv = ["git", "rm", "--", ":(top,literal)file.txt"]
+        .map(str::to_string)
+        .to_vec();
+    cmd.primary_command = Some("rm".to_string());
+    cmd.invoked_command = Some("rm".to_string());
+    cmd.invoked_args = cmd.raw_argv[2..].to_vec();
+    cmd.ref_changes.clear();
+    cmd.trace_derived = true;
+    cmd.started_at_ns = 20;
+    cmd.finished_at_ns = 30;
+    let worktree = WorktreeState {
+        head: Some("a".repeat(40)),
+        branch: None,
+        detached: true,
+        last_updated_ns: 10,
+    };
+    cmd.worktree = Some(PathBuf::from("/alias/worktree"));
+    let canonical = PathBuf::from("/canonical/worktree");
+    let mut state = FamilyState {
+        family_key: FamilyKey::new("family"),
+        refs: HashMap::from([("HEAD".into(), "b".repeat(40))]),
+        worktrees: HashMap::from([(canonical.clone(), worktree)]),
+        last_error: None,
+        applied_seq: 0,
+        watermarks: WatermarkState::default(),
+    };
+    let (_, analysis) = reduce_family_command_with_ref_snapshot(
+        &mut state,
+        cmd.clone(),
+        &AnalyzerRegistry::new(),
+        &HashMap::new(),
+        Some(canonical.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.events,
+        vec![SemanticEvent::WorkingTreeFilesRemoved {
+            head: "a".repeat(40),
+            files: vec!["file.txt".into()],
+        }]
+    );
+
+    state.worktrees.clear();
+    let (_, analysis) = reduce_family_command_with_ref_snapshot(
+        &mut state,
+        cmd,
+        &AnalyzerRegistry::new(),
+        &HashMap::new(),
+        Some(canonical),
+    )
+    .unwrap();
+    assert_eq!(analysis.events, vec![SemanticEvent::OpaqueCommand]);
+}

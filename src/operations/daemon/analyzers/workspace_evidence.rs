@@ -1,6 +1,6 @@
 use crate::model::domain::{NormalizedCommand, WorktreeState};
+use crate::model::git_oid::is_non_zero_oid;
 use crate::operations::git::cli_parser::ParsedGitInvocation;
-use crate::operations::git::oid::is_non_zero_oid;
 
 pub(super) fn ordered_head<'a>(
     cmd: &NormalizedCommand,

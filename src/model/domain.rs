@@ -52,6 +52,8 @@ pub struct NormalizedCommand {
     pub invoked_command: Option<String>,
     pub invoked_args: Vec<String>,
     pub observed_child_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_targets: Option<Vec<String>>,
     pub exit_code: i32,
     pub started_at_ns: u128,
     pub finished_at_ns: u128,

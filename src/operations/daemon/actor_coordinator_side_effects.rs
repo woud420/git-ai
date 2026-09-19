@@ -377,11 +377,7 @@ impl ActorDaemonCoordinator {
                     )?;
                 }
                 crate::model::domain::SemanticEvent::PushCompleted { .. } => {
-                    apply_push_side_effect(
-                        &worktree,
-                        cmd.invoked_command.as_deref(),
-                        &cmd.invoked_args,
-                    )?;
+                    apply_push_side_effect(&worktree, cmd)?;
                 }
                 crate::model::domain::SemanticEvent::CherryPickComplete {
                     original_head,

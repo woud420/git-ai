@@ -23,6 +23,7 @@ fn sample_normalized_cmd(family_key: &str, seq: u128) -> NormalizedCommand {
         stash_target_oid: None,
         cherry_pick_source_oids: Vec::new(),
         revert_source_oids: Vec::new(),
+        transport_targets: None,
         ref_changes: Vec::new(),
         confidence: Confidence::Low,
     }
@@ -74,6 +75,7 @@ async fn commit_enrichment_retries_until_reflog_entry_is_visible() {
         stash_target_oid: None,
         cherry_pick_source_oids: Vec::new(),
         revert_source_oids: Vec::new(),
+        transport_targets: None,
         ref_changes: Vec::new(),
         confidence: Confidence::Low,
     };
@@ -148,6 +150,7 @@ async fn trace_cherry_pick_retries_without_initial_reflog_evidence() {
         stash_target_oid: None,
         cherry_pick_source_oids: Vec::new(),
         revert_source_oids: Vec::new(),
+        transport_targets: None,
         ref_changes: Vec::new(),
         confidence: Confidence::Low,
     };

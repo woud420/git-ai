@@ -13,8 +13,7 @@ use crate::operations::git::sync_authorship::{fetch_authorship_notes, fetch_remo
 
 pub fn apply_push_side_effect(
     worktree: &str,
-    command: Option<&str>,
-    args: &[String],
+    cmd: &crate::model::domain::NormalizedCommand,
 ) -> Result<(), GitAiError> {
     use crate::config::NotesBackendKind;
     use crate::operations::git::cli_parser::is_dry_run;
@@ -26,7 +25,7 @@ pub fn apply_push_side_effect(
     }
 
     let repo = find_repository_in_path(worktree)?;
-    let parsed = parsed_invocation_for_side_effect(command, args);
+    let parsed = parsed_invocation_for_normalized_command(cmd);
 
     if is_dry_run(&parsed.command_args)
         || parsed
@@ -38,12 +37,29 @@ pub fn apply_push_side_effect(
         return Ok(());
     }
 
-    let remote = push_remote_from_args(&repo, &parsed)?;
-
+    let fallback;
+    let destinations = if cmd.trace_derived {
+        cmd.transport_targets
+            .as_deref()
+            .filter(|targets| !targets.is_empty())
+            .ok_or_else(|| crate::model::repository::error::PersistenceError::Io {
+                operation: "push notes",
+                path: String::new(),
+                kind: std::io::ErrorKind::InvalidData,
+                message: "push destination was not captured unambiguously from Trace2".to_string(),
+            })?
+    } else {
+        fallback = vec![push_remote_from_args(&repo, &parsed)?];
+        &fallback
+    };
     crate::operations::commands::upgrade::maybe_schedule_background_update_check();
-    tracing::debug!("started pushing authorship notes to remote: {}", remote);
-
-    push_authorship_notes(&repo, &remote)
+    let mut first_error = None;
+    for destination in destinations {
+        if let Err(error) = push_authorship_notes(&repo, destination) {
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 pub fn transcript_sweep_triggers_for_events(

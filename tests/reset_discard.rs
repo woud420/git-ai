@@ -184,13 +184,25 @@ fn reset_discard_fsmonitor_preserves_retained_edit() {
     let hook = repo.path().join(".git/hooks/fsmonitor-fixture");
     // Model a monitor that still reports the index entry as clean. Git itself
     // retains the edit, so a successful hard reset does not prove its removal.
-    repos::write_executable_script(&hook, "#!/bin/sh\nprintf 'fixture-token\\0'\n").unwrap();
-    repo.git_og(&["config", "core.fsmonitor", hook.to_str().unwrap()])
+    repos::write_executable_script(
+        &hook,
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" >> .git/fsmonitor-fixture-calls\nprintf 'fixture-token\\0'\n",
+    )
+    .unwrap();
+    // Git passes this value through a shell; native Windows backslashes would
+    // become shell escapes instead of separators in the hook path.
+    repo.git_og(&["config", "core.fsmonitor", ".git/hooks/fsmonitor-fixture"])
+        .unwrap();
+    repo.git_og(&["config", "core.fsmonitorHookVersion", "2"])
         .unwrap();
     repo.git_og(&["update-index", "--fsmonitor"]).unwrap();
     repo.git_og(&["update-index", "--fsmonitor-valid", "tracked.txt"])
         .unwrap();
+    let calls = repo.path().join(".git/fsmonitor-fixture-calls");
+    fs::write(&calls, "").unwrap();
     repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    let calls = fs::read_to_string(calls).unwrap();
+    assert!(!calls.is_empty() && calls.lines().all(|line| line == "2"));
     assert_eq!(
         fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
         "discarded edit\n"

@@ -95,13 +95,13 @@ pub trait HookInstaller: Send + Sync {
     ) -> Result<Option<String>, GitAiError>;
 
     /// Install extras (e.g., VS Code extensions, git.path configuration)
-    /// Default implementation does nothing
+    /// Codex and Claude use the shared opt-in socket permission installer.
     fn install_extras(
         &self,
         _params: &HookInstallerParams,
-        _dry_run: bool,
+        dry_run: bool,
     ) -> Result<Vec<InstallResult>, GitAiError> {
-        Ok(vec![])
+        super::sandbox_socket::install(self.id(), dry_run)
     }
 
     /// Process names to search for in the system process list.
@@ -112,13 +112,13 @@ pub trait HookInstaller: Send + Sync {
     }
 
     /// Uninstall extras (e.g., VS Code extensions, git.path configuration)
-    /// Default implementation does nothing
+    /// Codex and Claude use the shared opt-in socket permission installer.
     fn uninstall_extras(
         &self,
         _params: &HookInstallerParams,
-        _dry_run: bool,
+        dry_run: bool,
     ) -> Result<Vec<UninstallResult>, GitAiError> {
-        Ok(vec![])
+        super::sandbox_socket::uninstall(self.id(), dry_run)
     }
 }
 

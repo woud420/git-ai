@@ -10,7 +10,9 @@ use tokio::time::Duration;
 
 #[doc(hidden)]
 pub enum FamilySequencerEntry {
-    PendingRoot,
+    PendingRoot {
+        root_sid: String,
+    },
     ReadyCommand(Box<crate::model::domain::NormalizedCommand>),
     Checkpoint {
         request: Box<CheckpointRequest>,
@@ -22,7 +24,7 @@ pub enum FamilySequencerEntry {
 impl std::fmt::Debug for FamilySequencerEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PendingRoot => write!(f, "PendingRoot"),
+            Self::PendingRoot { .. } => write!(f, "PendingRoot"),
             Self::ReadyCommand(_) => write!(f, "ReadyCommand(..)"),
             Self::Checkpoint { .. } => write!(f, "Checkpoint {{ .. }}"),
             Self::Canceled => write!(f, "Canceled"),
@@ -219,6 +221,7 @@ pub struct ActorDaemonCoordinator {
     pub(crate) recent_replay_prerequisites_by_family:
         Mutex<HashMap<String, VecDeque<RecentReplayPrerequisite>>>,
     pub(crate) side_effect_errors_by_family: Mutex<HashMap<String, BTreeMap<u64, String>>>,
+    pub(crate) error_log_policy: Mutex<super::error_log_policy::ErrorLogPolicy>,
     pub(crate) side_effect_exec_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     pub(crate) command_side_effect_semaphore: Semaphore,
     /// Weak self-reference set by `register_self` after the coordinator is
@@ -255,6 +258,7 @@ pub struct ActorDaemonCoordinator {
     pub(crate) queued_trace_payloads_by_root: Mutex<HashMap<String, usize>>,
     pub(crate) processed_trace_ingest_seq: AtomicUsize,
     pub(crate) trace_ingest_progress_notify: Notify,
+    pub(crate) commit_editor_waits: Mutex<super::commit_editor_wait::CommitEditorWaits>,
     pub(crate) trace_ingress_state: Mutex<TraceIngressState>,
     pub(crate) accepting_checkpoints: AtomicBool,
     pub(crate) pending_checkpoint_admissions: AtomicUsize,

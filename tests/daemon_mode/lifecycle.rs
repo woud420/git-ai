@@ -1,3 +1,7 @@
+#[cfg(windows)]
+#[path = "lifecycle/windows_start.rs"]
+mod windows_start;
+
 use super::*;
 
 fn bg_command(repo: &TestRepo, subcommand: &str, extra_args: &[&str]) -> Output {

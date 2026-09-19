@@ -13,6 +13,7 @@ use crate::operations::git::repository::Repository;
 use crate::operations::mdm::paths::home_dir;
 
 mod author;
+mod budgets;
 mod file;
 mod notes_backend;
 mod patterns;
@@ -26,6 +27,7 @@ pub(crate) mod tests;
 // --- Public re-exports (preserve every crate::config::X path) ---
 
 pub use author::AuthorConfig;
+pub use budgets::{DEFAULT_MAX_TRANSCRIPT_BATCH_BYTES, DEFAULT_MAX_TRANSCRIPT_LINE_BYTES};
 #[cfg(any(test, feature = "test-support"))]
 pub use file::ConfigPatch;
 pub use file::{
@@ -82,6 +84,8 @@ pub struct Config {
     pub(crate) max_checkpoint_file_size_bytes: usize,
     pub(crate) max_checkpoint_total_size_bytes: usize,
     pub(crate) max_checkpoint_total_lines: usize,
+    pub(crate) max_transcript_line_bytes: usize,
+    pub(crate) max_transcript_batch_bytes: usize,
     pub(crate) daemon_memory_limit_mb: Option<u64>,
 }
 
@@ -419,21 +423,6 @@ impl Config {
 
     pub fn transcript_streaming_lookback_days(&self) -> Option<u32> {
         self.transcript_streaming_lookback_days
-    }
-
-    /// Returns the per-file size limit for checkpoint content reads.
-    pub fn max_checkpoint_file_size_bytes(&self) -> usize {
-        self.max_checkpoint_file_size_bytes
-    }
-
-    /// Returns the total byte budget for content in one checkpoint request.
-    pub fn max_checkpoint_total_size_bytes(&self) -> usize {
-        self.max_checkpoint_total_size_bytes
-    }
-
-    /// Returns the total line budget for content in one checkpoint request.
-    pub fn max_checkpoint_total_lines(&self) -> usize {
-        self.max_checkpoint_total_lines
     }
 
     /// Returns the daemon current-RSS limit in MiB, or `None` when disabled.

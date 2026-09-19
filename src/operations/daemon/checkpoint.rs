@@ -445,12 +445,11 @@ fn save_current_file_states(
     let file_content_hashes = crate::tokio_runtime::block_on(async {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
         let blobs_dir = Arc::new(blobs_dir);
-        let dirty_files = Arc::new(dirty_files);
 
         let mut futures = Vec::with_capacity(files.len());
         for file_path in files {
             let blobs_dir = Arc::clone(&blobs_dir);
-            let dirty_files = Arc::clone(&dirty_files);
+            let dirty_files = dirty_files.clone();
             let semaphore = Arc::clone(&semaphore);
 
             futures.push(async move {
@@ -459,8 +458,7 @@ fn save_current_file_states(
                     .await
                     .expect("file state semaphore was closed");
 
-                // Read file content - check dirty_files first, then filesystem
-                let content = if let Some(ref dirty_map) = *dirty_files {
+                let content = if let Some(ref dirty_map) = dirty_files {
                     dirty_map.get(&file_path).cloned()
                 } else {
                     None

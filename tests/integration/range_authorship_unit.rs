@@ -1,3 +1,6 @@
+mod batched_notes;
+mod note_parity;
+
 use crate::repos::test_repo::TestRepo;
 use git_ai::operations::authorship::range_authorship::{
     EMPTY_TREE_HASH, range_authorship, should_ignore_file,

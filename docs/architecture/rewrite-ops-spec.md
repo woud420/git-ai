@@ -361,3 +361,21 @@ completed commands — is a regression against this spec.
   (`assert_committed_lines` / `assert_lines_and_blame`).
 - The attribution fuzzer (companion doc) pressures the composition of these
   operations; every fuzzer find becomes a minimized deterministic regression.
+
+### Single-commit merge and revert continuation
+
+Successful exact `merge --continue` and `revert --continue` commands can use
+pending checkpoint evidence for their newly created commit. Their HEAD reflog
+entries differ from ordinary merge/revert entries: Git records a merge commit
+as `commit (merge):` and a resumed revert as `commit:`. Async enrichment admits
+one matching, unconsumed entry within the command time window and an existing
+cursor boundary, with the expected old HEAD. Missing, ambiguous, failed or
+multi-commit continuations remain opaque in this path.
+
+The admitted commit uses the ordinary post-commit working-log processor against
+captured old/new OIDs, including when later Git work has moved HEAD. Revert
+continuation does not guess the reverted source from the current first parent;
+restoring historical provenance across an interrupted multi-source revert still
+requires explicit persisted source identities. This change does not implement
+abort/skip cleanup: discarding resolution evidence must be distinguished from
+unrelated checkpointed edits that survive the control operation.

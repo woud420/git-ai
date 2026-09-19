@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 mod branch_lifecycle;
 mod cherry_pick_revert;
 mod command_matchers;
+mod continuation;
 mod cursor_core;
 mod enrichment;
 mod rebase_pull;
@@ -52,3 +53,6 @@ mod tests_rebase_cherry_pick;
 mod tests_reflog_rebase;
 #[cfg(test)]
 mod tests_reset_update_ref;
+
+#[cfg(test)]
+mod tests_continuation;

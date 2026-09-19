@@ -123,6 +123,14 @@ pub(crate) fn normalized_args(argv: &[String]) -> Vec<String> {
     }
 }
 
+/// These successful forms create a commit instead of merely moving a ref.
+pub(crate) fn is_commit_continuation(cmd: &NormalizedCommand) -> bool {
+    let parsed =
+        crate::operations::git::cli_parser::parse_git_cli_args(&normalized_args(&cmd.raw_argv));
+    matches!(parsed.command.as_deref(), Some("merge" | "revert"))
+        && parsed.command_args.as_slice() == ["--continue"]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,11 +1,17 @@
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::{TimestampCursorWatermark, WatermarkStrategy};
 use crate::operations::streams::agents::opencode::open_sqlite_readonly;
-use rusqlite::Connection;
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
+
+mod budget;
+mod rows;
+use rows::{SpanRow, read_attributes_for_spans, read_events_for_spans, read_spans_after};
+
+#[cfg(test)]
+mod budget_tests;
 
 fn map_sqlite_error(e: rusqlite::Error, context: &str) -> StreamError {
     if let rusqlite::Error::SqliteFailure(ref err, _) = e
@@ -38,9 +44,13 @@ pub fn read_otel_spans_incremental(
             message: "OTEL stream requires TimestampCursorWatermark".to_string(),
         })?;
 
-    let conn = open_sqlite_readonly(path)?;
-
-    let spans = read_spans_after(&conn, cursor.timestamp_millis, &cursor.last_id, batch_size)?;
+    let mut conn = open_sqlite_readonly(path)?;
+    // The byte plan and all child rows must share one immutable read snapshot.
+    let tx = conn
+        .transaction()
+        .map_err(|error| map_sqlite_error(error, "Failed to start OTEL read snapshot"))?;
+    let count = budget::plan_count(&tx, cursor, batch_size)?;
+    let spans = read_spans_after(&tx, cursor.timestamp_millis, &cursor.last_id, count)?;
     if spans.is_empty() {
         return Ok(StreamBatch {
             events: vec![],
@@ -49,8 +59,8 @@ pub fn read_otel_spans_incremental(
     }
 
     let span_ids: Vec<&str> = spans.iter().map(|s| s.span_id.as_str()).collect();
-    let attributes = read_attributes_for_spans(&conn, &span_ids)?;
-    let events = read_events_for_spans(&conn, &span_ids)?;
+    let mut attributes = read_attributes_for_spans(&tx, &span_ids)?;
+    let mut events = read_events_for_spans(&tx, &span_ids)?;
 
     let last_span = spans.last().unwrap();
     let new_watermark =
@@ -59,8 +69,8 @@ pub fn read_otel_spans_incremental(
     let json_events: Vec<serde_json::Value> = spans
         .into_iter()
         .map(|span| {
-            let span_attrs = attributes.get(&span.span_id).cloned().unwrap_or_default();
-            let span_events = events.get(&span.span_id).cloned().unwrap_or_default();
+            let span_attrs = attributes.remove(&span.span_id).unwrap_or_default();
+            let span_events = events.remove(&span.span_id).unwrap_or_default();
             build_span_event_json(span, span_attrs, span_events)
         })
         .collect();
@@ -69,208 +79,6 @@ pub fn read_otel_spans_incremental(
         events: json_events,
         new_watermark: Box::new(new_watermark),
     })
-}
-
-struct SpanRow {
-    span_id: String,
-    trace_id: String,
-    parent_span_id: Option<String>,
-    name: String,
-    start_time_ms: f64,
-    end_time_ms: f64,
-    status_code: i32,
-    status_message: Option<String>,
-    operation_name: Option<String>,
-    provider_name: Option<String>,
-    agent_name: Option<String>,
-    conversation_id: Option<String>,
-    request_model: Option<String>,
-    response_model: Option<String>,
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
-    cached_tokens: Option<i64>,
-    reasoning_tokens: Option<i64>,
-    tool_name: Option<String>,
-    tool_call_id: Option<String>,
-    tool_type: Option<String>,
-    chat_session_id: Option<String>,
-    turn_index: Option<i64>,
-    ttft_ms: Option<f64>,
-}
-
-fn read_spans_after(
-    conn: &Connection,
-    after_ms: f64,
-    after_id: &str,
-    limit: usize,
-) -> Result<Vec<SpanRow>, StreamError> {
-    // Keyset pagination: skip spans at or before the cursor.
-    // If after_id is empty (initial state), use simple `>` on timestamp.
-    // Otherwise use compound `(ts > ?) OR (ts = ? AND id > ?)` to handle ties.
-    // Only read spans that have at least one session identifier (chat_session_id
-    // or conversation_id). Spans without either cannot be linked to a session.
-    let session_filter = "(chat_session_id IS NOT NULL AND chat_session_id != '') \
-                          OR (conversation_id IS NOT NULL AND conversation_id != '')";
-
-    let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if after_id.is_empty() {
-        (
-            format!(
-                "SELECT span_id, trace_id, parent_span_id, name, \
-                 start_time_ms, end_time_ms, \
-                 status_code, status_message, operation_name, provider_name, agent_name, \
-                 conversation_id, request_model, response_model, input_tokens, output_tokens, \
-                 cached_tokens, reasoning_tokens, tool_name, tool_call_id, tool_type, \
-                 chat_session_id, turn_index, ttft_ms \
-                 FROM spans WHERE end_time_ms > ?1 AND ({}) \
-                 ORDER BY end_time_ms ASC, span_id ASC LIMIT ?2",
-                session_filter
-            ),
-            vec![
-                Box::new(after_ms) as Box<dyn rusqlite::types::ToSql>,
-                Box::new(limit as i64),
-            ],
-        )
-    } else {
-        (
-            format!(
-                "SELECT span_id, trace_id, parent_span_id, name, \
-                 start_time_ms, end_time_ms, \
-                 status_code, status_message, operation_name, provider_name, agent_name, \
-                 conversation_id, request_model, response_model, input_tokens, output_tokens, \
-                 cached_tokens, reasoning_tokens, tool_name, tool_call_id, tool_type, \
-                 chat_session_id, turn_index, ttft_ms \
-                 FROM spans WHERE ((end_time_ms > ?1) OR (end_time_ms = ?2 AND span_id > ?3)) \
-                 AND ({}) \
-                 ORDER BY end_time_ms ASC, span_id ASC LIMIT ?4",
-                session_filter
-            ),
-            vec![
-                Box::new(after_ms) as Box<dyn rusqlite::types::ToSql>,
-                Box::new(after_ms),
-                Box::new(after_id.to_string()),
-                Box::new(limit as i64),
-            ],
-        )
-    };
-
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| map_sqlite_error(e, "Failed to prepare spans query"))?;
-
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(params.iter()), |row| {
-            Ok(SpanRow {
-                span_id: row.get(0)?,
-                trace_id: row.get(1)?,
-                parent_span_id: row.get(2)?,
-                name: row.get(3)?,
-                start_time_ms: row.get(4)?,
-                end_time_ms: row.get(5)?,
-                status_code: row.get(6)?,
-                status_message: row.get(7)?,
-                operation_name: row.get(8)?,
-                provider_name: row.get(9)?,
-                agent_name: row.get(10)?,
-                conversation_id: row.get(11)?,
-                request_model: row.get(12)?,
-                response_model: row.get(13)?,
-                input_tokens: row.get(14)?,
-                output_tokens: row.get(15)?,
-                cached_tokens: row.get(16)?,
-                reasoning_tokens: row.get(17)?,
-                tool_name: row.get(18)?,
-                tool_call_id: row.get(19)?,
-                tool_type: row.get(20)?,
-                chat_session_id: row.get(21)?,
-                turn_index: row.get(22)?,
-                ttft_ms: row.get(23)?,
-            })
-        })
-        .map_err(|e| map_sqlite_error(e, "Failed to query spans"))?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| map_sqlite_error(e, "Failed to read span row"))
-}
-
-fn read_attributes_for_spans(
-    conn: &Connection,
-    span_ids: &[&str],
-) -> Result<HashMap<String, HashMap<String, String>>, StreamError> {
-    if span_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let placeholders: String = span_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql = format!(
-        "SELECT span_id, key, value FROM span_attributes WHERE span_id IN ({})",
-        placeholders
-    );
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| map_sqlite_error(e, "Failed to prepare attributes query"))?;
-
-    let mut result: HashMap<String, HashMap<String, String>> = HashMap::new();
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(span_ids.iter()), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })
-        .map_err(|e| map_sqlite_error(e, "Failed to query attributes"))?;
-
-    for row in rows {
-        let (span_id, key, value) =
-            row.map_err(|e| map_sqlite_error(e, "Failed to read attribute row"))?;
-        if let Some(v) = value {
-            result.entry(span_id).or_default().insert(key, v);
-        }
-    }
-    Ok(result)
-}
-
-fn read_events_for_spans(
-    conn: &Connection,
-    span_ids: &[&str],
-) -> Result<HashMap<String, Vec<serde_json::Value>>, StreamError> {
-    if span_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let placeholders: String = span_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql = format!(
-        "SELECT span_id, name, CAST(timestamp_ms AS INTEGER), attributes FROM span_events \
-         WHERE span_id IN ({}) ORDER BY timestamp_ms ASC",
-        placeholders
-    );
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| map_sqlite_error(e, "Failed to prepare events query"))?;
-
-    let mut result: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
-    let rows = stmt
-        .query_map(rusqlite::params_from_iter(span_ids.iter()), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
-        .map_err(|e| map_sqlite_error(e, "Failed to query events"))?;
-
-    for row in rows {
-        let (span_id, name, timestamp_ms, attributes_json) =
-            row.map_err(|e| map_sqlite_error(e, "Failed to read event row"))?;
-        let attrs: serde_json::Value = attributes_json
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or(serde_json::Value::Null);
-        result.entry(span_id).or_default().push(json!({
-            "name": name,
-            "timestamp_ms": timestamp_ms,
-            "attributes": attrs,
-        }));
-    }
-    Ok(result)
 }
 
 fn build_span_event_json(
@@ -347,7 +155,7 @@ mod tests {
     use crate::model::stream_watermark::TimestampCursorWatermark;
     use std::str::FromStr;
 
-    fn create_test_otel_db() -> (tempfile::TempDir, std::path::PathBuf) {
+    pub(super) fn create_test_otel_db() -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("traces.db");
         let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
@@ -377,7 +185,7 @@ mod tests {
         (dir, db_path)
     }
 
-    fn insert_span(
+    pub(super) fn insert_span(
         conn: &rusqlite::Connection,
         span_id: &str,
         end_time_ms: i64,

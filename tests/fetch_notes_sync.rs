@@ -241,41 +241,8 @@ fn fetch_sync_sqlite_backend_reads_imported_git_notes() {
     );
 }
 
-#[test]
-fn fetch_sync_http_backend_warms_existing_remote_head() {
-    let (source, oid, note) = attributed_source();
-    let server = ReferenceServer::start("127.0.0.1:0").unwrap();
-    let backend_url = server.base_url();
-    server.store().put(oid.clone(), note.clone());
-    let local = TestRepo::new_with_daemon_env(&[
-        ("GIT_AI_NOTES_BACKEND_KIND", "http"),
-        ("GIT_AI_NOTES_BACKEND_URL", &backend_url),
-        ("GIT_AI_API_KEY", "fetch-sync-test-key"),
-    ]);
-    add_remote(&local, "upstream", &source);
-    local.git_og(&["fetch", "upstream"]).unwrap();
-    local
-        .git_og(&["remote", "set-head", "upstream", "--auto"])
-        .unwrap();
-    let db_path = local.test_home_path().join(".git-ai/internal/notes-db");
-    assert_eq!(
-        NotesDatabase::open_at_path(&db_path)
-            .unwrap()
-            .get_note(&oid)
-            .unwrap(),
-        None
-    );
-
-    run_fetch(&local, &["fetch", "upstream"]).unwrap();
-    assert_eq!(
-        NotesDatabase::open_at_path(&db_path)
-            .unwrap()
-            .get_note(&oid)
-            .unwrap(),
-        Some(note)
-    );
-    assert!(local.read_authorship_note(&oid).is_none());
-}
+#[path = "fetch_notes_sync/http.rs"]
+mod http;
 
 #[test]
 fn fetch_sync_respects_repository_collection_opt_out() {

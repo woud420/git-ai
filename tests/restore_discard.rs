@@ -8,6 +8,11 @@ use std::fs;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+fn absolute_path(repo: &TestRepo, path: &str) -> String {
+    let root = repo.git_og(&["rev-parse", "--show-toplevel"]).unwrap();
+    format!("{}/{}", root.trim(), path)
+}
+
 fn commit_all(repo: &TestRepo, message: &str) -> String {
     repo.git(&["add", "-A"]).unwrap();
     repo.git(&["commit", "-m", message]).unwrap();
@@ -47,7 +52,7 @@ fn check_explicit_discard(preset: &str) {
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -96,7 +101,7 @@ fn restore_discard_index_only_preserves_worktree_evidence() {
             &base,
             "--staged",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -119,7 +124,7 @@ fn restore_discard_worktree_only_preserves_staged_evidence() {
             &base,
             "--worktree",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -130,6 +135,44 @@ fn restore_discard_worktree_only_preserves_staged_evidence() {
         "base\n"
     );
     repo.commit("staged edit survives worktree restore")
+        .unwrap();
+    assert_eq!(
+        repo.git_og(&["show", "HEAD:tracked.txt"]).unwrap(),
+        "discarded edit\n"
+    );
+    fs::write(repo.path().join("tracked.txt"), "discarded edit\n").unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
+fn restore_discard_alternate_index_preserves_default_staged_evidence() {
+    let repo = TestRepo::new();
+    let base = prepare_discard(&repo, "mock_ai");
+    repo.git(&["add", "tracked.txt"]).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let alternate = temp.path().join("alternate-index");
+    let env = [("GIT_INDEX_FILE", alternate.to_str().unwrap())];
+    repo.git_og_with_env(&["read-tree", &base], &env).unwrap();
+    repo.git_without_test_sync_for_test(
+        &[
+            "restore",
+            "--source",
+            &base,
+            "--staged",
+            "--worktree",
+            "--",
+            &absolute_path(&repo, "tracked.txt"),
+        ],
+        &env,
+    )
+    .unwrap();
+    repo.sync_daemon_force();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "base\n"
+    );
+    repo.commit("default-index edit survives alternate-index restore")
         .unwrap();
     assert_eq!(
         repo.git_og(&["show", "HEAD:tracked.txt"]).unwrap(),
@@ -155,7 +198,7 @@ fn restore_discard_preserves_unrelated_pending_file() {
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -187,7 +230,7 @@ fn restore_discard_preserves_later_checkpoint() {
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -243,7 +286,7 @@ fn restore_discard_linked_worktree() {
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -269,7 +312,7 @@ fn restore_discard_failed_restore_preserves_evidence() {
                 "--staged",
                 "--worktree",
                 "--",
-                ":(top,literal)tracked.txt"
+                &absolute_path(&repo, "tracked.txt")
             ],
             &[]
         )
@@ -296,7 +339,7 @@ fn restore_discard_sparse_skip_remains_native_failure() {
                 "--staged",
                 "--worktree",
                 "--",
-                ":(top,literal)tracked.txt"
+                &absolute_path(&repo, "tracked.txt")
             ],
             &[]
         )
@@ -320,14 +363,8 @@ fn check_invocation(mode: &str, linked: bool) {
     let subdir = repo.path().join("nested");
     fs::create_dir(&subdir).unwrap();
     let source = format!("--source={base}");
-    let args = [
-        "restore",
-        &source,
-        "--staged",
-        "--worktree",
-        "--",
-        ":(top,literal)tracked.txt",
-    ];
+    let path = absolute_path(&repo, "tracked.txt");
+    let args = ["restore", &source, "--staged", "--worktree", "--", &path];
     match mode {
         "root" => repo.git_without_test_sync_from_working_dir_for_test(repo.path(), &args, &[]),
         "subdir" => repo.git_without_test_sync_from_working_dir_for_test(&subdir, &args, &[]),
@@ -393,7 +430,7 @@ fn check_backend(kind: git_ai::config::NotesBackendKind) {
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -467,7 +504,7 @@ fn restore_discard_uses_own_worktree_head_after_another_worktree_commit() {
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)tracked.txt",
+            &absolute_path(&repo, "tracked.txt"),
         ],
         &[],
     )
@@ -506,7 +543,7 @@ fn restore_discard_git_process_count_does_not_grow_with_pending_files() {
                 "--staged",
                 "--worktree",
                 "--",
-                ":(top,literal)tracked.txt",
+                &absolute_path(&repo, "tracked.txt"),
             ],
             &[],
         )
@@ -545,11 +582,8 @@ fn restore_discard_directory_and_config_override_keep_existing_boundary() {
             args.extend(["-c", "core.quotePath=false"]);
         }
         args.extend(["restore", "--source", &base, "--staged", "--worktree", "--"]);
-        args.push(if config {
-            ":(top,literal)tracked.txt"
-        } else {
-            ":(top,literal)directory"
-        });
+        let selected = absolute_path(&repo, if config { "tracked.txt" } else { "directory" });
+        args.push(&selected);
         repo.git_without_test_sync_for_test(&args, &[]).unwrap();
         repo.sync_daemon_force();
         fs::write(repo.path().join(file), "discarded edit\n").unwrap();
@@ -561,19 +595,20 @@ fn restore_discard_directory_and_config_override_keep_existing_boundary() {
 }
 
 #[test]
-fn restore_discard_literal_magic_preserves_special_filename() {
+fn restore_discard_explicit_literal_mode_preserves_special_filename() {
     let repo = TestRepo::new();
     let file = "bracket[1].txt";
     let base = prepare_discard_at(&repo, "mock_ai", file);
     repo.git_without_test_sync_for_test(
         &[
+            "--literal-pathspecs",
             "restore",
             "--source",
             &base,
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)bracket[1].txt",
+            &absolute_path(&repo, "bracket[1].txt"),
         ],
         &[],
     )
@@ -611,4 +646,54 @@ fn restore_discard_plain_path_with_proven_absolute_root() {
     repo.stage_all_and_commit("proven root recreation").unwrap();
     repo.filename("tracked.txt")
         .assert_committed_lines(lines!["discarded edit".unattributed_human()]);
+}
+
+#[test]
+#[cfg(unix)]
+fn restore_discard_literal_environment_does_not_clear_another_file() {
+    let repo = TestRepo::new();
+    let shadow = ":(top,literal)tracked.txt";
+    for path in ["tracked.txt", shadow] {
+        fs::write(repo.path().join(path), "base\n").unwrap();
+        repo.git_ai(&["checkpoint", "mock_known_human", path])
+            .unwrap();
+    }
+    let base = commit_all(&repo, "two distinct filenames");
+    for path in ["tracked.txt", shadow] {
+        repo.filename(path)
+            .assert_committed_lines(lines!["base".human()]);
+    }
+    fs::write(repo.path().join("tracked.txt"), "retained ai\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "tracked.txt"])
+        .unwrap();
+    fs::write(repo.path().join(shadow), "discarded edit\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", shadow]).unwrap();
+    repo.git_without_test_sync_for_test(
+        &[
+            "restore",
+            "--source",
+            &base,
+            "--staged",
+            "--worktree",
+            "--",
+            shadow,
+        ],
+        &[("GIT_LITERAL_PATHSPECS", "1")],
+    )
+    .unwrap();
+    repo.sync_daemon_force();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "retained ai\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join(shadow)).unwrap(),
+        "base\n"
+    );
+    repo.stage_all_and_commit("retained edit after literal-path restore")
+        .unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["retained ai".ai()]);
+    repo.filename(shadow)
+        .assert_committed_lines(lines!["base".human()]);
 }

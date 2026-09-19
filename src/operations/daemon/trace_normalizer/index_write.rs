@@ -17,7 +17,7 @@ impl IndexVersions {
 }
 
 pub(super) fn record(pending: &mut PendingTraceCommand, payload: &Value, sid: &str, root: &str) {
-    if sid != root || !matches!(pending.root_cmd_name.as_deref(), Some("reset" | "switch" | "checkout")) {
+    if sid != root || !matches!(pending.root_cmd_name.as_deref(), Some("reset" | "switch" | "checkout" | "restore")) {
         return;
     }
     let category = payload.get("category").and_then(Value::as_str);

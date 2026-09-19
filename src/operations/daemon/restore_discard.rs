@@ -1,19 +1,23 @@
 use super::working_log_discard::remove_matching_attributions as remove_working_log_attributions_matching;
-use super::side_effect_helpers::parsed_invocation_for_normalized_command;
+use super::side_effect_helpers::{
+    parsed_invocation_for_normalized_command, proven_literal_worktree_path,
+};
 use crate::clients::git_cli::exec_git_stdin;
 use crate::error::GitAiError;
-use crate::model::domain::{NormalizedCommand, SemanticEvent};
+use crate::model::domain::{IndexWriteEvidence, NormalizedCommand, SemanticEvent};
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::oid::is_non_zero_oid;
 use crate::operations::git::refs::parse_batch_check_blob_oid;
 use std::collections::HashMap;
-use std::path::Path;
 
 pub(super) fn event(
     cmd: &NormalizedCommand,
     refs: &HashMap<String, String>,
 ) -> Option<SemanticEvent> {
-    if cmd.exit_code != 0 || cmd.raw_argv.is_empty() {
+    if cmd.exit_code != 0
+        || cmd.raw_argv.is_empty()
+        || !matches!(cmd.index_write, IndexWriteEvidence::Exact(_))
+    {
         return None;
     }
     let worktree = cmd.worktree.as_deref()?;
@@ -50,38 +54,27 @@ pub(super) fn event(
         return None;
     }
 
-    let mut root_cwd_proven = false;
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        let directory = if arg == "-C" {
-            globals.next()?.as_str()
-        } else {
-            arg.strip_prefix("-C").filter(|value| !value.is_empty())?
-        };
-        root_cwd_proven = Path::new(directory).is_absolute() && Path::new(directory) == worktree;
-    }
-    let path = if let Some(path) = path.strip_prefix(":(top,literal)") {
-        path
-    } else if root_cwd_proven && !path.contains(['*', '?', '[', ']', ':']) {
-        path
-    } else {
-        return None;
-    };
-    // Keep batch framing and root-relative path interpretation unambiguous.
-    if path.len() > 4096
-        || path.contains(['\n', '\r', '\0', '\\', '\u{fffd}'])
-        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
-    {
-        return None;
-    }
+    let path = proven_literal_worktree_path(&parsed.global_args, worktree, path)?;
     Some(SemanticEvent::WorkingLogPathDiscarded {
         base_commit: head.clone(),
-        path: path.to_string(),
+        path,
     })
 }
 
-pub(super) fn apply(worktree: &str, head: &str, path: &str) -> Result<(), GitAiError> {
+pub(super) fn apply(
+    worktree: &str,
+    head: &str,
+    path: &str,
+    index_write: &IndexWriteEvidence,
+) -> Result<(), GitAiError> {
     let repo = find_repository_in_path(worktree)?;
+    // Both restore destinations can still refer to an alternate index. Only
+    // Git's recorded write to this worktree's index proves default staged
+    // evidence was discarded too; inspecting the later index cannot prove it.
+    if !matches!(index_write, IndexWriteEvidence::Exact(path) if path == &repo.path().join("index.lock"))
+    {
+        return Ok(());
+    }
     if !repo.storage.has_working_log(head) {
         return Ok(());
     }
@@ -126,6 +119,7 @@ mod tests {
             invoked_command: Some("restore".into()),
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
+            index_write: Default::default(),
             exit_code: 0,
             started_at_ns: 1,
             finished_at_ns: 2,
@@ -138,178 +132,121 @@ mod tests {
         }
     }
 
-    #[test]
-    fn restore_discard_accepts_only_proven_root_relative_paths() {
+    fn valid() -> (NormalizedCommand, HashMap<String, String>) {
         let head = "a".repeat(40);
-        let refs = HashMap::from([("HEAD".into(), head.clone())]);
-        for globals in [vec![], vec!["-C", "relative"], vec!["-C/repo/nested"]] {
-            let mut argv = vec!["git"];
-            argv.extend(globals);
-            argv.extend([
-                "restore",
-                "--source",
-                &head,
-                "--staged",
-                "--worktree",
-                "--",
-                ":(top,literal)dir/a[1].txt",
-            ]);
-            assert_eq!(
-                event(&command(&argv), &refs),
-                Some(SemanticEvent::WorkingLogPathDiscarded {
-                    base_commit: head.clone(),
-                    path: "dir/a[1].txt".into(),
-                })
-            );
-        }
-        let source = format!("--source={head}");
         let root = std::env::temp_dir().join("restore-root");
-        let argv = [
+        let mut cmd = command(&[
             "git",
             "-C",
             root.to_str().unwrap(),
-            "restore",
-            &source,
-            "--staged",
-            "--worktree",
-            "--",
-            "dir/file.txt",
-        ];
-        let mut cmd = command(&argv);
-        cmd.worktree = Some(root);
-        assert!(event(&cmd, &refs).is_some());
-        for path in [
-            "file.txt",
-            "../file",
-            "/absolute",
-            ":(top,literal)..",
-            ":(top,literal)dir/../file",
-            ":(top,literal)dir//file",
-            ":(top,literal)file\nnext",
-            ":(top,literal)file\r",
-            ":(top,literal)file\0",
-            ":(top,literal)dir\\file",
-            ":(top,literal)file\u{fffd}",
-            ":(top,literal)/file",
-            ":(top,literal)",
-        ] {
-            let argv = [
-                "git",
-                "restore",
-                "--source",
-                &head,
-                "--staged",
-                "--worktree",
-                "--",
-                path,
-            ];
-            assert!(event(&command(&argv), &refs).is_none(), "{path:?}");
-        }
-        let path = format!(":(top,literal){}", "x".repeat(4097));
-        assert!(
-            event(
-                &command(&[
-                    "git",
-                    "restore",
-                    "--source",
-                    &head,
-                    "--staged",
-                    "--worktree",
-                    "--",
-                    &path
-                ]),
-                &refs
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn restore_discard_skips_incomplete_modes_sources_and_globals() {
-        let head = "a".repeat(40);
-        let refs = HashMap::from([("HEAD".into(), head.clone())]);
-        for args in [
-            vec!["--source", &head, "--worktree", "--", ":(top,literal)file"],
-            vec!["--source", &head, "--staged", "--", ":(top,literal)file"],
-            vec![
-                "--source",
-                "HEAD",
-                "--staged",
-                "--worktree",
-                "--",
-                ":(top,literal)file",
-            ],
-            vec!["--staged", "--worktree", "--", ":(top,literal)file"],
-            vec![
-                "--source",
-                &head,
-                "--staged",
-                "--worktree",
-                "--patch",
-                "--",
-                ":(top,literal)file",
-            ],
-            vec![
-                "--source",
-                &head,
-                "--staged",
-                "--worktree",
-                "--",
-                ":(top,literal)file",
-                "other",
-            ],
-            vec![
-                "--source",
-                &head,
-                "--staged",
-                "--worktree",
-                "--pathspec-from-file=paths",
-            ],
-        ] {
-            let mut argv = vec!["git", "restore"];
-            argv.extend(args);
-            assert!(event(&command(&argv), &refs).is_none(), "{argv:?}");
-        }
-        for globals in [
-            vec!["-c", "core.quotePath=false"],
-            vec!["--git-dir=other"],
-            vec!["--literal-pathspecs"],
-            vec!["--work-tree=other"],
-        ] {
-            let mut argv = vec!["git"];
-            argv.extend(globals);
-            argv.extend([
-                "restore",
-                "--source",
-                &head,
-                "--staged",
-                "--worktree",
-                "--",
-                ":(top,literal)file",
-            ]);
-            assert!(event(&command(&argv), &refs).is_none(), "{argv:?}");
-        }
-        let argv = [
-            "git",
             "restore",
             "--source",
             &head,
             "--staged",
             "--worktree",
             "--",
-            ":(top,literal)file",
-        ];
-        let mut cmd = command(&argv);
-        assert!(event(&cmd, &HashMap::new()).is_none());
-        for value in ["b".repeat(40), "0".repeat(40), "invalid".into()] {
-            assert!(event(&cmd, &HashMap::from([("HEAD".into(), value)])).is_none());
+            "file.txt",
+        ]);
+        cmd.worktree = Some(root.clone());
+        cmd.index_write = IndexWriteEvidence::Exact(root.join(".git/index.lock"));
+        (cmd, HashMap::from([("HEAD".into(), head)]))
+    }
+
+    #[test]
+    fn restore_discard_accepts_proven_absolute_and_root_relative_paths() {
+        let (mut cmd, refs) = valid();
+        assert!(event(&cmd, &refs).is_some());
+        let absolute = cmd.worktree.as_ref().unwrap().join("file.txt");
+        *cmd.raw_argv.last_mut().unwrap() = absolute.to_str().unwrap().to_string();
+        cmd.raw_argv.drain(1..3);
+        assert!(event(&cmd, &refs).is_some());
+        let (mut cmd, refs) = valid();
+        cmd.raw_argv.insert(1, "--literal-pathspecs".into());
+        *cmd.raw_argv.last_mut().unwrap() = "bracket[1].txt".into();
+        assert!(event(&cmd, &refs).is_some());
+    }
+
+    #[test]
+    fn restore_discard_replayed_commands_require_recorded_index_evidence() {
+        let (cmd, refs) = valid();
+        let mut serialized = serde_json::to_value(&cmd).unwrap();
+        serialized.as_object_mut().unwrap().remove("index_write");
+        let old: NormalizedCommand = serde_json::from_value(serialized).unwrap();
+        assert_eq!(old.index_write, IndexWriteEvidence::Missing);
+        assert!(event(&old, &refs).is_none());
+        for receipt in [cmd.index_write.clone(), IndexWriteEvidence::Conflicting] {
+            let mut current = cmd.clone();
+            current.index_write = receipt.clone();
+            let replayed: NormalizedCommand =
+                serde_json::from_slice(&serde_json::to_vec(&current).unwrap()).unwrap();
+            assert_eq!(replayed.index_write, receipt);
+            assert_eq!(event(&replayed, &refs), event(&current, &refs));
         }
+    }
+
+    #[test]
+    fn restore_discard_refuses_ambiguous_or_unrepresentable_paths() {
+        let (original, refs) = valid();
+        for path in [
+            "../file",
+            ":(top,literal)file",
+            "dir/../file",
+            "dir//file",
+            "file\nnext",
+            "file\r",
+            "file\0",
+            "dir\\file",
+            "file\u{fffd}",
+            "",
+            "*.txt",
+            "bracket[1].txt",
+        ] {
+            let mut cmd = original.clone();
+            *cmd.raw_argv.last_mut().unwrap() = path.into();
+            assert!(event(&cmd, &refs).is_none(), "{path:?}");
+        }
+        let mut cmd = original.clone();
+        *cmd.raw_argv.last_mut().unwrap() = "x".repeat(4097);
+        assert!(event(&cmd, &refs).is_none());
+        cmd = original;
+        cmd.raw_argv.drain(1..3);
+        assert!(event(&cmd, &refs).is_none());
+    }
+
+    #[test]
+    fn restore_discard_skips_incomplete_modes_sources_globals_and_index_evidence() {
+        let (original, refs) = valid();
+        for omitted in ["--staged", "--worktree", "--source", "--"] {
+            let mut cmd = original.clone();
+            cmd.raw_argv.retain(|arg| arg != omitted);
+            assert!(event(&cmd, &refs).is_none(), "{omitted}");
+        }
+        for globals in [
+            vec!["-c", "core.quotePath=false"],
+            vec!["--git-dir=other"],
+            vec!["--work-tree=other"],
+        ] {
+            let mut cmd = original.clone();
+            cmd.raw_argv
+                .splice(1..1, globals.into_iter().map(String::from));
+            assert!(event(&cmd, &refs).is_none());
+        }
+        for receipt in [IndexWriteEvidence::Missing, IndexWriteEvidence::Conflicting] {
+            let mut cmd = original.clone();
+            cmd.index_write = receipt;
+            assert!(event(&cmd, &refs).is_none());
+        }
+        for value in ["b".repeat(40), "0".repeat(40), "invalid".into()] {
+            assert!(event(&original, &HashMap::from([("HEAD".into(), value)])).is_none());
+        }
+        assert!(event(&original, &HashMap::new()).is_none());
+        let mut cmd = original.clone();
         cmd.exit_code = 1;
         assert!(event(&cmd, &refs).is_none());
-        cmd.exit_code = 0;
+        cmd = original.clone();
         cmd.worktree = None;
         assert!(event(&cmd, &refs).is_none());
-        cmd = command(&argv);
+        cmd = original;
         cmd.raw_argv.clear();
         assert!(event(&cmd, &refs).is_none());
     }

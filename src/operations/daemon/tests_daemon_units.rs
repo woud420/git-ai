@@ -585,3 +585,6 @@ fn commit_enrichment_unrecoverable_error_is_none_for_non_commit_commands() {
         "an opaque outcome for a non-commit command (e.g. `git branch`) is routine"
     );
 }
+
+#[path = "tests_stash_options.rs"]
+mod stash_options;

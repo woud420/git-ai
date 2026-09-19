@@ -1,5 +1,4 @@
 use super::*;
-use crate::model::working_log::{Checkpoint, WorkingLogEntry};
 
 #[test]
 fn test_path_matches_any_exact() {
@@ -75,55 +74,6 @@ fn test_stash_metadata_empty_pathspecs_default() {
 }
 
 #[test]
-fn path_filtered_copy_rejects_a_tampered_journal_record() {
-    let root = tempfile::tempdir().unwrap();
-    let source_dir = root.path().join("source");
-    let filtered_dir = root.path().join("filtered");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::create_dir_all(&filtered_dir).unwrap();
-    let source = PersistedWorkingLog::new(
-        source_dir,
-        "source",
-        root.path().to_path_buf(),
-        root.path().to_path_buf(),
-        None,
-    );
-    let filtered = PersistedWorkingLog::new(
-        filtered_dir,
-        "filtered",
-        root.path().to_path_buf(),
-        root.path().to_path_buf(),
-        None,
-    );
-    let blob_sha = source.persist_file_version("AI state\n").unwrap();
-    let checkpoint = Checkpoint::new(
-        CheckpointKind::AiAgent,
-        "diff".to_string(),
-        "mock_ai".to_string(),
-        vec![WorkingLogEntry::new(
-            "sample.txt".to_string(),
-            blob_sha,
-            Vec::new(),
-            Vec::new(),
-        )],
-    );
-    let mut checkpoints = source.load_checkpoint_journal().unwrap();
-    source
-        .append_checkpoint_record_to(&mut checkpoints, checkpoint)
-        .unwrap();
-    let path = source.checkpoints_file();
-    let tampered = fs::read_to_string(&path)
-        .unwrap()
-        .replace("mock_ai", "tampered-agent");
-    fs::write(path, tampered).unwrap();
-
-    let error = write_path_filtered_checkpoints(&source, &filtered, &["sample.txt".to_string()])
-        .expect_err("stash filtering must not launder a bad checksum");
-
-    assert!(error.to_string().contains("checksum"), "{error}");
-}
-
-#[test]
 fn missing_stash_content_uses_structured_persistence_error() {
     let root = tempfile::tempdir().unwrap();
     let working_log = PersistedWorkingLog::new(
@@ -145,6 +95,7 @@ fn missing_stash_content_uses_structured_persistence_error() {
         BTreeMap::new(),
         HashMap::new(),
         BTreeMap::new(),
+        None,
     )
     .expect_err("missing stash content must fail");
 

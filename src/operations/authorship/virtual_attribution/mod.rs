@@ -17,7 +17,7 @@ mod working_log_loader;
 mod working_log_state;
 
 pub use carryover::{restore_virtual_attribution_carryover, restore_working_log_carryover};
-pub(crate) use carryover_merge::diff_hunks_between_contents;
+pub(crate) use carryover_merge::{checkout_merge_rebased_content, diff_hunks_between_contents};
 pub use carryover_snapshot::checkout_merge_final_state_snapshot;
 pub use conflict_markers::{content_has_conflict_markers, strip_conflict_markers_keep_ours};
 pub use merge::merge_attributions_favoring_first;

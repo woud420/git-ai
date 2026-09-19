@@ -247,17 +247,20 @@ impl ActorDaemonCoordinator {
         (old, new)
     }
 
-    pub(crate) fn stash_pathspecs_from_command(
+    pub(crate) fn stash_push_options_from_command(
         cmd: &crate::model::domain::NormalizedCommand,
-    ) -> Vec<String> {
+    ) -> (Vec<String>, bool) {
         let parsed = parsed_invocation_for_normalized_command(cmd);
         if parsed.command.as_deref() != Some("stash") {
-            return Vec::new();
+            return (Vec::new(), false);
         }
 
+        let legacy_save = parsed.command_args.first().is_some_and(|arg| arg == "save");
         let mut pathspecs = Vec::new();
         let mut found_separator = false;
         let mut skip_next = false;
+        let mut keep_index = None;
+        let mut patch = false;
 
         for (i, arg) in parsed.command_args.iter().enumerate() {
             if skip_next {
@@ -272,11 +275,27 @@ impl ActorDaemonCoordinator {
                 pathspecs.push(arg.clone());
                 continue;
             }
-            if arg.starts_with('-') {
-                if matches!(
-                    arg.as_str(),
-                    "-m" | "--message" | "--pathspec-from-file" | "--pathspec-file-nul"
-                ) {
+            if let Some(flags) = arg.strip_prefix('-') {
+                match arg.as_str() {
+                    "--keep-index" => keep_index = Some(true),
+                    "--no-keep-index" => keep_index = Some(false),
+                    "--patch" => patch = true,
+                    _ if !arg.starts_with("--") => {
+                        for (index, flag) in flags.char_indices() {
+                            match flag {
+                                'k' => keep_index = Some(true),
+                                'p' => patch = true,
+                                'm' => {
+                                    skip_next = index + 2 == arg.len();
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                if matches!(arg.as_str(), "-m" | "--message" | "--pathspec-from-file") {
                     skip_next = true;
                 }
                 continue;
@@ -287,10 +306,13 @@ impl ActorDaemonCoordinator {
             if i == 1 && arg.starts_with("stash@") {
                 continue;
             }
+            if legacy_save {
+                break;
+            }
             pathspecs.push(arg.clone());
         }
 
         tracing::debug!("Extracted stash pathspecs: {:?}", pathspecs);
-        pathspecs
+        (pathspecs, keep_index.unwrap_or(patch))
     }
 }

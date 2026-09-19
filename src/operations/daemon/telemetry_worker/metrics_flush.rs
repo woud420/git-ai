@@ -1,6 +1,6 @@
 //! Metrics persistence and upload flush logic.
 
-use super::{MetricsDbHandle, TelemetryStores};
+use super::{DaemonTelemetryWorkerHandle, MetricsDbHandle, TelemetryStores};
 use crate::clients::api::metrics::{MetricsUploadResponse, metrics_upload_allowed};
 use crate::clients::api::{ApiClient, ApiContext};
 use crate::config::Config;
@@ -81,10 +81,29 @@ pub(super) fn store_metrics_in_db_with(
         .iter()
         .map(serde_json::to_string)
         .collect::<Result<_, _>>()?;
+    store_metric_jsons_in_db_with(db, &event_jsons)
+}
+
+impl DaemonTelemetryWorkerHandle {
+    pub(crate) fn persist_metric_jsons_blocking(
+        &self,
+        event_jsons: &[String],
+    ) -> Result<Vec<i64>, GitAiError> {
+        store_metric_jsons_in_db_with(metrics_store(self.stores), event_jsons)
+    }
+}
+
+fn store_metric_jsons_in_db_with(
+    db: Result<MetricsDbHandle, GitAiError>,
+    event_jsons: &[String],
+) -> Result<Vec<i64>, GitAiError> {
+    if event_jsons.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut db_lock = db?
         .lock()
         .map_err(|_| PersistenceError::LockPoisoned { what: "metrics DB" })?;
-    db_lock.insert_events(&event_jsons)
+    db_lock.insert_events(event_jsons)
 }
 
 pub(super) fn flush_metrics(events: &[MetricEvent], stores: TelemetryStores) {

@@ -432,7 +432,7 @@ impl ActorDaemonCoordinator {
                     && (old_head != new_head
                         || matches!(kind, crate::model::domain::ResetKind::Hard)) =>
                 {
-                    Self::handle_reset(&worktree, kind, old_head, new_head)?;
+                    Self::handle_reset(&worktree, kind, old_head, new_head, cmd)?;
                 }
                 _ => {}
             }

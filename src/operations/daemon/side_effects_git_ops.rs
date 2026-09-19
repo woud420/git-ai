@@ -177,10 +177,11 @@ impl ActorDaemonCoordinator {
         kind: &crate::model::domain::ResetKind,
         old_head: &str,
         new_head: &str,
+        cmd: &crate::model::domain::NormalizedCommand,
     ) -> Result<(), GitAiError> {
         let repo = find_repository_in_path(worktree)?;
         if old_head == new_head && matches!(kind, crate::model::domain::ResetKind::Hard) {
-            return super::reset_discard::discard_same_head_tracked_paths(&repo, old_head);
+            return super::reset_discard::discard_same_head_tracked_paths(&repo, old_head, cmd);
         }
         match kind {
             crate::model::domain::ResetKind::Hard => {

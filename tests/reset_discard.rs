@@ -84,6 +84,127 @@ fn reset_discard_preserves_untracked_file_evidence() {
 }
 
 #[test]
+fn reset_discard_alternate_index_preserves_default_staged_evidence() {
+    let repo = TestRepo::new();
+    let base = commit_base(&repo);
+    checkpoint_replacement(&repo, "mock_ai");
+    repo.git(&["add", "tracked.txt"]).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let alternate = temp.path().join("alternate-index");
+    let env = [("GIT_INDEX_FILE", alternate.to_str().unwrap())];
+    repo.git_og_with_env(&["read-tree", &base], &env).unwrap();
+    repo.git_without_test_sync_for_test(&["reset", "--hard", "HEAD"], &env)
+        .unwrap();
+    repo.sync_daemon_force();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "base\n"
+    );
+    repo.commit("default staged edit survives alternate-index reset")
+        .unwrap();
+    assert_eq!(
+        repo.git_og(&["show", "HEAD:tracked.txt"]).unwrap(),
+        "discarded edit\n"
+    );
+    fs::write(repo.path().join("tracked.txt"), "discarded edit\n").unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
+fn reset_discard_skip_worktree_preserves_retained_edit() {
+    let repo = TestRepo::new();
+    commit_base(&repo);
+    checkpoint_replacement(&repo, "mock_ai");
+    repo.git_og(&["update-index", "--skip-worktree", "tracked.txt"])
+        .unwrap();
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "discarded edit\n"
+    );
+    repo.git_og(&["update-index", "--no-skip-worktree", "tracked.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("retained sparse edit").unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
+fn reset_discard_v4_skip_worktree_preserves_retained_edit() {
+    let repo = TestRepo::new();
+    commit_base(&repo);
+    checkpoint_replacement(&repo, "mock_ai");
+    repo.git_og(&[
+        "update-index",
+        "--index-version=4",
+        "--skip-worktree",
+        "tracked.txt",
+    ])
+    .unwrap();
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "discarded edit\n"
+    );
+    repo.git_og(&["update-index", "--no-skip-worktree", "tracked.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("retained v4 sparse edit")
+        .unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
+fn reset_discard_split_index_skip_worktree_preserves_retained_edit() {
+    let repo = TestRepo::new();
+    commit_base(&repo);
+    checkpoint_replacement(&repo, "mock_ai");
+    repo.git_og(&["update-index", "--skip-worktree", "tracked.txt"])
+        .unwrap();
+    repo.git_og(&["update-index", "--split-index"]).unwrap();
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "discarded edit\n"
+    );
+    repo.git_og(&["update-index", "--no-skip-worktree", "tracked.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("retained split-index sparse edit")
+        .unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
+fn reset_discard_fsmonitor_preserves_retained_edit() {
+    let repo = TestRepo::new();
+    commit_base(&repo);
+    checkpoint_replacement(&repo, "mock_ai");
+    let hook = repo.path().join(".git/hooks/fsmonitor-fixture");
+    // Model a monitor that still reports the index entry as clean. Git itself
+    // retains the edit, so a successful hard reset does not prove its removal.
+    repos::write_executable_script(&hook, "#!/bin/sh\nprintf 'fixture-token\\0'\n").unwrap();
+    repo.git_og(&["config", "core.fsmonitor", hook.to_str().unwrap()])
+        .unwrap();
+    repo.git_og(&["update-index", "--fsmonitor"]).unwrap();
+    repo.git_og(&["update-index", "--fsmonitor-valid", "tracked.txt"])
+        .unwrap();
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "discarded edit\n"
+    );
+    repo.git_og(&["config", "--unset", "core.fsmonitor"])
+        .unwrap();
+    repo.git_og(&["update-index", "--no-fsmonitor"]).unwrap();
+    repo.stage_all_and_commit("retained monitored edit")
+        .unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
 fn reset_discard_preserves_checkpoint_after_unsynchronized_reset() {
     let temp = tempfile::tempdir().unwrap();
     let gate = temp.path().join("reset-gate");

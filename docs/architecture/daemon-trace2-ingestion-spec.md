@@ -286,6 +286,41 @@ These were implemented, found unsound, and removed. Do not reintroduce.
 6. **Message matching without a cursor**: duplicate commit messages are
    ubiquitous; cold duplicate-message commands fail closed instead.
 
+## Bounded pending-attribution carryover for `mv`
+
+The initial profile is `git -C <recorded-worktree-root> mv -- <nested-relative-path> .`.
+The source may be a file or directory; its destination is the source basename
+under that root. The final absolute `-C` must exactly match the recorded worktree.
+Plain path components are required; special literal filenames additionally need
+the explicit global `--literal-pathspecs` flag. No later filesystem lookup repairs
+an ambiguous argument or a path alias. Git can interpret other destinations as
+either a new name or an existing directory, so they are outside this profile.
+
+The command must succeed and carry a root-owned Trace2 index-write receipt for
+this worktree's default index. An alternate index can retain source-path staged
+content in the default index, so its evidence is left untouched. The base comes
+from this worktree's prior sequenced HEAD, never a family-wide or later HEAD.
+Older serialized commands without the receipt remain ineligible.
+
+The asynchronous handler rechecks collection opt-in before accessing the journal.
+Processing renames the source prefix in pending checkpoint entries, preserving
+their immutable blobs, attribution ranges, delivery identities, and session
+metadata. Older destination-path entries are removed only when source entries
+are present: a successful move without force proves that destination was absent.
+Unrelated entries remain unchanged. Commit reconciliation still checks captured
+content against the committed tree; equal-content copies receive no move evidence.
+
+The mutation uses the existing durable, atomic checkpoint-journal rewrite. Any
+`INITIAL` file makes the operation ineligible because it would require updating
+two independent files. It also skips journals exceeding 4096 path entries or
+1 MiB of path bytes. This first profile excludes force, dry-run, skip-error,
+sparse overrides, multiple sources, other destinations, and ambiguous globals.
+
+`mv` joins the family mutation sequence without collecting reflog offsets.
+Receipt collection performs no IO; asynchronous migration adds no Git object or
+ref queries. `tests/mv_carryover.rs` covers attribution, preservation, delayed
+processing, linked worktrees, backends, and a constant subprocess budget.
+
 ## Test obligations
 
 Deterministic tests must cover, at minimum:

@@ -20,7 +20,7 @@ pub(super) fn record(pending: &mut PendingTraceCommand, payload: &Value, sid: &s
     if sid != root
         || !matches!(
             pending.root_cmd_name.as_deref(),
-            Some("reset" | "switch" | "checkout" | "restore")
+            Some("reset" | "switch" | "checkout" | "restore" | "mv")
         )
     {
         return;

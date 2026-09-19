@@ -115,3 +115,28 @@ async fn restore_is_ordered_without_collecting_reflog_offsets() {
             .contains_key("restore-root")
     );
 }
+
+#[tokio::test]
+async fn mv_is_ordered_without_collecting_reflog_offsets() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("target");
+    seed_reflog(&target);
+    let coord = ActorDaemonCoordinator::new();
+    let mut start = json!({
+        "event": "start", "sid": "mv-root",
+        "argv": ["git", "-C", target, "mv", "--", "nested/file.txt", "."],
+    });
+    assert!(coord.prepare_trace_payload_for_ingest(&mut start));
+    let mut primary_repo = json!({
+        "event": "def_repo", "sid": "mv-root", "repo": 1, "worktree": target,
+    });
+    assert!(coord.prepare_trace_payload_for_ingest(&mut primary_repo));
+    assert!(
+        primary_repo
+            .get(TRACE_ROOT_REFLOG_START_OFFSETS_FIELD)
+            .is_none()
+    );
+    let ingress = coord.trace_ingress_state.lock().unwrap();
+    assert_eq!(ingress.root_mutating.get("mv-root"), Some(&true));
+    assert!(!ingress.root_reflog_start_offsets.contains_key("mv-root"));
+}

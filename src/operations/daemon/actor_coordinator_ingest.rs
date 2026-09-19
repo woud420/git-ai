@@ -260,6 +260,8 @@ impl ActorDaemonCoordinator {
             // Restore joins mutation fences, but cannot move refs. Do not add
             // reflog reads to ingestion merely to order its workspace effect.
             && effective_primary.as_deref() != Some("restore")
+            // Moving paths joins mutation fences, but cannot move refs either.
+            && effective_primary.as_deref() != Some("mv")
             && !ingress.root_reflog_start_offsets.contains_key(&root)
             && let Some(worktree) = worktree_hint
         {

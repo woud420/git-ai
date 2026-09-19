@@ -10,7 +10,6 @@ pub use crate::model::checkpoint_request::PreparedPathRole;
 use crate::model::imara_diff_utils::{
     LineChangeTag, compute_line_changes, content_eq_ignoring_line_endings,
 };
-use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::CheckpointKind;
 use crate::model::working_log::{Checkpoint, WorkingLogEntry};
 use crate::operations::git::repo_storage::{PersistedWorkingLog, persist_file_version_to_blob_dir};
@@ -38,15 +37,7 @@ struct PreviousFileState {
     attributions: Vec<Attribution>,
 }
 
-fn checkpoint_error(kind: std::io::ErrorKind, message: String) -> GitAiError {
-    PersistenceError::Io {
-        operation: "Generic error",
-        path: String::new(),
-        kind,
-        message,
-    }
-    .into()
-}
+use super::state_error::state_error as checkpoint_error;
 
 use crate::model::working_log::AgentId;
 

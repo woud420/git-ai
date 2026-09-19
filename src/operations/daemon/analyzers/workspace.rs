@@ -30,6 +30,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                     events.push(event);
                 }
             }
+            "mv" => {
+                if let Some(event) = super::super::mv_carryover::event(cmd, state.refs) {
+                    events.push(event);
+                }
+            }
             "stash" => {
                 let stash_args = stash_command_args(cmd);
                 events.push(SemanticEvent::StashOperation {

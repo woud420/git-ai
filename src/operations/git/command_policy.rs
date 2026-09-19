@@ -59,7 +59,7 @@ define_command_policy! {
     "merge" => POLICY_BUILTIN | POLICY_MAY_MUTATE | POLICY_FAMILY_SEQUENCER,
     "merge-base" => POLICY_BUILTIN | POLICY_READ_ONLY,
     "mktree" => POLICY_BUILTIN,
-    "mv" => POLICY_BUILTIN,
+    "mv" => POLICY_BUILTIN | POLICY_MAY_MUTATE | POLICY_FAMILY_SEQUENCER,
     "name-rev" => POLICY_BUILTIN | POLICY_READ_ONLY,
     "notes" => POLICY_BUILTIN,
     "pack-refs" => POLICY_REPO_ADMIN,

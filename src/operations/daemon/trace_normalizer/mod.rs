@@ -10,6 +10,7 @@ mod event_handlers;
 mod frame_helpers;
 mod index_write;
 mod transport_targets;
+mod index_write;
 
 use frame_helpers::{command_may_mutate_refs, payload_timestamp_ns, select_primary_command};
 
@@ -253,11 +254,21 @@ impl<B: GitBackend> TraceNormalizer<B> {
         let event = payload
             .get("event")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| GitAiError::Generic("trace payload missing event".to_string()))?;
+            .ok_or_else(|| {
+                super::state_error::state_error(
+                    std::io::ErrorKind::InvalidData,
+                    "trace payload missing event".to_string(),
+                )
+            })?;
         let sid = payload
             .get("sid")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| GitAiError::Generic("trace payload missing sid".to_string()))?;
+            .ok_or_else(|| {
+                super::state_error::state_error(
+                    std::io::ErrorKind::InvalidData,
+                    "trace payload missing sid".to_string(),
+                )
+            })?;
         let root_sid = trace_root_sid(sid).to_string();
         if self.is_completed_root(&root_sid) {
             return Ok(None);

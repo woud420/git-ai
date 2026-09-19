@@ -73,7 +73,10 @@ impl ActorDaemonCoordinator {
         } else if rebase_mode.is_completing_rebase || rebase_mode.is_pull_rebase {
             // During rebase, note transfer is handled by non-FF detection.
             // Skip post-commit note generation to avoid overwriting shifted notes.
-        } else if !new_head.is_empty() && cmd.primary_command.as_deref() == Some("revert") {
+        } else if !new_head.is_empty()
+            && cmd.primary_command.as_deref() == Some("revert")
+            && !super::analyzers::is_commit_continuation(cmd)
+        {
             if !*handled_revert_commits {
                 // A single `git revert A B` creates one commit per source.
                 // Reconstruct each destination from the matching HEAD transition

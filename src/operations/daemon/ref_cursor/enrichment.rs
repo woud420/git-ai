@@ -22,6 +22,11 @@ impl RefCursor {
             return Ok(command_start_refs);
         }
 
+        if super::super::analyzers::is_commit_continuation(cmd) {
+            self.consume_commit_continuation(cmd)?;
+            return Ok(command_start_refs);
+        }
+
         match primary {
             "commit" => self.enrich_commit(cmd, state),
             "revert" => self.enrich_revert(cmd, state),

@@ -90,6 +90,46 @@ fn restore_discard_explicit_source_known_human() {
 }
 
 #[test]
+fn restore_discard_fsmonitor_preserves_retained_edit() {
+    let repo = TestRepo::new();
+    let base = prepare_discard(&repo, "mock_ai");
+    let hook = repo.path().join(".git/hooks/fsmonitor-fixture");
+    // Git can retain the edit when a monitor reports its index entry as clean;
+    // command success and an index write alone cannot prove it was discarded.
+    repos::write_executable_script(&hook, "#!/bin/sh\nprintf 'fixture-token\\0'\n").unwrap();
+    repo.git_og(&["config", "core.fsmonitor", hook.to_str().unwrap()])
+        .unwrap();
+    repo.git_og(&["update-index", "--fsmonitor"]).unwrap();
+    repo.git_og(&["update-index", "--fsmonitor-valid", "tracked.txt"])
+        .unwrap();
+    repo.git_without_test_sync_for_test(
+        &[
+            "restore",
+            "--source",
+            &base,
+            "--staged",
+            "--worktree",
+            "--",
+            &absolute_path(&repo, "tracked.txt"),
+        ],
+        &[],
+    )
+    .unwrap();
+    repo.sync_daemon_force();
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "discarded edit\n"
+    );
+    repo.git_og(&["config", "--unset", "core.fsmonitor"])
+        .unwrap();
+    repo.git_og(&["update-index", "--no-fsmonitor"]).unwrap();
+    repo.stage_all_and_commit("retained monitored edit")
+        .unwrap();
+    repo.filename("tracked.txt")
+        .assert_committed_lines(lines!["discarded edit".ai()]);
+}
+
+#[test]
 fn restore_discard_index_only_preserves_worktree_evidence() {
     let repo = TestRepo::new();
     let base = prepare_discard(&repo, "mock_ai");

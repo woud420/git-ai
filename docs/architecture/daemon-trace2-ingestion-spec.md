@@ -241,6 +241,9 @@ existing Trace2 `index/do_write_index` region. Child/secondary-repository writes
 cannot supply it; missing, invalid, or conflicting receipts fail closed. The
 worker requires that receipt to name this worktree's default `index.lock`.
 An alternate-index restore therefore cannot erase default-index evidence.
+Root filesystem-monitor receipts also invalidate the discard proof, including
+extension tokens emitted without a repository id: native Git can retain an edit
+that the monitor reports as clean despite a successful index write.
 The reducer uses only this worktree's prior HEAD; another linked worktree's HEAD
 or a later live lookup cannot supply a missing anchor. The asynchronous effect
 uses one metadata-only `cat-file --batch-check` to require an immutable source

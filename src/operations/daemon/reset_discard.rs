@@ -14,6 +14,9 @@ pub(super) fn discard_same_head_tracked_paths(
     head: &str,
     cmd: &NormalizedCommand,
 ) -> Result<(), GitAiError> {
+    if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
+        return Ok(());
+    }
     // Version 2 cannot encode skip-worktree entries. Later index reads cannot
     // establish whether the reset actually discarded a sparse working edit.
     if !cmd.index_v2

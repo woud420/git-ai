@@ -217,6 +217,26 @@ fn reset_discard_fsmonitor_preserves_retained_edit() {
 }
 
 #[test]
+fn reset_discard_collection_opt_out_preserves_existing_journal() {
+    let mut repo = TestRepo::new_dedicated_daemon();
+    commit_base(&repo);
+    checkpoint_replacement(&repo, "mock_ai");
+    let log = repo.current_working_logs();
+    let before = fs::read(log.checkpoints_file()).unwrap();
+    repo.patch_git_ai_config(|patch| patch.allowed_repositories = Some(Vec::new()));
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    repo.sync_daemon_force();
+    assert!(
+        fs::read(log.checkpoints_file()).unwrap() == before,
+        "disabled collection must leave existing checkpoints unchanged"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "base\n"
+    );
+}
+
+#[test]
 fn reset_discard_preserves_checkpoint_after_unsynchronized_reset() {
     let temp = tempfile::tempdir().unwrap();
     let gate = temp.path().join("reset-gate");

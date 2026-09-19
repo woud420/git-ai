@@ -109,6 +109,9 @@ impl ActorDaemonCoordinator {
         head: Option<&str>,
     ) -> Result<(), GitAiError> {
         let repo = find_repository_in_path(worktree)?;
+        if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
+            return Ok(());
+        }
         match kind {
             crate::model::domain::StashOpKind::Push
             | crate::model::domain::StashOpKind::Unknown => {

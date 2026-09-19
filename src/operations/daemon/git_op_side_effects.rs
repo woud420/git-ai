@@ -192,6 +192,12 @@ pub fn apply_checkout_switch_working_log_side_effect(
         }
     }
 
+    if old_head == new_head
+        && is_non_zero_oid(&old_head)
+        && super::switch_discard::target(cmd).is_some()
+    {
+        return super::switch_discard::apply(&repo, &old_head, cmd);
+    }
     if old_head.is_empty() || new_head.is_empty() || old_head == new_head {
         return Ok(());
     }

@@ -80,6 +80,7 @@ pub(crate) mod side_effects_commit;
 pub(crate) mod side_effects_git_ops;
 pub(crate) mod socket_health;
 pub(crate) mod socket_listeners;
+mod switch_discard;
 pub(crate) mod trace_connection;
 pub(crate) mod trace_helpers;
 pub(crate) mod transport_error;

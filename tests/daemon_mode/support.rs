@@ -32,6 +32,8 @@ mod trace_listener;
 
 #[path = "repository_context.rs"]
 mod repository_context;
+#[path = "trace_normalization.rs"]
+mod trace_normalization;
 
 #[path = "load.rs"]
 mod load;

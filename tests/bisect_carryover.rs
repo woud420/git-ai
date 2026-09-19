@@ -10,25 +10,6 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-struct BisectDiagnostics<'a>(&'a TestRepo);
-
-impl Drop for BisectDiagnostics<'_> {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            let (_, log) = self.0.daemon_diagnostics();
-            let lines: Vec<_> = log
-                .lines()
-                .filter(|line| line.contains("bisect cursor"))
-                .collect();
-            eprintln!("Bisect cursor diagnostics:\n{}", lines.join("\n"));
-            eprintln!(
-                "Bisect completions: {:#?}",
-                self.0.daemon_completion_entries()
-            );
-        }
-    }
-}
-
 fn history() -> (TestRepo, Vec<String>) {
     let repo = TestRepo::new();
     let heads = prepare_history(&repo);
@@ -65,7 +46,6 @@ fn pending_ai(repo: &TestRepo) {
 }
 
 fn assert_pending_commit(repo: &TestRepo) {
-    let _diagnostics = BisectDiagnostics(repo);
     assert_eq!(
         fs::read_to_string(repo.path().join("pending.txt")).unwrap(),
         "base\npending AI\n"
@@ -253,7 +233,6 @@ fn bisect_carryover_delayed_effect_preserves_later_checkpoint() {
     let marker = fs::read_to_string(repo.path().join("history.txt")).unwrap();
     repo.stage_all_and_commit("Commit after delayed bisect and later checkpoint")
         .unwrap();
-    let _diagnostics = BisectDiagnostics(&repo);
     repo.filename("pending.txt").assert_committed_lines(lines![
         "base".human(),
         "pending AI".ai(),
@@ -475,4 +454,44 @@ fn assert_distinct_attribution_kinds(with_bisect: bool) {
             .iter()
             .all(|entry| entry.line_ranges.iter().all(|range| !range.contains(4)))
     );
+}
+
+#[test]
+fn bisect_carryover_parent_stream_before_child_preserves_pending_ai() {
+    let (repo, heads) = history();
+    pending_ai(&repo);
+    let dir = tempfile::tempdir().unwrap();
+    let trace = dir.path().join("trace.jsonl");
+    repo.git_without_test_sync_for_test(
+        &["bisect", "start", &heads[7], &heads[0]],
+        &[("GIT_TRACE2_EVENT", trace.to_str().unwrap())],
+    )
+    .unwrap();
+    let frames = fs::read_to_string(&trace).unwrap();
+    let mut parent = String::new();
+    let mut child = String::new();
+    for line in frames.lines() {
+        let frame: serde_json::Value = serde_json::from_str(line).unwrap();
+        let stream = if frame["sid"].as_str().unwrap().contains('/') {
+            &mut child
+        } else {
+            &mut parent
+        };
+        stream.push_str(line);
+        stream.push('\n');
+    }
+    assert!(!parent.is_empty() && !child.is_empty());
+    let before = repo.daemon_total_completion_count();
+    let mut socket = git_ai::operations::daemon::open_local_socket_stream_with_timeout(
+        &repo.daemon_trace_socket_path(),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    socket.write_all(parent.as_bytes()).unwrap();
+    socket.write_all(child.as_bytes()).unwrap();
+    socket.flush().unwrap();
+    drop(socket);
+    repo.wait_for_daemon_total_completion_count(before, before + 1);
+    repo.sync_daemon();
+    assert_pending_commit(&repo);
 }

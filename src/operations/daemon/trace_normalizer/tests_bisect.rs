@@ -126,3 +126,98 @@ fn bisect_capture_leaves_run_replay_custom_terms_and_other_commands_unsupported(
         assert!(capture(&args, frames()).receipt(0).is_none(), "{args:?}");
     }
 }
+
+fn parent_frames() -> Vec<Value> {
+    vec![
+        json!({"event":"child_start", "sid":"root", "child_id":0, "use_shell":false, "argv":["git", "checkout", "-q", "target", "--"]}),
+        json!({"event":"child_exit", "sid":"root", "child_id":0, "code":0}),
+    ]
+}
+
+#[test]
+fn bisect_capture_parent_receipt_survives_a_delayed_child_stream() {
+    for prefix in 0..=frames().len() {
+        let mut events = parent_frames();
+        events.splice(1..1, frames().into_iter().take(prefix));
+        let capture = capture(&["git", "bisect", "good"], events);
+        let receipt = capture.receipt(0).unwrap();
+        assert_eq!(receipt.target, "target");
+        assert_eq!(receipt.started_at_ns, 100);
+        assert_eq!(receipt.finished_at_ns, 101 + prefix as u128);
+        assert!(capture.receipt(1).is_none());
+    }
+}
+
+#[test]
+fn bisect_capture_rejects_unproven_parent_children() {
+    for boundary in [
+        "missing_start",
+        "missing_exit",
+        "missing_id",
+        "wrong_id",
+        "failed",
+        "shell",
+        "unknown_shell",
+        "directory",
+        "extra_args",
+        "other_program",
+        "two",
+        "duplicate_exit",
+    ] {
+        let mut events = parent_frames();
+        match boundary {
+            "missing_start" => {
+                events.remove(0);
+            }
+            "missing_exit" => {
+                events.remove(1);
+            }
+            "missing_id" => {
+                events[0].as_object_mut().unwrap().remove("child_id");
+            }
+            "wrong_id" => events[1]["child_id"] = json!(1),
+            "failed" => events[1]["code"] = json!(1),
+            "shell" => events[0]["use_shell"] = json!(true),
+            "unknown_shell" => {
+                events[0].as_object_mut().unwrap().remove("use_shell");
+            }
+            "directory" => events[0]["cd"] = json!("/other"),
+            "extra_args" => {
+                events[0]["argv"] = json!(["git", "checkout", "-q", "target", "--", "file"])
+            }
+            "other_program" => events[0]["argv"][0] = json!("custom-git"),
+            "two" => events.extend(parent_frames()),
+            "duplicate_exit" => events.push(events[1].clone()),
+            _ => unreachable!(),
+        }
+        assert!(
+            capture(&["git", "bisect", "good"], events)
+                .receipt(0)
+                .is_none(),
+            "{boundary}"
+        );
+    }
+}
+
+#[test]
+fn bisect_capture_parent_receipt_does_not_override_conflicting_child_evidence() {
+    for boundary in ["foreign", "target", "failed", "name", "nested"] {
+        let mut child = frames();
+        match boundary {
+            "foreign" => child[1]["worktree"] = json!("/other"),
+            "target" => child[0]["argv"][3] = json!("other"),
+            "failed" => child[3]["code"] = json!(1),
+            "name" => child[2]["name"] = json!("reset"),
+            "nested" => child[0]["sid"] = json!("root/child/nested"),
+            _ => unreachable!(),
+        }
+        let mut events = parent_frames();
+        events.splice(1..1, child);
+        assert!(
+            capture(&["git", "bisect", "good"], events)
+                .receipt(0)
+                .is_none(),
+            "{boundary}"
+        );
+    }
+}

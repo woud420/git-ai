@@ -38,6 +38,15 @@ fn bisect_cursor_uses_exact_child_target_and_replay_is_idempotent() {
 }
 
 #[test]
+fn bisect_cursor_accepts_a_parent_receipt_before_child_stream_delivery() {
+    let message = format!("checkout: moving from main to {B}");
+    let (_temp, mut cursor, mut cmd, state) = fixture(&[(A, B, &message)]);
+    cmd.observed_child_commands.clear();
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+    assert_eq!(cmd.ref_changes, vec![ref_change("HEAD", A, B)]);
+}
+
+#[test]
 fn bisect_cursor_rejects_ambiguous_same_second_target_matches() {
     let first = format!("checkout: moving from main to {B}");
     let second = format!("checkout: moving from {C} to {B}");

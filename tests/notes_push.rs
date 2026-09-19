@@ -97,6 +97,7 @@ fn delayed_push_keeps_destinations(mirrored: bool, relative_quoted: bool, args: 
             .unwrap();
     }
     fs::remove_file(&gate).unwrap();
+    repo.sync_daemon_force();
     repo.wait_for_daemon_total_completion_count(before, before + 1);
     assert_eq!(
         remote_note(&first, &commit).as_deref().map(str::trim),

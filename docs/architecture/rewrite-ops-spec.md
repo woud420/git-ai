@@ -197,8 +197,11 @@ daemon processing time (I3).
    and daemon processing are real evidence and must survive.
 
 `reset --hard` discards the work; discarded content gets no reconstruction.
-For a successful same-HEAD hard reset, a cursor-owned identity reflog entry and
-root-owned Trace2 index receipts can establish an ordered discard boundary.
+For a successful `git --no-replace-objects reset --hard` with unchanged HEAD,
+a cursor-owned identity reflog entry and root-owned Trace2 index receipts can
+establish an ordered discard boundary. The explicit global option establishes
+that the command used the canonical object view; commands without it retain
+their prior attribution boundary.
 The receipts must show a version-2 index read and write to this worktree's
 default `index.lock`, without shared-index or filesystem-monitor evidence.
 Version 2 cannot encode `skip-worktree`; filesystem-monitor evidence is excluded

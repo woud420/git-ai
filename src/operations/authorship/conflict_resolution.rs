@@ -42,7 +42,7 @@ fn attestation_metadata_key(hash: &str) -> &str {
     hash.split("::").next().unwrap_or(hash)
 }
 
-fn retain_referenced_metadata(log: &mut AuthorshipLog) {
+pub(crate) fn retain_referenced_metadata(log: &mut AuthorshipLog) {
     let mut prompt_keys = HashSet::new();
     let mut human_keys = HashSet::new();
     let mut session_keys = HashSet::new();

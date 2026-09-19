@@ -6,11 +6,13 @@ use crate::model::authorship_log::LineRange;
 use crate::model::authorship_log_serialization::{
     AttestationEntry, AuthorshipLog, FileAttestation,
 };
-use crate::model::hunk_shift::apply_hunk_shifts_to_file_attestation;
-use crate::operations::authorship::rewrite::compute_diff_trees_batch;
+use crate::operations::authorship::conflict_resolution::merge_conflict_resolution_authorship;
 use crate::operations::authorship::rewrite::{RewriteMetricCommit, RewriteMetricOperation};
+use crate::operations::authorship::rewrite::{compute_diff_trees_batch, shift_authorship_log};
 use crate::operations::git::notes_api;
 use crate::operations::git::repository::Repository;
+
+mod history;
 
 /// One reverted commit to reconstruct: the new revert commit, its parent, and
 /// the original commit that was reverted (used to locate the source note).
@@ -20,11 +22,9 @@ pub struct RevertSpec {
     pub reverted_commit: Option<String>,
 }
 
-/// Batched revert-attribution reconstruction for one `git revert A B C ...`
-/// invocation. Performs a CONSTANT number of git spawns regardless of how many
-/// commits were reverted: one batched first-parent rev-parse, one batched note
-/// read, one batched diff-tree (covering every commit's two diff pairs), and one
-/// batched note write. All per-commit work below is pure in-memory.
+/// Reconstruct revert attribution with a constant number of Git processes.
+/// Missing source coverage adds one bounded history query and batched note/diff
+/// reads; no lookup or Git process is issued per commit or file.
 pub(crate) fn handle_revert_commits_with_metrics(
     repo: &Repository,
     specs: &[RevertSpec],
@@ -128,88 +128,82 @@ pub(crate) fn handle_revert_commits_with_metrics(
         return Ok(Vec::new());
     }
 
-    // Batch-read all source notes in one call.
-    let source_base_shas: Vec<String> = {
-        let mut v: Vec<String> = resolved.iter().map(|r| r.source_base_sha.clone()).collect();
-        v.sort();
-        v.dedup();
-        v
-    };
-    let notes = notes_api::read_notes_batch(repo, &source_base_shas)?;
-
-    // Build one batched diff-tree request covering, for each reverted commit:
-    //  - (source_base, revert_commit): hunks to shift the source note forward,
-    //  - (parent, revert_commit): added lines re-introduced by the revert.
-    // Track each pair's index so we can read its result back.
-    let mut diff_pairs: Vec<(String, String)> = Vec::new();
-    let mut shift_idx: Vec<Option<usize>> = Vec::new();
-    let mut added_idx: Vec<usize> = Vec::new();
-    for r in &resolved {
-        // Only need the shift pair if the source note exists.
-        let shift = if notes.contains_key(&r.source_base_sha) {
-            let idx = diff_pairs.len();
-            diff_pairs.push((r.source_base_sha.clone(), r.revert_commit.clone()));
-            Some(idx)
-        } else {
-            None
-        };
-        shift_idx.push(shift);
-        let aidx = diff_pairs.len();
-        diff_pairs.push((r.parent_sha.clone(), r.revert_commit.clone()));
-        added_idx.push(aidx);
-    }
+    let mut note_shas: Vec<_> = resolved
+        .iter()
+        .flat_map(|r| [r.source_base_sha.clone(), r.revert_commit.clone()])
+        .collect();
+    note_shas.sort();
+    note_shas.dedup();
+    let notes = notes_api::read_notes_batch(repo, &note_shas)?;
+    let mut source_logs: HashMap<_, _> = resolved
+        .iter()
+        .filter_map(|r| {
+            let log =
+                AuthorshipLog::deserialize_from_string(notes.get(&r.source_base_sha)?).ok()?;
+            Some((r.source_base_sha.clone(), log))
+        })
+        .collect();
+    let diff_pairs: Vec<_> = resolved
+        .iter()
+        .flat_map(|r| {
+            [
+                (r.source_base_sha.clone(), r.revert_commit.clone()),
+                (r.parent_sha.clone(), r.revert_commit.clone()),
+            ]
+        })
+        .collect();
     let diff_results = compute_diff_trees_batch(repo, &diff_pairs)?;
+    let added: Vec<_> = (0..resolved.len())
+        .map(|i| added_lines_from_diff_result(&diff_results[2 * i + 1]))
+        .collect();
+    let mut missing_sources = Vec::new();
+    for (i, r) in resolved.iter().enumerate() {
+        let mut direct = source_logs
+            .get(&r.source_base_sha)
+            .cloned()
+            .unwrap_or_default();
+        shift_authorship_log(&mut direct, &diff_results[2 * i]);
+        if !covers_added_lines(&direct, &added[i]) {
+            missing_sources.push(r.source_base_sha.clone());
+        }
+    }
+    missing_sources.sort();
+    missing_sources.dedup();
+    source_logs.extend(history::recover_source_logs(
+        repo,
+        &missing_sources,
+        &notes,
+    )?);
 
     // Per-commit reconstruction is now pure in-memory.
     let mut writes: Vec<(String, String)> = Vec::new();
     let mut metric_commits: Vec<RewriteMetricCommit> = Vec::new();
     for (i, r) in resolved.iter().enumerate() {
-        let Some(shift) = shift_idx[i] else {
+        let Some(mut log) = source_logs.get(&r.source_base_sha).cloned() else {
             continue;
         };
-        let Some(source_note) = notes.get(&r.source_base_sha) else {
-            continue;
-        };
-        let Ok(mut log) = AuthorshipLog::deserialize_from_string(source_note) else {
-            continue;
-        };
-
-        // Added lines re-introduced by the revert (new-side hunk ranges of the
-        // parent->revert diff), keyed by file.
-        let added_lines = added_lines_from_diff_result(&diff_results[added_idx[i]]);
+        let added_lines = &added[i];
         if added_lines.is_empty() {
             continue;
         }
-
-        let shift_result = &diff_results[shift];
-        for (old_path, new_path) in &shift_result.renames {
-            for attestation in &mut log.attestations {
-                if attestation.file_path == *old_path {
-                    attestation.file_path = new_path.clone();
-                }
-            }
-        }
-        if !shift_result.hunks_by_file.is_empty() {
-            log.attestations = log
-                .attestations
-                .iter()
-                .filter_map(|fa| match shift_result.hunks_by_file.get(&fa.file_path) {
-                    Some(hunks) => apply_hunk_shifts_to_file_attestation(fa, hunks),
-                    None => Some(fa.clone()),
-                })
-                .collect();
-        }
+        shift_authorship_log(&mut log, &diff_results[2 * i]);
 
         log.metadata.base_commit_sha = r.revert_commit.clone();
         log.attestations = log
             .attestations
             .iter()
-            .filter_map(|file| clip_file_attestation_to_lines(file, &added_lines))
+            .filter_map(|file| clip_file_attestation_to_lines(file, added_lines))
             .collect();
         if log.attestations.is_empty() {
             continue;
         }
 
+        if let Some(raw) = notes.get(&r.revert_commit) {
+            let Ok(existing) = AuthorshipLog::deserialize_from_string(raw) else {
+                continue;
+            };
+            log = merge_conflict_resolution_authorship(Some(existing), log, &r.revert_commit);
+        }
         let Ok(note_str) = log.serialize_to_string() else {
             continue;
         };
@@ -223,7 +217,7 @@ pub(crate) fn handle_revert_commits_with_metrics(
                 )
                 .with_parent_sha(r.parent_sha.clone())
                 .with_authorship_note(note_str)
-                .with_parent_diff(diff_results[added_idx[i]].clone()),
+                .with_parent_diff(diff_results[2 * i + 1].clone()),
             );
         }
     }
@@ -232,6 +226,19 @@ pub(crate) fn handle_revert_commits_with_metrics(
         notes_api::write_notes_batch(repo, &writes)?;
     }
     Ok(metric_commits)
+}
+
+fn covers_added_lines(log: &AuthorshipLog, added: &HashMap<String, Vec<u32>>) -> bool {
+    added.iter().all(|(path, lines)| {
+        lines.iter().all(|line| {
+            log.attestations
+                .iter()
+                .filter(|file| file.file_path == *path)
+                .flat_map(|file| &file.entries)
+                .flat_map(|entry| &entry.line_ranges)
+                .any(|range| range.contains(*line))
+        })
+    })
 }
 
 fn legacy_revert_metric_original_sha(parent_sha: &str) -> Option<String> {

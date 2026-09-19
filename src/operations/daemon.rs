@@ -53,6 +53,7 @@ pub(crate) mod checkpoint_stream_authority;
 pub(crate) mod cherry_pick_helpers;
 pub(crate) mod client_helpers;
 pub(crate) mod commit_editor_wait;
+pub(crate) mod control_admission;
 pub(crate) mod daemon_config;
 pub(crate) mod git_op_side_effects;
 pub(crate) mod health;
@@ -72,6 +73,7 @@ pub(crate) mod side_effects_commit;
 pub(crate) mod side_effects_git_ops;
 pub(crate) mod socket_listeners;
 pub(crate) mod trace_helpers;
+pub(crate) mod transport_error;
 
 // Re-export types and functions that external code accesses as
 // `crate::operations::daemon::X`.  Only modules that define such public items

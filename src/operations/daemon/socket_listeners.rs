@@ -1,3 +1,4 @@
+use super::transport_error::transport_error;
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
@@ -22,7 +23,10 @@ use std::path::Path;
 /// below; Display output is unchanged from the sites it replaces.
 #[cfg(windows)]
 fn worker_panicked_error(what: &str) -> GitAiError {
-    GitAiError::Generic(format!("daemon {} worker panicked", what))
+    transport_error(
+        std::io::ErrorKind::Other,
+        format!("daemon {} worker panicked", what),
+    )
 }
 
 pub fn control_listener_loop_actor(
@@ -36,7 +40,9 @@ pub fn control_listener_loop_actor(
         let listener = ListenerOptions::new()
             .name(local_socket_name(&control_socket_path)?)
             .create_sync()
-            .map_err(|e| GitAiError::Generic(format!("failed binding control socket: {}", e)))?;
+            .map_err(|e| {
+                transport_error(e.kind(), format!("failed binding control socket: {}", e))
+            })?;
         set_socket_owner_only(&control_socket_path)?;
         for stream in listener.incoming() {
             if coordinator.is_shutting_down() {
@@ -45,10 +51,14 @@ pub fn control_listener_loop_actor(
             let Ok(stream) = stream else {
                 continue;
             };
+            let Some(admission) = coordinator.control_admission.connection() else {
+                continue;
+            };
             let coord = coordinator.clone();
             let handle = runtime_handle.clone();
             if std::thread::Builder::new()
                 .spawn(move || {
+                    let _admission = admission;
                     if let Err(e) = handle_control_connection_actor(stream, coord, handle) {
                         tracing::debug!(%e, "control connection error");
                     }
@@ -124,11 +134,14 @@ pub fn windows_pipe_connecting_server(
         .first(first_instance)
         .open_mode(WindowsPipeOpenMode::Duplex);
     options.single().map_err(|e| {
-        GitAiError::Generic(format!(
-            "failed binding windows daemon pipe {}: {}",
-            pipe_path.display(),
-            e
-        ))
+        transport_error(
+            e.kind(),
+            format!(
+                "failed binding windows daemon pipe {}: {}",
+                pipe_path.display(),
+                e
+            ),
+        )
     })
 }
 
@@ -174,11 +187,14 @@ pub fn windows_control_pipe_worker_loop(
 ) -> Result<(), GitAiError> {
     loop {
         let server = connecting.wait().map_err(|e| {
-            GitAiError::Generic(format!(
-                "failed accepting control pipe {}: {}",
-                control_socket_path.display(),
-                e
-            ))
+            transport_error(
+                e.kind(),
+                format!(
+                    "failed accepting control pipe {}: {}",
+                    control_socket_path.display(),
+                    e
+                ),
+            )
         })?;
 
         if coordinator.is_shutting_down() {
@@ -188,18 +204,27 @@ pub fn windows_control_pipe_worker_loop(
 
         connecting = windows_pipe_connecting_server(&control_socket_path, false)?;
 
+        let Some(admission) = coordinator.control_admission.connection() else {
+            let _ = server.disconnect();
+            continue;
+        };
+
         let coord = coordinator.clone();
         let handle = runtime_handle.clone();
         std::thread::Builder::new()
             .spawn(move || {
+                let _admission = admission;
                 handle_windows_control_pipe_connection(server, coord, handle);
             })
             .map_err(|e| {
-                GitAiError::Generic(format!(
-                    "failed spawning control pipe handler for {}: {}",
-                    control_socket_path.display(),
-                    e
-                ))
+                transport_error(
+                    e.kind(),
+                    format!(
+                        "failed spawning control pipe handler for {}: {}",
+                        control_socket_path.display(),
+                        e
+                    ),
+                )
             })?;
     }
 
@@ -216,7 +241,9 @@ pub fn trace_listener_loop_actor(
         let listener = ListenerOptions::new()
             .name(local_socket_name(&trace_socket_path)?)
             .create_sync()
-            .map_err(|e| GitAiError::Generic(format!("failed binding trace socket: {}", e)))?;
+            .map_err(|e| {
+                transport_error(e.kind(), format!("failed binding trace socket: {}", e))
+            })?;
         set_socket_owner_only(&trace_socket_path)?;
         for stream in listener.incoming() {
             if coordinator.is_shutting_down() {
@@ -376,11 +403,14 @@ pub fn windows_trace_pipe_worker_loop(
 ) -> Result<(), GitAiError> {
     loop {
         let server = connecting.wait().map_err(|e| {
-            GitAiError::Generic(format!(
-                "failed accepting trace pipe {}: {}",
-                trace_socket_path.display(),
-                e
-            ))
+            transport_error(
+                e.kind(),
+                format!(
+                    "failed accepting trace pipe {}: {}",
+                    trace_socket_path.display(),
+                    e
+                ),
+            )
         })?;
 
         if coordinator.is_shutting_down() {
@@ -396,11 +426,14 @@ pub fn windows_trace_pipe_worker_loop(
                 handle_windows_trace_pipe_connection(server, coord);
             })
             .map_err(|e| {
-                GitAiError::Generic(format!(
-                    "failed spawning trace pipe handler for {}: {}",
-                    trace_socket_path.display(),
-                    e
-                ))
+                transport_error(
+                    e.kind(),
+                    format!(
+                        "failed spawning trace pipe handler for {}: {}",
+                        trace_socket_path.display(),
+                        e
+                    ),
+                )
             })?;
     }
 

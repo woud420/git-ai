@@ -17,6 +17,25 @@ impl LockFile {
         let file = try_lock_exclusive(path)?;
         Some(Self { _file: file })
     }
+
+    /// Retry exclusive access for a bounded interval. Windows readers can briefly
+    /// prevent the exclusive open even when no other daemon owns the lock.
+    pub fn acquire_with_timeout(
+        path: &std::path::Path,
+        timeout: std::time::Duration,
+    ) -> Option<Self> {
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(lock) = Self::try_acquire(path) {
+                return Some(lock);
+            }
+            let remaining = timeout.checked_sub(started.elapsed())?;
+            if remaining.is_zero() {
+                return None;
+            }
+            std::thread::sleep(remaining.min(std::time::Duration::from_millis(25)));
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -56,49 +75,4 @@ fn try_lock_exclusive(path: &std::path::Path) -> Option<std::fs::File> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_lockfile_acquire_succeeds() {
-        let dir = tempfile::tempdir().unwrap();
-        let lock_path = dir.path().join("test.lock");
-        let lock = LockFile::try_acquire(&lock_path);
-        assert!(lock.is_some(), "should acquire lock on a fresh path");
-    }
-
-    #[test]
-    fn test_lockfile_second_acquire_blocked() {
-        let dir = tempfile::tempdir().unwrap();
-        let lock_path = dir.path().join("test.lock");
-        let _first = LockFile::try_acquire(&lock_path).expect("first acquire should succeed");
-        let second = LockFile::try_acquire(&lock_path);
-        assert!(second.is_none(), "second acquire should be blocked");
-    }
-
-    #[test]
-    fn test_lockfile_released_on_drop() {
-        let dir = tempfile::tempdir().unwrap();
-        let lock_path = dir.path().join("test.lock");
-        {
-            let _lock = LockFile::try_acquire(&lock_path).expect("first acquire should succeed");
-            // _lock is dropped here
-        }
-        let second = LockFile::try_acquire(&lock_path);
-        assert!(
-            second.is_some(),
-            "should acquire lock after previous holder is dropped"
-        );
-    }
-
-    #[test]
-    fn test_lockfile_nonexistent_parent_returns_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let lock_path = dir.path().join("no_such_dir").join("test.lock");
-        let lock = LockFile::try_acquire(&lock_path);
-        assert!(
-            lock.is_none(),
-            "should return None when parent directory does not exist"
-        );
-    }
-}
+mod tests;

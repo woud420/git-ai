@@ -55,7 +55,7 @@ cargo insta accept                       # accept all pending snapshots
 
 Before opening a PR, make sure to run `make lint` and `make fmt` and resolve any formatting/lint issues as they will fail in CI.
 
-When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are the fastest (roughly 15mins) and if they fail, you should quickly iterate based on those failures and update the PR -- iterating there until those jobs are all green. Review all automated and human feedback that is actually present and address it: fix valid issues or reply with reasoning when feedback does not identify a real issue. Once the lint, fmt, and Ubuntu-based tests have passed and all actionable review feedback is addressed, you can stop monitoring CI for the Mac (~35mins) and Windows (up to 3.5 hours) checks unless the user has explicitly asked for you to wait for those or you're working on a specific OS-based bug.
+When opening a PR, make sure to monitor the ubuntu-based CI jobs first. They are the fastest (roughly 15mins) and if they fail, you should quickly iterate based on those failures and update the PR -- iterating there until those jobs are all green. Review all automated and human feedback that is actually present and address it: fix valid issues or reply with reasoning when feedback does not identify a real issue. Once lint, fmt, and Ubuntu-based tests have passed and actionable review feedback is addressed, you may stop monitoring optional Mac and Windows jobs unless the user asked to wait or the task concerns that OS. Continue monitoring every required check on the current PR head until it passes; a failed required check must be fixed and verified. Report any optional jobs still pending.
 
 ## Architecture
 
@@ -156,7 +156,7 @@ never wrap or re-nest it.
 - Always write code optimized for human review. No code can be merged without a greenlight from a human, so make it easy for humans to review your code. This means clear naming, clear refactors as needed, and, most importantly, minimal and simple code. Clean, DRY, simple, maintainable code is your true north star.
 - Use ordinary Git branches and independently reviewable GitHub pull requests for contributor work.
 - Preserve vendor-neutral `commit-tree` / `update-ref` behavior when changing rewrite handling. Do not reintroduce fork-only compatibility code, tests, or CI for external stacking tools the fork does not support.
-- Before stopping, ensure every submitted pull request passes all required CI checks and all actionable review feedback has been addressed and resolved.
+- Before stopping, apply the PR Workflow completion rule above to every submitted pull request.
 
 ## Gotchas
 

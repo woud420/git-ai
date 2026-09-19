@@ -7,6 +7,7 @@ use super::types::{AuthorshipLogDiffContext, VirtualAttributions};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::hunk_shift::apply_hunk_shifts_to_line_attributions;
+use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
@@ -82,6 +83,9 @@ impl VirtualAttributions {
             precomputed_parent_diff,
         )?;
 
+        // A pending replacement can share a line number with different committed
+        // content. Keep its captured evidence independently of note projection.
+        let pending_hunks = hunks.unstaged.clone();
         // Drop unstaged line numbers that are also committed; keep pure insertions.
         filter_committed_overlap_from_unstaged(
             &mut hunks.unstaged,
@@ -108,10 +112,16 @@ impl VirtualAttributions {
                     .get(&nfc_file_path)
                     .or_else(|| snapshot.get(file_path))
                     .ok_or_else(|| {
-                        GitAiError::Generic(format!(
-                            "carryover snapshot missing content for {}",
-                            file_path
-                        ))
+                        PersistenceError::Io {
+                            // Persisted diagnostics rely on the existing Display prefix.
+                            operation: "Generic error",
+                            path: String::new(),
+                            kind: std::io::ErrorKind::InvalidData,
+                            message: format!(
+                                "carryover snapshot missing content for {}",
+                                file_path
+                            ),
+                        }
                     })?;
                 // self.file_contents lookup: raw-then-NFC (working-log paths are raw).
                 let observed_content = self
@@ -119,10 +129,16 @@ impl VirtualAttributions {
                     .get(file_path)
                     .or_else(|| self.file_contents.get(&nfc_file_path))
                     .ok_or_else(|| {
-                        GitAiError::Generic(format!(
-                            "virtual attribution missing content for {}",
-                            file_path
-                        ))
+                        PersistenceError::Io {
+                            // Persisted diagnostics rely on the existing Display prefix.
+                            operation: "Generic error",
+                            path: String::new(),
+                            kind: std::io::ErrorKind::InvalidData,
+                            message: format!(
+                                "virtual attribution missing content for {}",
+                                file_path
+                            ),
+                        }
                     })?;
                 let shift_hunks = diff_hunks_between_contents(observed_content, carryover_content);
                 rebased_line_attrs =
@@ -146,6 +162,12 @@ impl VirtualAttributions {
                 unstaged_lines.sort_unstable();
             }
 
+            let pending_ranges = pending_hunks.get(&nfc_file_path).or_else(|| {
+                rename_map
+                    .get(&nfc_file_path)
+                    .and_then(|path| pending_hunks.get(path))
+            });
+
             // Committed hunks for this file are keyed by new path after renames.
             let file_committed_hunks = hunks.committed.get(&nfc_file_path).or_else(|| {
                 rename_map
@@ -162,13 +184,16 @@ impl VirtualAttributions {
                 for workdir_line_num in line_attr.start_line..=line_attr.end_line {
                     let is_unstaged = unstaged_lines.binary_search(&workdir_line_num).is_ok();
 
-                    if is_unstaged {
+                    if pending_ranges.is_some_and(|ranges| {
+                        ranges.iter().any(|range| range.contains(workdir_line_num))
+                    }) {
                         uncommitted_lines_map
                             .entry(line_attr.author_id.clone())
                             .or_default()
                             .push(workdir_line_num);
                         referenced_prompts.insert(line_attr.author_id.clone());
-                    } else {
+                    }
+                    if !is_unstaged {
                         // Convert workdir → commit line number by subtracting
                         // the count of unstaged lines that precede this one.
                         let adjustment = unstaged_lines

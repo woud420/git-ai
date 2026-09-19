@@ -1,3 +1,5 @@
+mod pending_checkpoint;
+
 use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::TestRepo;
 use crate::test_utils::extract_json_object;

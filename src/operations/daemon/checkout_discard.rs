@@ -57,6 +57,9 @@ pub(super) fn apply(
     index_write: &IndexWriteEvidence,
 ) -> Result<(), GitAiError> {
     let repo = find_repository_in_path(worktree)?;
+    if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
+        return Ok(());
+    }
     // A tree checkout can still write an alternate index. Only
     // Git's recorded write to this worktree's index proves default staged
     // evidence was discarded too; inspecting the later index cannot prove it.

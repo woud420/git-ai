@@ -87,18 +87,12 @@ fn checkout_discard_explicit_source_known_human() {
 }
 
 #[test]
-fn checkout_discard_fsmonitor_preserves_retained_edit() {
-    let repo = TestRepo::new();
+fn checkout_discard_collection_opt_out_preserves_existing_journal() {
+    let mut repo = TestRepo::new_dedicated_daemon();
     let base = prepare_discard(&repo, "mock_ai");
-    let hook = repo.path().join(".git/hooks/fsmonitor-fixture");
-    // Git can retain the edit when a monitor reports its index entry as clean;
-    // command success and an index write alone cannot prove it was discarded.
-    repos::write_executable_script(&hook, "#!/bin/sh\nprintf 'fixture-token\\0'\n").unwrap();
-    repo.git_og(&["config", "core.fsmonitor", hook.to_str().unwrap()])
-        .unwrap();
-    repo.git_og(&["update-index", "--fsmonitor"]).unwrap();
-    repo.git_og(&["update-index", "--fsmonitor-valid", "tracked.txt"])
-        .unwrap();
+    let log = repo.current_working_logs();
+    let before = fs::read(log.checkpoints_file()).unwrap();
+    repo.patch_git_ai_config(|patch| patch.allowed_repositories = Some(Vec::new()));
     repo.git_without_test_sync_for_test(
         &[
             "checkout",
@@ -110,6 +104,51 @@ fn checkout_discard_fsmonitor_preserves_retained_edit() {
     )
     .unwrap();
     repo.sync_daemon_force();
+    assert!(
+        fs::read(log.checkpoints_file()).unwrap() == before,
+        "disabled collection must leave existing checkpoints unchanged"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "base\n"
+    );
+}
+
+#[test]
+fn checkout_discard_fsmonitor_preserves_retained_edit() {
+    let repo = TestRepo::new();
+    let base = prepare_discard(&repo, "mock_ai");
+    let hook = repo.path().join(".git/hooks/fsmonitor-fixture");
+    // Git can retain the edit when a monitor reports its index entry as clean;
+    // command success and an index write alone cannot prove it was discarded.
+    repos::write_executable_script(
+        &hook,
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" >> .git/fsmonitor-fixture-calls\nprintf 'fixture-token\\0'\n",
+    )
+    .unwrap();
+    // Git interprets this setting through a shell, including on Windows.
+    repo.git_og(&["config", "core.fsmonitor", ".git/hooks/fsmonitor-fixture"])
+        .unwrap();
+    repo.git_og(&["config", "core.fsmonitorHookVersion", "2"])
+        .unwrap();
+    repo.git_og(&["update-index", "--fsmonitor"]).unwrap();
+    repo.git_og(&["update-index", "--fsmonitor-valid", "tracked.txt"])
+        .unwrap();
+    let calls = repo.path().join(".git/fsmonitor-fixture-calls");
+    fs::write(&calls, "").unwrap();
+    repo.git_without_test_sync_for_test(
+        &[
+            "checkout",
+            &base,
+            "--",
+            &absolute_path(&repo, "tracked.txt"),
+        ],
+        &[],
+    )
+    .unwrap();
+    repo.sync_daemon_force();
+    let calls = fs::read_to_string(calls).unwrap();
+    assert!(!calls.is_empty() && calls.lines().all(|line| line == "2"));
     assert_eq!(
         fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
         "discarded edit\n"

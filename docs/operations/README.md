@@ -19,6 +19,9 @@ and internal databases live under `~/.git-ai/internal/`. `git-ai daemon`
 subcommands and `git-ai status` cover inspection; `GIT_AI_DEBUG=1` enables
 debug logging, `GIT_AI_DEBUG_PERFORMANCE=1` timing output.
 
+For opt-in agent sandbox access to the trace socket, see
+[sandbox socket permissions](sandbox-socket-permissions.md).
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

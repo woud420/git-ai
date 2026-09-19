@@ -261,6 +261,7 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn clear_trace_root_tracking(&self, root_sid: &str) -> Result<(), GitAiError> {
+        self.clear_commit_editor_wait(root_sid)?;
         {
             let mut ingress =
                 self.trace_ingress_state
@@ -299,6 +300,7 @@ impl ActorDaemonCoordinator {
         ingress.root_open_connections.iter().any(|(root, count)| {
             *count > 0
                 && !ingress.root_definitely_read_only.contains(root)
+                && !self.commit_editor_is_waiting(root)
                 && ingress.root_mutating.get(root).copied().unwrap_or(true)
                 && family.is_none_or(|family| {
                     ingress
@@ -423,15 +425,19 @@ impl ActorDaemonCoordinator {
                         match futures::FutureExt::catch_unwind(caught).await {
                             Ok(Ok(())) => Ok(()),
                             Ok(Err(error)) => {
-                                tracing::error!(
-                                    component = "daemon",
-                                    phase = "trace_ingest_worker",
-                                    reason = "ingest_error",
-                                    sequence = processed_seq,
-                                    root_sid = ?ordered_payload_root,
-                                    %error,
-                                    "trace ingest error"
-                                );
+                                if super::error_log_policy::is_discovery_miss(&error) {
+                                    tracing::debug!(
+                                        component = "daemon", phase = "trace_ingest_worker",
+                                        reason = "repository_unavailable", sequence = processed_seq,
+                                        root_sid = ?ordered_payload_root, %error, "trace ingest error"
+                                    );
+                                } else {
+                                    tracing::error!(
+                                        component = "daemon", phase = "trace_ingest_worker",
+                                        reason = "ingest_error", sequence = processed_seq,
+                                        root_sid = ?ordered_payload_root, %error, "trace ingest error"
+                                    );
+                                }
                                 Err(error)
                             }
                             Err(panic_payload) => {

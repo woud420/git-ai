@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "health/error_storms.rs"]
+mod error_storms;
+
 fn bg_status(repo: &TestRepo, repo_path: &Path) -> Value {
     let mut command = Command::new(get_binary_path());
     command

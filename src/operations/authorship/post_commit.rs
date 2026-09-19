@@ -1,3 +1,6 @@
+mod snapshots;
+mod stale_checkpoint;
+
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
@@ -19,7 +22,8 @@ use crate::operations::authorship::virtual_attribution::{
 };
 use crate::operations::git::notes_api::write_note;
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
-use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
+use crate::operations::git::repository::Repository;
+use snapshots::{commit_tree_snapshot_for_files, recovery_committed_hunks};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 
@@ -386,13 +390,28 @@ where
     authorship_log = transform(authorship_log)?;
     authorship_log.metadata.base_commit_sha = commit_sha.clone();
 
+    let mut recovery_hunks = recovery_committed_hunks(
+        repo,
+        &parent_sha,
+        &commit_sha,
+        context.precomputed_parent_diff,
+    )?;
+    stale_checkpoint::CheckpointEvidence {
+        working_log: &working_log,
+        checkpoints: &parent_working_log,
+        initial: &initial_attributions_for_pathspecs,
+        observed: &observed_snapshot,
+        attribution_metadata: &working_va,
+    }
+    .reconcile(
+        repo,
+        &committed_diff_base,
+        &commit_sha,
+        &mut authorship_log,
+        &mut recovery_hunks,
+    )?;
+
     if options.recover_attribution {
-        let recovery_hunks = recovery_committed_hunks(
-            repo,
-            &parent_sha,
-            &commit_sha,
-            context.precomputed_parent_diff,
-        )?;
         crate::operations::authorship::attribution_recovery::recover_attribution(
             repo,
             &parent_sha,
@@ -423,6 +442,7 @@ where
         }
     }
 
+    // This diagnostic is persisted in daemon failure state; keep its text stable.
     let authorship_note_str = authorship_log
         .serialize_to_string()
         .map_err(|_| GitAiError::Generic("Failed to serialize authorship log".to_string()))?;
@@ -564,60 +584,6 @@ where
         authorship_log,
         authorship_note: authorship_note_str,
     })
-}
-
-fn commit_tree_snapshot_for_files(
-    repo: &Repository,
-    commit_sha: &str,
-    file_paths: &HashSet<String>,
-) -> Result<HashMap<String, String>, GitAiError> {
-    let requests = file_paths
-        .iter()
-        .map(|file_path| (commit_sha.to_string(), file_path.clone()))
-        .collect::<Vec<_>>();
-    let contents = batch_read_paths_at_treeishes(repo, &requests)?;
-    let mut snapshot = HashMap::with_capacity(file_paths.len());
-    for file_path in file_paths {
-        snapshot.insert(
-            file_path.clone(),
-            contents
-                .get(&(commit_sha.to_string(), file_path.clone()))
-                .cloned()
-                .unwrap_or_default(),
-        );
-    }
-
-    Ok(snapshot)
-}
-
-fn recovery_committed_hunks(
-    repo: &Repository,
-    parent_sha: &str,
-    commit_sha: &str,
-    precomputed_parent_diff: Option<&crate::operations::authorship::rewrite::DiffTreeResult>,
-) -> Result<HashMap<String, Vec<crate::model::authorship_log::LineRange>>, GitAiError> {
-    if let Some(diff) = precomputed_parent_diff {
-        return Ok(
-            crate::operations::authorship::virtual_attribution::committed_hunks_from_diff_result(
-                diff, None,
-            ),
-        );
-    }
-
-    // Recovery only attributes lines added by the commit being finalized, so the
-    // diff must be bounded to that single commit (see `single_commit_diff_base`).
-    let diff_base = single_commit_diff_base(parent_sha, commit_sha);
-    let added_lines = repo.diff_added_lines(&diff_base, commit_sha, None)?;
-    Ok(added_lines
-        .into_iter()
-        .filter(|(_, lines)| !lines.is_empty())
-        .map(|(path, lines)| {
-            (
-                path,
-                crate::model::authorship_log::LineRange::compress_lines(&lines),
-            )
-        })
-        .collect())
 }
 
 /// Amend-specific post-commit that merges blame-sourced attributions from the
@@ -834,6 +800,7 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         }
     }
 
+    // This diagnostic is persisted in daemon failure state; keep its text stable.
     let authorship_note_str = authorship_log
         .serialize_to_string()
         .map_err(|_| GitAiError::Generic("Failed to serialize authorship log".to_string()))?;

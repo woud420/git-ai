@@ -62,6 +62,7 @@ impl ActorDaemonCoordinator {
         }
 
         self.maybe_append_pending_root_from_trace_payload(&payload)?;
+        self.update_commit_editor_wait_state(&payload)?;
         let emitted = {
             let mut normalizer = self.normalizer.lock().await;
             normalizer.ingest_payload(&payload)?

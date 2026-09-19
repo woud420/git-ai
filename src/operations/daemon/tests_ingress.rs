@@ -313,13 +313,19 @@ async fn mutating_trace_payload_captures_repo_reflog_start_offsets() {
     std::fs::write(&head_log, old_head_reflog).unwrap();
     std::fs::write(&stash_log, old_reflog).unwrap();
     std::fs::write(&branch_log, old_branch_reflog).unwrap();
-    let mut payload = serde_json::json!({
+    let mut start = serde_json::json!({
         "event": "start",
         "sid": "20260411T120000.000000-Psid-reflog",
         "argv": ["git", "reset", "--hard", "HEAD~1"],
         "worktree": repo,
     });
-
+    assert!(coord.prepare_trace_payload_for_ingest(&mut start));
+    let mut payload = serde_json::json!({
+        "event": "def_repo",
+        "sid": "20260411T120000.000000-Psid-reflog",
+        "repo": 1,
+        "worktree": repo,
+    });
     assert!(coord.prepare_trace_payload_for_ingest(&mut payload));
 
     let offsets = payload

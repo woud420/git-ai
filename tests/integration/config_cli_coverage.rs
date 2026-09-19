@@ -10,6 +10,8 @@ use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 
+mod transcript_budgets;
+
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
 fn get_json(repo: &TestRepo, key: &str) -> Value {
     get_json_with_env(repo, key, &[])
@@ -484,6 +486,8 @@ fn fully_populated_file_config() -> FileConfig {
         max_checkpoint_file_size_bytes: Some(3 * 1024 * 1024),
         max_checkpoint_total_size_bytes: Some(32 * 1024 * 1024),
         max_checkpoint_total_lines: Some(500_000),
+        max_transcript_line_bytes: Some(8 * 1024 * 1024),
+        max_transcript_batch_bytes: Some(8 * 1024 * 1024),
         daemon_memory_limit_mb: Some(1024),
     }
 }

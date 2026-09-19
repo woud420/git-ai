@@ -131,12 +131,9 @@ impl Agent for CopilotCliAgent {
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
-        use std::io::{BufRead, BufReader};
-
-        let file = fs::File::open(stream_path).ok()?;
-        let reader = BufReader::new(file);
-
-        for line in reader.lines().map_while(Result::ok).take(5) {
+        for line in
+            crate::operations::streams::reader::read_leading_jsonl_lines(stream_path, 5).ok()?
+        {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;

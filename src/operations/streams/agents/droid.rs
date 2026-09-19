@@ -105,9 +105,6 @@ impl Agent for DroidAgent {
         watermark: Box<dyn WatermarkStrategy>,
         session_id: &str,
     ) -> Result<StreamBatch, StreamError> {
-        use std::fs::File;
-        use std::io::{BufReader, Seek, SeekFrom};
-
         // Downcast watermark to HybridWatermark
         let hybrid_watermark = watermark
             .as_any()
@@ -122,86 +119,16 @@ impl Agent for DroidAgent {
         let start_offset = hybrid_watermark.offset;
         let mut record_count = hybrid_watermark.record;
 
-        // Open file
-        let file = File::open(path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                StreamError::Fatal {
-                    message: format!("Transcript file not found: {}", path.display()),
-                }
-            } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                StreamError::Fatal {
-                    message: format!("Permission denied reading transcript: {}", path.display()),
-                }
-            } else {
-                StreamError::Transient {
-                    message: format!("Failed to open transcript file: {}", e),
-                    retry_after: std::time::Duration::from_secs(5),
-                }
-            }
-        })?;
-
-        let mut reader = BufReader::new(file);
-
-        // Seek to watermark position
-        reader
-            .seek(SeekFrom::Start(start_offset))
-            .map_err(|e| StreamError::Transient {
-                message: format!("Failed to seek to offset {}: {}", start_offset, e),
-                retry_after: std::time::Duration::from_secs(5),
-            })?;
-
-        let batch_limit = self.batch_size_hint();
-        let mut events = Vec::with_capacity(batch_limit);
-        let mut current_offset = start_offset;
-        let mut line_number = 0;
-        let mut latest_timestamp: Option<chrono::DateTime<chrono::Utc>> =
-            hybrid_watermark.timestamp;
-
-        // Read lines from watermark position
-        let mut line = String::new();
-        loop {
-            match crate::model::stream_types::read_jsonl_line(&mut reader, &mut line).map_err(
-                |e| StreamError::Transient {
-                    message: format!("I/O error reading line: {}", e),
-                    retry_after: std::time::Duration::from_secs(5),
-                },
-            )? {
-                crate::model::stream_types::JsonlLineState::Eof => break,
-                crate::model::stream_types::JsonlLineState::Partial => break,
-                crate::model::stream_types::JsonlLineState::Complete(bytes_read) => {
-                    line_number += 1;
-                    current_offset += bytes_read as u64;
-                }
-            }
-
-            // Skip empty lines
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            // Parse JSONL entry
-            let entry: serde_json::Value = match serde_json::from_str(&line) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(
-                        line = line_number,
-                        path = %path.display(),
-                        error = %e,
-                        "skipping malformed JSON line"
-                    );
-                    continue;
-                }
-            };
-
-            // Only process "message" entries; skip session_start, todo_state, etc.
-            if entry["type"].as_str() != Some("message") {
-                continue;
-            }
-
-            // Track record count for hybrid watermark
+        let (events, current_offset) = crate::operations::streams::reader::read_jsonl_event_batch(
+            path,
+            start_offset,
+            self.batch_size_hint(),
+            "open",
+            |entry| entry["type"].as_str() == Some("message"),
+        )?;
+        let mut latest_timestamp = hybrid_watermark.timestamp;
+        for entry in &events {
             record_count += 1;
-
-            // Update latest_timestamp for hybrid watermark
             if let Some(ts_str) = entry["timestamp"].as_str()
                 && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str)
             {
@@ -209,12 +136,6 @@ impl Agent for DroidAgent {
                 if latest_timestamp.is_none() || Some(utc_dt) > latest_timestamp {
                     latest_timestamp = Some(utc_dt);
                 }
-            }
-
-            // Push raw JSON entry
-            events.push(entry);
-            if events.len() >= batch_limit {
-                break;
             }
         }
 

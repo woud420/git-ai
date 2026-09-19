@@ -175,30 +175,12 @@ impl ActorDaemonCoordinator {
             let state = map
                 .entry(family.to_string())
                 .or_insert_with(FamilySequencerState::new);
-            while let Some(first_entry) = state.entries.first_entry() {
-                if matches!(first_entry.get(), FamilySequencerEntry::PendingRoot) {
-                    break;
-                }
-                let entry_root_sid = match first_entry.get() {
-                    FamilySequencerEntry::ReadyCommand(command) => Some(command.root_sid.as_str()),
-                    _ => None,
-                };
-                if self.family_entry_blocked_by_prior_open_trace_root(
-                    family,
-                    first_entry.key().started_at_ns,
-                    entry_root_sid,
-                )? {
-                    break;
-                }
-                let (order, entry) = first_entry.remove_entry();
-                match entry {
-                    FamilySequencerEntry::PendingRoot => {
-                        unreachable!("pending root should not be removed from sequencer front");
-                    }
-                    other => {
-                        ready.push((order.ordinal, other));
-                    }
-                }
+            for order in self.ready_family_orders(family, state)? {
+                let entry = state
+                    .entries
+                    .remove(&order)
+                    .expect("selected entry remains queued under the sequencer lock");
+                ready.push((order.ordinal, entry));
             }
         }
 
@@ -259,15 +241,13 @@ impl ActorDaemonCoordinator {
                                     }
                                 }
                             };
-                            if let Err(error) = &side_effect_result {
-                                let _ = self.record_side_effect_error(family, order, error);
-                                tracing::error!(
-                                    %error,
-                                    %family,
-                                    seq = applied.seq,
-                                    "command side effect failed"
-                                );
-                            }
+                            self.record_and_log_side_effect_result(
+                                family,
+                                order,
+                                "command_side_effect",
+                                "command side effect failed",
+                                &side_effect_result,
+                            );
                             if let Err(error) = self.append_command_completion_log(
                                 family,
                                 &applied,
@@ -284,12 +264,12 @@ impl ActorDaemonCoordinator {
                             }
                         }
                         Ok(Err(error)) => {
-                            let _ = self.record_side_effect_error(family, order, &error);
-                            tracing::error!(
-                                %error,
-                                %family,
+                            self.record_and_log_side_effect_result::<()>(
+                                family,
                                 order,
-                                "command apply failed"
+                                "command_apply",
+                                "command apply failed",
+                                &Err(error),
                             );
                         }
                         Err(panic_payload) => {
@@ -439,13 +419,6 @@ impl ActorDaemonCoordinator {
                             duration_ms = checkpoint_duration_ms as u64,
                             "checkpoint done"
                         );
-                    } else {
-                        tracing::warn!(
-                            kind = %checkpoint_kind_str,
-                            repo = %repo_wd,
-                            duration_ms = checkpoint_duration_ms as u64,
-                            "checkpoint failed"
-                        );
                     }
                     if result.is_ok() {
                         // Clear pending AI edit state once the PostFileEdit completes.
@@ -482,15 +455,13 @@ impl ActorDaemonCoordinator {
                         }
                     }
                     // Removed captured_checkpoint_id cleanup - no more captured checkpoints
-                    if let Err(error) = &result {
-                        let _ = self.record_side_effect_error(family, order, error);
-                        tracing::error!(
-                            %error,
-                            %family,
-                            order,
-                            "checkpoint side effect failed"
-                        );
-                    }
+                    self.record_and_log_side_effect_result(
+                        family,
+                        order,
+                        "checkpoint_side_effect",
+                        "checkpoint side effect failed",
+                        &result,
+                    );
                     if should_log_completion {
                         let log_entry = TestCompletionLogEntry {
                             seq: result.as_ref().copied().unwrap_or(0),
@@ -527,7 +498,7 @@ impl ActorDaemonCoordinator {
                     }
                 }
                 FamilySequencerEntry::Canceled => {}
-                FamilySequencerEntry::PendingRoot => {}
+                FamilySequencerEntry::PendingRoot { .. } => {}
             }
         }
         Ok(())

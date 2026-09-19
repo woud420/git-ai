@@ -182,15 +182,10 @@ impl Agent for ClaudeAgent {
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
-        use std::fs::File;
-        use std::io::{BufRead, BufReader};
-
-        let file = File::open(stream_path).ok()?;
-        let reader = BufReader::new(file);
-
         // Check up to 50 lines for a top-level "cwd" field
-        for line in reader.lines().take(50) {
-            let Ok(line) = line else { continue };
+        for line in
+            crate::operations::streams::reader::read_leading_jsonl_lines(stream_path, 50).ok()?
+        {
             if line.is_empty() {
                 continue;
             }

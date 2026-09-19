@@ -8,15 +8,11 @@ use crate::operations::daemon::{
     remove_stale_daemon_files, send_control_request,
     send_control_request_fire_and_forget as send_nowait, send_control_request_with_timeout,
 };
-#[cfg(windows)]
-use crate::process_spawn::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
-#[cfg(windows)]
-use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(not(windows))]
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,6 +22,12 @@ mod status;
 #[cfg(test)]
 #[path = "daemon_startup_lock_tests.rs"]
 mod startup_lock_tests;
+
+#[cfg(any(windows, not(any(test, feature = "test-support"))))]
+#[path = "daemon_spawn.rs"]
+mod detached;
+#[cfg(any(windows, not(any(test, feature = "test-support"))))]
+use detached::spawn_daemon_run_detached;
 
 pub fn handle_daemon(args: &[String]) {
     if args.is_empty() || is_help(args[0].as_str()) {
@@ -353,77 +355,6 @@ fn daemon_runtime_dir(config: &DaemonConfig) -> Result<PathBuf, String> {
         .parent()
         .map(PathBuf::from)
         .ok_or_else(|| "daemon lock path has no parent".to_string())
-}
-
-#[cfg(windows)]
-fn powershell_single_quote_literal(value: &OsStr) -> String {
-    format!("'{}'", value.to_string_lossy().replace('\'', "''"))
-}
-
-#[cfg(any(windows, not(any(test, feature = "test-support"))))]
-fn spawn_daemon_run_detached(config: &DaemonConfig) -> Result<(), String> {
-    // Use current_git_ai_exe() instead of current_exe() to resolve through
-    // symlinks. When the current exe is the git shim (e.g. ~/.local/bin/git),
-    // current_exe() would spawn `git daemon run` which re-enters handle_git()
-    // instead of handle_git_ai(), causing a fork bomb in async mode.
-    let exe = crate::cli::git_ai_exe::current_git_ai_exe().map_err(|e| e.to_string())?;
-    let runtime_dir = daemon_runtime_dir(config)?;
-
-    #[cfg(windows)]
-    {
-        let script = format!(
-            "Start-Process -FilePath {} -ArgumentList @('bg','run') -WorkingDirectory {} -WindowStyle Hidden",
-            powershell_single_quote_literal(exe.as_os_str()),
-            powershell_single_quote_literal(Path::new(&runtime_dir).as_os_str())
-        );
-        let mut child = Command::new("powershell.exe");
-        child
-            .arg("-NoProfile")
-            .arg("-NonInteractive")
-            .arg("-WindowStyle")
-            .arg("Hidden")
-            .arg("-Command")
-            .arg(script)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        crate::operations::daemon::sanitize_daemon_child_environment(&mut child);
-        child.env_remove("GIT_AI");
-        let preferred_flags =
-            CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB;
-        child.creation_flags(preferred_flags);
-        match child.spawn() {
-            Ok(_) => Ok(()),
-            Err(preferred_err) => {
-                tracing::debug!(
-                    "detached daemon spawn with CREATE_BREAKAWAY_FROM_JOB failed, retrying without it: {}",
-                    preferred_err
-                );
-                child.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
-                child.spawn().map(|_| ()).map_err(|fallback_err| {
-                    format!(
-                        "failed to spawn detached daemon with flags {:#x}: {}; retry without CREATE_BREAKAWAY_FROM_JOB also failed: {}",
-                        preferred_flags, preferred_err, fallback_err
-                    )
-                })
-            }
-        }
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut child = Command::new(exe);
-        child
-            .arg("bg")
-            .arg("run")
-            .current_dir(&runtime_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        crate::operations::daemon::sanitize_daemon_child_environment(&mut child);
-        child.env_remove("GIT_AI");
-        child.spawn().map(|_| ()).map_err(|e| e.to_string())
-    }
 }
 
 #[cfg(not(windows))]

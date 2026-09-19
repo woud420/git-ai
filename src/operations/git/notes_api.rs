@@ -12,7 +12,9 @@
 //! reads fall back to `refs/notes/ai` (and backfill the cache) so repositories
 //! with pre-existing git notes keep working without migration.
 
+mod authorship;
 mod primary_backend;
+pub use authorship::{read_authorship_v3, read_authorship_v3_batch};
 
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
@@ -152,36 +154,6 @@ pub fn read_authorship(repo: &Repository, commit_sha: &str) -> Option<Authorship
     }
 }
 
-pub fn read_authorship_v3(
-    repo: &Repository,
-    commit_sha: &str,
-) -> Result<AuthorshipLog, GitAiError> {
-    match Config::fresh().notes_backend_kind() {
-        NotesBackendKind::Sqlite => {
-            if let Some(content) = SqliteNoteStore::new()
-                .read_note(commit_sha)
-                .or_else(|| sqlite_fallback_read_from_refs(repo, commit_sha))
-            {
-                AuthorshipLog::deserialize_from_string(&content)
-                    .map_err(|e| GitAiError::Generic(format!("notes deserialization error: {}", e)))
-            } else {
-                crate::operations::git::refs::get_reference_as_authorship_log_v3(repo, commit_sha)
-            }
-        }
-        NotesBackendKind::Http => {
-            if let Some(content) = HttpNoteStore::new().read_note(commit_sha) {
-                AuthorshipLog::deserialize_from_string(&content)
-                    .map_err(|e| GitAiError::Generic(format!("notes deserialization error: {}", e)))
-            } else {
-                crate::operations::git::refs::get_reference_as_authorship_log_v3(repo, commit_sha)
-            }
-        }
-        NotesBackendKind::GitNotes => {
-            crate::operations::git::refs::get_reference_as_authorship_log_v3(repo, commit_sha)
-        }
-    }
-}
-
 /// Return a map of commit SHA → note-blob OID for the given commits.
 ///
 /// Callers use the returned OIDs as git object IDs with the batched `cat-file` reader
@@ -257,7 +229,6 @@ pub fn filter_commits_with_notes(
                         if let Some(content) = cached_map.get(sha)
                             && let Ok(authorship_log) =
                                 AuthorshipLog::deserialize_from_string(content)
-                                    .map_err(|e| GitAiError::Generic(e.to_string()))
                         {
                             return CommitAuthorship::Log {
                                 sha: sha.clone(),

@@ -88,11 +88,14 @@ fn spawn_probe_log(effective_args: &[String]) {
     let Ok(path) = std::env::var("GIT_AI_SPAWN_LOG") else {
         return;
     };
-    let sub = effective_args
+    let mut sub = effective_args
         .iter()
         .find(|a| !a.starts_with('-') && !a.contains('=') && !a.contains('/') && !a.contains('\\'))
         .cloned()
         .unwrap_or_default();
+    if sub == "cat-file" && effective_args.iter().any(|arg| arg == "--batch") {
+        sub.push_str(" --batch");
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

@@ -21,6 +21,7 @@ debug logging, `GIT_AI_DEBUG_PERFORMANCE=1` timing output.
 
 For opt-in agent sandbox access to the trace socket, see
 [sandbox socket permissions](sandbox-socket-permissions.md).
+See [socket health checks](socket-health.md) for liveness warnings and limits.
 
 ## Release
 

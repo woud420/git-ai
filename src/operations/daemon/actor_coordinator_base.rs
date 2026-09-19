@@ -97,6 +97,7 @@ impl ActorDaemonCoordinator {
             shutdown_notify: Notify::new(),
             shutdown_condvar: std::sync::Condvar::new(),
             shutdown_condvar_mutex: Mutex::new(()),
+            trace_health_pings_received: std::sync::atomic::AtomicU64::new(0),
         }
     }
 

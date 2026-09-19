@@ -268,6 +268,7 @@ pub struct ActorDaemonCoordinator {
     pub(crate) shutdown_notify: Notify,
     pub(crate) shutdown_condvar: std::sync::Condvar,
     pub(crate) shutdown_condvar_mutex: Mutex<()>,
+    pub(crate) trace_health_pings_received: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

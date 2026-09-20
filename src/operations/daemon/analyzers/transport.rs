@@ -133,9 +133,7 @@ mod tests {
         let result = analyzer
             .analyze(
                 &command("pull", &["git", "pull", "--rebase"]),
-                AnalysisView {
-                    refs: &Default::default(),
-                },
+                AnalysisView::from_refs(&Default::default()),
             )
             .unwrap();
         assert!(result.events.iter().any(|event| matches!(

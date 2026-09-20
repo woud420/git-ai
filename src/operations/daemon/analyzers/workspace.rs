@@ -20,6 +20,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
 
         let mut events = Vec::new();
         match name {
+            "rm" => {
+                if let Some(event) = super::removal::analyze_removal(cmd, state.worktree) {
+                    events.push(event);
+                }
+            }
             "stash" => {
                 let stash_args = stash_command_args(cmd);
                 events.push(SemanticEvent::StashOperation {
@@ -28,7 +33,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                 });
             }
             "checkout" => {
-                if is_path_checkout(&args) {
+                if let Some(event) =
+                    super::orphan_checkout::analyze_orphan_checkout(cmd, state.worktree)
+                {
+                    events.push(event);
+                } else if is_path_checkout(&args) {
                     events.push(SemanticEvent::CheckoutPaths);
                 } else if let Some(change) = cmd.ref_changes.first() {
                     events.push(SemanticEvent::RefUpdated {
@@ -39,7 +48,11 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                 }
             }
             "switch" => {
-                if let Some(change) = cmd.ref_changes.first() {
+                if let Some(event) =
+                    super::orphan_checkout::analyze_orphan_checkout(cmd, state.worktree)
+                {
+                    events.push(event);
+                } else if let Some(change) = cmd.ref_changes.first() {
                     events.push(SemanticEvent::RefUpdated {
                         reference: change.reference.clone(),
                         old: change.old.clone(),
@@ -128,7 +141,7 @@ mod tests {
         refs.insert("HEAD".to_string(), "abc123".to_string());
         let cmd = command("stash", &["git", "stash", "apply", "stash@{0}"]);
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
         assert!(result.events.iter().any(|event| matches!(
             event,

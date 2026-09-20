@@ -200,6 +200,54 @@ daemon processing time (I3).
 Pathspec reset (`git reset -- path`) only unstages; it does not move HEAD and
 needs no committed-record migration.
 
+### Orphan branches with pending checkpoints
+
+Successful `git checkout --orphan <branch>` and `git switch --orphan <branch>`
+move pending working-log evidence from the ordered worktree HEAD to the
+`initial` base. The reducer records the new unborn branch and clears the old
+HEAD; a later root commit consumes the migrated evidence. Returning to an
+existing branch maps a captured zero old HEAD to `initial`, so pending evidence
+follows that transition back. Later checkpoints are merged through the
+existing working-log storage helper.
+
+Plain checkout preserves the index/worktree. Plain switch removes paths from
+the old HEAD, preserves untracked and newly staged additions, and refuses to
+remove modified tracked files. Before a switch migration, one metadata-only
+Git batch verifies the old commit still exists, identifies recorded paths in
+its immutable tree, and retires those paths' evidence. A 4,096-path/1 MiB query budget and complete response
+validation keep incomplete evidence from being migrated. No current index,
+worktree contents, or mutable HEAD is used.
+
+Admission requires ordered worktree evidence, only `-C` globals, exactly
+`--orphan <branch>`, and no observed ref changes or child commands. Force,
+explicit start-point, and cold-actor forms remain outside this contract. The
+migration preserves pending checkpoints; it does not synthesize full
+historical blame for the new root.
+
+### Explicit file removal
+
+A successful `git rm [-f|--force] [-q|--quiet] -- :(top,literal)path ...`
+retires the named files' uncommitted attribution from the ordered worktree
+HEAD's working log. `:(literal,top)` is equivalent. The family actor supplies
+that worktree's previously observed full HEAD OID; a cold actor, missing HEAD,
+or overlapping command timestamps leave the operation opaque. Another
+worktree's family-level HEAD is never substituted.
+
+The side effect runs in family order and reuses the checkpoint/INITIAL
+filtering kernel. Exact file names are filtered, preserving other paths,
+committed notes, and checkpoints sequenced after the removal. No current
+index, file content, or HEAD lookup is used, and no Git process is spawned.
+
+This intentionally excludes recursive removal, relative or glob pathspecs,
+pathspec files, `--cached`, dry runs, `--ignore-unmatch`, failed commands, and
+repository/configuration globals other than `-C`. Git's Trace2 stream does not
+capture the invocation subdirectory or an immutable index snapshot: a
+relative path can name different files, and recursive removal must preserve
+untracked files beneath a directory. Likewise, default-index `git restore`
+cannot safely discard all prior evidence because the restored index can
+already contain the AI edit. These forms require additional authoritative
+operation-time evidence before their attribution can be changed.
+
 ### Stash
 
 Stash is a working-log migration, not a committed-record rewrite.

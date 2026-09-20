@@ -447,12 +447,7 @@ mod tests {
         }];
 
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
 
         assert!(result.events.iter().any(|event| matches!(
@@ -484,7 +479,7 @@ mod tests {
         )]);
 
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
 
         assert_only_opaque(&result);
@@ -507,7 +502,7 @@ mod tests {
         ]);
 
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
 
         assert!(result.events.iter().any(|event| matches!(
@@ -529,7 +524,7 @@ mod tests {
         )]);
 
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
 
         assert_only_opaque(&result);
@@ -541,9 +536,7 @@ mod tests {
         let result = analyzer
             .analyze(
                 &command("commit", &["git", "commit", "-m", "x"]),
-                AnalysisView {
-                    refs: &Default::default(),
-                },
+                AnalysisView::from_refs(&Default::default()),
             )
             .unwrap();
         assert!(
@@ -577,12 +570,7 @@ mod tests {
         ];
 
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
 
         assert!(result.events.iter().any(|event| matches!(
@@ -616,12 +604,7 @@ mod tests {
         ];
 
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
 
         assert!(result.events.iter().any(|event| matches!(
@@ -650,12 +633,7 @@ mod tests {
         ];
 
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
 
         assert!(result.events.iter().any(|event| matches!(
@@ -672,9 +650,7 @@ mod tests {
         let result = analyzer
             .analyze(
                 &command("reset", &["git", "reset", "--hard", "HEAD~1"]),
-                AnalysisView {
-                    refs: &Default::default(),
-                },
+                AnalysisView::from_refs(&Default::default()),
             )
             .unwrap();
         assert!(result.events.iter().any(|event| matches!(
@@ -693,12 +669,7 @@ mod tests {
         cmd.ref_changes.clear();
 
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
 
         assert_only_opaque(&result);
@@ -715,7 +686,7 @@ mod tests {
         )]);
 
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
 
         assert_only_opaque(&result);
@@ -732,7 +703,7 @@ mod tests {
         )]);
 
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
         assert_only_opaque(&result);
     }
@@ -744,12 +715,7 @@ mod tests {
         cmd.ref_changes.clear();
 
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
 
         assert_only_opaque(&result);
@@ -777,12 +743,7 @@ mod tests {
             },
         ];
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
         assert!(
             result.events.iter().any(|event| matches!(
@@ -837,12 +798,7 @@ mod tests {
             },
         ];
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
         assert!(
             result.events.iter().any(|event| matches!(
@@ -885,12 +841,7 @@ mod tests {
         ];
 
         let result = analyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
 
         assert!(
@@ -917,7 +868,7 @@ mod tests {
             ("refs/heads/main".to_string(), "old-head".to_string()),
         ]);
         let result = analyzer
-            .analyze(&cmd, AnalysisView { refs: &refs })
+            .analyze(&cmd, AnalysisView::from_refs(&refs))
             .unwrap();
         assert_only_opaque(&result);
     }

@@ -233,11 +233,13 @@ impl ActorDaemonCoordinator {
             return Ok(());
         }
         let worktree = cmd.worktree.as_ref().ok_or_else(|| {
-            // This invariant error is persisted in FamilyStatus.last_error; preserve its text.
-            GitAiError::Generic(format!(
-                "rebase side-effect state requires worktree sid={}",
-                cmd.root_sid
-            ))
+            super::state_error::state_error(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "rebase side-effect state requires worktree sid={}",
+                    cmd.root_sid
+                ),
+            )
         })?;
         if cmd.invoked_args.iter().any(|arg| arg == "--abort") {
             self.clear_pending_rebase_original_head_for_worktree(worktree)?;
@@ -286,11 +288,13 @@ impl ActorDaemonCoordinator {
             return Ok(());
         }
         let worktree = cmd.worktree.as_ref().ok_or_else(|| {
-            // This invariant error is persisted in FamilyStatus.last_error; preserve its text.
-            GitAiError::Generic(format!(
-                "cherry-pick side-effect state requires worktree sid={}",
-                cmd.root_sid
-            ))
+            super::state_error::state_error(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "cherry-pick side-effect state requires worktree sid={}",
+                    cmd.root_sid
+                ),
+            )
         })?;
         if cmd.invoked_args.iter().any(|arg| arg == "--abort") {
             self.clear_pending_cherry_pick_sources_for_worktree(worktree)?;
@@ -321,11 +325,13 @@ impl ActorDaemonCoordinator {
         if !new_commits.is_empty() && !applied_source_oids.is_empty() {
             let repo = find_repository_in_path(&worktree.to_string_lossy())?;
             let original_head = cherry_pick_original_head(cmd).ok_or_else(|| {
-                // This invariant error is persisted in FamilyStatus.last_error; preserve its text.
-                GitAiError::Generic(format!(
-                    "cherry-pick completed commits without original HEAD sid={}",
-                    cmd.root_sid
-                ))
+                super::state_error::state_error(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "cherry-pick completed commits without original HEAD sid={}",
+                        cmd.root_sid
+                    ),
+                )
             })?;
             crate::operations::daemon::revert_rebase_helpers::apply_cherry_pick_complete_rewrite(
                 &repo,
@@ -377,6 +383,19 @@ impl ActorDaemonCoordinator {
                         &worktree,
                         base_commit,
                         path,
+                        &cmd.index_write,
+                    )?;
+                }
+                crate::model::domain::SemanticEvent::WorkingLogPathMoved {
+                    base_commit,
+                    source,
+                    destination,
+                } => {
+                    super::mv_carryover::apply(
+                        &worktree,
+                        base_commit,
+                        source,
+                        destination,
                         &cmd.index_write,
                     )?;
                 }
@@ -465,69 +484,7 @@ impl ActorDaemonCoordinator {
     }
 }
 
-/// `Some(error)` when a `commit` invocation exited 0 but ref-cursor
-/// enrichment (`RefCursor::enrich_commit`, including its existing
-/// cold-seed-clamp and ingress-hint mitigations) still found no HEAD
-/// transition, and this isn't one of the known legitimate no-op shapes.
-/// Reuses `commit_skip_reason`'s exact classification of "opaque outcome for
-/// a commit" so the diagnostic-only skip reason recorded in the completion
-/// log and this fail-loud gate can never drift apart.
-///
-/// It deliberately does not rescan the reflog: message/timestamp matching is
-/// explicitly rejected by the ingestion spec as unsound. This only makes the
-/// existing fail-closed outcome observable; it does not change enrichment.
-///
-/// Known legitimate exceptions (must NOT error):
-/// - `--dry-run`: never touches the reflog, by design.
-/// - non-zero exit: excluded by the explicit `exit_code == 0` check (a
-///   rejected/empty/conflicted commit attempt routinely produces no HEAD
-///   move and is not a bug).
-///
-/// Not handled here (documented limitations, not attempted): a repo with
-/// `core.logAllRefUpdates=false` has no reflog for ref-cursor to read at all,
-/// so every commit there would fail loud; and a `commit --amend` that
-/// reproduces a byte-identical commit object (requires a fixed
-/// `GIT_COMMITTER_DATE`) moves no ref and writes no reflog entry. Both are
-/// pre-existing constraints of the reflog-cursor attribution model itself,
-/// not introduced by this check.
-pub(crate) fn commit_enrichment_unrecoverable_error(
-    cmd: &crate::model::domain::NormalizedCommand,
-    events: &[crate::model::domain::SemanticEvent],
-) -> Option<GitAiError> {
-    if cmd.exit_code != 0 {
-        return None;
-    }
-    crate::operations::daemon::actor_coordinator_seq::commit_skip_reason(
-        cmd.primary_command.as_deref(),
-        events,
-    )?;
-    let command_args = crate::operations::daemon::analyzers::command_args(cmd);
-    if crate::operations::git::cli_parser::is_dry_run(&command_args)
-        || command_args
-            .iter()
-            .any(|arg| matches!(arg.as_str(), "--short" | "--porcelain" | "--long"))
-    {
-        return None;
-    }
-    // Collection is opt-in per repository: a note was never going to be
-    // written for a non-allowed repo, so a lost enrichment there is not an
-    // attribution loss and must not raise error telemetry. This resolve+check
-    // runs only on the already-rare failure path, never per healthy commit.
-    if let Some(worktree) = cmd.worktree.as_deref()
-        && let Ok(repo) =
-            crate::operations::git::find_repository_in_path(&worktree.to_string_lossy())
-        && !repo.is_collection_allowed(&crate::config::Config::fresh())
-    {
-        return None;
-    }
-    // This diagnostic is persisted and asserted by lost-enrichment regressions.
-    Some(GitAiError::Generic(format!(
-        "commit sid={} exited 0 but ref-cursor enrichment found no HEAD transition; no AI \
-         attribution note was written for this commit (see \
-         docs/architecture/daemon-trace2-ingestion-spec.md)",
-        cmd.root_sid
-    )))
-}
+pub(crate) use super::state_error::commit_enrichment_unrecoverable_error;
 
 /// Emit a tracing telemetry record when a successful write-class git op completed.
 fn log_write_op_completion(primary: &str, cmd: &crate::model::domain::NormalizedCommand) {

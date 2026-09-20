@@ -23,16 +23,27 @@ impl GlobalActorHandle {
         self.tx
             .send(GlobalMsg::Apply(Box::new(cmd), tx))
             .await
-            .map_err(|_| GitAiError::Generic("global actor apply send failed".to_string()))?;
-        rx.await
-            .map_err(|_| GitAiError::Generic("global actor apply receive failed".to_string()))?
+            .map_err(|_| {
+                super::state_error::state_error(
+                    std::io::ErrorKind::BrokenPipe,
+                    "global actor apply send failed".to_string(),
+                )
+            })?;
+        rx.await.map_err(|_| {
+            super::state_error::state_error(
+                std::io::ErrorKind::BrokenPipe,
+                "global actor apply receive failed".to_string(),
+            )
+        })?
     }
 
     pub async fn shutdown(&self) -> Result<(), GitAiError> {
-        self.tx
-            .send(GlobalMsg::Shutdown)
-            .await
-            .map_err(|_| GitAiError::Generic("global actor shutdown send failed".to_string()))
+        self.tx.send(GlobalMsg::Shutdown).await.map_err(|_| {
+            super::state_error::state_error(
+                std::io::ErrorKind::BrokenPipe,
+                "global actor shutdown send failed".to_string(),
+            )
+        })
     }
 }
 

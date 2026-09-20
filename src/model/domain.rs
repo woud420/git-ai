@@ -218,6 +218,11 @@ pub enum SemanticEvent {
         base_commit: String,
         path: String,
     },
+    WorkingLogPathMoved {
+        base_commit: String,
+        source: String,
+        destination: String,
+    },
     CleanedWorkspace,
     StashOperation {
         kind: StashOpKind,

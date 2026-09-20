@@ -123,7 +123,12 @@ mod tests {
                 .unwrap()
                 .get(worktree.to_string_lossy().as_ref())
                 .cloned()
-                .ok_or_else(|| GitAiError::Generic("family not found".to_string()))
+                .ok_or_else(|| {
+                    super::super::state_error::state_error(
+                        std::io::ErrorKind::NotFound,
+                        "family not found".to_string(),
+                    )
+                })
         }
 
         fn resolve_primary_command(

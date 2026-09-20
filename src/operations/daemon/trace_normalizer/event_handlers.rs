@@ -172,12 +172,22 @@ impl<B: GitBackend> TraceNormalizer<B> {
             payload_worktree
                 .or(payload_repo)
                 .or(pending_worktree)
-                .ok_or_else(|| GitAiError::Generic("def_repo missing repo path".to_string()))?
+                .ok_or_else(|| {
+                    super::super::state_error::state_error(
+                        std::io::ErrorKind::InvalidData,
+                        "def_repo missing repo path".to_string(),
+                    )
+                })?
         } else {
             payload_worktree
                 .or(pending_worktree)
                 .or(payload_repo)
-                .ok_or_else(|| GitAiError::Generic("def_repo missing repo path".to_string()))?
+                .ok_or_else(|| {
+                    super::super::state_error::state_error(
+                        std::io::ErrorKind::InvalidData,
+                        "def_repo missing repo path".to_string(),
+                    )
+                })?
         };
         let repo = worktree_root_for_path(&repo).unwrap_or(repo);
 
@@ -218,7 +228,12 @@ impl<B: GitBackend> TraceNormalizer<B> {
         let cmd = payload
             .get("name")
             .and_then(Value::as_str)
-            .ok_or_else(|| GitAiError::Generic("cmd_name missing name".to_string()))?
+            .ok_or_else(|| {
+                super::super::state_error::state_error(
+                    std::io::ErrorKind::InvalidData,
+                    "cmd_name missing name".to_string(),
+                )
+            })?
             .to_string();
 
         if is_internal_cmd_name(&cmd) {
@@ -334,7 +349,10 @@ impl<B: GitBackend> TraceNormalizer<B> {
         finished_at_ns: u128,
     ) -> Result<Option<NormalizedCommand>, GitAiError> {
         let mut pending = self.state.pending.remove(root_sid).ok_or_else(|| {
-            GitAiError::Generic("missing pending command at finalize".to_string())
+            super::super::state_error::state_error(
+                std::io::ErrorKind::InvalidData,
+                "missing pending command at finalize".to_string(),
+            )
         })?;
 
         pending.exit_code = Some(exit_code);
@@ -452,10 +470,13 @@ impl<B: GitBackend> TraceNormalizer<B> {
                 } else {
                     last_error = Some((
                         candidate.clone(),
-                        GitAiError::Generic(format!(
-                            "failed to resolve clone/init target family from filesystem: {}",
-                            candidate.display()
-                        )),
+                        super::super::state_error::state_error(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "failed to resolve clone/init target family from filesystem: {}",
+                                candidate.display()
+                            ),
+                        ),
                     ));
                 }
             }

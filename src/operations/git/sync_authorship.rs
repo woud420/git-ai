@@ -3,6 +3,8 @@ use crate::operations::git::refs::{
 };
 use crate::{error::GitAiError, operations::git::cli_parser::ParsedGitInvocation};
 
+mod send_pack;
+pub use send_pack::send_authorship_notes;
 mod transport;
 #[cfg(test)]
 use transport::disabled_hooks_config;

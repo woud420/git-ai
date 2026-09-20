@@ -381,6 +381,15 @@ impl ActorDaemonCoordinator {
                 crate::model::domain::SemanticEvent::PushCompleted { .. } => {
                     push = prepare_push_side_effect(&worktree, cmd)?;
                 }
+                crate::model::domain::SemanticEvent::SendPackCompleted { repository } => {
+                    if let Err(error) =
+                        crate::operations::git::sync_authorship::send_authorship_notes(
+                            &worktree, repository,
+                        )
+                    {
+                        tracing::warn!(%repository, %error, "best-effort send-pack notes export failed");
+                    }
+                }
                 crate::model::domain::SemanticEvent::CherryPickComplete {
                     original_head,
                     new_head,

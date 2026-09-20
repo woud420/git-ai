@@ -41,6 +41,11 @@ limit with `git-ai config set max_metrics_flush_chunk_bytes 16777216` and run
 the file setting. This bounds stored JSON bytes per read, not total RSS or the
 serialized HTTP envelope size.
 
+## Git transport
+
+[Standalone send-pack notes export](send-pack-notes.md) documents the opt-in,
+bounded metadata profile and its unsupported forms.
+
 ## Release
 
 Release automation is configured in `.github/workflows/release.yml`. It can

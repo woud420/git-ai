@@ -248,6 +248,8 @@ impl ActorDaemonCoordinator {
         if sid == root
             && event == "def_repo"
             && command_mutates_refs
+            // Order optional notes export without reading unrelated local reflogs.
+            && effective_primary.as_deref() != Some("send-pack")
             && !ingress.root_reflog_start_offsets.contains_key(&root)
             && let Some(worktree) = worktree_hint
         {

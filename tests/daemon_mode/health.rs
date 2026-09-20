@@ -2,6 +2,9 @@ use super::*;
 
 #[path = "health/error_storms.rs"]
 mod error_storms;
+#[cfg(not(windows))]
+#[path = "health/status_pending.rs"]
+mod status_pending;
 
 fn bg_status(repo: &TestRepo, repo_path: &Path) -> Value {
     let mut command = Command::new(get_binary_path());
@@ -49,6 +52,11 @@ fn unix_nanos() -> u64 {
 #[cfg(not(windows))]
 fn daemon_health_bg_status_reports_fenced_pipeline_without_mutating_it() {
     let repo = TestRepo::new_dedicated_daemon();
+    fs::write(repo.path().join("fenced.txt"), "base\n").unwrap();
+    repo.stage_all_and_commit("base before the fenced checkpoint")
+        .unwrap();
+    repo.filename("fenced.txt")
+        .assert_committed_lines(lines!["base".unattributed_human()]);
     let repo_path = repo.path().to_path_buf();
     let sid = "daemon-health-open-root";
     let mut open_root = open_local_socket_stream_with_timeout(
@@ -156,6 +164,8 @@ fn daemon_health_bg_status_reports_fenced_pipeline_without_mutating_it() {
     assert!(health["sequencer_stalled"].is_boolean(), "{health}");
     assert!(health["families"].is_array(), "{health}");
 
+    status_pending::assert_checkpoint_status(&repo, true);
+
     let second_probe = bg_status(&repo, &repo_path);
     assert_eq!(
         second_probe["data"]["latest_seq"], latest_seq_before_probe,
@@ -216,6 +226,11 @@ fn daemon_health_bg_status_reports_fenced_pipeline_without_mutating_it() {
         );
         thread::sleep(Duration::from_millis(25));
     }
+    status_pending::assert_checkpoint_status(&repo, false);
+    repo.stage_all_and_commit("commit the previously fenced checkpoint")
+        .unwrap();
+    repo.filename("fenced.txt")
+        .assert_committed_lines(lines!["fenced ai".ai()]);
 }
 
 #[test]

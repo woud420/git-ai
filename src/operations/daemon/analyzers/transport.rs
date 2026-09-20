@@ -230,12 +230,7 @@ mod tests {
         let mut cmd = command("push", &["git", "push", "origin"]);
         cmd.observed_child_commands.push("send-pack".into());
         let result = TransportAnalyzer
-            .analyze(
-                &cmd,
-                AnalysisView {
-                    refs: &Default::default(),
-                },
-            )
+            .analyze(&cmd, AnalysisView::from_refs(&Default::default()))
             .unwrap();
         assert!(matches!(
             result.events.as_slice(),

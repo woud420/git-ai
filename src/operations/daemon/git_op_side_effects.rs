@@ -1,9 +1,7 @@
 pub use super::working_log_discard::remove_working_log_attributions_for_pathspecs;
 use crate::error::GitAiError;
 use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
-use crate::operations::daemon::side_effect_helpers::{
-    parsed_invocation_for_normalized_command, parsed_invocation_for_side_effect,
-};
+use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
 use crate::operations::git::cli_parser::summarize_rebase_args;
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::oid::is_non_zero_oid;

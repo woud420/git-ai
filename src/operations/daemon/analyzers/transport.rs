@@ -21,7 +21,7 @@ impl CommandAnalyzer for TransportAnalyzer {
 
         let mut events = Vec::new();
         match name {
-            "fetch" => events.push(SemanticEvent::FetchCompleted {
+            "fetch" | "fetch-pack" => events.push(SemanticEvent::FetchCompleted {
                 remote: first_positional(&args),
             }),
             "pull" => events.push(SemanticEvent::PullCompleted {

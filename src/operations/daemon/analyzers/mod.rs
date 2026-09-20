@@ -75,7 +75,7 @@ impl AnalyzerRegistry {
         }
 
         let transport: Arc<dyn CommandAnalyzer> = Arc::new(transport::TransportAnalyzer);
-        for command in ["fetch", "pull", "push", "send-pack", "clone"] {
+        for command in ["fetch", "fetch-pack", "pull", "push", "send-pack", "clone"] {
             registry.register_command(command, transport.clone());
         }
 

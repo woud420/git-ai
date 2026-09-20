@@ -11,6 +11,7 @@ mod literal_path;
 mod orphan_checkout;
 mod removal;
 mod reset;
+pub(crate) mod restore_discard;
 pub(crate) mod switch_discard;
 pub mod transport;
 pub mod workspace;
@@ -72,7 +73,7 @@ impl AnalyzerRegistry {
         }
 
         let workspace: Arc<dyn CommandAnalyzer> = Arc::new(workspace::WorkspaceAnalyzer);
-        for command in ["stash", "checkout", "switch", "rm"] {
+        for command in ["stash", "checkout", "switch", "rm", "restore"] {
             registry.register_command(command, workspace.clone());
         }
 

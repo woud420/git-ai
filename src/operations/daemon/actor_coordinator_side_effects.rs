@@ -373,7 +373,12 @@ impl ActorDaemonCoordinator {
                     base_commit,
                     path,
                 } => {
-                    super::checkout_discard::apply(&worktree, base_commit, path, &cmd.index_write)?;
+                    super::working_log_discard::apply_path_discard(
+                        &worktree,
+                        base_commit,
+                        path,
+                        &cmd.index_write,
+                    )?;
                 }
                 crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
                     apply_clone_notes_sync_side_effect(&worktree, cmd)?;

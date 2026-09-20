@@ -1,20 +1,65 @@
-use super::side_effect_helpers::parsed_invocation_for_normalized_command;
-use crate::model::domain::NormalizedCommand;
-use crate::operations::git::oid::is_non_zero_oid;
+use super::literal_path::proven_literal_worktree_path;
+use crate::model::domain::{IndexWriteEvidence, NormalizedCommand, SemanticEvent};
+use crate::model::git_oid::is_non_zero_oid;
+use crate::operations::git::cli_parser::parse_git_cli_args;
+use std::collections::HashMap;
 
-pub(super) fn is_explicit_path_checkout(cmd: &NormalizedCommand) -> bool {
-    let parsed = parsed_invocation_for_normalized_command(cmd);
-    parsed.command.as_deref() == Some("checkout")
-        && matches!(parsed.command_args.as_slice(), [source, separator, _]
-            if is_non_zero_oid(source) && separator == "--")
+pub(crate) fn event(
+    cmd: &NormalizedCommand,
+    refs: &HashMap<String, String>,
+) -> Option<SemanticEvent> {
+    if cmd.exit_code != 0
+        || cmd.raw_argv.is_empty()
+        || !matches!(cmd.index_write, IndexWriteEvidence::Exact(_))
+    {
+        return None;
+    }
+    let worktree = cmd.worktree.as_deref()?;
+    let head = refs.get("HEAD").filter(|head| is_non_zero_oid(head))?;
+    let parsed = parse_git_cli_args(&super::normalized_args(&cmd.raw_argv));
+    if parsed.command.as_deref() != Some("restore") {
+        return None;
+    }
+    let (source, path) = match parsed.command_args.as_slice() {
+        // A worktree-only restore can leave the same edit staged. Discarding
+        // its evidence would misattribute a later commit of that index entry.
+        [
+            source_flag,
+            source,
+            staged_flag,
+            worktree_flag,
+            separator,
+            path,
+        ] if source_flag == "--source"
+            && staged_flag == "--staged"
+            && worktree_flag == "--worktree"
+            && separator == "--" =>
+        {
+            (source.as_str(), path.as_str())
+        }
+        [source_flag, staged_flag, worktree_flag, separator, path]
+            if staged_flag == "--staged" && worktree_flag == "--worktree" && separator == "--" =>
+        {
+            (source_flag.strip_prefix("--source=")?, path.as_str())
+        }
+        _ => return None,
+    };
+    if source != head {
+        return None;
+    }
+
+    let path = proven_literal_worktree_path(&parsed.global_args, worktree, path)?;
+    Some(SemanticEvent::WorkingLogPathDiscarded {
+        base_commit: head.clone(),
+        path,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::domain::NormalizedCommand;
-    use crate::model::domain::{CommandScope, Confidence, IndexWriteEvidence};
-    use crate::operations::daemon::analyzers::checkout_discard::event;
+    use crate::model::domain::{CommandScope, Confidence};
     use std::collections::HashMap;
 
     fn command(argv: &[&str]) -> NormalizedCommand {
@@ -22,11 +67,11 @@ mod tests {
             scope: CommandScope::Global,
             family_key: None,
             worktree: Some("/repo".into()),
-            root_sid: "checkout".into(),
+            root_sid: "restore".into(),
             trace_derived: true,
             raw_argv: argv.iter().map(|s| s.to_string()).collect(),
-            primary_command: Some("checkout".into()),
-            invoked_command: Some("checkout".into()),
+            primary_command: Some("restore".into()),
+            invoked_command: Some("restore".into()),
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
             transport_targets: None,
@@ -46,13 +91,16 @@ mod tests {
 
     fn valid() -> (NormalizedCommand, HashMap<String, String>) {
         let head = "a".repeat(40);
-        let root = std::env::temp_dir().join("checkout-root");
+        let root = std::env::temp_dir().join("restore-root");
         let mut cmd = command(&[
             "git",
             "-C",
             root.to_str().unwrap(),
-            "checkout",
+            "restore",
+            "--source",
             &head,
+            "--staged",
+            "--worktree",
             "--",
             "file.txt",
         ]);
@@ -62,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn checkout_discard_accepts_proven_absolute_and_root_relative_paths() {
+    fn restore_discard_accepts_proven_absolute_and_root_relative_paths() {
         let (mut cmd, refs) = valid();
         assert!(event(&cmd, &refs).is_some());
         let absolute = cmd.worktree.as_ref().unwrap().join("file.txt");
@@ -76,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn checkout_discard_replayed_commands_require_recorded_index_evidence() {
+    fn restore_discard_replayed_commands_require_recorded_index_evidence() {
         let (cmd, refs) = valid();
         let mut serialized = serde_json::to_value(&cmd).unwrap();
         serialized.as_object_mut().unwrap().remove("index_write");
@@ -94,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn checkout_discard_handles_backslashes_using_native_path_semantics() {
+    fn restore_discard_handles_backslashes_using_native_path_semantics() {
         let (mut cmd, refs) = valid();
         *cmd.raw_argv.last_mut().unwrap() = "dir\\file".into();
         #[cfg(windows)]
@@ -108,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn checkout_discard_refuses_ambiguous_or_unrepresentable_paths() {
+    fn restore_discard_refuses_ambiguous_or_unrepresentable_paths() {
         let (original, refs) = valid();
         for path in [
             "../file",
@@ -136,23 +184,12 @@ mod tests {
     }
 
     #[test]
-    fn checkout_discard_skips_incomplete_modes_sources_globals_and_index_evidence() {
+    fn restore_discard_skips_incomplete_modes_sources_globals_and_index_evidence() {
         let (original, refs) = valid();
-        let head = refs.get("HEAD").unwrap().as_str();
-        for args in [
-            vec![head, "file.txt"],
-            vec!["--", "file.txt"],
-            vec!["--ours", "--", "file.txt"],
-            vec!["--theirs", "--", "file.txt"],
-            vec!["--patch", head, "--", "file.txt"],
-            vec!["--force", head, "--", "file.txt"],
-            vec![head, "--pathspec-from-file=paths"],
-        ] {
+        for omitted in ["--staged", "--worktree", "--source", "--"] {
             let mut cmd = original.clone();
-            cmd.raw_argv.truncate(4);
-            cmd.raw_argv.extend(args.iter().map(|arg| arg.to_string()));
-            assert!(!is_explicit_path_checkout(&cmd), "{args:?}");
-            assert!(event(&cmd, &refs).is_none(), "{args:?}");
+            cmd.raw_argv.retain(|arg| arg != omitted);
+            assert!(event(&cmd, &refs).is_none(), "{omitted}");
         }
         for globals in [
             vec!["-c", "core.quotePath=false"],

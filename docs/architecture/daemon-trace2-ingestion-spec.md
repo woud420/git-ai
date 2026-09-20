@@ -222,6 +222,43 @@ force/patch/ours/theirs forms, omitted sources or separators, pathspec files,
 directories, and recovery from arbitrary sources retain their existing paths.
 Native Git execution, output, and exit status remain unchanged.
 
+### Bounded explicit restore discard
+
+Successful `git restore --source <full-oid> --staged --worktree -- <path>`
+(also `--source=<full-oid>`) retires the selected file's pending attribution
+when the source equals this worktree's prior sequenced HEAD. The path must be
+an absolute plain path within the recorded worktree, or a plain relative path
+after an absolute `-C` that exactly matches that worktree. Special filenames
+require the explicit global `--literal-pathspecs` option. Pathspec magic,
+other global options, ambiguous syntax, paths over 4096 bytes, and multiple
+paths are skipped. Magic cannot establish literal identity because inherited
+`GIT_LITERAL_PATHSPECS` can make the same argument name a different file.
+
+Restore participates in mutation fences so later checkpoints cannot be erased
+by delayed processing. It captures no reflog offsets and adds no ingestion IO.
+The normalizer retains one bounded index-write path from the root command's
+existing Trace2 `index/do_write_index` region. Child/secondary-repository writes
+cannot supply it; missing, invalid, or conflicting receipts fail closed. The
+worker requires that receipt to name this worktree's default `index.lock`.
+An alternate-index restore therefore cannot erase default-index evidence.
+Root filesystem-monitor receipts also invalidate the discard proof, including
+extension tokens emitted without a repository id: native Git can retain an edit
+that the monitor reports as clean despite a successful index write.
+The reducer uses only this worktree's prior HEAD; another linked worktree's HEAD
+or a later live lookup cannot supply a missing anchor. The asynchronous effect
+uses one metadata-only `cat-file --batch-check` to require an immutable source
+blob, then removes only the exact file from existing working-log records.
+The index and worktree are never read to reconstruct command-time state.
+
+Both destinations are required: a worktree-only restore may leave attributed
+content staged for the next commit. Index-only and worktree-only commands keep
+their existing behavior. This profile does not recover attribution from older
+sources or cover default/index sources, patches, directories, deletions absent
+from the source tree, submodules, pathspec files, or sparse paths that Git skips.
+Failed commands and commands without an exact source/worktree/index anchor leave
+pending evidence untouched. Native Git output, index updates, and exit status
+remain Git's responsibility.
+
 ## Reads must not sync
 
 Production read commands (`show`, `blame`, `status`, ...) must not trigger a

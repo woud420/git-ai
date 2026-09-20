@@ -9,7 +9,9 @@ pub(super) fn for_command<'a>(
     command_start_refs: &HashMap<String, String>,
     canonical_worktree: Option<&Path>,
 ) -> Cow<'a, HashMap<String, String>> {
-    if super::super::checkout_discard::is_explicit_path_checkout(cmd) {
+    if super::super::checkout_discard::is_explicit_path_checkout(cmd)
+        || cmd.primary_command.as_deref() == Some("restore")
+    {
         // Family HEAD may belong to another linked worktree. Only a prior
         // sequenced transition for this worktree can anchor its discard.
         let head = canonical_worktree
@@ -65,6 +67,38 @@ mod tests {
             "--".into(),
             "/repo/file.txt".into(),
         ];
+        let snapshot = HashMap::from([("HEAD".into(), "other-head".into())]);
+        let refs = for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo")));
+        assert_eq!(
+            refs.as_ref(),
+            &HashMap::from([("HEAD".into(), "own-head".into())])
+        );
+        assert!(for_command(&state, &cmd, &snapshot, None).is_empty());
+        state
+            .worktrees
+            .get_mut(Path::new("/canonical/repo"))
+            .unwrap()
+            .head = None;
+        assert!(
+            for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo"))).is_empty()
+        );
+    }
+
+    #[test]
+    fn restore_uses_only_its_sequenced_worktree_head() {
+        let mut state = family_state();
+        state.refs.insert("HEAD".into(), "family-head".into());
+        state.worktrees.insert(
+            PathBuf::from("/canonical/repo"),
+            WorktreeState {
+                head: Some("own-head".into()),
+                branch: None,
+                detached: true,
+                last_updated_ns: 1,
+            },
+        );
+        let mut cmd = normalized();
+        cmd.primary_command = Some("restore".into());
         let snapshot = HashMap::from([("HEAD".into(), "other-head".into())]);
         let refs = for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo")));
         assert_eq!(

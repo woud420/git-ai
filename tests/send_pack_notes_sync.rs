@@ -4,7 +4,7 @@ mod repos;
 
 use git_ai::config::{NotesBackendConfig, NotesBackendKind};
 use repos::test_file::ExpectedLineExt;
-use repos::test_repo::{DaemonTestScope, TestRepo};
+use repos::test_repo::{DaemonTestScope, TestRepo, run_raw_git_plumbing};
 use std::fs;
 
 fn source(opt_in: Option<bool>) -> (TestRepo, String, String) {
@@ -338,15 +338,20 @@ fn send_pack_sync_preserves_pending_attribution_and_local_refs() {
 fn send_pack_sync_divergent_remote_notes_are_never_overwritten() {
     let (repo, oid, note) = source(Some(true));
     let target = TestRepo::new_bare_with_daemon_scope(DaemonTestScope::NoDaemon);
+    target
+        .git_og(&["config", "user.useConfigOnly", "true"])
+        .unwrap();
     repo.git_og(&[
         "send-pack",
         target.path().to_str().unwrap(),
         &format!("{oid}:refs/heads/main"),
     ])
     .unwrap();
-    target
-        .git_og(&["notes", "--ref=ai", "add", "-m", "remote authority", &oid])
-        .unwrap();
+    run_raw_git_plumbing(
+        target.path(),
+        &["notes", "--ref=ai", "add", "-m", "remote authority", &oid],
+        None,
+    );
     let remote_ref = target.git_og(&["rev-parse", "refs/notes/ai"]).unwrap();
     publish(&repo, &target, &oid);
     assert_eq!(

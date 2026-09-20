@@ -76,7 +76,6 @@ fn apply_fetch_notes_sync_side_effect(worktree: &str, cmd: &NormalizedCommand) {
     }
 }
 
-
 // A standalone `fetch-pack --all <absolute path>` names its one source
 // explicitly; other forms can select refs or remotes we must not guess.
 fn explicit_fetch_pack_source(cmd: &NormalizedCommand) -> Option<String> {

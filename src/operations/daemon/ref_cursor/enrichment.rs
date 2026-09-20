@@ -54,17 +54,15 @@ impl RefCursor {
                     )
                 }
             }
-            "switch" => {
-                let mut expected = self.head_expected_transition(cmd, state);
-                expected.allow_identity =
-                    crate::operations::daemon::analyzers::switch_discard::target(cmd).is_some();
-                self.consume_head_transition_for_command(
-                    cmd,
-                    state,
-                    &["checkout:", "switch:"],
-                    expected,
-                )
-            }
+            "switch" => self.consume_head_transition_for_command(
+                cmd,
+                state,
+                &["checkout:", "switch:"],
+                ExpectedTransition {
+                    allow_identity: super::super::analyzers::switch_discard::target(cmd).is_some(),
+                    ..self.head_expected_transition(cmd, state)
+                },
+            ),
             "merge" => self.consume_head_transition_for_command(
                 cmd,
                 state,

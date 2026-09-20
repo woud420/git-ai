@@ -9,6 +9,7 @@ pub mod history;
 mod orphan_checkout;
 mod removal;
 mod reset;
+pub(crate) mod switch_discard;
 pub mod transport;
 pub mod workspace;
 mod workspace_evidence;
@@ -139,10 +140,8 @@ mod tests {
 
     /// Shared fixture builder for analyzer unit tests: a global-scope command
     /// with no ref changes. `workspace.rs` and `transport.rs` import
-    /// this. `history.rs` keeps its own local variant (its default seeds a
-    /// HEAD ref change several tests rely on) and `generic.rs` keeps its
-    /// 1-arg variant (no argv needed there) — neither is a byte-identical
-    /// duplicate of this.
+    /// this. `history.rs` adds its default HEAD ref change; `generic.rs`
+    /// keeps a 1-arg variant that does not need argv.
     pub(super) fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {
             scope: CommandScope::Global,

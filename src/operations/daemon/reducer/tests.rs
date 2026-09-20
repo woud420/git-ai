@@ -431,3 +431,35 @@ fn reducer_uses_this_worktree_head_and_never_the_family_head() {
     .unwrap();
     assert_eq!(analysis.events, vec![SemanticEvent::OpaqueCommand]);
 }
+
+#[test]
+fn same_oid_discard_preserves_the_explicit_switch_branch_identity() {
+    let registry = AnalyzerRegistry::new();
+    for destination in ["main", "other"] {
+        let mut state = family_state();
+        let mut cmd = normalized();
+        cmd.primary_command = Some("switch".into());
+        cmd.invoked_command = Some("switch".into());
+        cmd.invoked_args = vec!["--discard-changes".into(), destination.into()];
+        cmd.raw_argv = vec![
+            "git".into(),
+            "--no-replace-objects".into(),
+            "switch".into(),
+            "--discard-changes".into(),
+            destination.into(),
+        ];
+        cmd.ref_changes = vec![RefChange {
+            reference: "HEAD".into(),
+            old: "aaa".into(),
+            new: "aaa".into(),
+        }];
+        reduce_family_command(&mut state, cmd, &registry).unwrap();
+        let worktree = state.worktrees.get(&PathBuf::from("/tmp/repo")).unwrap();
+        assert_eq!(worktree.head.as_deref(), Some("aaa"));
+        assert_eq!(
+            worktree.branch.as_deref(),
+            Some(format!("refs/heads/{destination}").as_str())
+        );
+        assert!(!worktree.detached);
+    }
+}

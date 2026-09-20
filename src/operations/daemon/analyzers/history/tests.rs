@@ -13,6 +13,8 @@ fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         invoked_command: Some(primary.to_string()),
         invoked_args: argv.iter().skip(2).map(|s| s.to_string()).collect(),
         observed_child_commands: Vec::new(),
+        index_write: Default::default(),
+        index_v2: false,
         exit_code: 0,
         started_at_ns: 1,
         finished_at_ns: 2,
@@ -21,8 +23,6 @@ fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         cherry_pick_source_oids: Vec::new(),
         revert_source_oids: Vec::new(),
         transport_targets: None,
-        index_write: Default::default(),
-        index_v2: false,
         ref_changes: vec![RefChange {
             reference: "HEAD".to_string(),
             old: "a".to_string(),

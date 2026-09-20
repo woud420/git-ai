@@ -28,7 +28,7 @@ pub(super) fn remove_working_log_attributions_for_files(
     remove_matching_attributions(repository, head, |file| files.contains(file))
 }
 
-fn remove_matching_attributions(
+pub(super) fn remove_matching_attributions(
     repository: &Repository,
     head: &str,
     matches: impl Fn(&str) -> bool,

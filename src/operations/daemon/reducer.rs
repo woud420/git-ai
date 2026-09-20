@@ -148,7 +148,15 @@ fn apply_worktree_state(
         // OID is still correct); a precise fix would consult the actual
         // post-command symbolic-ref/branch name rather than inferring from
         // ref-change pairing.
-        let branch = unique_branch_for_head_change(cmd, head_change);
+        let branch = if head_change.old == head_change.new {
+            match super::analyzers::switch_discard::target(cmd) {
+                Some(super::analyzers::switch_discard::Target::Branch(branch)) => Some(branch),
+                Some(super::analyzers::switch_discard::Target::Detached) => None,
+                None => unique_branch_for_head_change(cmd, head_change),
+            }
+        } else {
+            unique_branch_for_head_change(cmd, head_change)
+        };
         (
             Some(head_change.new.clone()),
             branch.clone(),

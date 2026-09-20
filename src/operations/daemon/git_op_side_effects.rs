@@ -90,12 +90,58 @@ pub fn transcript_sweep_triggers_for_events(
     triggers
 }
 
-pub fn apply_clone_notes_sync_side_effect(worktree: &str) -> Result<(), GitAiError> {
+fn explicit_clone_remote(cmd: &crate::model::domain::NormalizedCommand) -> Option<String> {
+    let parsed = parsed_invocation_for_normalized_command(cmd);
+    if parsed.command.as_deref() != Some("clone") {
+        return None;
+    }
+    let mut globals = parsed.global_args.iter();
+    while let Some(arg) = globals.next() {
+        match arg.as_str() {
+            "-C" if globals.next().is_some() => {}
+            value if value.starts_with("-C") && value.len() > 2 => {}
+            _ => return None,
+        }
+    }
+    // Require both operands and a single explicit option so another option's
+    // value cannot be mistaken for the remote. Other forms keep the old path.
+    let (remote, source, target) = match parsed.command_args.as_slice() {
+        [flag, remote, source, target] if flag == "-o" || flag == "--origin" => {
+            (remote.as_str(), source, target)
+        }
+        [option, source, target] => (
+            option
+                .strip_prefix("--origin=")
+                .or_else(|| option.strip_prefix("-o"))?,
+            source,
+            target,
+        ),
+        _ => return None,
+    };
+    if remote.is_empty()
+        || remote.starts_with('-')
+        || source.starts_with('-')
+        || target.starts_with('-')
+    {
+        return None;
+    }
+    Some(remote.to_string())
+}
+
+pub fn apply_clone_notes_sync_side_effect(
+    worktree: &str,
+    cmd: &crate::model::domain::NormalizedCommand,
+) -> Result<(), GitAiError> {
     use crate::config::NotesBackendKind;
 
     let repo = find_repository_in_path(worktree)?;
-    let remote = "origin";
-    let notes_backend = crate::config::Config::fresh().notes_backend_kind();
+    let config = crate::config::Config::fresh();
+    let explicit_remote = explicit_clone_remote(cmd);
+    if explicit_remote.is_some() && !repo.is_collection_allowed(&config) {
+        return Ok(());
+    }
+    let remote = explicit_remote.as_deref().unwrap_or("origin");
+    let notes_backend = config.notes_backend_kind();
 
     tracing::info!(
         command = "clone",

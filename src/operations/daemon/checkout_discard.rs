@@ -1,5 +1,5 @@
-use super::working_log_discard::remove_matching_attributions as remove_working_log_attributions_matching;
 use super::side_effect_helpers::parsed_invocation_for_normalized_command;
+use super::working_log_discard::remove_matching_attributions as remove_working_log_attributions_matching;
 use crate::clients::git_cli::exec_git_stdin;
 use crate::error::GitAiError;
 use crate::model::domain::{IndexWriteEvidence, NormalizedCommand};
@@ -78,6 +78,8 @@ mod tests {
             invoked_command: Some("checkout".into()),
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
+            transport_targets: None,
+            index_v2: false,
             index_write: Default::default(),
             exit_code: 0,
             started_at_ns: 1,

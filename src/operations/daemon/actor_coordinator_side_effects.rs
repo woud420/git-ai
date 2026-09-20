@@ -375,9 +375,6 @@ impl ActorDaemonCoordinator {
                 } => {
                     super::checkout_discard::apply(&worktree, base_commit, path, &cmd.index_write)?;
                 }
-                crate::model::domain::SemanticEvent::FetchCompleted { .. } => {
-                    apply_fetch_notes_sync_side_effect(&worktree, cmd);
-                }
                 crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
                     apply_clone_notes_sync_side_effect(&worktree, cmd)?;
                 }

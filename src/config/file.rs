@@ -159,6 +159,10 @@ pub struct FileConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_transcript_batch_bytes: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_transcript_file_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_metrics_flush_chunk_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_memory_limit_mb: Option<u64>,
 }
 
@@ -209,6 +213,10 @@ pub struct ConfigPatch {
     pub max_transcript_line_bytes: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_transcript_batch_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_transcript_file_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_metrics_flush_chunk_bytes: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_memory_limit_mb: Option<u64>,
 }
@@ -558,6 +566,18 @@ pub(crate) fn build_config() -> Config {
             "GIT_AI_MAX_TRANSCRIPT_BATCH_BYTES",
             file_cfg.as_ref().and_then(|c| c.max_transcript_batch_bytes),
             super::DEFAULT_MAX_TRANSCRIPT_BATCH_BYTES,
+        ),
+        max_transcript_file_bytes: super::budgets::positive_byte_budget(
+            "GIT_AI_MAX_TRANSCRIPT_FILE_BYTES",
+            file_cfg.as_ref().and_then(|c| c.max_transcript_file_bytes),
+            super::DEFAULT_MAX_TRANSCRIPT_FILE_BYTES,
+        ),
+        max_metrics_flush_chunk_bytes: super::budgets::positive_byte_budget(
+            "GIT_AI_MAX_METRICS_FLUSH_CHUNK_BYTES",
+            file_cfg
+                .as_ref()
+                .and_then(|c| c.max_metrics_flush_chunk_bytes),
+            super::DEFAULT_MAX_METRICS_FLUSH_CHUNK_BYTES,
         ),
         daemon_memory_limit_mb,
     };

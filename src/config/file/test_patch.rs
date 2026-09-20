@@ -100,6 +100,15 @@ pub(super) fn apply_test_config_patch(config: &mut Config) {
         if let Some(bytes) = patch.max_transcript_line_bytes.filter(|value| *value > 0) {
             config.max_transcript_line_bytes = bytes;
         }
+        if let Some(bytes) = patch.max_transcript_file_bytes.filter(|value| *value > 0) {
+            config.max_transcript_file_bytes = bytes;
+        }
+        if let Some(bytes) = patch
+            .max_metrics_flush_chunk_bytes
+            .filter(|value| *value > 0)
+        {
+            config.max_metrics_flush_chunk_bytes = bytes;
+        }
         if let Some(bytes) = patch.max_transcript_batch_bytes.filter(|value| *value > 0) {
             config.max_transcript_batch_bytes = bytes;
         }

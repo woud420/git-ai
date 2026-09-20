@@ -1,4 +1,5 @@
 use crate::error::GitAiError;
+use crate::model::repository::error::PersistenceError;
 use std::path::{Path, PathBuf};
 
 pub(super) fn resolve_transcript_path(
@@ -63,18 +64,11 @@ fn find_thread_file_by_tool_use_id(threads_dir: &Path, tool_use_id: &str) -> Opt
             continue;
         }
 
-        let content = match std::fs::read_to_string(&path) {
-            Ok(content) => content,
-            Err(_) => continue,
-        };
-        if !content.contains(tool_use_id) {
-            continue;
-        }
-
-        let parsed: serde_json::Value = match serde_json::from_str(&content) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
+        let parsed: serde_json::Value =
+            match crate::operations::streams::bounded_json::read_json_file(&path) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
         let has_match = parsed
             .get("messages")
             .and_then(|value| value.as_array())
@@ -121,8 +115,7 @@ fn amp_threads_dir() -> Result<PathBuf, GitAiError> {
             return Ok(PathBuf::from(xdg_data).join("amp").join("threads"));
         }
 
-        let home = dirs::home_dir()
-            .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
+        let home = dirs::home_dir().ok_or_else(PersistenceError::home_dir_not_found)?;
         Ok(home
             .join(".local")
             .join("share")
@@ -139,8 +132,7 @@ fn amp_threads_dir() -> Result<PathBuf, GitAiError> {
             return Ok(PathBuf::from(app_data).join("amp").join("threads"));
         }
 
-        let home = dirs::home_dir()
-            .ok_or_else(|| GitAiError::Generic("Could not determine home directory".to_string()))?;
+        let home = dirs::home_dir().ok_or_else(PersistenceError::home_dir_not_found)?;
         Ok(home
             .join("AppData")
             .join("Local")
@@ -150,8 +142,12 @@ fn amp_threads_dir() -> Result<PathBuf, GitAiError> {
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
-        Err(GitAiError::Generic(
-            "Amp threads path not supported on this platform".to_string(),
-        ))
+        Err(PersistenceError::Io {
+            operation: "resolve Amp threads path",
+            path: String::new(),
+            kind: std::io::ErrorKind::Unsupported,
+            message: "Amp threads path not supported on this platform".to_string(),
+        }
+        .into())
     }
 }

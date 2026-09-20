@@ -82,11 +82,18 @@ impl CommandAnalyzer for HistoryAnalyzer {
                         events.push(SemanticEvent::MergeSquash { source_head, onto });
                     }
                 } else if let Some((old_head, new_head)) = head_change(cmd, state.refs) {
-                    events.push(SemanticEvent::RefUpdated {
-                        reference: "HEAD".to_string(),
-                        old: old_head,
-                        new: new_head,
-                    });
+                    if crate::operations::daemon::analyzers::is_commit_continuation(cmd) {
+                        events.push(SemanticEvent::CommitCreated {
+                            base: sanitize_base(Some(old_head), &new_head),
+                            new_head,
+                        });
+                    } else {
+                        events.push(SemanticEvent::RefUpdated {
+                            reference: "HEAD".to_string(),
+                            old: old_head,
+                            new: new_head,
+                        });
+                    }
                 }
             }
             "update-ref" => {

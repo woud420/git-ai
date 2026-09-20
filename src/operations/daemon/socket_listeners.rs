@@ -2,6 +2,8 @@ use super::transport_error::transport_error;
 #[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
+#[cfg(windows)]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 

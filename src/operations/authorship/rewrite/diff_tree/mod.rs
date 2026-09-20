@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::clients::git_cli::{exec_git, exec_git_stdin_streaming};
+use crate::clients::git_cli::{exec_git_stdin, exec_git_stdin_streaming};
 use crate::error::GitAiError;
 use crate::model::hunk_shift::{DiffHunk, parse_hunk_header};
 use crate::operations::git::oid::is_full_oid;
@@ -18,14 +18,6 @@ fn empty_tree_sha() -> &'static str {
     EMPTY_TREE_SHA
 }
 
-fn tree_revision_arg(sha: &str) -> Option<String> {
-    if sha == "initial" {
-        None
-    } else {
-        Some(format!("{}^{{tree}}", sha))
-    }
-}
-
 fn insert_known_tree(sha_to_tree: &mut HashMap<String, String>, sha: &str) -> bool {
     if sha == "initial" {
         sha_to_tree.insert(sha.to_string(), empty_tree_sha().to_string());
@@ -35,7 +27,7 @@ fn insert_known_tree(sha_to_tree: &mut HashMap<String, String>, sha: &str) -> bo
     }
 }
 
-fn unique_pair_shas(pairs: &[(String, String)]) -> Vec<String> {
+pub(super) fn unique_pair_shas(pairs: &[(String, String)]) -> Vec<String> {
     let mut unique_shas = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for (src, dst) in pairs {
@@ -49,7 +41,7 @@ fn unique_pair_shas(pairs: &[(String, String)]) -> Vec<String> {
     unique_shas
 }
 
-fn resolve_tree_shas(
+pub(super) fn resolve_tree_shas(
     repo: &Repository,
     unique_shas: &[String],
 ) -> Result<HashMap<String, String>, GitAiError> {
@@ -66,30 +58,47 @@ fn resolve_tree_shas(
         return Ok(sha_to_tree);
     }
 
-    let mut rev_parse_args = repo.global_args_for_exec();
-    rev_parse_args.push("rev-parse".to_string());
-    for sha in &shas_to_resolve {
-        if let Some(arg) = tree_revision_arg(sha) {
-            rev_parse_args.push(arg);
-        }
-    }
-    let rev_output = exec_git(&rev_parse_args)?;
-    let rev_stdout = String::from_utf8_lossy(&rev_output.stdout);
-    let tree_shas: Vec<&str> = rev_stdout.lines().collect();
-
-    if tree_shas.len() != shas_to_resolve.len() {
-        return Err(GitAiError::Generic(format!(
-            "rev-parse returned {} trees for {} commits",
-            tree_shas.len(),
-            shas_to_resolve.len()
+    let mut args = repo.global_args_for_exec();
+    args.extend([
+        "cat-file".to_string(),
+        "--batch-check=%(objectname) %(objecttype)".to_string(),
+    ]);
+    let input = shas_to_resolve
+        .iter()
+        .map(|sha| format!("{sha}^{{tree}}\n"))
+        .collect::<String>();
+    let output = exec_git_stdin(&args, input.as_bytes())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trees = stdout.lines().collect::<Vec<_>>();
+    if trees.len() != shas_to_resolve.len() {
+        return Err(invalid_tree_response(format!(
+            "expected {} trees, received {}",
+            shas_to_resolve.len(),
+            trees.len()
         )));
     }
-
-    for (commit, tree) in shas_to_resolve.into_iter().zip(tree_shas) {
-        sha_to_tree.insert(commit, tree.to_string());
+    for (commit, line) in shas_to_resolve.into_iter().zip(trees) {
+        let mut fields = line.split_whitespace();
+        let tree = fields.next().filter(|oid| is_full_oid(oid));
+        if fields.next() != Some("tree") || fields.next().is_some() || tree.is_none() {
+            return Err(invalid_tree_response(format!(
+                "missing tree for commit {commit}"
+            )));
+        }
+        sha_to_tree.insert(commit, tree.unwrap().to_string());
     }
 
     Ok(sha_to_tree)
+}
+
+fn invalid_tree_response(message: String) -> GitAiError {
+    crate::model::repository::error::PersistenceError::Io {
+        operation: "resolve rewrite trees",
+        path: String::new(),
+        kind: std::io::ErrorKind::InvalidData,
+        message,
+    }
+    .into()
 }
 
 fn tree_for_commit<'a>(
@@ -99,7 +108,7 @@ fn tree_for_commit<'a>(
     sha_to_tree
         .get(sha)
         .map(String::as_str)
-        .ok_or_else(|| GitAiError::Generic(format!("missing tree for commit {}", sha)))
+        .ok_or_else(|| invalid_tree_response(format!("missing tree for commit {sha}")))
 }
 
 fn build_diff_tree_stdin(

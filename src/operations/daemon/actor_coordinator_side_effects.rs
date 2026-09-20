@@ -228,6 +228,7 @@ impl ActorDaemonCoordinator {
             return Ok(());
         }
         let worktree = cmd.worktree.as_ref().ok_or_else(|| {
+            // This invariant error is persisted in FamilyStatus.last_error; preserve its text.
             GitAiError::Generic(format!(
                 "rebase side-effect state requires worktree sid={}",
                 cmd.root_sid
@@ -255,10 +256,16 @@ impl ActorDaemonCoordinator {
                         "pending rebase original head set"
                     );
                 }
+                let range = crate::operations::authorship::rewrite::RebaseRange::from_command(
+                    cmd,
+                    &old_head,
+                    rebase_onto.as_deref(),
+                );
                 self.set_pending_rebase_original_head_for_worktree(
                     worktree,
                     old_head,
                     rebase_onto,
+                    range,
                 )?;
             }
         }
@@ -274,6 +281,7 @@ impl ActorDaemonCoordinator {
             return Ok(());
         }
         let worktree = cmd.worktree.as_ref().ok_or_else(|| {
+            // This invariant error is persisted in FamilyStatus.last_error; preserve its text.
             GitAiError::Generic(format!(
                 "cherry-pick side-effect state requires worktree sid={}",
                 cmd.root_sid
@@ -308,6 +316,7 @@ impl ActorDaemonCoordinator {
         if !new_commits.is_empty() && !applied_source_oids.is_empty() {
             let repo = find_repository_in_path(&worktree.to_string_lossy())?;
             let original_head = cherry_pick_original_head(cmd).ok_or_else(|| {
+                // This invariant error is persisted in FamilyStatus.last_error; preserve its text.
                 GitAiError::Generic(format!(
                     "cherry-pick completed commits without original HEAD sid={}",
                     cmd.root_sid
@@ -492,6 +501,7 @@ pub(crate) fn commit_enrichment_unrecoverable_error(
     {
         return None;
     }
+    // This diagnostic is persisted and asserted by lost-enrichment regressions.
     Some(GitAiError::Generic(format!(
         "commit sid={} exited 0 but ref-cursor enrichment found no HEAD transition; no AI \
          attribution note was written for this commit (see \

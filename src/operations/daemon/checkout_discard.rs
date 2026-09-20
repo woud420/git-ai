@@ -1,11 +1,6 @@
 use super::side_effect_helpers::parsed_invocation_for_normalized_command;
-use super::working_log_discard::remove_matching_attributions as remove_working_log_attributions_matching;
-use crate::clients::git_cli::exec_git_stdin;
-use crate::error::GitAiError;
-use crate::model::domain::{IndexWriteEvidence, NormalizedCommand};
-use crate::operations::git::find_repository_in_path;
+use crate::model::domain::NormalizedCommand;
 use crate::operations::git::oid::is_non_zero_oid;
-use crate::operations::git::refs::parse_batch_check_blob_oid;
 
 pub(super) fn is_explicit_path_checkout(cmd: &NormalizedCommand) -> bool {
     let parsed = parsed_invocation_for_normalized_command(cmd);
@@ -14,55 +9,11 @@ pub(super) fn is_explicit_path_checkout(cmd: &NormalizedCommand) -> bool {
             if is_non_zero_oid(source) && separator == "--")
 }
 
-pub(super) fn apply(
-    worktree: &str,
-    head: &str,
-    path: &str,
-    index_write: &IndexWriteEvidence,
-) -> Result<(), GitAiError> {
-    let repo = find_repository_in_path(worktree)?;
-    if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
-        return Ok(());
-    }
-    // A tree checkout can still write an alternate index. Only
-    // Git's recorded write to this worktree's index proves default staged
-    // evidence was discarded too; inspecting the later index cannot prove it.
-    if !matches!(index_write, IndexWriteEvidence::Exact(path) if path == &repo.path().join("index.lock"))
-    {
-        return Ok(());
-    }
-    if !repo.storage.has_working_log(head) {
-        return Ok(());
-    }
-    // A directory checkout can skip descendants. Require an exact immutable blob
-    // before treating the successful command as evidence that this path changed.
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "--no-replace-objects".to_string(),
-        "cat-file".to_string(),
-        "--batch-check=%(objectname) %(objecttype)".to_string(),
-    ]);
-    let output = exec_git_stdin(&args, format!("{head}:{path}\n").as_bytes())?;
-    let stdout = String::from_utf8(output.stdout)?;
-    let mut records = stdout.lines();
-    if records
-        .next()
-        .and_then(parse_batch_check_blob_oid)
-        .is_some()
-        && records.next().is_none()
-    {
-        // Match only this file: descendant evidence can belong to a different
-        // path shape, including one exposed through replacement objects.
-        remove_working_log_attributions_matching(&repo, head, |file| file == path)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::domain::NormalizedCommand;
-    use crate::model::domain::{CommandScope, Confidence};
+    use crate::model::domain::{CommandScope, Confidence, IndexWriteEvidence};
     use crate::operations::daemon::analyzers::checkout_discard::event;
     use std::collections::HashMap;
 

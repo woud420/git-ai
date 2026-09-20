@@ -1,4 +1,6 @@
 use super::*;
+use crate::model::repository::lock_file::LockFile;
+use std::thread;
 
 #[test]
 fn startup_probe_waits_for_released_lock() {

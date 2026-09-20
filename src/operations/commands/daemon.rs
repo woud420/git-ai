@@ -23,8 +23,6 @@ use startup::{
 };
 pub(crate) use startup::{daemon_is_up, ensure_daemon_running};
 use std::time::Duration;
-#[cfg(windows)]
-const TRACING_TARGET: &str = module_path!();
 
 #[cfg(test)]
 #[path = "daemon_startup_lock_tests.rs"]

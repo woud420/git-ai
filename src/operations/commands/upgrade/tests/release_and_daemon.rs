@@ -1,4 +1,6 @@
+use super::super::models::ChannelInfo;
 use super::*;
+use std::collections::HashMap;
 
 #[test]
 fn test_release_from_response_missing_channel() {

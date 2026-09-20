@@ -1,4 +1,4 @@
-use super::*;
+use crate::model::stream_watermark::*;
 
 #[test]
 fn test_byte_offset_watermark_serialize() {

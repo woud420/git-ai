@@ -383,6 +383,5 @@ fn infer_reset_kind(args: &[String]) -> ResetKind {
     ResetKind::Mixed
 }
 
-#[path = "history_tests.rs"]
 #[cfg(test)]
 mod tests;

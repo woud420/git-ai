@@ -1,4 +1,4 @@
-use super::*;
+use crate::model::authorship_log_serialization::*;
 use insta::assert_debug_snapshot;
 
 #[test]

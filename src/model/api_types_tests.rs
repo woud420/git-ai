@@ -1,4 +1,4 @@
-use super::*;
+use crate::model::api_types::*;
 use crate::model::authorship_log::LineRange;
 use crate::model::diff_json::FileDiffJson;
 use std::collections::BTreeMap;

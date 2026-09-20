@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "bash_history_db/tests/metadata.rs"]
+mod metadata;
+
 fn test_agent() -> AgentId {
     AgentId {
         tool: "codex".to_string(),

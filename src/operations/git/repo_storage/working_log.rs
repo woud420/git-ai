@@ -193,22 +193,6 @@ impl PersistedWorkingLog {
         self.write_all_checkpoints(checkpoints)
     }
 
-    /// Append one checksummed checkpoint index record. The daemon uses this
-    /// after materializing the collection once so ordinary checkpoints do not
-    /// rewrite the entire journal.
-    #[cfg(test)]
-    pub(crate) fn append_checkpoint_record_to(
-        &self,
-        journal: &mut LoadedJournal,
-        checkpoint: Checkpoint,
-    ) -> Result<(), GitAiError> {
-        self.append_checkpoint_record_with_compaction_interval(
-            journal,
-            checkpoint,
-            checkpoint_journal::COMPACTION_INTERVAL,
-        )
-    }
-
     pub(crate) fn append_cached_checkpoint_record_to(
         &self,
         journal: &mut checkpoint_journal::JournalLease<'_>,
@@ -274,11 +258,6 @@ impl PersistedWorkingLog {
     pub fn read_all_checkpoints(&self) -> Result<Vec<Checkpoint>, GitAiError> {
         self.load_checkpoint_journal_with_size_limit(Self::checkpoints_file_size_limit_bytes())
             .map(LoadedJournal::into_checkpoints)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn load_checkpoint_journal(&self) -> Result<LoadedJournal, GitAiError> {
-        self.load_checkpoint_journal_with_size_limit(Self::checkpoints_file_size_limit_bytes())
     }
 
     pub(crate) fn load_cached_checkpoint_journal(

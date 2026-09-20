@@ -122,6 +122,18 @@ const RULES: &[Rule] = &[
         forbidden_extern_crates: PURE_CORE_FORBIDDEN_CRATES,
         forbidden_prefixes: PURE_CORE_FORBIDDEN_PREFIXES,
     },
+    Rule {
+        layer: "Git grammar helpers (pure core)",
+        applies_to: &["src/operations/git/cli_parser/"],
+        allowed_crate_prefixes: &[
+            "crate::operations::git::cli_parser",
+            "crate::operations::git::command_policy",
+        ],
+        excluding: &[],
+        forbidden_crate_modules: &[],
+        forbidden_extern_crates: PURE_CORE_FORBIDDEN_CRATES,
+        forbidden_prefixes: PURE_CORE_FORBIDDEN_PREFIXES,
+    },
 ];
 
 /// Substrings whose presence in non-test code signals filesystem or process IO.
@@ -678,6 +690,10 @@ fn policy_accepts_audited_pure_dependencies() {
             "src/operations/git/command_classification.rs",
             "use super::command_policy;",
         ),
+        (
+            "src/operations/git/cli_parser/rewrite_args.rs",
+            "use super::ParsedGitInvocation;",
+        ),
         ("src/model/stat_snapshot.rs", "use std::fs::Metadata;"),
         ("src/model/stream_types.rs", "use std::io::BufRead;"),
     ] {
@@ -692,6 +708,7 @@ fn policy_accepts_audited_pure_dependencies() {
 fn policy_rejects_effects_in_pure_git_kernels() {
     for file in [
         "src/operations/git/cli_parser.rs",
+        "src/operations/git/cli_parser/rewrite_args.rs",
         "src/operations/git/command_classification.rs",
         "src/operations/git/command_policy.rs",
     ] {

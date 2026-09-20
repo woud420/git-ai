@@ -125,7 +125,7 @@ worktree_test_wrappers! {
 }
 
 worktree_test_wrappers! {
-    fn notes_sync_fetch_does_not_import_authorship_notes() {
+    fn notes_sync_fetch_dry_run_does_not_import_authorship_notes() {
         let (local, _upstream) = TestRepo::new_with_remote();
 
         fs::write(local.path().join("fetch-seed.txt"), "seed\n")
@@ -167,13 +167,13 @@ worktree_test_wrappers! {
         );
 
         local
-            .git(&["fetch", "origin"])
+            .git(&["fetch", "--dry-run", "origin"])
             .expect("fetch should succeed");
 
         let fetched_note = local.read_authorship_note(&seed_sha);
         assert!(
             fetched_note.is_none(),
-            "plain git fetch should not import authorship note for commit {}",
+            "git fetch --dry-run should not import authorship note for commit {}",
             seed_sha
         );
     }

@@ -9,15 +9,8 @@ use crate::operations::daemon::{
     ControlRequest, DaemonConfig, local_socket_connects_with_timeout, remove_stale_daemon_files,
     send_control_request_with_timeout,
 };
-#[cfg(windows)]
-use crate::process_spawn::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
-#[cfg(windows)]
-use std::ffi::OsStr;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-#[cfg(windows)]
-use std::path::Path;
 use std::path::PathBuf;
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};

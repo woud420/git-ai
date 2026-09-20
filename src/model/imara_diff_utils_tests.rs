@@ -1,4 +1,4 @@
-use super::*;
+use crate::model::imara_diff_utils::*;
 
 #[test]
 fn test_capture_diff_slices_simple() {

@@ -1,6 +1,14 @@
 use super::*;
 
 impl RefCursor {
+    pub(super) fn enrich_fetch(&mut self, cmd: &mut NormalizedCommand) -> Result<(), GitAiError> {
+        if let Err(error) = self.consume_fetch_transitions(cmd) {
+            cmd.ref_changes.clear();
+            tracing::warn!(%error, "best-effort fetch reflog enrichment failed");
+        }
+        Ok(())
+    }
+
     pub(super) fn consume_fetch_transitions(
         &mut self,
         cmd: &mut NormalizedCommand,

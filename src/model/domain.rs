@@ -83,6 +83,7 @@ pub struct NormalizedCommand {
     pub index_write: IndexWriteEvidence,
     #[serde(default, skip_serializing_if = "is_false")]
     pub index_v2: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bisect_checkout: Option<BisectCheckout>,
     pub exit_code: i32,
     pub started_at_ns: u128,

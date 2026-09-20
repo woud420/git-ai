@@ -74,7 +74,9 @@ impl AnalyzerRegistry {
         }
 
         let workspace: Arc<dyn CommandAnalyzer> = Arc::new(workspace::WorkspaceAnalyzer);
-        for command in ["stash", "checkout", "switch", "rm", "restore", "mv"] {
+        for command in [
+            "stash", "checkout", "switch", "rm", "restore", "mv", "bisect",
+        ] {
             registry.register_command(command, workspace.clone());
         }
 
@@ -160,6 +162,7 @@ mod tests {
             observed_child_commands: Vec::new(),
             index_write: Default::default(),
             index_v2: false,
+            bisect_checkout: None,
             exit_code: 0,
             started_at_ns: 1,
             finished_at_ns: 2,

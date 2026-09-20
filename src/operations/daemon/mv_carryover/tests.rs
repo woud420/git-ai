@@ -28,6 +28,7 @@ fn fixture() -> (NormalizedCommand, HashMap<String, String>) {
         observed_child_commands: Vec::new(),
         transport_targets: None,
         index_v2: false,
+        bisect_checkout: None,
         index_write: IndexWriteEvidence::Exact(worktree.join(".git/index.lock")),
         exit_code: 0,
         started_at_ns: 1,

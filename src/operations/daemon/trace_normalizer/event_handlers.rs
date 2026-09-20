@@ -62,6 +62,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
 
         let pending = PendingTraceCommand {
             root_sid: root_sid.to_string(),
+            bisect_checkout: super::bisect::BisectCheckoutCapture::default(),
             raw_argv,
             root_cmd_name: None,
             observed_child_commands: Vec::new(),
@@ -243,6 +244,12 @@ impl<B: GitBackend> TraceNormalizer<B> {
         if sid == root_sid {
             if let Some(pending) = self.state.pending.get_mut(root_sid) {
                 merge_reflog_start_offsets_from_payload(pending, payload);
+                if cmd == "bisect" {
+                    pending.bisect_checkout = super::bisect::BisectCheckoutCapture::new(
+                        &pending.raw_argv,
+                        pending.worktree.as_deref(),
+                    );
+                }
                 pending.root_cmd_name = Some(cmd);
             } else {
                 self.state
@@ -514,6 +521,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
             observed_child_commands: pending.observed_child_commands,
             index_write: pending.index_write,
             index_v2: pending.index_versions.proven_v2(),
+            bisect_checkout: pending.bisect_checkout.receipt(exit_code),
             exit_code,
             started_at_ns: pending.started_at_ns,
             finished_at_ns,

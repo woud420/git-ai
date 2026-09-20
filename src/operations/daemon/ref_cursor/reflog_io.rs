@@ -140,6 +140,25 @@ pub(super) fn read_reflog_records(
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(GitAiError::IoError)?;
 
+    Ok(parse_reflog_records(&bytes, start))
+}
+
+pub(super) fn read_reflog_records_bounded(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<Option<Vec<ReflogRecord>>, GitAiError> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    Ok((bytes.len() as u64 <= max_bytes).then(|| parse_reflog_records(&bytes, 0)))
+}
+
+fn parse_reflog_records(bytes: &[u8], start: u64) -> Vec<ReflogRecord> {
     let mut entries = Vec::new();
     let mut offset = start;
     for raw_line in bytes.split_inclusive(|byte| *byte == b'\n') {
@@ -157,7 +176,7 @@ pub(super) fn read_reflog_records(
             entries.push(entry);
         }
     }
-    Ok(entries)
+    entries
 }
 
 pub(super) fn read_reflog_record_ending_at(

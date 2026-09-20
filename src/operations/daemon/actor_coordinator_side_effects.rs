@@ -84,6 +84,10 @@ impl ActorDaemonCoordinator {
             self.handle_checkout_switch(family, cmd)?;
         }
 
+        if primary == "bisect" {
+            self.handle_bisect(family, cmd)?;
+        }
+
         if saw_pull_event || super::merge_fast_forward::has_explicit_fast_forward_transition(cmd) {
             Self::handle_pull_fast_forward_working_log(cmd)?;
         }
@@ -134,7 +138,7 @@ impl ActorDaemonCoordinator {
                 )
             }) || matches!(
                 cmd.primary_command.as_deref(),
-                Some("checkout" | "switch" | "branch" | "stash")
+                Some("checkout" | "switch" | "branch" | "stash" | "bisect")
             )
         };
         if !skip_non_ff && cmd.exit_code == 0 {

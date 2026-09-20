@@ -52,6 +52,7 @@ pub(super) fn command_with_worktree(
         observed_child_commands: Vec::new(),
         index_write: Default::default(),
         index_v2: false,
+        bisect_checkout: None,
         exit_code: 0,
         started_at_ns: 1,
         finished_at_ns: 2,

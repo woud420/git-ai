@@ -56,6 +56,13 @@ fn is_false(value: &bool) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BisectCheckout {
+    pub target: String,
+    pub started_at_ns: u128,
+    pub finished_at_ns: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NormalizedCommand {
     pub scope: CommandScope,
     pub family_key: Option<FamilyKey>,
@@ -76,6 +83,8 @@ pub struct NormalizedCommand {
     pub index_write: IndexWriteEvidence,
     #[serde(default, skip_serializing_if = "is_false")]
     pub index_v2: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bisect_checkout: Option<BisectCheckout>,
     pub exit_code: i32,
     pub started_at_ns: u128,
     pub finished_at_ns: u128,

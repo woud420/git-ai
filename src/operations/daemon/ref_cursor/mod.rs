@@ -18,6 +18,7 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
+mod bisect;
 mod branch_lifecycle;
 mod cherry_pick_revert;
 mod command_matchers;
@@ -42,6 +43,8 @@ use reflog_io::*;
 use span_clamping::*;
 use types::*;
 
+#[cfg(test)]
+mod tests_bisect;
 #[cfg(test)]
 mod tests_commit;
 #[cfg(test)]

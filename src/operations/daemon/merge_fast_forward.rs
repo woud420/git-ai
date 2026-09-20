@@ -74,6 +74,7 @@ mod tests {
             finished_at_ns: 2,
             reflog_start_offsets: Default::default(),
             stash_target_oid: None,
+            bisect_checkout: None,
             cherry_pick_source_oids: Vec::new(),
             revert_source_oids: Vec::new(),
             ref_changes: vec![RefChange {

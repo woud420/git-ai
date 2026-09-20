@@ -518,6 +518,7 @@ mod tests {
     /// union + sort) with `GIT_AI_TEST_NOTES_DB_PATH` to avoid env-var races and
     /// verifies that a db-only SHA (absent from refs/notes/ai) is returned.
     #[test]
+    #[serial_test::serial]
     #[serial_test::serial(notes_db_env)]
     fn sqlite_http_search_arm_returns_db_only_sha() {
         use crate::operations::git::test_utils::TmpRepo;
@@ -578,8 +579,8 @@ mod tests {
 
     /// With kind=Http, the public read_note_blob_oids returns an empty map
     /// because notes live in notes-db, not in git refs.
-    /// We test this by calling the function through a fresh Config set to Http.
     #[test]
+    #[serial_test::serial]
     fn http_backend_read_note_blob_oids_returns_empty_map() {
         use crate::operations::git::test_utils::TmpRepo;
 
@@ -734,9 +735,9 @@ mod tests {
     /// Verify that `run_pre_push_hook_managed` has the correct early-return guard for
     /// `kind = Http`. We test this by confirming Config::fresh() with
     /// `GIT_AI_NOTES_BACKEND_KIND=http` returns Http, and that the guard in
-    /// `run_pre_push_hook_managed` would short-circuit. This is a compile-time
-    /// regression guard for the code structure added in Phase 2.6.
+    /// `run_pre_push_hook_managed` would short-circuit.
     #[test]
+    #[serial_test::serial]
     fn push_pre_command_hook_http_guard_is_in_place() {
         use std::env;
 
@@ -750,7 +751,6 @@ mod tests {
             None => unsafe { env::remove_var("GIT_AI_NOTES_BACKEND_KIND") },
         }
 
-        // Verify Config::fresh() correctly parses http from env.
         assert_eq!(
             kind,
             crate::config::NotesBackendKind::Http,

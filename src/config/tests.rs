@@ -975,9 +975,8 @@ fn test_notes_backend_kind_env_var_parsing() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_notes_backend_env_var_overrides_file_config_via_fresh() {
-    // Verify that GIT_AI_NOTES_BACKEND_KIND=http is correctly resolved in
-    // `build_config()`. We call Config::fresh() with the env var set.
     // This test depends on a real git binary being findable (same constraint
     // as all other integration-style config tests).
     let old = std::env::var("GIT_AI_NOTES_BACKEND_KIND").ok();

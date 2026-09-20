@@ -45,10 +45,7 @@ impl ActorDaemonCoordinator {
                     return Ok(TracePayloadApplyOutcome::None);
                 }
             }
-            {
-                let mut normalizer = self.normalizer.lock().await;
-                let _ = normalizer.sweep_orphans_for_roots(&[root_sid.to_string()]);
-            }
+            self.normalizer.sweep_orphan(root_sid.to_string()).await?;
             let replaced_family =
                 self.replace_pending_root_entry(root_sid, FamilySequencerEntry::Canceled)?;
             let outcome = if replaced_family.is_some() {
@@ -63,19 +60,18 @@ impl ActorDaemonCoordinator {
 
         self.maybe_append_pending_root_from_trace_payload(&payload)?;
         self.update_commit_editor_wait_state(&payload)?;
-        let emitted = {
-            let mut normalizer = self.normalizer.lock().await;
-            normalizer.ingest_payload(&payload)?
-        };
+        let terminal_root_event = is_terminal_root_trace_event(
+            &event,
+            payload
+                .get("sid")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            payload_root_sid.as_deref().unwrap_or_default(),
+        );
+        let emitted = self.normalizer.ingest_payload(payload).await?;
         let Some(command) = emitted else {
-            if is_terminal_root_trace_event(
-                &event,
-                payload
-                    .get("sid")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default(),
-                payload_root_sid.as_deref().unwrap_or_default(),
-            ) && let Some(root_sid) = payload_root_sid.as_deref()
+            if terminal_root_event
+                && let Some(root_sid) = payload_root_sid.as_deref()
                 && let Some(family) =
                     self.replace_pending_root_entry(root_sid, FamilySequencerEntry::Canceled)?
             {

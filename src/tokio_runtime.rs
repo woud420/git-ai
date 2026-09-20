@@ -65,10 +65,15 @@ fn build_bounded_runtime(
 }
 
 pub(crate) fn build_daemon_runtime() -> Result<tokio::runtime::Runtime, String> {
-    build_bounded_runtime(
-        DAEMON_RUNTIME_WORKER_THREADS,
-        DAEMON_RUNTIME_MAX_BLOCKING_THREADS,
-    )
+    #[cfg(feature = "test-support")]
+    let workers = std::env::var("GIT_AI_TEST_DAEMON_RUNTIME_WORKER_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|workers| *workers > 0)
+        .unwrap_or(DAEMON_RUNTIME_WORKER_THREADS);
+    #[cfg(not(feature = "test-support"))]
+    let workers = DAEMON_RUNTIME_WORKER_THREADS;
+    build_bounded_runtime(workers, DAEMON_RUNTIME_MAX_BLOCKING_THREADS)
 }
 
 // Post-commit attribution calls this helper from inside the daemon runtime.
@@ -123,9 +128,14 @@ where
     F: FnOnce() -> Result<T, GitAiError> + Send + 'static,
     T: Send + 'static,
 {
-    tokio::task::spawn_blocking(task)
-        .await
-        .map_err(|err| GitAiError::Generic(format!("Tokio blocking task failed: {err}")))?
+    tokio::task::spawn_blocking(task).await.map_err(|err| {
+        crate::model::repository::error::PersistenceError::Io {
+            operation: "Tokio blocking task failed",
+            path: String::new(),
+            kind: std::io::ErrorKind::Other,
+            message: err.to_string(),
+        }
+    })?
 }
 
 #[cfg(test)]

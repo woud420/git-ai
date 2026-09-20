@@ -217,6 +217,7 @@ fn test_rebase_command(
         stash_target_oid: None,
         cherry_pick_source_oids: Vec::new(),
         revert_source_oids: Vec::new(),
+        transport_targets: None,
         ref_changes,
         confidence: crate::model::domain::Confidence::High,
     }

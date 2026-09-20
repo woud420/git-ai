@@ -63,6 +63,10 @@ impl<B: GitBackend> TraceNormalizer<B> {
             raw_argv,
             root_cmd_name: None,
             observed_child_commands: Vec::new(),
+            transport_targets: Some(Vec::new()),
+            push_alias: None,
+            push_alias_sid: None,
+            push_alias_targets: Some(Vec::new()),
             invocation_worktree: worktree.clone(),
             worktree,
             family_key,
@@ -471,6 +475,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
             }
         }
 
+        let transport_targets = super::transport_targets::finish(&mut pending);
         let normalized = NormalizedCommand {
             scope,
             family_key,
@@ -489,6 +494,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
             stash_target_oid: None,
             cherry_pick_source_oids: Vec::new(),
             revert_source_oids: Vec::new(),
+            transport_targets,
             ref_changes,
             confidence,
         };

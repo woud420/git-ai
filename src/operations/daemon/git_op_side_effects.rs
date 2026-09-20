@@ -11,22 +11,26 @@ pub use crate::operations::git::oid::{is_full_oid as is_valid_oid, is_zero_oid};
 use crate::operations::git::repository::Repository;
 use crate::operations::git::sync_authorship::{fetch_authorship_notes, fetch_remote_from_args};
 
-pub fn apply_push_side_effect(
+pub(crate) struct PreparedNotesPush {
+    pub(crate) repository: Repository,
+    pub(crate) destinations: Vec<String>,
+}
+
+pub(crate) fn prepare_push_side_effect(
     worktree: &str,
-    command: Option<&str>,
-    args: &[String],
-) -> Result<(), GitAiError> {
+    cmd: &crate::model::domain::NormalizedCommand,
+) -> Result<Option<PreparedNotesPush>, GitAiError> {
     use crate::config::NotesBackendKind;
     use crate::operations::git::cli_parser::is_dry_run;
-    use crate::operations::git::sync_authorship::{push_authorship_notes, push_remote_from_args};
+    use crate::operations::git::sync_authorship::push_remote_from_args;
 
     if crate::config::Config::get().notes_backend_kind() == NotesBackendKind::Http {
         tracing::debug!("apply_push_side_effect: skipping authorship push (Http backend)");
-        return Ok(());
+        return Ok(None);
     }
 
     let repo = find_repository_in_path(worktree)?;
-    let parsed = parsed_invocation_for_side_effect(command, args);
+    let parsed = parsed_invocation_for_normalized_command(cmd);
 
     if is_dry_run(&parsed.command_args)
         || parsed
@@ -35,15 +39,30 @@ pub fn apply_push_side_effect(
             .any(|a| a == "-d" || a == "--delete")
         || parsed.command_args.iter().any(|a| a == "--mirror")
     {
-        return Ok(());
+        return Ok(None);
     }
 
-    let remote = push_remote_from_args(&repo, &parsed)?;
-
+    let fallback;
+    let destinations = if cmd.trace_derived {
+        cmd.transport_targets
+            .as_deref()
+            .filter(|targets| !targets.is_empty())
+            .ok_or_else(|| crate::model::repository::error::PersistenceError::Io {
+                operation: "push notes",
+                path: String::new(),
+                kind: std::io::ErrorKind::InvalidData,
+                message: "push destination was not captured unambiguously from Trace2".to_string(),
+            })?
+    } else {
+        fallback = vec![push_remote_from_args(&repo, &parsed)?];
+        &fallback
+    };
     crate::operations::commands::upgrade::maybe_schedule_background_update_check();
-    tracing::debug!("started pushing authorship notes to remote: {}", remote);
-
-    push_authorship_notes(&repo, &remote)
+    let destinations = destinations.to_vec();
+    Ok(Some(PreparedNotesPush {
+        repository: repo,
+        destinations,
+    }))
 }
 
 pub fn transcript_sweep_triggers_for_events(

@@ -12,7 +12,7 @@ use crate::operations::git::repository::Repository;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{Mutex as AsyncMutex, Notify, Semaphore};
+use tokio::sync::{Notify, Semaphore};
 
 impl ActorDaemonCoordinator {
     /// Store a weak self-reference so family drains can be scheduled on
@@ -33,9 +33,7 @@ impl ActorDaemonCoordinator {
             coordinator: Arc::new(crate::operations::daemon::coordinator::Coordinator::new(
                 backend.clone(),
             )),
-            normalizer: AsyncMutex::new(
-                crate::operations::daemon::trace_normalizer::TraceNormalizer::new(backend.clone()),
-            ),
+            normalizer: super::normalizer_worker::TraceNormalizerWorker::new(backend.clone()),
             backend,
             pending_rebase_original_head_by_worktree: Mutex::new(HashMap::new()),
             pending_cherry_pick_sources_by_worktree: Mutex::new(HashMap::new()),
@@ -58,6 +56,7 @@ impl ActorDaemonCoordinator {
             error_log_policy: Mutex::new(Default::default()),
             side_effect_exec_locks: Mutex::new(HashMap::new()),
             command_side_effect_semaphore: Semaphore::new(COMMAND_SIDE_EFFECT_CONCURRENCY),
+            notes_push_queue: Default::default(),
             self_ref: std::sync::OnceLock::new(),
             scheduled_family_drains: Mutex::new(HashMap::new()),
             bash_sessions: Mutex::new(

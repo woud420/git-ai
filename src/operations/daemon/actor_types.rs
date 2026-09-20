@@ -200,11 +200,7 @@ pub struct ActorDaemonCoordinator {
             crate::operations::daemon::git_backend::SystemGitBackend,
         >,
     >,
-    pub(crate) normalizer: AsyncMutex<
-        crate::operations::daemon::trace_normalizer::TraceNormalizer<
-            crate::operations::daemon::git_backend::SystemGitBackend,
-        >,
-    >,
+    pub(crate) normalizer: super::normalizer_worker::TraceNormalizerWorker,
     pub(crate) pending_rebase_original_head_by_worktree: Mutex<HashMap<String, PendingRebase>>,
     pub(crate) pending_cherry_pick_sources_by_worktree: Mutex<HashMap<String, Vec<String>>>,
     pub(crate) pending_cherry_pick_no_commit_by_worktree:
@@ -231,6 +227,7 @@ pub struct ActorDaemonCoordinator {
     pub(crate) error_log_policy: Mutex<super::error_log_policy::ErrorLogPolicy>,
     pub(crate) side_effect_exec_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     pub(crate) command_side_effect_semaphore: Semaphore,
+    pub(crate) notes_push_queue: super::notes_push_queue::NotesPushQueue,
     /// Weak self-reference set by `register_self` after the coordinator is
     /// wrapped in its `Arc` (production daemons and full-daemon tests do
     /// this). Family drains are then scheduled on their own tasks so

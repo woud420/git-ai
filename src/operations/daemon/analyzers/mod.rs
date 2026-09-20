@@ -153,6 +153,7 @@ mod tests {
             stash_target_oid: None,
             cherry_pick_source_oids: Vec::new(),
             revert_source_oids: Vec::new(),
+            transport_targets: None,
             ref_changes: Vec::new(),
             confidence: Confidence::Low,
         }

@@ -2,6 +2,8 @@
 
 Local development, validation, and release notes for git-ai.
 
+For explicit offline authorship exchange, see [companion notes bundles](notes-bundle.md).
+
 ## Local development
 
 - `make dev` — build a debug binary, install it system-wide (same location as

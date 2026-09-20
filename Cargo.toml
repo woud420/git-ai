@@ -41,7 +41,7 @@ rand = "0.10"
 regex = "1.12"
 toml = "0.9"
 unicode-normalization = "0.1"
-tempfile = { version = "3.27", optional = true }
+tempfile = "3.27"
 paste = "1.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -54,7 +54,7 @@ winreg = "0.55"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [features]
-test-support = ["dep:tempfile"]
+test-support = []
 keyring = ["dep:keyring"]
 
 [dev-dependencies]

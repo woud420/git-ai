@@ -26,6 +26,7 @@ pub mod install_manifest;
 pub mod log;
 pub mod login;
 pub mod logout;
+pub mod notes_bundle;
 pub mod notes_migrate;
 pub mod personal_dashboard;
 pub mod reingest;

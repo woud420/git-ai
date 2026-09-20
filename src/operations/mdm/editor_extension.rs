@@ -256,7 +256,12 @@ mod tests {
 
     #[cfg(unix)]
     const SUCCESS_SCRIPT: &str = r#"#!/bin/sh
-printf '1' > "$GIT_AI_TEST_EDITOR_CLI_ATTEMPTS"
+count=0
+if [ -f "$GIT_AI_TEST_EDITOR_CLI_ATTEMPTS" ]; then
+    IFS= read -r count < "$GIT_AI_TEST_EDITOR_CLI_ATTEMPTS"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$GIT_AI_TEST_EDITOR_CLI_ATTEMPTS"
 printf '%s' "$*" > "$GIT_AI_TEST_EDITOR_CLI_ARGS"
 if [ "$1" = "--list-extensions" ]; then
     printf 'git-ai.git-ai-vscode\n'
@@ -290,6 +295,26 @@ if [ "$GIT_AI_TEST_INSTALL_SUCCEEDS" = "true" ]; then
 fi
 exit 1
 "#;
+
+    #[test]
+    fn editor_cli_retry_returns_first_success_without_sleeping() {
+        let mut attempts = 0;
+        let mut delays = Vec::new();
+
+        let value = run_editor_cli_with_retry(
+            || {
+                attempts += 1;
+                Ok("success")
+            },
+            || "unexpected fallback".to_string(),
+            |delay| delays.push(delay),
+        )
+        .unwrap();
+
+        assert_eq!(value, "success");
+        assert_eq!(attempts, 1);
+        assert!(delays.is_empty());
+    }
 
     #[test]
     fn editor_cli_retry_retries_twice_before_succeeding() {
@@ -364,7 +389,7 @@ exit 1
             is_vsc_editor_extension_installed_with_sleeper(
                 &cli,
                 GIT_AI_VSCODE_EXTENSION_ID,
-                |delay| panic!("successful CLI must not retry: {delay:?}"),
+                |_| {},
             )
             .unwrap()
         );
@@ -378,10 +403,8 @@ exit 1
     fn install_extension_invokes_the_cli_once_with_expected_arguments() {
         let (_temp_dir, cli, attempts_path, args_path) = scripted_cli(SUCCESS_SCRIPT);
 
-        install_vsc_editor_extension_with_sleeper(&cli, GIT_AI_VSCODE_EXTENSION_ID, |delay| {
-            panic!("successful CLI must not retry: {delay:?}")
-        })
-        .unwrap();
+        install_vsc_editor_extension_with_sleeper(&cli, GIT_AI_VSCODE_EXTENSION_ID, |_| {})
+            .unwrap();
 
         assert_eq!(fs::read_to_string(attempts_path).unwrap(), "1");
         assert_eq!(

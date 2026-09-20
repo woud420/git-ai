@@ -79,6 +79,7 @@ macro_rules! define_feature_flags {
 // Format: struct_field: file_and_env_name, debug = <bool>, release = <bool>
 define_feature_flags!(
     auth_keyring: auth_keyring, debug = false, release = false,
+    send_pack_notes_sync: send_pack_notes_sync, debug = false, release = false,
     transcript_streaming: transcript_streaming, debug = true, release = true,
     transcript_sweep: transcript_sweep, debug = true, release = true,
     checkpoint_debug_log: checkpoint_debug_log, debug = false, release = false,
@@ -133,6 +134,7 @@ mod tests {
     #[test]
     fn test_default_feature_flags() {
         let flags = FeatureFlags::default();
+        assert!(!flags.send_pack_notes_sync);
         #[cfg(debug_assertions)]
         {
             assert!(!flags.auth_keyring);
@@ -237,6 +239,7 @@ mod tests {
     fn test_serialization() {
         let flags = FeatureFlags {
             auth_keyring: true,
+            send_pack_notes_sync: false,
             transcript_streaming: true,
             transcript_sweep: true,
             checkpoint_debug_log: false,
@@ -260,6 +263,7 @@ mod tests {
     fn test_clone_trait() {
         let flags = FeatureFlags {
             auth_keyring: true,
+            send_pack_notes_sync: false,
             transcript_streaming: true,
             transcript_sweep: true,
             checkpoint_debug_log: true,

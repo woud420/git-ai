@@ -85,6 +85,9 @@ fn reingest_command_is_retry_and_restart_safe_without_duplicating_local_history(
     assert_eq!(pending_status.total, 3);
     assert_eq!(pending_status.pending_retryable, 1);
 
+    // The replacement must replay a pending row, not interrupt an upload that the
+    // old worker started after observing the telemetry configuration change.
+    repo.shutdown_dedicated_daemon_for_test();
     repo.patch_git_ai_config(|patch| {
         patch.telemetry = Some("on".to_string());
     });
@@ -112,5 +115,5 @@ fn reingest_command_is_retry_and_restart_safe_without_duplicating_local_history(
     assert!(!uploads.contains("after-window"));
 
     assert_eq!(status.total, 3);
-    assert_eq!(status.delivered, 3);
+    assert_eq!(status.delivered, 3, "{status:?}");
 }

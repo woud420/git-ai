@@ -229,6 +229,9 @@ pub enum SemanticEvent {
     PushCompleted {
         remote: Option<String>,
     },
+    SendPackCompleted {
+        repository: String,
+    },
     CloneCompleted {
         target: PathBuf,
     },

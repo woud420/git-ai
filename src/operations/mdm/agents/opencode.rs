@@ -161,10 +161,15 @@ mod tests {
     fn test_opencode_plugin_template_contains_checkpoint_hooks() {
         let content = OPENCODE_PLUGIN_CONTENT;
 
-        assert!(content.contains("import type { Plugin, PluginModule }"));
-        assert!(content.contains("@opencode-ai/plugin"));
-        assert!(content.contains("export const GitAiPlugin: Plugin"));
+        assert!(content.contains("import { Plugin } from \"@opencode/plugin\""));
+        assert!(content.contains("@opencode/plugin"));
+        assert!(content.contains("export const GitAiPlugin = Plugin.define("));
         assert!(content.contains("export default GitAiPluginModule"));
+        // V1 compatibility entrypoint (OpenCode 1.x calls `server()`)
+        assert!(content.contains("async server("));
+        // V2 registers hooks through the tool domain
+        assert!(content.contains("ctx.tool.hook(\"execute.before\""));
+        assert!(content.contains("ctx.tool.hook(\"execute.after\""));
         assert!(content.contains("child_process"));
         assert!(content.contains("\"tool.execute.before\""));
         assert!(content.contains("\"tool.execute.after\""));

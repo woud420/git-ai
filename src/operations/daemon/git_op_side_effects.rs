@@ -1,15 +1,13 @@
 pub use super::working_log_discard::remove_working_log_attributions_for_pathspecs;
 use crate::error::GitAiError;
 use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
-use crate::operations::daemon::side_effect_helpers::{
-    parsed_invocation_for_normalized_command, parsed_invocation_for_side_effect,
-};
+use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
 use crate::operations::git::cli_parser::summarize_rebase_args;
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::oid::is_non_zero_oid;
 pub use crate::operations::git::oid::{is_full_oid as is_valid_oid, is_zero_oid};
 use crate::operations::git::repository::Repository;
-use crate::operations::git::sync_authorship::{fetch_authorship_notes, fetch_remote_from_args};
+use crate::operations::git::sync_authorship::fetch_authorship_notes;
 
 pub(crate) struct PreparedNotesPush {
     pub(crate) repository: Repository,
@@ -90,73 +88,6 @@ pub fn transcript_sweep_triggers_for_events(
     }
 
     triggers
-}
-
-pub fn apply_fetch_notes_sync_side_effect(
-    worktree: &str,
-    cmd: &crate::model::domain::NormalizedCommand,
-) {
-    if cmd.raw_argv.is_empty() {
-        return;
-    }
-    let parsed = parsed_invocation_for_normalized_command(cmd);
-    let [remote] = parsed.command_args.as_slice() else {
-        return;
-    };
-    // More complex forms can select multiple remotes or carry option values.
-    // Do not guess their destination from mutable config after the command.
-    if parsed.command.as_deref() != Some("fetch") || remote.starts_with('-') {
-        return;
-    }
-
-    // Normalization already resolved -C. Other globals can redirect transport
-    // or repository selection and are not preserved by the notes sync helper.
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        match arg.as_str() {
-            "-C" if globals.next().is_some() => {}
-            value if value.starts_with("-C") && value.len() > 2 => {}
-            _ => return,
-        }
-    }
-
-    if let Err(error) =
-        apply_pull_notes_sync_side_effect(worktree, parsed.command.as_deref(), &parsed.command_args)
-    {
-        tracing::warn!(%remote, %error, "best-effort fetch notes sync failed");
-    }
-}
-
-pub fn apply_pull_notes_sync_side_effect(
-    worktree: &str,
-    command: Option<&str>,
-    args: &[String],
-) -> Result<(), GitAiError> {
-    use crate::config::NotesBackendKind;
-
-    let repo = find_repository_in_path(worktree)?;
-    let config = crate::config::Config::fresh();
-    if command == Some("fetch") && !repo.is_collection_allowed(&config) {
-        return Ok(());
-    }
-    let parsed = parsed_invocation_for_side_effect(command, args);
-    let remote = fetch_remote_from_args(&repo, &parsed)?;
-    let notes_backend = config.notes_backend_kind();
-
-    tracing::info!(
-        command = command.unwrap_or("pull"),
-        remote = %remote,
-        backend = %notes_backend,
-        worktree = %worktree,
-        "handling pull notes sync"
-    );
-
-    if notes_backend == NotesBackendKind::Http {
-        return crate::operations::git::notes_api::warm_cache_for_remote(&repo, &remote);
-    }
-
-    fetch_authorship_notes(&repo, &remote)?;
-    Ok(())
 }
 
 pub fn apply_clone_notes_sync_side_effect(worktree: &str) -> Result<(), GitAiError> {

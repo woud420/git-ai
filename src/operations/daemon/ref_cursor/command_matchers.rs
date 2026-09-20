@@ -337,6 +337,7 @@ pub(super) fn command_uses_ref_cursor(primary: &str) -> bool {
             | "cherry-pick"
             | "rebase"
             | "pull"
+            | "fetch"
             | "branch"
             | "stash"
             | "update-ref"

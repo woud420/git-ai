@@ -68,6 +68,13 @@ impl RefCursor {
             "cherry-pick" => self.enrich_cherry_pick(cmd, state),
             "rebase" => self.consume_rebase_transition(cmd, state),
             "pull" => self.consume_pull_transition(cmd, state),
+            "fetch" => {
+                if let Err(error) = self.consume_fetch_transitions(cmd) {
+                    cmd.ref_changes.clear();
+                    tracing::warn!(%error, "best-effort fetch reflog enrichment failed");
+                }
+                Ok(())
+            }
             "branch" => self.enrich_branch(cmd, state),
             "stash" => self.enrich_stash(cmd, state),
             "update-ref" => self.enrich_update_ref(cmd, state),

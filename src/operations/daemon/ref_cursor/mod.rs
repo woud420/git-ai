@@ -24,6 +24,7 @@ mod command_matchers;
 mod continuation;
 mod cursor_core;
 mod enrichment;
+mod fetch;
 mod rebase_pull;
 mod reflog_io;
 mod span_clamping;
@@ -43,6 +44,8 @@ use types::*;
 
 #[cfg(test)]
 mod tests_commit;
+#[cfg(test)]
+mod tests_fetch;
 #[cfg(test)]
 mod tests_fixtures;
 #[cfg(test)]

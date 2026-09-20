@@ -7,6 +7,7 @@ pub(crate) mod command_policy;
 mod config_access_retry;
 pub mod fast_reader;
 pub mod notes_api;
+pub(crate) mod notes_bundle;
 pub(crate) mod notes_store;
 pub use crate::model::git_oid as oid;
 pub(crate) mod patch_id;

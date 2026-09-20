@@ -237,6 +237,7 @@ pub fn handle_git_ai(args: &[String]) {
 pub(crate) fn handle_notes_subcommand(args: &[String]) {
     let subcommand = args.first().map(|s| s.as_str()).unwrap_or("--help");
     match subcommand {
+        "bundle" => commands::notes_bundle::handle_notes_bundle(&args[1..]),
         "migrate" => {
             commands::notes_migrate::handle_notes_migrate(&args[1..]);
         }
@@ -252,6 +253,7 @@ pub(crate) fn handle_notes_subcommand(args: &[String]) {
             eprintln!("Usage: git ai notes <subcommand> [options]");
             eprintln!();
             eprintln!("Subcommands:");
+            eprintln!("  bundle     Export selected notes in a companion Git bundle");
             eprintln!("  migrate    Bulk-upload existing git notes to the HTTP backend");
             eprintln!();
             eprintln!("Run 'git ai notes <subcommand> --help' for details.");

@@ -67,6 +67,8 @@ mod tests {
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
             transport_targets: None,
+            index_write: Default::default(),
+            index_v2: false,
             exit_code: 0,
             started_at_ns: 1,
             finished_at_ns: 2,

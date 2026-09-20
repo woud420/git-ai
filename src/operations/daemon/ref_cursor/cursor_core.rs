@@ -156,7 +156,11 @@ impl RefCursor {
         use_hint: bool,
     ) -> Result<Option<CursorEntry>, GitAiError> {
         let start = self.reflog_start_offset(&key, path)?;
-        let entries = read_reflog_entries(key.clone(), path, reference, start)?;
+        let entries = if expected.allow_identity {
+            read_reflog_entries_including_noops(key.clone(), path, reference, start)?
+        } else {
+            read_reflog_entries(key.clone(), path, reference, start)?
+        };
         let mut candidates = entries.into_iter().filter(|entry| {
             !self.entry_consumed(entry)
                 && expected.matches(entry)
@@ -262,6 +266,7 @@ impl RefCursor {
                 old_oids: [old.to_string()].into_iter().collect(),
                 new_oid: Some(new.to_string()),
                 messages: HashSet::new(),
+                allow_identity: false,
             };
             if let Some(entry) = self.find_common_ref_entry(&reference, expected, &[])? {
                 self.consume_entry(&entry)?;

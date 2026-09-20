@@ -20,6 +20,8 @@ use super::frame_helpers::{
 use super::{DeferredRootExit, PendingTraceCommand, TraceNormalizer};
 
 impl<B: GitBackend> TraceNormalizer<B> {
+    // Existing validation/target errors reach persisted trace and telemetry
+    // diagnostics; retain their Generic-prefixed Display text.
     pub(super) fn handle_start(
         &mut self,
         payload: &Value,
@@ -67,6 +69,8 @@ impl<B: GitBackend> TraceNormalizer<B> {
             push_alias: None,
             push_alias_sid: None,
             push_alias_targets: Some(Vec::new()),
+            index_write: Default::default(),
+            index_versions: Default::default(),
             invocation_worktree: worktree.clone(),
             worktree,
             family_key,
@@ -487,6 +491,8 @@ impl<B: GitBackend> TraceNormalizer<B> {
             invoked_command,
             invoked_args,
             observed_child_commands: pending.observed_child_commands,
+            index_write: pending.index_write,
+            index_v2: pending.index_versions.proven_v2(),
             exit_code,
             started_at_ns: pending.started_at_ns,
             finished_at_ns,

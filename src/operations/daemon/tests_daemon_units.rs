@@ -210,6 +210,8 @@ fn test_rebase_command(
         invoked_command: Some("rebase".to_string()),
         invoked_args: invoked_args.iter().map(|arg| (*arg).to_string()).collect(),
         observed_child_commands: Vec::new(),
+        index_write: Default::default(),
+        index_v2: false,
         exit_code: 0,
         started_at_ns: 1,
         finished_at_ns: 2,

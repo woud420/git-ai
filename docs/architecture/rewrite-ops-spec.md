@@ -197,6 +197,30 @@ daemon processing time (I3).
    and daemon processing are real evidence and must survive.
 
 `reset --hard` discards the work; discarded content gets no reconstruction.
+For a successful `git --no-replace-objects reset --hard` with unchanged HEAD,
+a cursor-owned identity reflog entry and root-owned Trace2 index receipts can
+establish an ordered discard boundary. The explicit global option establishes
+that the command used the canonical object view; commands without it retain
+their prior attribution boundary.
+The receipts must show a version-2 index read and write to this worktree's
+default `index.lock`, without shared-index or filesystem-monitor evidence.
+Version 2 cannot encode `skip-worktree`; filesystem-monitor evidence is excluded
+because Git can also retain edits that its monitor reports as clean.
+The async family worker checks recorded
+paths against that immutable HEAD tree with one metadata-only `cat-file` batch,
+then removes their old checkpoints and INITIAL attribution. It does not inspect
+the later index or worktree, delete surviving untracked-path evidence, or change
+committed notes. The existing sequencer places later checkpoints after this
+boundary. The reducer preserves the remembered branch for this identity record.
+
+This is best-effort coverage of paths in the canonical HEAD tree, bounded to
+4,096 distinct recorded paths and 1 MiB of query input. Missing or conflicting
+receipts, alternate indexes, extended index versions, shared indexes, monitor
+evidence, query budget/encoding failures, and failed commands do not infer a
+discard. Index-only additions, untracked obstructions, replacement-object views,
+and recursive submodule effects are outside this profile. Those cases require
+additional operation-time evidence before broader support can be claimed.
+
 Pathspec reset (`git reset -- path`) only unstages; it does not move HEAD and
 needs no committed-record migration.
 

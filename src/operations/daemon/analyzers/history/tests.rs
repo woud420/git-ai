@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::domain::{CommandScope, RefChange};
+use crate::model::domain::{CommandScope, RefChange, ResetKind};
 
 fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
     NormalizedCommand {
@@ -21,6 +21,8 @@ fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         cherry_pick_source_oids: Vec::new(),
         revert_source_oids: Vec::new(),
         transport_targets: None,
+        index_write: Default::default(),
+        index_v2: false,
         ref_changes: vec![RefChange {
             reference: "HEAD".to_string(),
             old: "a".to_string(),

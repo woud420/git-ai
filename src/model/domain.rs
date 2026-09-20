@@ -37,6 +37,24 @@ pub struct RefChange {
     pub new: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IndexWriteEvidence {
+    #[default]
+    Missing,
+    Exact(PathBuf),
+    Conflicting,
+}
+
+impl IndexWriteEvidence {
+    pub fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NormalizedCommand {
     pub scope: CommandScope,
@@ -54,6 +72,10 @@ pub struct NormalizedCommand {
     pub observed_child_commands: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_targets: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "IndexWriteEvidence::is_missing")]
+    pub index_write: IndexWriteEvidence,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub index_v2: bool,
     pub exit_code: i32,
     pub started_at_ns: u128,
     pub finished_at_ns: u128,

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 mod event_handlers;
 mod frame_helpers;
+mod index_write;
 mod transport_targets;
 
 use frame_helpers::{command_may_mutate_refs, payload_timestamp_ns, select_primary_command};
@@ -31,6 +32,8 @@ pub struct PendingTraceCommand {
     pub push_alias: Option<bool>,
     pub push_alias_sid: Option<String>,
     pub push_alias_targets: Option<Vec<String>>,
+    pub index_write: crate::model::domain::IndexWriteEvidence,
+    pub index_versions: index_write::IndexVersions,
     pub invocation_worktree: Option<PathBuf>,
     pub worktree: Option<PathBuf>,
     pub family_key: Option<FamilyKey>,
@@ -246,6 +249,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
         &mut self,
         payload: &serde_json::Value,
     ) -> Result<Option<NormalizedCommand>, GitAiError> {
+        // Malformed-frame diagnostics are logged verbatim by the trace worker.
         let event = payload
             .get("event")
             .and_then(serde_json::Value::as_str)
@@ -261,6 +265,12 @@ impl<B: GitBackend> TraceNormalizer<B> {
         let ts = payload_timestamp_ns(payload)?;
 
         match event {
+            "region_enter" | "data" => {
+                if let Some(pending) = self.state.pending.get_mut(&root_sid) {
+                    index_write::record(pending, payload, sid, &root_sid);
+                }
+                Ok(None)
+            }
             "start" => self.handle_start(payload, sid, &root_sid, ts),
             "def_repo" => self.handle_def_repo(payload, sid, &root_sid),
             "cmd_name" => {

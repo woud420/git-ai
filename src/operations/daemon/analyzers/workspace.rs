@@ -37,6 +37,8 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                     super::orphan_checkout::analyze_orphan_checkout(cmd, state.worktree)
                 {
                     events.push(event);
+                } else if let Some(event) = super::checkout_discard::event(cmd, state.refs) {
+                    events.push(event);
                 } else if is_path_checkout(&args) {
                     events.push(SemanticEvent::CheckoutPaths);
                 } else if let Some(change) = cmd.ref_changes.first() {

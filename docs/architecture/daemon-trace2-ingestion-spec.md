@@ -197,6 +197,31 @@ so no cursor predates the first traced command.
   commit. All other authorship reads and writes go through the configured notes
   backend.
 
+### Bounded explicit path checkout
+
+Successful `git checkout <full-oid> -- <path>` retires the selected file's
+pending attribution when the source equals that worktree's prior sequenced
+HEAD. A plain absolute path inside the recorded worktree qualifies; a plain
+relative path requires an absolute `-C` that exactly matches the worktree.
+Special filenames require explicit global `--literal-pathspecs`. Other global
+options, ambiguous paths, multiple paths, and paths over 4096 bytes are skipped.
+
+The normalizer records one bounded root-owned default-index write receipt from
+existing Trace2 frames. Missing, invalid, conflicting, alternate-index, and
+filesystem-monitor receipts skip the new cleanup. Monitor receipts can omit a
+repository id and can describe a successful checkout that retains an edit.
+No new ingestion IO or Git queries are added. The reducer uses only this
+worktree's prior HEAD for the explicit form; other commands keep their existing
+ref view. Another worktree's HEAD cannot supply a missing anchor.
+
+The asynchronous worker requires one exact immutable source blob using a
+metadata-only `cat-file --batch-check`, then reuses the working-log filter for
+that exact path. It never reconstructs the command from later index/worktree
+contents. The family sequencer preserves later checkpoints. Branch switching,
+force/patch/ours/theirs forms, omitted sources or separators, pathspec files,
+directories, and recovery from arbitrary sources retain their existing paths.
+Native Git execution, output, and exit status remain unchanged.
+
 ## Reads must not sync
 
 Production read commands (`show`, `blame`, `status`, ...) must not trigger a

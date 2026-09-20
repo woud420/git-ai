@@ -6,6 +6,8 @@ use crate::model::git_oid::is_zero_oid;
 use crate::operations::daemon::analyzers::{AnalysisView, AnalyzerRegistry};
 use std::path::PathBuf;
 
+mod analysis_refs;
+
 /// Convenience wrapper around [`reduce_family_command_with_ref_snapshot`] for
 /// unit tests.
 ///
@@ -36,26 +38,16 @@ pub fn reduce_family_command_with_ref_snapshot(
     canonical_worktree: Option<PathBuf>,
 ) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
     // Analyze against pre-command state so history/ref analyzers can infer old->new correctly.
-    let refs_for_analysis;
-    let analysis_refs = if command_start_refs.is_empty() {
-        &state.refs
-    } else {
-        refs_for_analysis = state
-            .refs
-            .iter()
-            .map(|(reference, oid)| (reference.clone(), oid.clone()))
-            .chain(
-                command_start_refs
-                    .iter()
-                    .map(|(reference, oid)| (reference.clone(), oid.clone())),
-            )
-            .collect();
-        &refs_for_analysis
-    };
+    let analysis_refs = analysis_refs::for_command(
+        state,
+        &cmd,
+        command_start_refs,
+        canonical_worktree.as_deref(),
+    );
     let analysis = analyzers.analyze(
         &cmd,
         AnalysisView {
-            refs: analysis_refs,
+            refs: &analysis_refs,
             worktree: canonical_worktree
                 .as_ref()
                 .or(cmd.worktree.as_ref())

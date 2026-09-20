@@ -94,6 +94,19 @@ pub fn process_trace_connection_line(
         Ok(v) => v,
         Err(_) => return Ok(None),
     };
+    if parsed.get("event").and_then(Value::as_str)
+        == Some(super::socket_health::TRACE_HEALTH_PING_EVENT)
+        && parsed.get("sid").is_none()
+    {
+        coordinator
+            .trace_health_pings_received
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Ok(Some(TraceLineOutcome {
+            continue_reading: false,
+            #[cfg(not(windows))]
+            bootstrap_complete: false,
+        }));
+    }
     #[cfg(not(windows))]
     let event = parsed
         .get("event")

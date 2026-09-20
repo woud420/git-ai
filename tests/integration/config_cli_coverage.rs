@@ -10,8 +10,8 @@ use git_ai::config::{AuthorConfig, FileConfig, NotesBackendConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 
-mod transcript_budgets;
 mod git_path_environment;
+mod transcript_budgets;
 
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
 fn get_json(repo: &TestRepo, key: &str) -> Value {

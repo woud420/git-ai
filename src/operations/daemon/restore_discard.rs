@@ -69,6 +69,8 @@ mod tests {
             invoked_command: Some("restore".into()),
             invoked_args: Vec::new(),
             observed_child_commands: Vec::new(),
+            transport_targets: None,
+            index_v2: false,
             index_write: Default::default(),
             exit_code: 0,
             started_at_ns: 1,

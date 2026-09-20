@@ -31,6 +31,9 @@ pub(super) fn record(pending: &mut PendingTraceCommand, payload: &Value, sid: &s
                 || label.is_some_and(|label| label.starts_with("shared/")))
     {
         pending.index_versions.unsupported = true;
+        // Monitor and shared-index receipts also invalidate the write proof:
+        // restore-style discards accept an Exact receipt without a v2 check.
+        pending.index_write = IndexWriteEvidence::Conflicting;
     }
     if payload.get("repo").and_then(Value::as_u64) != Some(1) || category != Some("index") {
         return;

@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 mod transcript_budgets;
+mod git_path_environment;
 
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
 fn get_json(repo: &TestRepo, key: &str) -> Value {

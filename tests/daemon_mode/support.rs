@@ -36,6 +36,8 @@ mod trace_listener;
 
 #[path = "repository_context.rs"]
 mod repository_context;
+#[path = "trace_completed_roots.rs"]
+mod trace_completed_roots;
 #[path = "trace_frame_limits.rs"]
 mod trace_frame_limits;
 #[path = "trace_normalization.rs"]

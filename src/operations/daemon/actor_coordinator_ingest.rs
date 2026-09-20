@@ -191,11 +191,15 @@ impl ActorDaemonCoordinator {
             Ok(guard) => guard,
             Err(_) => return false,
         };
+        if sid != root && ingress.completed_roots.contains(&root) {
+            return true;
+        }
         ingress
             .root_last_activity_ns
             .insert(root.clone(), now_unix_nanos() as u64);
 
         if event == "start" && sid == root {
+            ingress.roots_seen_own_start.insert(root.clone());
             let started_at_ns = started_at_ns.unwrap_or_else(now_unix_nanos);
             ingress
                 .root_started_at_ns

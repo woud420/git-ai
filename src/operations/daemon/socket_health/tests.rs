@@ -45,7 +45,7 @@ fn disabled_ping_health_does_not_accumulate_stalls() {
 #[tokio::test]
 async fn sentinel_acknowledgment_does_not_register_or_enqueue_a_git_root() {
     let coordinator = Arc::new(ActorDaemonCoordinator::new());
-    let mut roots = std::collections::BTreeSet::new();
+    let mut roots = std::collections::BTreeMap::new();
     for _ in 0..2 {
         super::super::process_trace_connection_line(
             "{\"event\":\"git_ai_health_ping\"}",

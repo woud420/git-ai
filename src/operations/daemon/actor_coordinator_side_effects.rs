@@ -61,7 +61,7 @@ impl ActorDaemonCoordinator {
             pull_uses_rebase,
         } = pull_event_flags(events);
 
-        trace_side_effect_debug(cmd, applied.seq, events);
+        super::side_effect_helpers::trace_side_effect_debug(cmd, applied.seq, events);
 
         let rebase_mode =
             self.compute_rebase_mode_and_detect_non_ff(cmd, events, pull_uses_rebase)?;
@@ -572,31 +572,5 @@ fn pull_event_flags(events: &[crate::model::domain::SemanticEvent]) -> PullFlags
     PullFlags {
         saw_pull_event,
         pull_uses_rebase,
-    }
-}
-
-/// Emit a full side-effect debug trace when `GIT_AI_DEBUG_DAEMON_TRACE=1`.
-fn trace_side_effect_debug(
-    cmd: &crate::model::domain::NormalizedCommand,
-    seq: u64,
-    events: &[crate::model::domain::SemanticEvent],
-) {
-    if std::env::var("GIT_AI_DEBUG_DAEMON_TRACE")
-        .ok()
-        .as_deref()
-        .is_some_and(|v| v == "1")
-    {
-        tracing::debug!(
-            command = cmd.invoked_command.clone().unwrap_or_default(),
-            primary = cmd.primary_command.clone().unwrap_or_default(),
-            seq,
-            argv = ?cmd.raw_argv,
-            invoked_args = ?cmd.invoked_args,
-            ref_changes_len = cmd.ref_changes.len(),
-            ref_changes = ?cmd.ref_changes,
-            events = ?events,
-            exit_code = cmd.exit_code,
-            "side-effect trace"
-        );
     }
 }

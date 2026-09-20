@@ -279,3 +279,7 @@ fn switch_branch_target(args: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "reducer_reset_tests.rs"]
+mod reset_tests;

@@ -10,7 +10,6 @@ mod event_handlers;
 mod frame_helpers;
 mod index_write;
 mod transport_targets;
-mod index_write;
 
 use frame_helpers::{command_may_mutate_refs, payload_timestamp_ns, select_primary_command};
 

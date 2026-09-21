@@ -328,6 +328,21 @@ fn clone_sync_git_process_count_does_not_grow_with_commits() {
     assert_eq!(counts[0], counts[1]);
 }
 
+#[test]
+fn dedicated_daemon_readiness_does_not_leak_git_spawns() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = directory.path().join("git-spawns.log");
+    let caller = TestRepo::new_with_daemon_env(&[
+        ("GIT_AI_SPAWN_LOG", log.to_str().unwrap()),
+        ("GIT_AI_TEST_DELAY_SIDE_EFFECT_MS_FOR_COMMAND", "config=250"),
+    ]);
+
+    fs::write(&log, "").unwrap();
+    caller.sync_daemon_force();
+
+    assert_eq!(fs::read_to_string(log).unwrap(), "");
+}
+
 reuse_tests_in_worktree!(
     clone_sync_default_remote_preserves_attribution,
     clone_sync_short_remote_name,

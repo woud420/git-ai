@@ -358,6 +358,23 @@ impl DaemonProcess {
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             if latest_seq > baseline_seq {
+                // Ingestion advancing does not mean the probe's family side effects are done.
+                // Drain them before the fixture can treat this dedicated daemon as idle.
+                let response = send_control_request(
+                    &self.control_socket_path,
+                    &ControlRequest::SyncFamily {
+                        repo_working_dir: repo_working_dir.to_string(),
+                    },
+                )
+                .map_err(|error| format!("failed draining daemon readiness probe: {error}"))?;
+                if !response.ok {
+                    return Err(format!(
+                        "daemon readiness probe drain failed: {}",
+                        response
+                            .error
+                            .unwrap_or_else(|| "unknown daemon error".to_string())
+                    ));
+                }
                 return Ok(());
             }
             thread::sleep(Duration::from_millis(25));

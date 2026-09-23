@@ -597,6 +597,13 @@ pub(in crate::operations::git) fn grep_ai_notes(
     repo: &Repository,
     pattern: &str,
 ) -> Result<Vec<String>, GitAiError> {
+    if repo.has_promisor_remote() {
+        tracing::info!(
+            "Skipping authorship-note grep in a partial clone to avoid lazy-fetching history"
+        );
+        return Ok(Vec::new());
+    }
+
     let mut args = repo.global_args_for_exec();
     args.push("--no-pager".to_string());
     args.push("grep".to_string());

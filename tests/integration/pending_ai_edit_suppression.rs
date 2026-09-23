@@ -29,6 +29,47 @@ fn fire_post_edit_checkpoint(repo: &TestRepo, file_paths: &[&str]) {
     repo.git_ai(&args).unwrap();
 }
 
+fn fire_agent_v1_post_edit_checkpoint(repo: &TestRepo, file_paths: &[&str]) {
+    let abs_paths: Vec<String> = file_paths
+        .iter()
+        .map(|p| repo.path().join(p).to_string_lossy().to_string())
+        .collect();
+    let payload = json!({
+        "type": "ai_agent",
+        "repo_working_dir": repo.path().to_string_lossy().to_string(),
+        "edited_filepaths": abs_paths,
+        "agent_name": "agent-v1",
+        "model": "test-model",
+        "conversation_id": "same-content-race",
+    })
+    .to_string();
+    repo.checkpoint_with_hook_input("agent-v1", &payload)
+        .unwrap();
+}
+
+/// A tracker may emit KnownHuman after the agent's post-edit event, with the
+/// exact same file contents. That duplicate must not replace the AI attribution.
+#[test]
+fn test_identical_known_human_checkpoint_after_agent_post_keeps_ai_attribution() {
+    let repo = TestRepo::new();
+    let file_path = repo.path().join("target.txt");
+
+    fs::write(&file_path, "original\n").unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    fire_pre_edit_checkpoint(&repo, &["target.txt"]);
+    fs::write(&file_path, "original\nai added\n").unwrap();
+    fire_agent_v1_post_edit_checkpoint(&repo, &["target.txt"]);
+
+    repo.git_ai(&["checkpoint", "mock_known_human", "target.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("AI edit with identical tracker checkpoint")
+        .unwrap();
+
+    let mut file = repo.filename("target.txt");
+    file.assert_committed_lines(lines!["original".unattributed_human(), "ai added".ai(),]);
+}
+
 /// Core race condition test: a KnownHuman checkpoint arriving between
 /// pre-edit and post-edit AI checkpoints should be suppressed.
 #[test]
@@ -50,7 +91,7 @@ fn test_known_human_suppressed_between_ai_pre_and_post_edit() {
         .unwrap();
 
     // AI agent fires post-edit checkpoint (clears pending state)
-    fire_post_edit_checkpoint(&repo, &["target.txt"]);
+    fire_agent_v1_post_edit_checkpoint(&repo, &["target.txt"]);
 
     repo.stage_all_and_commit("AI edit with race").unwrap();
     let mut file = repo.filename("target.txt");

@@ -286,7 +286,12 @@ where
     if bytes.len() > max_size {
         return Ok(CheckpointFileSnapshot::Oversized(bytes.len() as u64));
     }
-    Ok(CheckpointFileSnapshot::Read(String::from_utf8(bytes).ok()))
+    // Source files may use a legacy encoding such as CP949. A lossy UTF-8 view
+    // preserves ASCII syntax and line boundaries so checkpoint diffs can still
+    // attribute generated code around those comments.
+    Ok(CheckpointFileSnapshot::Read(Some(
+        String::from_utf8_lossy(&bytes).into_owned(),
+    )))
 }
 
 #[cfg(unix)]
@@ -490,6 +495,44 @@ mod tests {
         let result = read_checkpoint_file_snapshot(&path, 1_024).unwrap();
 
         assert!(matches!(result, CheckpointFileSnapshot::Read(None)));
+    }
+
+    #[test]
+    fn snapshot_preserves_ascii_lines_from_legacy_encoded_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().canonicalize().unwrap().join("checkpoint.c");
+        fs::write(
+            &path,
+            [
+                b"// ".as_slice(),
+                &[0xbf, 0xa9, 0xb1, 0xe2],
+                b"\nint generated(void) {}\n".as_slice(),
+            ]
+            .concat(),
+        )
+        .unwrap();
+
+        let result = read_checkpoint_file_snapshot(&path, 1_024).unwrap();
+
+        let CheckpointFileSnapshot::Read(Some(content)) = result else {
+            panic!("legacy encoded text should produce a line snapshot");
+        };
+        assert!(content.contains("int generated(void) {}"));
+        assert_eq!(content.lines().count(), 2);
+    }
+
+    #[test]
+    fn snapshot_preserves_nul_bytes_in_readable_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().canonicalize().unwrap().join("checkpoint.bin");
+        fs::write(&path, b"text\0binary").unwrap();
+
+        let result = read_checkpoint_file_snapshot(&path, 1_024).unwrap();
+
+        let CheckpointFileSnapshot::Read(Some(content)) = result else {
+            panic!("valid UTF-8 containing NUL should remain readable");
+        };
+        assert!(content.contains('\0'));
     }
 
     #[test]

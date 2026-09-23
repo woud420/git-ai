@@ -25,6 +25,14 @@ fn gbk_multiline() -> Vec<u8> {
     bytes
 }
 
+fn cp949_korean_comment() -> Vec<u8> {
+    // "// 여기에 한글 주석" in CP949/EUC-KR-compatible encoding.
+    vec![
+        b'/', b'/', b' ', 0xBF, 0xA9, 0xB1, 0xE2, 0xBF, 0xA1, b' ', 0xC7, 0xD1, 0xB1, 0xDB, b' ',
+        0xC1, 0xD6, 0xBC, 0xAE, b'\n',
+    ]
+}
+
 fn latin1_bytes() -> Vec<u8> {
     // Latin-1 text with characters outside UTF-8
     // "café résumé" with Latin-1 accented chars (0xe9 = é in Latin-1, invalid as standalone UTF-8)
@@ -501,6 +509,40 @@ fn test_checkpoint_ai_with_non_utf8_file_present() {
     );
 }
 
+#[test]
+fn test_ai_attribution_after_cp949_korean_comment() {
+    let repo = TestRepo::new();
+    let file_path = repo.path().join("source.c");
+    let comment = cp949_korean_comment();
+
+    let mut initial = comment.clone();
+    initial.extend_from_slice(b"int main() {\n}\n");
+    fs::write(&file_path, initial).unwrap();
+    repo.stage_all_and_commit("Add CP949 source file").unwrap();
+
+    let mut edited = comment.clone();
+    edited
+        .extend_from_slice(b"int main() {\n}\nint generated_function(void) {\n    return 42;\n}\n");
+    fs::write(&file_path, edited).unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "source.c"]).unwrap();
+    repo.stage_all_and_commit("Add generated function after Korean comment")
+        .unwrap();
+
+    let comment = String::from_utf8_lossy(&comment)
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    repo.filename("source.c").assert_committed_lines(vec![
+        comment.unattributed_human(),
+        "int main() {".unattributed_human(),
+        "}".unattributed_human(),
+        "int generated_function(void) {".ai(),
+        "    return 42;".ai(),
+        "}".ai(),
+    ]);
+}
+
 // =============================================================================
 // Binary files: Should be handled gracefully (related edge case)
 // =============================================================================
@@ -933,6 +975,7 @@ crate::reuse_tests_in_worktree!(
     test_non_utf8_file_in_subdirectory,
     test_checkpoint_with_non_utf8_file,
     test_checkpoint_ai_with_non_utf8_file_present,
+    test_ai_attribution_after_cp949_korean_comment,
     test_binary_file_does_not_crash_commit,
     test_binary_and_non_utf8_with_ai_file,
     test_line_attribution_ai_file_with_gbk_neighbor,

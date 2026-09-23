@@ -10,7 +10,7 @@ use super::identity::{
     GitAuthorIdentity, GitIdentityResolution, git_config_identity_resolution_from_config,
     resolve_git_var_identity_with_args,
 };
-use crate::clients::git_cli::exec_git;
+use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero};
 use crate::config;
 use crate::error::GitAiError;
 use crate::operations::git::repo_storage::RepoStorage;
@@ -18,6 +18,7 @@ use crate::operations::git::sync_authorship::push_authorship_notes;
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use super::diff::probe_configured_git_version;
 
@@ -39,9 +40,35 @@ pub struct Repository {
     pub(super) canonical_workdir: PathBuf,
     /// Cached git author identity resolved via `git var GIT_COMMITTER_IDENT`.
     pub(super) cached_author_identity: std::sync::OnceLock<GitAuthorIdentity>,
+    /// Shared across repository clones so promisor detection runs once per repository.
+    pub(super) cached_has_promisor_remote: Arc<OnceLock<bool>>,
 }
 
 impl Repository {
+    /// Returns whether this repository has a configured promisor remote.
+    ///
+    /// A failed config query is treated as a promisor repository so callers
+    /// avoid commands that could trigger an unbounded lazy fetch.
+    pub(crate) fn has_promisor_remote(&self) -> bool {
+        *self.cached_has_promisor_remote.get_or_init(|| {
+            let mut args = self.global_args_for_exec();
+            args.extend([
+                "config".to_string(),
+                "--bool".to_string(),
+                "--get-regexp".to_string(),
+                r"^remote\..*\.promisor$".to_string(),
+            ]);
+
+            match exec_git_allow_nonzero(&args) {
+                Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .any(|line| line.split_whitespace().last() == Some("true")),
+                Ok(output) if output.status.code() == Some(1) => false,
+                Ok(_) | Err(_) => true,
+            }
+        })
+    }
+
     // Util for preparing global args for execution
     pub fn global_args_for_exec(&self) -> Vec<String> {
         let mut args = self.global_args.clone();

@@ -564,6 +564,26 @@ fn test_grep_ai_notes_single_match() {
 }
 
 #[test]
+fn test_grep_ai_notes_skips_partial_clone_history_search() {
+    let (repo, gitai_repo) = repo_with_handle();
+
+    fs::write(repo.path().join("test.txt"), "content\n").unwrap();
+    repo.stage_all_and_commit("Commit").expect("commit");
+    let commit_sha = head_sha(&repo);
+    write_note(&gitai_repo, &commit_sha, "{\"tool\":\"cursor\"}").expect("add note");
+    repo.git_og(&["config", "remote.origin.promisor", "true"])
+        .expect("mark the repository as partial clone");
+
+    let cloned_repo = gitai_repo.clone();
+    let results = grep_ai_notes(&cloned_repo, "cursor").expect("partial clone skips grep");
+
+    assert!(
+        results.is_empty(),
+        "a partial clone must skip tree-wide notes search"
+    );
+}
+
+#[test]
 fn test_grep_ai_notes_multiple_matches() {
     let (repo, gitai_repo) = repo_with_handle();
 

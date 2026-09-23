@@ -305,6 +305,7 @@ pub fn from_bare_repository(git_dir: &Path) -> Result<Repository, GitAiError> {
         workdir,
         canonical_workdir,
         cached_author_identity: std::sync::OnceLock::new(),
+        cached_has_promisor_remote: std::sync::Arc::new(std::sync::OnceLock::new()),
     })
 }
 
@@ -341,6 +342,7 @@ pub(super) fn repository_from_discovered_paths(
         workdir: workdir.to_path_buf(),
         canonical_workdir,
         cached_author_identity: std::sync::OnceLock::new(),
+        cached_has_promisor_remote: std::sync::Arc::new(std::sync::OnceLock::new()),
     })
 }
 

@@ -482,6 +482,11 @@ where
                 &stats_diff_base,
                 &commit_sha,
             )?;
+            let ignore_matcher = build_ignore_matcher(&ignore_patterns);
+            let diff_hunks: Vec<_> = diff_hunks
+                .into_iter()
+                .filter(|hunk| !should_ignore_file_with_matcher(&hunk.file_path, &ignore_matcher))
+                .collect();
 
             let computed = stats_for_commit_stats_from_hunks(
                 repo,

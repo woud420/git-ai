@@ -38,11 +38,10 @@ struct PreviousFileState {
 }
 
 use super::state_error::state_error as checkpoint_error;
+mod known_human_checkpoint_filter;
+use known_human_checkpoint_filter::filter_same_content_known_human_files;
 
 use crate::model::working_log::AgentId;
-
-#[cfg(not(any(test, feature = "test-support")))]
-const KNOWN_HUMAN_MIN_SECS_AFTER_AI: u64 = 1;
 
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) fn should_emit_agent_usage(agent_id: &AgentId) -> bool {
@@ -207,30 +206,24 @@ fn execute_resolved_checkpoint(
         return Ok((0, resolved.files.len(), checkpoints.len()));
     }
 
-    // Reject KnownHuman checkpoints that arrive within KNOWN_HUMAN_MIN_SECS_AFTER_AI
-    // seconds of an AI checkpoint on any of the same files. These are likely spurious
-    // IDE save events triggered by the AI completing its edit, not genuine human keystrokes.
-    // Only compiled in non-test builds where the constant is non-zero; under --all-targets
-    // clippy would otherwise flag the comparisons as always-false for u64.
-    #[cfg(not(any(test, feature = "test-support")))]
-    if kind == CheckpointKind::KnownHuman {
-        let now_secs = crate::model::clock::now_secs();
-        let too_soon = checkpoints.iter().rev().any(|cp| {
-            cp.kind.is_ai()
-                && now_secs.saturating_sub(cp.timestamp) < KNOWN_HUMAN_MIN_SECS_AFTER_AI
-                && cp.entries.iter().any(|e| resolved.files.contains(&e.file))
-        });
-        if too_soon {
-            tracing::debug!(
-                "[KnownHuman] Rejected: fired within {}s of an AI checkpoint on the same file",
-                KNOWN_HUMAN_MIN_SECS_AFTER_AI
-            );
-            return Ok((0, 0, 0));
-        }
-    }
-
     let save_states_start = Instant::now();
     let file_content_hashes = save_current_file_states(&working_log, &resolved.files)?;
+    if kind == CheckpointKind::KnownHuman {
+        let filtered_files = filter_same_content_known_human_files(
+            &mut resolved.files,
+            &file_content_hashes,
+            &checkpoints,
+            crate::model::clock::now_secs(),
+        );
+        if filtered_files > 0 {
+            tracing::debug!(
+                "[KnownHuman] Filtered {filtered_files} file(s) whose content matches a recent AI checkpoint"
+            );
+        }
+        if resolved.files.is_empty() {
+            return Ok((0, filtered_files, checkpoints.len()));
+        }
+    }
     tracing::debug!(
         "[BENCHMARK] save_current_file_states for {} files took {:?}",
         resolved.files.len(),

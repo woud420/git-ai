@@ -11,6 +11,10 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+mod cli;
+mod package_manager;
+pub use cli::run_with_args;
+
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
@@ -654,35 +658,6 @@ fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(
     }
 }
 
-pub fn run_with_args(args: &[String]) {
-    #[cfg(windows)]
-    exit_if_invoked_via_git_extension();
-
-    let mut force = false;
-    let mut background = false;
-
-    for arg in args {
-        match arg.as_str() {
-            "--force" => force = true,
-            "--background" => background = true, // Undocumented flag for internal use when spawning background process
-            _ => {
-                eprintln!("Unknown argument: {}", arg);
-                eprintln!("Usage: git-ai upgrade [--force]");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    run_impl(force, background);
-}
-
-fn run_impl(force: bool, background: bool) {
-    let config = config::Config::fresh();
-    let channel = config.update_channel();
-    let skip_install = background && config.auto_updates_disabled();
-    let _ = run_impl_with_url(force, config.api_base_url(), channel, skip_install);
-}
-
 fn run_impl_with_url(
     force: bool,
     api_base_url: &str,
@@ -852,6 +827,9 @@ fn print_cached_notice(cache: &UpdateCache) {
 }
 
 pub fn maybe_schedule_background_update_check() {
+    if package_manager::current().is_some() {
+        return;
+    }
     let config = config::Config::get();
     if config.version_checks_disabled() {
         return;
@@ -912,6 +890,10 @@ pub enum DaemonUpdateCheckResult {
 /// Returns `Ok(UpdateReady)` if the install script ran, `Ok(NoUpdate)` if
 /// no pending update was found or updates are disabled.
 pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult, String> {
+    package_manager::automatic_update(package_manager::current(), install_pending_update)
+}
+
+fn install_pending_update() -> Result<DaemonUpdateCheckResult, String> {
     let config = config::Config::fresh();
     if config.version_checks_disabled() || config.auto_updates_disabled() {
         return Ok(DaemonUpdateCheckResult::NoUpdate);
@@ -985,6 +967,10 @@ pub fn check_and_install_update_if_available() -> Result<DaemonUpdateCheckResult
 /// and updates the local cache. Returns `DaemonUpdateCheckResult::UpdateReady` when
 /// the channel has a newer version than the running binary.
 pub fn check_for_update_available() -> Result<DaemonUpdateCheckResult, String> {
+    package_manager::automatic_update(package_manager::current(), check_release_for_update)
+}
+
+fn check_release_for_update() -> Result<DaemonUpdateCheckResult, String> {
     let config = config::Config::fresh();
     if config.version_checks_disabled() {
         return Ok(DaemonUpdateCheckResult::NoUpdate);

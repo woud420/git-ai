@@ -120,6 +120,7 @@ mod nix_documentation;
 mod non_utf8_files;
 mod notes_merge_mixed_fanout;
 mod opencode;
+mod package_manager_upgrade;
 mod packaging_contract;
 mod pending_ai_edit_suppression;
 mod performance;

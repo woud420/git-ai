@@ -6,6 +6,7 @@ use git_ai::metrics::attrs::attr_pos;
 use git_ai::metrics::events::committed_pos;
 use git_ai::metrics::types::{MetricEventId, SparseArray};
 use git_ai::model::repository::metrics_db::MetricsDatabase;
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -125,4 +126,87 @@ fn committed_metric_includes_git_author_commit_timestamps_and_patch_id() {
 
     let mut file = repo.filename("generated.txt");
     file.assert_committed_lines(lines!["base".unattributed_human(), "ai line".ai()]);
+}
+
+#[test]
+fn committed_metric_hunks_respect_git_ai_ignore() {
+    let (_metrics_db_dir, metrics_db_path) = isolated_metrics_db_path();
+    let repo =
+        TestRepo::new_with_daemon_env(&[("GIT_AI_TEST_METRICS_DB_PATH", metrics_db_path.as_str())]);
+
+    fs::write(repo.path().join(".git-ai-ignore"), "**/i18n/**\n").unwrap();
+    fs::write(repo.path().join("README.md"), "# Project\n").unwrap();
+    let visible_path = repo.path().join("src/app.jsx");
+    let ignored_path = repo.path().join("locales/i18n/en.json");
+    fs::create_dir_all(visible_path.parent().unwrap()).unwrap();
+    fs::create_dir_all(ignored_path.parent().unwrap()).unwrap();
+    fs::write(&visible_path, "export const base = true;\n").unwrap();
+    fs::write(&ignored_path, "{\"base\": \"hello\"}\n").unwrap();
+    repo.stage_all_and_commit("Add ignore rule").unwrap();
+
+    checkpoint_codex(
+        &repo,
+        CodexHookInput::pre_file_edit(
+            "ignored-metric-session",
+            repo.canonical_path(),
+            "tool-use-visible",
+            &visible_path,
+        ),
+    );
+    checkpoint_codex(
+        &repo,
+        CodexHookInput::pre_file_edit(
+            "ignored-metric-session",
+            repo.canonical_path(),
+            "tool-use-ignored",
+            &ignored_path,
+        ),
+    );
+    fs::write(
+        &visible_path,
+        "export const base = true;\nexport const answer = 42;\n",
+    )
+    .unwrap();
+    fs::write(
+        &ignored_path,
+        "{\"base\": \"hello\", \"message\": \"generated\"}\n",
+    )
+    .unwrap();
+    checkpoint_codex(
+        &repo,
+        CodexHookInput::post_file_edit(
+            "ignored-metric-session",
+            repo.canonical_path(),
+            "tool-use-visible",
+            &visible_path,
+        ),
+    );
+    checkpoint_codex(
+        &repo,
+        CodexHookInput::post_file_edit(
+            "ignored-metric-session",
+            repo.canonical_path(),
+            "tool-use-ignored",
+            &ignored_path,
+        ),
+    );
+    let commit = repo
+        .stage_all_and_commit("Add visible and ignored generated files")
+        .unwrap();
+
+    let event = committed_metric_for_commit(&metrics_db_path, &commit.commit_sha);
+    let hunks_json = sparse_str(&event.values, committed_pos::HUNKS).expect("metric hunks");
+    let hunks: Value = serde_json::from_str(hunks_json).expect("hunks should be valid JSON");
+    let file_paths = hunks
+        .as_array()
+        .expect("hunks should be an array")
+        .iter()
+        .filter_map(|hunk| hunk.get("file_path").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+
+    assert!(file_paths.contains(&"src/app.jsx"), "hunks: {file_paths:?}");
+    assert!(
+        file_paths.iter().all(|path| !path.contains("i18n")),
+        "ignored paths must not be persisted in commit metrics: {file_paths:?}"
+    );
 }

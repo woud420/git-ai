@@ -180,16 +180,25 @@ daemon_latest_seq() {
 # The daemon processes attribution asynchronously after the foreground git
 # command returns, so a real timing/validation pass MUST wait for it to go
 # quiescent. We poll daemon status and watch latest_seq: once it has advanced
-# past the supplied baseline and then held steady across several polls, every
-# queued command -- and its synchronous refs/notes/ai write -- has been applied.
+# past the supplied baseline and then held steady across several polls, the
+# daemon has ingested every command. latest_seq advances before a command's side
+# effects (note writes, rewrite migration) run, so we then send sync.family to
+# wait for those to finish.
 #
 # Arg 1 (optional): baseline seq that latest_seq must exceed before we accept
 # stability. Omit (or pass empty) to just wait for stability without requiring
 # advancement -- used to drain leftover setup/checkout work before timing.
-#
-# This is the only sync primitive available on BOTH binaries under test: the
-# removed `daemon barrier` subcommand and the `sync.family` control method do
-# not exist on the main-branch daemon, but `daemon status` does.
+BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+daemon_sync_family() {
+  python3 - "$BENCH_DIR" "$GIT_AI_DAEMON_CONTROL_SOCKET" "$REPO_DIR" "$DAEMON_QUIESCE_TIMEOUT_S" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from benchmark_common import daemon_sync_family
+daemon_sync_family(Path(sys.argv[2]), Path(sys.argv[3]), float(sys.argv[4]))
+PY
+}
+
 DAEMON_QUIESCE_TIMEOUT_S=300
 DAEMON_QUIESCE_STABLE_POLLS=8
 DAEMON_QUIESCE_POLL_S=0.05
@@ -214,7 +223,8 @@ wait_for_daemon_quiescence() {
         advanced=0
       fi
       if (( advanced == 1 )) && (( stable >= DAEMON_QUIESCE_STABLE_POLLS )); then
-        return 0
+        daemon_sync_family
+        return
       fi
     else
       stable=0

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 DEFAULT_COMMAND_TIMEOUT_S = 900
 LONG_COMMAND_TIMEOUT_S = 5400
@@ -60,6 +63,38 @@ def run_cmd(
             f"stderr:\n{proc.stderr}\n"
         )
     return proc
+
+
+def daemon_sync_family(
+    control_socket: Path, repo_dir: Path, timeout_s: float = 300.0
+) -> dict[str, Any]:
+    """Block until the daemon has finished every side effect for repo_dir's family.
+
+    Sends the daemon's ``sync.family`` control request, which returns once the
+    family's queued commands are applied and their side effects (authorship
+    note writes, rewrite migration) have completed. It only covers trace data
+    the daemon has already received, so callers first wait for ``daemon
+    status`` to settle.
+    """
+    request = {
+        "method": "sync.family",
+        "params": {"repo_working_dir": os.path.realpath(repo_dir)},
+    }
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout_s)
+            sock.connect(str(control_socket))
+            sock.sendall(json.dumps(request).encode() + b"\n")
+            with sock.makefile("rb") as reader:
+                line = reader.readline()
+        response = json.loads(line)
+    except (OSError, ValueError) as err:
+        raise BenchmarkError(f"daemon sync.family failed for {repo_dir}: {err}") from err
+    data = response.get("data") or {}
+    if not response.get("ok") or data.get("last_error"):
+        error = response.get("error") or data.get("last_error") or response
+        raise BenchmarkError(f"daemon sync.family failed for {repo_dir}: {error}")
+    return data
 
 
 def build_release_binary(repo_dir: Path, target_dir: Path) -> Path:

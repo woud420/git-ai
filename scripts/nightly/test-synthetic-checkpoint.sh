@@ -50,9 +50,11 @@ CHECKPOINT_JSON=$(printf '{
 }' "$REPO_DIR" "$TEST_FILE" "$TEST_FILE" "$AGENT" "$AGENT" "$(date +%s)")
 
 CHECKPOINT_STDERR="$RESULTS_DIR/synthetic-checkpoint-${AGENT}.stderr"
+CHECKPOINT_STATUS=0
 echo "$CHECKPOINT_JSON" | git-ai checkpoint agent-v1 --hook-input stdin 2> "$CHECKPOINT_STDERR" \
-  || fail "git-ai checkpoint agent-v1 command failed"
+  || CHECKPOINT_STATUS=$?
 cat "$CHECKPOINT_STDERR" >&2
+[ "$CHECKPOINT_STATUS" -eq 0 ] || fail "git-ai checkpoint agent-v1 command failed"
 # git-ai checkpoint exits 0 when it declines a checkpoint so agent hooks never
 # fail; detect a skipped or rejected checkpoint from its stderr instead.
 if grep -qE '^(Skipping checkpoint|[^ ]+ preset error:)' "$CHECKPOINT_STDERR"; then

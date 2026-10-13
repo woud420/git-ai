@@ -46,6 +46,7 @@ pub struct PendingTraceCommand {
     pub finished_at_ns: Option<u128>,
     pub reflog_start_offsets: HashMap<String, u64>,
     pub saw_def_repo: bool,
+    pub root_owns_repo: bool,
 }
 
 #[derive(Debug, Clone, Default)]

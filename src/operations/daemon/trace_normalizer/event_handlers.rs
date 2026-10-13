@@ -80,6 +80,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
             finished_at_ns: None,
             reflog_start_offsets: payload_reflog_start_offsets(payload),
             saw_def_repo: false,
+            root_owns_repo: false,
         };
         trace_debug_lifecycle(&format!(
             "trace normalizer start sid={} argv={:?} worktree={:?}",
@@ -119,10 +120,20 @@ impl<B: GitBackend> TraceNormalizer<B> {
     pub(super) fn handle_def_repo(
         &mut self,
         payload: &Value,
-        _sid: &str,
+        sid: &str,
         root_sid: &str,
     ) -> Result<Option<NormalizedCommand>, GitAiError> {
-        if def_repo_is_secondary(payload) {
+        // Children can run in other repositories: clone helpers report the
+        // parent CWD, and a local fetch-pack's upload-pack reports the source
+        // repository. Their frames arrive on separate connections in any order,
+        // so once the root reports its own repository, children cannot replace it.
+        let from_root = sid == root_sid;
+        let root_owns_repo = self
+            .state
+            .pending
+            .get(root_sid)
+            .is_some_and(|pending| pending.root_owns_repo);
+        if def_repo_is_secondary(payload) || (!from_root && root_owns_repo) {
             if let Some(pending) = self.state.pending.get_mut(root_sid) {
                 merge_reflog_start_offsets_from_payload(pending, payload);
             }
@@ -148,23 +159,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
             .get(root_sid)
             .and_then(|pending| trace_argv_primary_command(&pending.raw_argv))
             .is_some_and(|command| matches!(command.as_str(), "clone" | "init"));
-
-        // For clone/init the root process's def_repo carries the newly created
-        // repo path.  Child processes (remote-https, index-pack, rev-list, …)
-        // inherit the parent CWD and their def_repo reports that CWD — not the
-        // clone destination.  Once we've captured the root def_repo (first
-        // arrival), skip subsequent child def_repo events entirely to prevent
-        // overwriting the correct worktree, family, and sid lookup maps.
-        if prefer_def_repo_target {
-            let already_saw_def_repo = self
-                .state
-                .pending
-                .get(root_sid)
-                .is_some_and(|pending| pending.saw_def_repo);
-            if already_saw_def_repo {
-                return Ok(None);
-            }
-        }
 
         // Trace2 `def_repo.repo` may point at a common-dir `.git` path for worktrees.
         // For normal in-repo commands we keep the start/cwd-derived worktree when available.
@@ -211,6 +205,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
         if let Some(pending) = self.state.pending.get_mut(root_sid) {
             merge_reflog_start_offsets_from_payload(pending, payload);
             pending.saw_def_repo = true;
+            pending.root_owns_repo |= from_root;
             pending.worktree = Some(repo);
             if let Some(family) = family.as_ref() {
                 pending.family_key = Some(family.clone());
@@ -238,6 +233,13 @@ impl<B: GitBackend> TraceNormalizer<B> {
             .to_string();
 
         if is_internal_cmd_name(&cmd) {
+            // An alias or dashed external root only launches the real command;
+            // that child's def_repo names the repository it works in.
+            if sid == root_sid
+                && let Some(pending) = self.state.pending.get_mut(root_sid)
+            {
+                pending.root_owns_repo = false;
+            }
             return Ok(None);
         }
 

@@ -153,6 +153,13 @@ class VariantRunner:
         self.daemon_trace_socket = self.daemon_socket_dir / "trace2.sock"
         self.daemon_control_socket = self.daemon_socket_dir / "control.sock"
 
+        # Benchmark attribution is validated through refs/notes/ai, so configure
+        # this isolated HOME before the daemon starts: collection is opt-in, and
+        # release builds default to the SQLite notes backend. Every repository
+        # this runner touches is a benchmark repo, so allow them all.
+        self.run_git_ai(["config", "set", "notes_backend.kind", "git_notes"], cwd=run_root)
+        self.run_git_ai(["config", "--add", "allowed_repositories", "*"], cwd=run_root)
+
         if self.variant.mode == "daemon":
             self.start_daemon()
             self.base_env["GIT_TRACE2_EVENT"] = (

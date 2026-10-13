@@ -38,6 +38,7 @@ from benchmark_common import (
     BenchmarkError,
     build_release_binary,
     create_link_or_copy,
+    daemon_sync_family,
     git_output,
     now_iso_utc,
     prepare_main_worktree,
@@ -260,12 +261,11 @@ class VariantRunner:
         command returns, so a real timing/validation pass MUST wait for it to go
         quiescent before reading notes. We poll ``daemon status`` and watch the
         family's ``latest_seq`` (the actor's applied-command counter): once it has
-        advanced past zero and then held steady across several polls, every queued
-        command -- and its synchronous ``refs/notes/ai`` write -- has been applied.
+        advanced past zero and then held steady across several polls, the daemon
+        has ingested every command. ``latest_seq`` advances before a command's
+        side effects (note writes, rewrite migration) run, so we then send
+        ``sync.family`` to wait for those to finish.
 
-        This is the only sync primitive available on BOTH binaries under test:
-        the removed ``daemon barrier`` subcommand and the ``sync.family`` control
-        method do not exist on the main-branch daemon, but ``daemon status`` does.
         Each scenario runs in a freshly copied repo (a fresh daemon family that
         starts at seq 0), so ``latest_seq > 0`` reliably means "work was seen".
         """
@@ -297,6 +297,9 @@ class VariantRunner:
             if latest_seq == last_seq:
                 stable_polls += 1
                 if latest_seq > 0 and stable_polls >= required_stable_polls:
+                    daemon_sync_family(
+                        self.daemon_control_socket, repo_dir, DAEMON_IDLE_TIMEOUT_S
+                    )
                     return
             else:
                 stable_polls = 0

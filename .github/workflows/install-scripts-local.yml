@@ -147,15 +147,8 @@ jobs:
 
       - name: Configure git-ai for E2E (notes backend + allowed repositories)
         run: |
-          INSTALL_DIR="$HOME/.git-ai/bin"
-          # Use git_notes backend so verify-synthetic-attribution.sh can read
-          # 'git notes --ref=ai show HEAD' directly.
-          # SQLite-default coverage lives in tests/integration/sqlite_notes_backend.rs.
-          "$INSTALL_DIR/git-ai" config set notes_backend.kind git_notes
-          # Resolve the canonical path — on macOS /tmp is a symlink to /private/tmp
-          # and allowed_repositories matching canonicalises the repo root.
-          REPO_CANONICAL="$(cd /tmp/e2e-test-repo && pwd -P)"
-          "$INSTALL_DIR/git-ai" config --add allowed_repositories "$REPO_CANONICAL"
+          bash "$GITHUB_WORKSPACE/scripts/nightly/configure-test-repo.sh" \
+            "$HOME/.git-ai/bin/git-ai" /tmp/e2e-test-repo
 
       - name: Start async daemon
         run: |

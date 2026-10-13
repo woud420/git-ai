@@ -212,6 +212,11 @@ jobs:
           cd /tmp/test-repo
           git-ai install
 
+      - name: Configure git-ai for test repo (notes backend + allowed repositories)
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/nightly/configure-test-repo.sh" \
+            "$GITHUB_WORKSPACE/target/release/git-ai" /tmp/test-repo
+
       - name: Start async daemon
         run: |
           source "$GITHUB_WORKSPACE/scripts/nightly/start-async-daemon.sh" \
@@ -309,6 +314,11 @@ jobs:
           ln -sf "$GITHUB_WORKSPACE/target/release/git-ai" "$GITHUB_WORKSPACE/target/release/git"
           cd /tmp/test-repo
           git-ai install
+
+      - name: Configure git-ai for test repo (notes backend + allowed repositories)
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/nightly/configure-test-repo.sh" \
+            "$GITHUB_WORKSPACE/target/release/git-ai" /tmp/test-repo
 
       - name: Start async daemon
         run: |

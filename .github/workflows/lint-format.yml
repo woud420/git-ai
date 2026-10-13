@@ -36,6 +36,13 @@ env:
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: "-D warnings"
 
+# Cancel a pull request's in-progress run when a newer commit is pushed. Every
+# other event gets its own group, so pushes to main and scheduled runs are never
+# cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   format:
     name: Format

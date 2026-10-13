@@ -5,7 +5,7 @@ permissions:
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 2 AM UTC nightly
+    - cron: '0 2 * * 1'  # 2 AM UTC Mondays
   pull_request:
     types: [labeled]
   workflow_dispatch:

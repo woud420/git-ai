@@ -27,7 +27,7 @@ on:
       - '.github/actions/**'
       - '.github/workflows/performance-benchmarks.yml'
   schedule:
-    - cron: "0 7 * * *"
+    - cron: "0 7 * * 1"  # 7 AM UTC Mondays
   workflow_dispatch:
 
 jobs:

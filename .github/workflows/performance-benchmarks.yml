@@ -134,7 +134,8 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pr-flamegraph-benchmarks
-          path: .benchmarks/pr-flamegraphs/**
+          path: .benchmarks/pr-flamegraphs/artifacts/**
+          retention-days: 7
           if-no-files-found: ignore
 
   nightly-full-benchmarks:
@@ -252,5 +253,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-flamegraph-benchmarks
-          path: .benchmarks/nightly-flamegraphs/**
+          path: .benchmarks/nightly-flamegraphs/artifacts/**
+          retention-days: 7
           if-no-files-found: ignore

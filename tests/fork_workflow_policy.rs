@@ -441,7 +441,8 @@ fn active_distribution_guidance_is_fork_local() {
     let operations = fs::read_to_string(root.join("docs/operations/README.md"))
         .expect("operations guide must be readable");
     for required in [
-        "has not published tags or release artifacts",
+        "has version tags",
+        "has not yet published GitHub Release artifacts",
         "macOS Intel",
         "macOS Apple Silicon",
         "macOS universal",

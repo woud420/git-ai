@@ -186,12 +186,15 @@ fn extract_model_from_copilot_otel_sqlite(
         Err(_) => return Ok(None),
     };
 
+    let limit = crate::config::Config::get()
+        .max_transcript_line_bytes()
+        .min(i64::MAX as usize) as i64;
     let newest_request_model: Option<String> = conn
         .query_row(
-            "SELECT request_model FROM spans \
+            "SELECT CASE WHEN LENGTH(CAST(request_model AS BLOB)) <= ?2 THEN request_model END FROM spans \
              WHERE chat_session_id = ?1 AND request_model IS NOT NULL AND request_model != '' \
              ORDER BY end_time_ms DESC, span_id DESC LIMIT 1",
-            rusqlite::params![chat_session_id],
+            rusqlite::params![chat_session_id, limit],
             |row| row.get(0),
         )
         .ok();
@@ -202,10 +205,10 @@ fn extract_model_from_copilot_otel_sqlite(
 
     let newest_response_model: Option<String> = conn
         .query_row(
-            "SELECT response_model FROM spans \
+            "SELECT CASE WHEN LENGTH(CAST(response_model AS BLOB)) <= ?2 THEN response_model END FROM spans \
              WHERE chat_session_id = ?1 AND response_model IS NOT NULL AND response_model != '' \
              ORDER BY end_time_ms DESC, span_id DESC LIMIT 1",
-            rusqlite::params![chat_session_id],
+            rusqlite::params![chat_session_id, limit],
             |row| row.get(0),
         )
         .ok();
@@ -246,22 +249,26 @@ fn extract_model_from_opencode_sqlite(
     // OpenCode stores model info in two places depending on message role:
     //   User messages:     data.model.modelID  (nested object)
     //   Assistant messages: data.modelID        (top-level string)
+    let limit = crate::config::Config::get()
+        .max_transcript_line_bytes()
+        .min(i64::MAX as usize) as i64;
     let (query, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = match session_id {
         Some(sid) => (
-            "SELECT data FROM message WHERE session_id = ? AND (data LIKE '%\"modelID\"%' OR data LIKE '%\"model\"%') LIMIT 1",
-            vec![Box::new(sid.to_string())],
+            "SELECT CASE WHEN LENGTH(CAST(data AS BLOB)) <= ?1 THEN data END FROM message WHERE session_id = ?2 AND (data LIKE '%\"modelID\"%' OR data LIKE '%\"model\"%') LIMIT 1",
+            vec![Box::new(limit), Box::new(sid.to_string())],
         ),
         None => (
-            "SELECT data FROM message WHERE (data LIKE '%\"modelID\"%' OR data LIKE '%\"model\"%') LIMIT 1",
-            vec![],
+            "SELECT CASE WHEN LENGTH(CAST(data AS BLOB)) <= ?1 THEN data END FROM message WHERE (data LIKE '%\"modelID\"%' OR data LIKE '%\"model\"%') LIMIT 1",
+            vec![Box::new(limit)],
         ),
     };
 
     let result: Option<String> = conn
         .query_row(query, rusqlite::params_from_iter(params.iter()), |row| {
-            row.get::<_, String>(0)
+            row.get::<_, Option<String>>(0)
         })
         .ok()
+        .flatten()
         .and_then(|data| {
             let json: serde_json::Value = serde_json::from_str(&data).ok()?;
             // Try user message format: data.model.modelID

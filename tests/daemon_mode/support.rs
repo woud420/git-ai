@@ -2,6 +2,8 @@ use super::repos;
 
 #[path = "metrics_byte_budget.rs"]
 mod metrics_byte_budget;
+#[path = "sqlite_transcript_budget.rs"]
+mod sqlite_transcript_budget;
 #[path = "transcript_budgets.rs"]
 mod transcript_budgets;
 #[path = "whole_file_transcript_budget.rs"]

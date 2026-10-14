@@ -49,6 +49,7 @@ pub(crate) mod copilot_model;
 pub(crate) mod jsonl_scan;
 pub mod model_extraction;
 pub(crate) mod reader;
+pub(crate) mod sqlite_budget;
 pub mod sweep;
 pub(crate) mod timestamp;
 

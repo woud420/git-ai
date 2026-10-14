@@ -3,24 +3,24 @@
 mod repos;
 
 use git_ai::operations::daemon::control_api::CasSyncPayload;
-#[cfg(unix)]
-use git_ai::operations::daemon::send_control_request_with_timeout;
 use git_ai::operations::daemon::{
-    ControlRequest, ControlResponse, DaemonConfig, TelemetryEnvelope,
-    local_socket_connects_with_timeout, open_local_socket_stream_with_timeout,
-    send_control_request,
+    ControlRequest, ControlResponse, DaemonConfig, TelemetryEnvelope, daemon_log_dir,
+    open_local_socket_stream_with_timeout, read_daemon_pid, send_control_request,
+    send_control_request_with_timeout,
 };
-use repos::test_repo::{DaemonTestScope, TestRepo, get_binary_path, real_git_executable};
+use repos::test_repo::{
+    DAEMON_TEST_READY_TOTAL_TIMEOUT, DaemonTestScope, TestRepo, get_binary_path,
+    real_git_executable, wait_for_test_daemon_ready, write_daemon_startup_artifact,
+};
 use serde_json::Value;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
-
-const DAEMON_TEST_PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 
 fn read_global_git_config(repo: &TestRepo, key: &str) -> Option<String> {
     let mut command = Command::new(real_git_executable());
@@ -109,28 +109,113 @@ fn git_ai_with_daemon_env(repo: &TestRepo, args: &[&str]) -> Result<String, Stri
     repo.git_ai_with_env(args, &envs)
 }
 
-fn wait_for_daemon_sockets(repo: &TestRepo) {
-    let control = daemon_control_socket_path(repo);
-    let trace = daemon_trace_socket_path(repo);
-    for _ in 0..200 {
-        let status = send_control_request(
-            &control,
-            &ControlRequest::StatusFamily {
-                repo_working_dir: repo.canonical_path().to_string_lossy().to_string(),
-            },
-        );
-        if status.is_ok()
-            && local_socket_connects_with_timeout(&trace, DAEMON_TEST_PROBE_TIMEOUT).is_ok()
-        {
-            return;
+// These tests own independent daemon homes, but their startup phases must not
+// overlap: hosted Windows runners can otherwise spend the entire readiness
+// budget loading several daemon images at once. Each start helper releases this
+// permit only after both channels are ready (or startup has failed and cleaned up).
+struct AsyncModeDaemonOwnership {
+    lock: Mutex<()>,
+}
+
+impl AsyncModeDaemonOwnership {
+    const fn new() -> Self {
+        Self {
+            lock: Mutex::new(()),
         }
-        thread::sleep(Duration::from_millis(25));
     }
-    panic!(
-        "daemon sockets did not become ready: control={}, trace={}",
-        control.display(),
-        trace.display()
+
+    fn acquire(&self) -> MutexGuard<'_, ()> {
+        self.lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+static ASYNC_MODE_DAEMON_OWNERSHIP: AsyncModeDaemonOwnership = AsyncModeDaemonOwnership::new();
+
+fn acquire_async_mode_daemon_startup() -> MutexGuard<'static, ()> {
+    ASYNC_MODE_DAEMON_OWNERSHIP.acquire()
+}
+
+fn daemon_diagnostic_log_path(repo: &TestRepo, pid: u32) -> PathBuf {
+    daemon_log_dir(&DaemonConfig::from_home(&repo.daemon_home_path())).join(format!("{pid}.log"))
+}
+
+fn daemon_home_startup_diagnostics(repo: &TestRepo) -> String {
+    let config = DaemonConfig::from_home(&repo.daemon_home_path());
+    let log_dir = daemon_log_dir(&config);
+    let mut paths = Vec::new();
+
+    if let Ok(pid) = read_daemon_pid(&config) {
+        paths.push(log_dir.join(format!("{pid}.log")));
+    } else if let Ok(entries) = fs::read_dir(&log_dir) {
+        paths.extend(entries.filter_map(|entry| entry.ok().map(|entry| entry.path())));
+        paths.sort();
+    }
+
+    if paths.is_empty() {
+        return format!(
+            "no daemon startup diagnostics found under {}",
+            log_dir.display()
+        );
+    }
+
+    paths
+        .into_iter()
+        .map(|path| match fs::read_to_string(&path) {
+            Ok(contents) => format!(
+                "Daemon startup diagnostics ({}):\n{}",
+                path.display(),
+                contents
+            ),
+            Err(error) => format!(
+                "failed to read daemon startup diagnostics at {}: {error}",
+                path.display()
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn detached_daemon_startup_diagnostics(repo: &TestRepo) -> String {
+    let diagnostic = daemon_home_startup_diagnostics(repo);
+    let config = DaemonConfig::from_home(&repo.daemon_home_path());
+    let Some(artifact_dir) = std::env::var_os("GIT_AI_TEST_ARTIFACT_DIR").map(PathBuf::from) else {
+        return diagnostic;
+    };
+    let Ok(pid) = read_daemon_pid(&config) else {
+        return diagnostic;
+    };
+
+    match write_daemon_startup_artifact(Some(&artifact_dir), pid, &diagnostic) {
+        Ok(Some(path)) => format!(
+            "{diagnostic}\nDaemon startup diagnostics persisted at {}",
+            path.display()
+        ),
+        Ok(None) => diagnostic,
+        Err(error) => format!("{diagnostic}\n{error}"),
+    }
+}
+
+fn cleanup_failed_detached_daemon(repo: &TestRepo) {
+    let config = DaemonConfig::from_home(&repo.daemon_home_path());
+    let _ = send_control_request_with_timeout(
+        &config.control_socket_path,
+        &ControlRequest::Shutdown,
+        Duration::from_millis(500),
     );
+
+    let Ok(pid) = read_daemon_pid(&config) else {
+        return;
+    };
+    #[cfg(unix)]
+    let _ = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    #[cfg(windows)]
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
 }
 
 fn wait_for_daemon_latest_seq(repo: &TestRepo, min_seq: u64) {
@@ -200,18 +285,94 @@ fn assert_daemon_status_ok_after_launch_repo_removed(home_repo: &TestRepo, targe
     );
 }
 
+struct DirectDaemon {
+    child: Child,
+    control_socket_path: PathBuf,
+}
+
+impl DirectDaemon {
+    fn wait_for_exit(&mut self) {
+        wait_for_child_exit(&mut self.child);
+    }
+}
+
+impl Drop for DirectDaemon {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        let _ = send_control_request_with_timeout(
+            &self.control_socket_path,
+            &ControlRequest::Shutdown,
+            Duration::from_millis(500),
+        );
+        wait_for_child_exit(&mut self.child);
+    }
+}
+
 #[allow(clippy::zombie_processes)]
-fn start_daemon(repo: &TestRepo) {
+fn start_direct_daemon(repo: &TestRepo) -> DirectDaemon {
+    let _startup_owner = acquire_async_mode_daemon_startup();
+    let stderr_log_path = repo.daemon_home_path().join("async-mode-daemon.stderr.log");
+    fs::create_dir_all(repo.daemon_home_path()).expect("failed to create daemon test home");
+    let stderr_log = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&stderr_log_path)
+        .expect("failed to create daemon stderr log");
     let mut daemon_cmd = Command::new(repos::test_repo::get_binary_path());
     daemon_cmd
         .arg("bg")
         .arg("run")
         .current_dir(repo.path())
+        .env("GIT_AI_TEST_DB_PATH", repo.test_db_path())
+        .env("GITAI_TEST_DB_PATH", repo.test_db_path())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(stderr_log);
     configure_test_home_env(&mut daemon_cmd, repo);
     configure_test_daemon_env(&mut daemon_cmd, repo);
-    daemon_cmd.spawn().expect("failed to start daemon");
+    let mut child = daemon_cmd.spawn().expect("failed to start daemon");
+    #[cfg(windows)]
+    let diagnostic_log_path = daemon_diagnostic_log_path(repo, child.id());
+    #[cfg(not(windows))]
+    let diagnostic_log_path = stderr_log_path;
+    let artifact_dir = std::env::var_os("GIT_AI_TEST_ARTIFACT_DIR").map(PathBuf::from);
+
+    if let Err(error) = wait_for_test_daemon_ready(
+        &mut child,
+        &daemon_control_socket_path(repo),
+        &daemon_trace_socket_path(repo),
+        &repo.canonical_path().to_string_lossy(),
+        &diagnostic_log_path,
+        DAEMON_TEST_READY_TOTAL_TIMEOUT,
+        artifact_dir.as_deref(),
+    ) {
+        let message = error.message().to_string();
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("{message}");
+    }
+
+    DirectDaemon {
+        child,
+        control_socket_path: daemon_control_socket_path(repo),
+    }
+}
+
+fn start_detached_daemon(repo: &TestRepo, cwd: &Path) {
+    let _startup_owner = acquire_async_mode_daemon_startup();
+    let output = daemon_command_output(repo, &["bg", "start"], cwd);
+    if !output.status.success() {
+        let diagnostics = detached_daemon_startup_diagnostics(repo);
+        cleanup_failed_detached_daemon(repo);
+        panic!(
+            "daemon start should succeed: stdout={} stderr={}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+            diagnostics
+        );
+    }
 }
 
 fn shutdown_daemon(home_repo: &TestRepo) {
@@ -234,6 +395,60 @@ fn wait_for_child_exit(child: &mut Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[test]
+fn async_mode_startup_lock_serializes_daemon_owners() {
+    let ownership = AsyncModeDaemonOwnership::new();
+    let first = ownership.acquire();
+    let (attempting_tx, attempting_rx) = std::sync::mpsc::channel();
+    let (acquired_tx, acquired_rx) = std::sync::mpsc::channel();
+
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            attempting_tx
+                .send(())
+                .expect("failed to announce startup-lock attempt");
+            let _second = ownership.acquire();
+            acquired_tx
+                .send(())
+                .expect("failed to announce startup-lock acquisition");
+        });
+
+        attempting_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("contender should attempt the startup lock");
+        assert!(
+            acquired_rx
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "a second daemon owner must not enter the startup phase concurrently"
+        );
+
+        drop(first);
+        acquired_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("contender should acquire the released startup lock");
+    });
+}
+
+#[test]
+fn async_mode_daemon_home_diagnostics_surface_platform_log() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let diagnostic_log_path = daemon_diagnostic_log_path(&repo, 4242);
+    fs::create_dir_all(
+        diagnostic_log_path
+            .parent()
+            .expect("daemon diagnostic path should have a parent"),
+    )
+    .expect("failed to create daemon diagnostic directory");
+    fs::write(&diagnostic_log_path, "detached daemon startup diagnostic\n")
+        .expect("failed to write daemon diagnostic fixture");
+
+    let diagnostics = daemon_home_startup_diagnostics(&repo);
+
+    assert!(diagnostics.contains(&diagnostic_log_path.display().to_string()));
+    assert!(diagnostics.contains("detached daemon startup diagnostic"));
 }
 
 #[cfg(unix)]
@@ -331,14 +546,7 @@ fn install_hooks_async_mode_trace2_target_routes_real_git_trace_to_daemon() {
     git_ai_with_daemon_env(&repo, &["install-hooks", "--dry-run=false"])
         .expect("install-hooks should succeed");
 
-    let start_output = daemon_command_output(&repo, &["bg", "start"], repo.path());
-    assert!(
-        start_output.status.success(),
-        "daemon start should succeed: stdout={} stderr={}",
-        String::from_utf8_lossy(&start_output.stdout),
-        String::from_utf8_lossy(&start_output.stderr)
-    );
-    wait_for_daemon_sockets(&repo);
+    start_detached_daemon(&repo, repo.path());
 
     // Use a mutating git command so the trace2 events flow through the full
     // ingest pipeline and increment applied_seq. Readonly commands (like
@@ -377,8 +585,7 @@ fn async_mode_checkpoint_starts_daemon_when_down() {
     let _ = fs::remove_file(&trace);
 
     // Manually start the daemon (production auto-start is disabled in test builds)
-    start_daemon(&repo);
-    wait_for_daemon_sockets(&repo);
+    let mut daemon = start_direct_daemon(&repo);
 
     fs::write(
         repo.path().join("async-checkpoint.txt"),
@@ -398,6 +605,7 @@ fn async_mode_checkpoint_starts_daemon_when_down() {
 
     assert_daemon_status_ok_after_launch_repo_removed(&repo, &repo);
     shutdown_daemon(&repo);
+    daemon.wait_for_exit();
 }
 
 #[test]
@@ -434,18 +642,7 @@ fn daemon_status_does_not_self_emit_trace2_events() {
         String::from_utf8_lossy(&set_nesting.stderr)
     );
 
-    let mut daemon_cmd = Command::new(repos::test_repo::get_binary_path());
-    daemon_cmd
-        .arg("bg")
-        .arg("run")
-        .current_dir(repo.path())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    configure_test_home_env(&mut daemon_cmd, &repo);
-    configure_test_daemon_env(&mut daemon_cmd, &repo);
-    let mut daemon = daemon_cmd.spawn().expect("failed to start daemon");
-
-    wait_for_daemon_sockets(&repo);
+    let mut daemon = start_direct_daemon(&repo);
 
     let repo_working_dir = repo.canonical_path().to_string_lossy().to_string();
     let status_response = send_control_request(
@@ -469,15 +666,7 @@ fn daemon_status_does_not_self_emit_trace2_events() {
         &daemon_control_socket_path(&repo),
         &ControlRequest::Shutdown,
     );
-    for _ in 0..100 {
-        match daemon.try_wait() {
-            Ok(Some(_)) => return,
-            Ok(None) => thread::sleep(Duration::from_millis(20)),
-            Err(_) => break,
-        }
-    }
-    let _ = daemon.kill();
-    let _ = daemon.wait();
+    daemon.wait_for_exit();
 }
 
 #[test]
@@ -485,24 +674,13 @@ fn daemon_run_survives_deleted_launch_repo_cwd() {
     let launch_repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let target_repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
 
-    let mut daemon_cmd = Command::new(get_binary_path());
-    daemon_cmd
-        .arg("bg")
-        .arg("run")
-        .current_dir(launch_repo.path())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    configure_test_home_env(&mut daemon_cmd, &launch_repo);
-    configure_test_daemon_env(&mut daemon_cmd, &launch_repo);
-    let mut daemon = daemon_cmd.spawn().expect("failed to start daemon");
-
-    wait_for_daemon_sockets(&launch_repo);
+    let mut daemon = start_direct_daemon(&launch_repo);
     fs::remove_dir_all(launch_repo.path()).expect("failed to remove launch repo");
 
     assert_daemon_status_ok_after_launch_repo_removed(&launch_repo, &target_repo);
 
     shutdown_daemon(&launch_repo);
-    wait_for_child_exit(&mut daemon);
+    daemon.wait_for_exit();
 }
 
 #[test]
@@ -510,15 +688,7 @@ fn daemon_start_survives_deleted_launch_repo_cwd() {
     let launch_repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let target_repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
 
-    let output = daemon_command_output(&launch_repo, &["bg", "start"], launch_repo.path());
-    assert!(
-        output.status.success(),
-        "daemon start should succeed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    wait_for_daemon_sockets(&launch_repo);
+    start_detached_daemon(&launch_repo, launch_repo.path());
     fs::remove_dir_all(launch_repo.path()).expect("failed to remove launch repo");
 
     assert_daemon_status_ok_after_launch_repo_removed(&launch_repo, &target_repo);
@@ -558,14 +728,7 @@ fn daemon_telemetry_and_cas_over_persistent_connection() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
 
     // Start the daemon
-    let start_output = daemon_command_output(&repo, &["bg", "start"], repo.path());
-    assert!(
-        start_output.status.success(),
-        "daemon start should succeed: stdout={} stderr={}",
-        String::from_utf8_lossy(&start_output.stdout),
-        String::from_utf8_lossy(&start_output.stderr)
-    );
-    wait_for_daemon_sockets(&repo);
+    start_detached_daemon(&repo, repo.path());
 
     // Open a single persistent connection (mirrors the shared handle in telemetry_handle.rs)
     let control_path = daemon_control_socket_path(&repo);

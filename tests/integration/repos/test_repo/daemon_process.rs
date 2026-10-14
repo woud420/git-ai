@@ -484,7 +484,7 @@ pub(crate) const DAEMON_SPAWN_LOADER_RETRY_ATTEMPTS: usize = 5;
 
 /// Outcome of a failed daemon-readiness wait, distinguishing a transient
 /// Windows loader hiccup (respawn) from a genuine failure (fail loudly).
-enum DaemonReadyError {
+pub(crate) enum DaemonReadyError {
     /// The Windows loader aborted process startup; safe to respawn.
     LoaderInitFailure(String),
     /// Any other failure — the daemon started and misbehaved, or timed out.
@@ -492,10 +492,163 @@ enum DaemonReadyError {
 }
 
 impl DaemonReadyError {
-    fn message(&self) -> &str {
+    pub(crate) fn message(&self) -> &str {
         match self {
             DaemonReadyError::LoaderInitFailure(m) | DaemonReadyError::Fatal(m) => m,
         }
+    }
+}
+
+pub(crate) fn write_daemon_startup_artifact(
+    artifact_dir: Option<&Path>,
+    pid: u32,
+    diagnostic: &str,
+) -> Result<Option<PathBuf>, String> {
+    let Some(artifact_dir) = artifact_dir else {
+        return Ok(None);
+    };
+    let artifact_path = artifact_dir.join(format!("daemon-startup-{pid}.txt"));
+    fs::create_dir_all(artifact_dir).map_err(|error| {
+        format!(
+            "failed to persist daemon startup diagnostics at {}: {error}",
+            artifact_path.display()
+        )
+    })?;
+    fs::write(&artifact_path, diagnostic).map_err(|error| {
+        format!(
+            "failed to persist daemon startup diagnostics at {}: {error}",
+            artifact_path.display()
+        )
+    })?;
+    Ok(Some(artifact_path))
+}
+
+pub(crate) fn wait_for_test_daemon_ready(
+    child: &mut Child,
+    control_socket_path: &Path,
+    trace_socket_path: &Path,
+    repo_working_dir: &str,
+    diagnostic_log_path: &Path,
+    readiness_timeout: Duration,
+    artifact_dir: Option<&Path>,
+) -> Result<(), DaemonReadyError> {
+    let started = Instant::now();
+    let mut last_control_error = None;
+    let mut last_trace_error = None;
+
+    while started.elapsed() < readiness_timeout {
+        if let Some(status) = child.try_wait().map_err(|error| {
+            DaemonReadyError::Fatal(daemon_startup_failure_message(
+                child.id(),
+                diagnostic_log_path,
+                format!(
+                    "failed polling daemon process status (pid {}): {error}",
+                    child.id()
+                ),
+                artifact_dir,
+            ))
+        })? {
+            let message = daemon_startup_failure_message(
+                child.id(),
+                diagnostic_log_path,
+                format!(
+                    "daemon exited before becoming ready (pid {}, status {}): sockets {} {} (last_control_error={}, last_trace_error={})",
+                    child.id(),
+                    status,
+                    control_socket_path.display(),
+                    trace_socket_path.display(),
+                    last_control_error.as_deref().unwrap_or("none"),
+                    last_trace_error.as_deref().unwrap_or("none")
+                ),
+                artifact_dir,
+            );
+            if is_windows_loader_init_failure(&status) {
+                return Err(DaemonReadyError::LoaderInitFailure(message));
+            }
+            return Err(DaemonReadyError::Fatal(message));
+        }
+
+        let control_ready = match send_control_request_with_timeout(
+            control_socket_path,
+            &ControlRequest::StatusFamily {
+                repo_working_dir: repo_working_dir.to_string(),
+            },
+            DAEMON_TEST_READY_CONTROL_TIMEOUT,
+        ) {
+            Ok(_) => true,
+            Err(error) => {
+                last_control_error = Some(error.to_string());
+                false
+            }
+        };
+        let trace_ready = match local_socket_connects_with_timeout(
+            trace_socket_path,
+            DAEMON_TEST_PROBE_TIMEOUT,
+        ) {
+            Ok(()) => true,
+            Err(error) => {
+                last_trace_error = Some(error.to_string());
+                false
+            }
+        };
+        if control_ready && trace_ready {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    let final_status = child.try_wait();
+    let child_status = match &final_status {
+        Ok(Some(status)) => status.to_string(),
+        Ok(None) => "running".to_string(),
+        Err(error) => format!("poll-error: {error}"),
+    };
+    let message = daemon_startup_failure_message(
+        child.id(),
+        diagnostic_log_path,
+        format!(
+            "daemon did not become ready within {:?} (pid {}, child_status={}) at {} (trace socket: {}, last_control_error={}, last_trace_error={})",
+            readiness_timeout,
+            child.id(),
+            child_status,
+            control_socket_path.display(),
+            trace_socket_path.display(),
+            last_control_error.as_deref().unwrap_or("none"),
+            last_trace_error.as_deref().unwrap_or("none")
+        ),
+        artifact_dir,
+    );
+    match final_status {
+        Ok(Some(status)) if is_windows_loader_init_failure(&status) => {
+            Err(DaemonReadyError::LoaderInitFailure(message))
+        }
+        _ => Err(DaemonReadyError::Fatal(message)),
+    }
+}
+
+fn daemon_startup_failure_message(
+    pid: u32,
+    diagnostic_log_path: &Path,
+    message: String,
+    artifact_dir: Option<&Path>,
+) -> String {
+    let diagnostic = match fs::read_to_string(diagnostic_log_path) {
+        Ok(contents) => format!(
+            "{message}\nDaemon startup diagnostics ({}):\n{contents}",
+            diagnostic_log_path.display()
+        ),
+        Err(error) => format!(
+            "{message}\nfailed to read daemon startup diagnostics at {}: {error}",
+            diagnostic_log_path.display()
+        ),
+    };
+    match write_daemon_startup_artifact(artifact_dir, pid, &diagnostic) {
+        Ok(Some(path)) => format!(
+            "{diagnostic}\nDaemon startup diagnostics persisted at {}",
+            path.display()
+        ),
+        Ok(None) => diagnostic,
+        Err(error) => format!("{diagnostic}\n{error}"),
     }
 }
 

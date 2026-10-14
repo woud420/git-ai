@@ -105,10 +105,9 @@ use git_ai::operations::daemon::{
 };
 use repos::test_file::ExpectedLineExt;
 use repos::test_repo::{
-    DAEMON_SPAWN_LOADER_RETRY_ATTEMPTS, DAEMON_TEST_PROBE_TIMEOUT,
-    DAEMON_TEST_READY_CONTROL_TIMEOUT, DAEMON_TEST_READY_TOTAL_TIMEOUT,
-    DaemonTestCompletionLogEntry, DaemonTestScope, RawGitCommand, TestRepo, get_binary_path,
-    is_windows_loader_init_failure, real_git_executable,
+    DAEMON_SPAWN_LOADER_RETRY_ATTEMPTS, DAEMON_TEST_PROBE_TIMEOUT, DAEMON_TEST_READY_TOTAL_TIMEOUT,
+    DaemonReadyError, DaemonTestCompletionLogEntry, DaemonTestScope, RawGitCommand, TestRepo,
+    get_binary_path, real_git_executable, wait_for_test_daemon_ready,
 };
 use serde_json::Value;
 use serde_json::json;
@@ -123,36 +122,7 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Outcome of a failed `DaemonGuard` readiness wait: a transient Windows loader
-/// hiccup (respawn) versus a genuine failure (fail loudly).
-enum DaemonReadyOutcome {
-    LoaderInitFailure(String),
-    Fatal(String),
-}
-
-fn write_daemon_startup_artifact(
-    artifact_dir: Option<&Path>,
-    pid: u32,
-    diagnostic: &str,
-) -> Result<Option<PathBuf>, String> {
-    let Some(artifact_dir) = artifact_dir else {
-        return Ok(None);
-    };
-    let artifact_path = artifact_dir.join(format!("daemon-startup-{pid}.txt"));
-    fs::create_dir_all(artifact_dir).map_err(|error| {
-        format!(
-            "failed to persist daemon startup diagnostics at {}: {error}",
-            artifact_path.display()
-        )
-    })?;
-    fs::write(&artifact_path, diagnostic).map_err(|error| {
-        format!(
-            "failed to persist daemon startup diagnostics at {}: {error}",
-            artifact_path.display()
-        )
-    })?;
-    Ok(Some(artifact_path))
-}
+type DaemonReadyOutcome = DaemonReadyError;
 
 fn daemon_control_socket_path(repo: &TestRepo) -> PathBuf {
     repo.daemon_control_socket_path()
@@ -821,90 +791,15 @@ impl DaemonGuard {
         readiness_timeout: Duration,
         artifact_dir: Option<&Path>,
     ) -> Result<(), DaemonReadyOutcome> {
-        let started = Instant::now();
-        let mut last_control_error = None;
-        let mut last_trace_error = None;
-        while started.elapsed() < readiness_timeout {
-            if let Some(status) = self
-                .child
-                .try_wait()
-                .expect("failed to poll daemon process status")
-            {
-                let message = format!(
-                    "daemon exited before becoming ready (pid {}, status {}): sockets {} {} (last_control_error={}, last_trace_error={})",
-                    self.child.id(),
-                    status,
-                    self.control_socket_path.display(),
-                    self.trace_socket_path.display(),
-                    last_control_error.as_deref().unwrap_or("none"),
-                    last_trace_error.as_deref().unwrap_or("none")
-                );
-                if is_windows_loader_init_failure(&status) {
-                    return Err(DaemonReadyOutcome::LoaderInitFailure(message));
-                }
-                return Err(self.startup_failure(message, artifact_dir));
-            }
-            let control_ready = match send_control_request_with_timeout(
-                &self.control_socket_path,
-                &ControlRequest::StatusFamily {
-                    repo_working_dir: self.repo_working_dir.clone(),
-                },
-                DAEMON_TEST_READY_CONTROL_TIMEOUT,
-            ) {
-                Ok(_) => true,
-                Err(error) => {
-                    last_control_error = Some(error.to_string());
-                    false
-                }
-            };
-            let trace_ready = match local_socket_connects_with_timeout(
-                &self.trace_socket_path,
-                DAEMON_TEST_PROBE_TIMEOUT,
-            ) {
-                Ok(()) => true,
-                Err(error) => {
-                    last_trace_error = Some(error.to_string());
-                    false
-                }
-            };
-            if control_ready && trace_ready {
-                return Ok(());
-            }
-            thread::sleep(Duration::from_millis(25));
-        }
-        Err(self.startup_failure(
-            format!(
-                "daemon did not become ready within {:?} (pid {}) at {} (trace socket: {}, last_control_error={}, last_trace_error={})",
-                readiness_timeout,
-                self.child.id(),
-                self.control_socket_path.display(),
-                self.trace_socket_path.display(),
-                last_control_error.as_deref().unwrap_or("none"),
-                last_trace_error.as_deref().unwrap_or("none")
-            ),
+        wait_for_test_daemon_ready(
+            &mut self.child,
+            &self.control_socket_path,
+            &self.trace_socket_path,
+            &self.repo_working_dir,
+            &self.diagnostic_log_path,
+            readiness_timeout,
             artifact_dir,
-        ))
-    }
-
-    fn startup_failure(&self, message: String, artifact_dir: Option<&Path>) -> DaemonReadyOutcome {
-        let diagnostic = match fs::read_to_string(&self.diagnostic_log_path) {
-            Ok(contents) => format!(
-                "{message}\nDaemon startup diagnostics ({}):\n{contents}",
-                self.diagnostic_log_path.display()
-            ),
-            Err(error) => format!(
-                "{message}\nfailed to read daemon startup diagnostics at {}: {error}",
-                self.diagnostic_log_path.display()
-            ),
-        };
-        match write_daemon_startup_artifact(artifact_dir, self.child.id(), &diagnostic) {
-            Ok(Some(path)) => DaemonReadyOutcome::Fatal(format!(
-                "{diagnostic}\nDaemon startup diagnostics persisted at {}",
-                path.display()
-            )),
-            Ok(None) => DaemonReadyOutcome::Fatal(diagnostic),
-            Err(error) => DaemonReadyOutcome::Fatal(format!("{diagnostic}\n{error}")),
-        }
+        )
     }
 
     fn shutdown(&mut self) {
@@ -1274,22 +1169,30 @@ fn daemon_guard_readiness_timeout_persists_channel_and_daemon_diagnostics() {
     let mut daemon = unready_daemon_guard(&repo, diagnostic_log_path.clone());
     let pid = daemon.child.id();
 
+    let started = Instant::now();
     let outcome = daemon.wait_until_ready(Duration::from_millis(100), Some(&artifact_dir));
+    let elapsed = started.elapsed();
     stop_unready_daemon(&mut daemon);
 
     let DaemonReadyOutcome::Fatal(message) = outcome.expect_err("readiness should time out") else {
         panic!("readiness timeout should be fatal");
     };
+    assert!(message.contains("child_status=running"));
     assert!(message.contains("last_control_error="));
     assert!(!message.contains("last_control_error=none"));
     assert!(message.contains("last_trace_error="));
     assert!(!message.contains("last_trace_error=none"));
     assert!(message.contains(&diagnostic_log_path.display().to_string()));
     assert!(message.contains("daemon boot diagnostic"));
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "the injected readiness deadline must bound the wait; elapsed={elapsed:?}"
+    );
 
     let artifact = artifact_dir.join(format!("daemon-startup-{pid}.txt"));
     let artifact_contents =
         fs::read_to_string(&artifact).expect("startup artifact should be persisted");
+    assert!(artifact_contents.contains("child_status=running"));
     assert!(artifact_contents.contains("last_control_error="));
     assert!(artifact_contents.contains("last_trace_error="));
     assert!(artifact_contents.contains("daemon boot diagnostic"));
@@ -1332,6 +1235,42 @@ fn daemon_guard_readiness_timeout_reports_artifact_write_failure() {
     assert!(message.contains("daemon boot diagnostic"));
     assert!(message.contains("failed to persist daemon startup diagnostics"));
     assert!(message.contains(&artifact_path.display().to_string()));
+}
+
+#[cfg(windows)]
+#[test]
+fn daemon_guard_deadline_edge_preserves_loader_failure_classification() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let diagnostic_log_path = repo.path().join("daemon.log");
+    fs::write(&diagnostic_log_path, "loader failure diagnostic\n")
+        .expect("failed to write daemon diagnostic fixture");
+    let child = Command::new("cmd")
+        .args(["/C", "exit", "/B", "-1073741502"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn loader-status fixture");
+    let mut daemon = DaemonGuard {
+        child,
+        control_socket_path: repo.path().join("missing-control"),
+        trace_socket_path: repo.path().join("missing-trace"),
+        repo_working_dir: repo_workdir_string(&repo),
+        diagnostic_log_path,
+    };
+    daemon
+        .child
+        .wait()
+        .expect("failed to reap loader-status fixture");
+
+    let outcome = daemon.wait_until_ready(Duration::ZERO, None);
+
+    let DaemonReadyOutcome::LoaderInitFailure(message) =
+        outcome.expect_err("deadline-edge loader failure should be retryable")
+    else {
+        panic!("deadline-edge loader failure should retain its retry classification");
+    };
+    assert!(message.contains("child_status="));
+    assert!(message.contains("loader failure diagnostic"));
 }
 
 #[test]

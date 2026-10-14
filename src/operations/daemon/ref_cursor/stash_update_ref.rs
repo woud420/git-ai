@@ -158,7 +158,7 @@ impl RefCursor {
     ) -> Result<(), GitAiError> {
         let args = command_args(cmd);
         let stash_args = stash_command_args(&args);
-        let kind = stash_args.first().map(String::as_str).unwrap_or("push");
+        let kind = stash_kind(stash_args);
 
         if matches!(kind, "apply" | "pop" | "drop" | "branch") {
             let target = if kind == "branch" {
@@ -243,6 +243,49 @@ impl RefCursor {
 
         self.sync_common_ref_cursor_to_log_end_after_rewrite("refs/stash")?;
         Ok(())
+    }
+
+    /// A cold `refs/stash` seed is captured asynchronously and can land past
+    /// this push's own entry, e.g. when the first stash creates the reflog.
+    /// Keep the seed when an own entry follows it; otherwise rewind to the
+    /// latest own entry before it. Own entries fall in the command's time
+    /// window and carry its message, so a push that saved nothing cannot
+    /// adopt older stash history.
+    pub(super) fn clamp_stash_push_seed(
+        &self,
+        key: &str,
+        path: &Path,
+        offset: u64,
+        cmd: &NormalizedCommand,
+    ) -> Result<u64, GitAiError> {
+        if cmd.primary_command.as_deref() != Some("stash") || key != common_key("refs/stash") {
+            return Ok(offset);
+        }
+        let args = command_args(cmd);
+        let stash_args = stash_command_args(&args);
+        let kind = stash_kind(stash_args);
+        if !matches!(kind, "push" | "save") {
+            return Ok(offset);
+        }
+        let message = stash_push_message_from_args(stash_args, kind);
+        let window = reflog_timestamp_window(cmd);
+        let entries = read_reflog_entries(key.to_string(), path, "refs/stash", None)?;
+        let own_entries = entries.iter().filter(|entry| {
+            entry
+                .timestamp_secs
+                .is_some_and(|secs| window.contains(secs))
+                && message
+                    .as_deref()
+                    .is_none_or(|message| stash_reflog_message_matches(&entry.message, message))
+        });
+        let mut latest_before = None;
+        for entry in own_entries {
+            if entry.start_offset >= offset {
+                return Ok(offset);
+            }
+            latest_before = Some(entry.start_offset);
+        }
+        Ok(latest_before.unwrap_or(offset))
     }
 
     pub(super) fn find_stash_push_entry(
@@ -474,6 +517,10 @@ pub(super) fn stash_command_args(args: &[String]) -> &[String] {
     } else {
         args
     }
+}
+
+fn stash_kind(stash_args: &[String]) -> &str {
+    stash_args.first().map(String::as_str).unwrap_or("push")
 }
 
 pub(super) fn stash_push_message_from_args(args: &[String], kind: &str) -> Option<String> {

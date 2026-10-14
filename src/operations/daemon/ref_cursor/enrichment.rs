@@ -167,10 +167,10 @@ impl RefCursor {
             return Ok(offset);
         };
         let Some(spec) = self.cold_seed_match_spec(cmd) else {
-            // No command-specific matcher (e.g. update-ref --stdin / stash that
-            // match by transition only): keep the offset as the boundary to
-            // preserve existing first-observed-boundary semantics.
-            return Ok(offset);
+            // No span matcher (e.g. update-ref --stdin matches by transition
+            // only): keep the offset as the boundary unless a stash push can
+            // identify its own entry before it.
+            return self.clamp_stash_push_seed(key, &path, offset, cmd);
         };
         match spec {
             ColdSeedMatchSpec::SingleEntry { expected, prefixes } => {
@@ -274,7 +274,7 @@ impl RefCursor {
     /// The expected transition + reflog message prefixes used to recognize a
     /// command's OWN entry during cold-start seed clamping. Returns None for
     /// commands matched by transition alone (no message discriminator), where
-    /// clamping must not change the seed (update-ref --stdin, stash, etc.).
+    /// span clamping must not change the seed (update-ref --stdin, stash).
     pub(super) fn cold_seed_match_spec(
         &self,
         cmd: &NormalizedCommand,

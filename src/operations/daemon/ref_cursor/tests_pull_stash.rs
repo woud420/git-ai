@@ -295,3 +295,57 @@ fn cold_stash_save_uses_message_to_skip_raw_stash_history() {
     assert_eq!(cmd.ref_changes, vec![ref_change("refs/stash", B, C)]);
     assert_eq!(cursor.stash_stack, vec![C.to_string()]);
 }
+
+#[test]
+fn cold_first_stash_push_late_ingress_offset_still_records_its_entry() {
+    // The first stash creates logs/refs/stash. When ingress captures the
+    // command's start offsets after Git appended the push, the only boundary
+    // lies past the command's own entry.
+    let temp = tempfile::tempdir().unwrap();
+    append_reflog(
+        temp.path(),
+        "refs/stash",
+        &[(&zero_oid(), B, "On main: first")],
+    );
+    let late_offset = fs::metadata(temp.path().join("logs/refs/stash"))
+        .unwrap()
+        .len();
+    let family = FamilyKey::new(temp.path().to_string_lossy().to_string());
+    let state = family_state(&family);
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command(&family, &["stash", "push", "-m", "first"]);
+    cmd.reflog_start_offsets
+        .insert(common_key("refs/stash"), late_offset);
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert_eq!(
+        cmd.ref_changes,
+        vec![ref_change("refs/stash", &zero_oid(), B)]
+    );
+    assert_eq!(cursor.stash_stack, vec![B.to_string()]);
+}
+
+#[test]
+fn cold_stash_push_without_its_own_entry_does_not_adopt_older_stash() {
+    // `git stash push` with nothing to save exits 0 without a reflog entry.
+    // An older stash with the same message must not become this push's.
+    let temp = tempfile::tempdir().unwrap();
+    append_reflog(temp.path(), "refs/stash", &[(A, B, "On main: first")]);
+    let offset = fs::metadata(temp.path().join("logs/refs/stash"))
+        .unwrap()
+        .len();
+    let family = FamilyKey::new(temp.path().to_string_lossy().to_string());
+    let state = family_state(&family);
+    let mut cursor = RefCursor::new(family.clone());
+    let mut cmd = command(&family, &["stash", "push", "-m", "first"]);
+    cmd.started_at_ns = 100_000_000_000;
+    cmd.finished_at_ns = 100_000_000_001;
+    cmd.reflog_start_offsets
+        .insert(common_key("refs/stash"), offset);
+
+    cursor.enrich_command(&mut cmd, &state).unwrap();
+
+    assert!(cmd.ref_changes.is_empty());
+    assert!(cursor.stash_stack.is_empty());
+}

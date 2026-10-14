@@ -12,6 +12,8 @@ on:
         type: boolean
         default: true
 
+permissions: {}
+
 defaults:
   run:
     working-directory: agent-support/intellij
@@ -38,6 +40,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       # Set up the Java environment for the next steps
       - name: Setup Java
@@ -82,9 +85,12 @@ jobs:
       # Create git tag for the release
       - name: Create Git Tag
         if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
+          gh auth setup-git
           git tag -a "intellij-v${{ steps.version.outputs.current }}" -m "IntelliJ Plugin v${{ steps.version.outputs.current }}"
           git push origin "intellij-v${{ steps.version.outputs.current }}"
 
@@ -101,10 +107,13 @@ jobs:
       # Commit version bump
       - name: Commit Version Bump
         if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NEW_VERSION=$(grep '^pluginVersion = ' gradle.properties | cut -d' ' -f3)
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
+          gh auth setup-git
           git add gradle.properties
           git commit -m "chore(intellij): bump version to ${NEW_VERSION}"
           git push

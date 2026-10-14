@@ -1,0 +1,51 @@
+name: Actions Security Check
+
+# Tokenless, deterministic static analysis for GitHub Actions policy changes.
+# Reproduce locally with the pinned command used by the final step below.
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/**'
+      - '.github/workflows/**'
+      - '.github/dependabot.yml'
+      - 'tests/fixtures/github-actions/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: zizmor (fails on medium+ findings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prove unsafe workflow detection
+        shell: bash
+        run: |
+          set +e
+          output="$(pipx run zizmor==1.29.0 --pedantic --no-online-audits --min-severity medium \
+            tests/fixtures/github-actions/unsafe-template-injection.yml 2>&1)"
+          status=$?
+          set -e
+
+          printf '%s\n' "$output"
+          if [ "$status" -ne 14 ] || ! grep -Fq 'template-injection' <<< "$output"; then
+            echo "Expected zizmor to reject the unsafe template-injection fixture" >&2
+            exit 1
+          fi
+
+      - name: Run zizmor
+        # Pedantic enables permission auditing; offline keeps the result deterministic and tokenless.
+        run: pipx run zizmor==1.29.0 --pedantic --no-online-audits --min-severity medium .github/

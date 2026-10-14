@@ -13,7 +13,8 @@ runs:
     - name: Install GNU Make (Linux)
       if: runner.os == 'Linux'
       shell: bash
-      run: |
+      # The path is derived only from the fixed, checksum-verified Make version above.
+      run: | # zizmor: ignore[github-env]
         set -euo pipefail
         archive="$RUNNER_TEMP/make-$GNU_MAKE_VERSION.tar.gz"
         source_dir="$RUNNER_TEMP/make-$GNU_MAKE_VERSION"
@@ -33,7 +34,8 @@ runs:
     - name: Install GNU Make (macOS)
       if: runner.os == 'macOS'
       shell: bash
-      run: |
+      # Homebrew returns its own installation prefix for the pinned package name.
+      run: | # zizmor: ignore[github-env]
         set -euo pipefail
         brew install make
         echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"

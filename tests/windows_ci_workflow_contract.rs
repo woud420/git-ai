@@ -75,9 +75,14 @@ fn windows_ci_provisions_gnu_make_and_checks_the_installer_exit_code() {
         .iter()
         .position(|line| *line == MAKE_INSTALL_COMMAND)
         .expect("setup action must install GNU Make 4.4.1 with Chocolatey");
-    assert_eq!(
-        lines.get(install_index + 1).copied(),
-        Some(NATIVE_FAILURE_GUARD),
+    // Retries may sit between the install and the guard, but the guard must
+    // end the same step so the final installer exit code still fails the job.
+    let step_end = lines[install_index..]
+        .iter()
+        .position(|line| line.starts_with("- name:"))
+        .map_or(lines.len(), |offset| install_index + offset);
+    assert!(
+        lines[install_index..step_end].contains(&NATIVE_FAILURE_GUARD),
         "setup action must propagate the GNU Make installer exit code"
     );
 

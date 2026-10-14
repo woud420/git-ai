@@ -42,7 +42,16 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        choco install make --version=4.4.1 --no-progress --yes
+        # The community feed intermittently answers 5xx; one bad response
+        # should not fail every Windows job before it builds anything.
+        $attempts = 4
+        for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+          choco install make --version=4.4.1 --no-progress --yes
+          if ($LASTEXITCODE -eq 0 -or $attempt -eq $attempts) { break }
+          $delay = 15 * [math]::Pow(2, $attempt - 1)
+          Write-Host "choco install failed (exit $LASTEXITCODE); retrying in $delay s ($attempt/$attempts)"
+          Start-Sleep -Seconds $delay
+        }
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     - name: Verify GNU Make (Unix)

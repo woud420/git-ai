@@ -54,10 +54,10 @@ leaves the Homebrew-owned executable for Homebrew to remove.
 
 ## Chocolatey: install a release package
 
-The fork has no published release packages as of 2026-09-15. The release
-workflow produces `git-ai.<version>.nupkg` for stable releases after this
-change is merged. This is a local package source; there is no claim of a
-Chocolatey Community Repository listing.
+The fork has version tags but has not yet published GitHub Release artifacts.
+The release workflow produces `git-ai.<version>.nupkg` for stable releases
+after this change is merged. This is a local package source; there is no claim
+of a Chocolatey Community Repository listing.
 
 Download the package and `SHA256SUMS` from the same
 [fork release](https://github.com/woud420/git-ai/releases). Compare the package's

@@ -1,0 +1,97 @@
+name: Package Managers
+
+on:
+  pull_request:
+    paths:
+      - 'Formula/**'
+      - 'packaging/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/actions/setup-rust/**'
+      - '.github/actions/setup-gnu-make/**'
+      - '.github/workflows/package-managers.yml'
+      - '.github/workflows/release.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Formula/**'
+      - 'packaging/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'Makefile'
+      - '.github/actions/setup-rust/**'
+      - '.github/actions/setup-gnu-make/**'
+      - '.github/workflows/package-managers.yml'
+      - '.github/workflows/release.yml'
+  merge_group:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-contract:
+    name: Package generation contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s packaging/managers/tests -v
+
+  homebrew:
+    name: Homebrew source install
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+      GIT_AI_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash packaging/smoke/homebrew.sh
+
+  chocolatey:
+    name: Chocolatey ${{ matrix.arch }} lifecycle
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            target: x86_64-pc-windows-msvc
+          - os: windows-11-arm
+            arch: arm64
+            target: aarch64-pc-windows-msvc
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      GIT_AI_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: msrv
+          targets: ${{ matrix.target }}
+      - uses: ./.github/actions/setup-gnu-make
+      - name: Build current binary
+        run: make build
+      - name: Install, upgrade, and uninstall local packages
+        shell: pwsh
+        env:
+          PACKAGE_SMOKE_ARCH: ${{ matrix.arch }}
+        run: >-
+          ./packaging/smoke/chocolatey.ps1
+          -Binary "target/$env:CARGO_BUILD_TARGET/debug/git-ai.exe"
+          -Architecture $env:PACKAGE_SMOKE_ARCH

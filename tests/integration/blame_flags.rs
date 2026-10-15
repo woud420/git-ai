@@ -667,6 +667,53 @@ fn test_blame_show_root() {
     );
 }
 
+#[test]
+fn test_blame_hash_column_matches_git() {
+    let repo = TestRepo::new();
+    std::fs::write(repo.path().join("width.txt"), "root line\nold line\n").unwrap();
+    repo.stage_all_and_commit("root commit").unwrap();
+    std::fs::write(repo.path().join("width.txt"), "root line\nnew line\n").unwrap();
+    repo.stage_all_and_commit("update second line").unwrap();
+
+    for flags in [vec![], vec!["-b"], vec!["--root"]] {
+        for abbrev in [None, Some("4"), Some("12"), Some("40")] {
+            for range in [None, Some("1,1"), Some("2,2")] {
+                let mut git_args = vec!["blame".to_string()];
+                let mut ai_args = git_args.clone();
+                git_args.extend(flags.iter().map(|flag| flag.to_string()));
+                ai_args.extend(flags.iter().map(|flag| flag.to_string()));
+                if let Some(abbrev) = abbrev {
+                    git_args.push(format!("--abbrev={abbrev}"));
+                    ai_args.extend(["--abbrev".to_string(), abbrev.to_string()]);
+                }
+                if let Some(range) = range {
+                    git_args.extend(["-L".to_string(), range.to_string()]);
+                    ai_args.extend(["-L".to_string(), range.to_string()]);
+                }
+                git_args.push("width.txt".to_string());
+                ai_args.push("width.txt".to_string());
+                let git_output = repo
+                    .git(&git_args.iter().map(String::as_str).collect::<Vec<_>>())
+                    .unwrap();
+                let ai_output = repo
+                    .git_ai(&ai_args.iter().map(String::as_str).collect::<Vec<_>>())
+                    .unwrap();
+                let hash_columns = |output: &str| {
+                    output
+                        .lines()
+                        .map(|line| line.split_once('(').unwrap().0.to_string())
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(
+                    hash_columns(&ai_output),
+                    hash_columns(&git_output),
+                    "hash columns differ for {git_args:?}"
+                );
+            }
+        }
+    }
+}
+
 // #[test]
 // fn test_blame_show_stats() {
 //     let tmp_dir = tempdir().unwrap();
@@ -1421,6 +1468,7 @@ crate::reuse_tests_in_worktree!(
     test_blame_raw_timestamp,
     test_blame_abbrev,
     test_blame_blank_boundary,
+    test_blame_hash_column_matches_git,
     test_blame_show_root,
     test_blame_date_format,
     test_blame_multiple_flags,

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>git-ai</id>
+    <version>@VERSION@</version>
+    <title>Git AI</title>
+    <authors>Git AI contributors</authors>
+    <owners>woud420</owners>
+    <projectUrl>https://github.com/@REPOSITORY@</projectUrl>
+    <licenseUrl>https://github.com/@REPOSITORY@/blob/@TAG@/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/@REPOSITORY@</projectSourceUrl>
+    <packageSourceUrl>https://github.com/@REPOSITORY@/tree/@TAG@/packaging/managers</packageSourceUrl>
+    <bugTrackerUrl>https://github.com/@REPOSITORY@/issues</bugTrackerUrl>
+    <summary>Track AI-generated code in Git.</summary>
+    <description>Git AI tracks AI-generated code through checkpoints and Git trace2 events. This Apache-2.0 package contains the x64 and ARM64 Windows binaries from the woud420/git-ai fork. Requires Git to be installed separately. After installation or upgrade, run git-ai install-hooks as your regular user, then enable collection with git-ai config --add allowed_repositories /path/to/repository. Installation does not configure Git, editors, agents, or a daemon. Before choco uninstall git-ai, run git-ai uninstall as your regular user to remove your integration. Removing the package preserves per-user Git AI data.</description>
+    <releaseNotes>https://github.com/@REPOSITORY@/releases/tag/@TAG@</releaseNotes>
+    <tags>git ai attribution cli</tags>
+  </metadata>
+</package>

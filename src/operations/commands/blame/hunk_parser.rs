@@ -31,6 +31,18 @@ fn prepare_blame_hunks(hunks: Vec<BlameHunk>) -> BlameRenderPreparation {
     }
 }
 
+fn blame_hash_width(
+    options: &GitAiBlameOptions,
+    has_boundary: bool,
+    git_version: Option<(u32, u32, u32)>,
+) -> usize {
+    // Git 2.56 reserves a marker column only when the selected lines need one.
+    // Older versions always reserve it, even for --root and blank boundaries.
+    let reserve_marker = git_version.is_none_or(|version| version < (2, 56, 0))
+        || (has_boundary && !options.show_root && !options.blank_boundary);
+    (options.abbrev.unwrap_or(7).max(1) as usize + usize::from(reserve_marker)).min(40)
+}
+
 impl Repository {
     pub fn blame_hunks(
         &self,
@@ -161,13 +173,9 @@ impl Repository {
     pub(super) fn blame_requested_abbrev_len(
         options: &GitAiBlameOptions,
         is_boundary: bool,
+        hash_width: usize,
     ) -> usize {
-        let base_len = options.abbrev.unwrap_or(7).max(1) as usize;
-        if is_boundary && !options.show_root {
-            base_len
-        } else {
-            (base_len + 1).min(40)
-        }
+        hash_width - usize::from(is_boundary && !options.show_root && !options.blank_boundary)
     }
 
     fn fallback_blame_abbrev_sha(commit_sha: &str, requested_len: usize) -> String {
@@ -243,9 +251,15 @@ impl Repository {
 
         let mut requests_by_len: HashMap<usize, Vec<String>> = HashMap::new();
         let mut seen_by_len: HashMap<usize, HashSet<String>> = HashMap::new();
+        let hash_width = blame_hash_width(
+            options,
+            hunks.iter().any(|hunk| hunk.is_boundary),
+            self.git_version(),
+        );
 
         for hunk in hunks.iter() {
-            let requested_len = Self::blame_requested_abbrev_len(options, hunk.is_boundary);
+            let requested_len =
+                Self::blame_requested_abbrev_len(options, hunk.is_boundary, hash_width);
             let seen = seen_by_len.entry(requested_len).or_default();
             if seen.insert(hunk.commit_sha.clone()) {
                 requests_by_len
@@ -258,7 +272,8 @@ impl Repository {
         let resolved = self.resolve_blame_abbrev_shas_batched(&requests_by_len);
 
         for hunk in hunks.iter_mut() {
-            let requested_len = Self::blame_requested_abbrev_len(options, hunk.is_boundary);
+            let requested_len =
+                Self::blame_requested_abbrev_len(options, hunk.is_boundary, hash_width);
             hunk.abbrev_sha = resolved
                 .get(&(hunk.commit_sha.clone(), requested_len))
                 .cloned()
@@ -476,6 +491,34 @@ fn parse_porcelain_blame_output(stdout: &str, file_path: &str) -> Vec<BlameHunk>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hash_width_preserves_legacy_git_and_tracks_visible_boundaries() {
+        for (has_boundary, show_root, blank_boundary, modern_width) in [
+            (false, false, false, 12),
+            (true, false, false, 13),
+            (true, true, false, 12),
+            (true, false, true, 12),
+            (false, true, false, 12),
+            (false, false, true, 12),
+        ] {
+            let options = GitAiBlameOptions {
+                abbrev: Some(12),
+                show_root,
+                blank_boundary,
+                ..Default::default()
+            };
+            for version in [None, Some((2, 55, 0))] {
+                assert_eq!(blame_hash_width(&options, has_boundary, version), 13);
+            }
+            for version in [Some((2, 56, 0)), Some((3, 0, 0))] {
+                assert_eq!(
+                    blame_hash_width(&options, has_boundary, version),
+                    modern_width
+                );
+            }
+        }
+    }
 
     #[test]
     fn render_preparation_handles_empty_overlap_and_owned_sorting() {

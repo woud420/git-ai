@@ -81,11 +81,12 @@ pub(super) fn output_default_format(
         max_author_width = max_author_width.max(author_display.len());
     }
 
-    let blank_boundary_hash_width = if options.long_rev {
-        40
-    } else {
-        ((options.abbrev.unwrap_or(7).max(1) as usize) + 1).min(40)
-    };
+    let blank_boundary_hash_width = prepared
+        .hunks
+        .iter()
+        .map(|hunk| hunk.abbrev_sha.len())
+        .max()
+        .unwrap_or(0);
 
     for line_num in prepared.requested_lines {
         let line_index = (line_num - 1) as usize;

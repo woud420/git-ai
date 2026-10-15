@@ -2,6 +2,9 @@
 
 This directory contains MSI and PKG installer scaffolding for Git AI.
 
+For the source Homebrew tap, generated binary formula, and embedded Chocolatey
+package, see [Homebrew and Chocolatey](package-managers.md).
+
 Package outputs must install `git-ai` only. They must not install a `git`
 wrapper, `git.exe` shim, `git-og`, or any other executable that changes Git
 command routing. Per-user trace2 and editor/agent setup remains the

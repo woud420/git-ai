@@ -1,0 +1,35 @@
+$ErrorActionPreference = 'Stop'
+
+if (-not [Environment]::Is64BitOperatingSystem -or $env:chocolateyForceX86 -eq 'true') {
+    throw 'Git AI supports 64-bit Windows only; --forcex86 is not supported.'
+}
+
+# The process architecture can report x64 when Chocolatey runs under ARM64 emulation.
+$architectures = @(Get-CimInstance -ClassName Win32_Processor | Select-Object -ExpandProperty Architecture -Unique)
+if ($architectures.Count -ne 1) {
+    throw 'Cannot determine a single native Windows architecture.'
+}
+switch ($architectures[0]) {
+    9 { $architecture = 'x64'; $checksum = '@SHA256_WINDOWS_X64@' }
+    12 { $architecture = 'arm64'; $checksum = '@SHA256_WINDOWS_ARM64@' }
+    default { throw 'Git AI supports only x64 and ARM64 Windows.' }
+}
+
+$toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$source = Join-Path $toolsDir "payload\$architecture\git-ai.exe"
+$sha256 = [Security.Cryptography.SHA256]::Create()
+$stream = $null
+try {
+    $stream = [IO.File]::OpenRead($source)
+    $actualChecksum = [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+} finally {
+    if ($null -ne $stream) { $stream.Dispose() }
+    $sha256.Dispose()
+}
+if ($actualChecksum -ne $checksum) {
+    throw 'The bundled Git AI binary failed SHA256 verification.'
+}
+Copy-Item -LiteralPath $source -Destination (Join-Path $toolsDir 'git-ai.exe') -Force
+Write-Host 'Install Git first, then run git-ai install-hooks in your regular user shell.'
+Write-Host 'Enable collection with git-ai config --add allowed_repositories /path/to/repository.'
+Write-Host 'After upgrading, run git-ai install-hooks again. Before choco uninstall git-ai, run git-ai uninstall.'

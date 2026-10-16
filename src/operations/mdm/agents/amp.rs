@@ -133,15 +133,17 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_amp_plugin_output_path() {
-        assert_eq!(
-            AmpInstaller::plugin_path(),
-            home_dir()
-                .join(".config")
-                .join("amp")
-                .join("plugins")
-                .join("git-ai.ts")
-        );
+        with_temp_home(|home| {
+            assert_eq!(
+                AmpInstaller::plugin_path(),
+                home.join(".config")
+                    .join("amp")
+                    .join("plugins")
+                    .join("git-ai.ts")
+            );
+        });
     }
 
     #[test]

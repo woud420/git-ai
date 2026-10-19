@@ -377,21 +377,30 @@ impl HookInstaller for GitHubCopilotInstaller {
         _params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Vec<InstallResult>, GitAiError> {
-        Self::settings_targets()
+        Ok(Self::settings_targets()
             .into_iter()
             .filter(|path| should_process_settings_target(path))
-            .map(|path| {
-                let diff = update_vscode_chat_hook_settings(&path, dry_run)?;
-                Ok(InstallResult {
-                    changed: diff.is_some(),
-                    diff,
-                    message: format!(
-                        "GitHub Copilot: chat hook settings configured in {}",
-                        path.display()
-                    ),
-                })
-            })
-            .collect()
+            .map(
+                |path| match update_vscode_chat_hook_settings(&path, dry_run) {
+                    Ok(diff) => InstallResult {
+                        changed: diff.is_some(),
+                        diff,
+                        message: format!(
+                            "GitHub Copilot: chat hook settings configured in {}",
+                            path.display()
+                        ),
+                    },
+                    Err(error) => InstallResult {
+                        changed: false,
+                        diff: None,
+                        message: format!(
+                            "GitHub Copilot: Failed to configure chat hook settings in {}: {error}",
+                            path.display()
+                        ),
+                    },
+                },
+            )
+            .collect())
     }
 }
 

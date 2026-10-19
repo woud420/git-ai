@@ -514,3 +514,35 @@ fn native_copilot_configures_chat_settings_without_an_extension() {
         assert_eq!(fs::read_to_string(&path).unwrap(), content);
     });
 }
+
+#[test]
+#[serial]
+fn native_copilot_keeps_configuring_profiles_after_invalid_settings() {
+    with_temp_home(|_home| {
+        let paths = GitHubCopilotInstaller::settings_targets();
+        for path in &paths {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "{}\n").unwrap();
+        }
+        let invalid = paths.first().unwrap();
+        fs::write(invalid, "invalid json").unwrap();
+        let params = HookInstallerParams {
+            binary_path: test_binary_path(),
+        };
+        let results = GitHubCopilotInstaller
+            .install_extras(&params, false)
+            .unwrap();
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("Failed to configure"))
+        );
+        assert!(results.iter().any(|r| r.changed));
+        assert_eq!(fs::read_to_string(invalid).unwrap(), "invalid json");
+        assert!(
+            fs::read_to_string(paths.last().unwrap())
+                .unwrap()
+                .contains("\"chat.useHooks\": true")
+        );
+    });
+}

@@ -1,30 +1,17 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::resolve_editor_cli;
-use crate::operations::mdm::editor_extension::{
-    ExtensionInstallPresentation, GIT_AI_VSCODE_EXTENSION_ID, ensure_vsc_editor_extension,
-    extension_install_result,
-};
-use crate::operations::mdm::hook_installer::{
-    HookCheckResult, HookInstaller, HookInstallerParams, InstallResult, UninstallResult,
-};
+use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::hooks_merge::{
     MissingBehavior, edit_settings_json, is_git_ai_checkpoint_command,
     upsert_singleton_command_hook,
 };
 use crate::operations::mdm::paths::home_dir;
-use crate::operations::mdm::vscode_settings::is_github_codespaces;
 
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const WINDSURF_CHECKPOINT_CMD: &str = "checkpoint windsurf --hook-input stdin";
-const WINDSURF_EXTENSION_PRESENTATION: ExtensionInstallPresentation =
-    ExtensionInstallPresentation {
-        product_name: "Windsurf",
-        installed_message: "\tExtension 'git-ai.git-ai-vscode' was successfully installed.",
-        install_failure_instructions: "Unable to automatically install extension. Please cmd+click on the following link to install: windsurf:extension/git-ai.git-ai-vscode (or search for 'git-ai-vscode' in the Windsurf extensions tab)",
-    };
 
 /// The Windsurf Cascade hook events we install into.
 const HOOK_EVENTS: &[&str] = &[
@@ -128,19 +115,6 @@ impl WindsurfInstaller {
                 }
             },
         )
-    }
-
-    fn extension_install_announcements() -> [&'static str; 2] {
-        [
-            "Installing extensions...",
-            "\tInstalling extension 'git-ai.git-ai-vscode'...",
-        ]
-    }
-
-    fn announce_extension_install() {
-        for message in Self::extension_install_announcements() {
-            println!("{message}");
-        }
     }
 }
 
@@ -249,53 +223,6 @@ impl HookInstaller for WindsurfInstaller {
             Ok(Some(all_diffs.join("\n")))
         }
     }
-
-    fn install_extras(
-        &self,
-        _params: &HookInstallerParams,
-        dry_run: bool,
-    ) -> Result<Vec<InstallResult>, GitAiError> {
-        let mut results = Vec::new();
-
-        // Skip extension installation in GitHub Codespaces
-        // Extensions must be configured via devcontainer.json in Codespaces
-        if is_github_codespaces() {
-            results.push(InstallResult {
-                changed: false,
-                diff: None,
-                message: "Windsurf: Unable to install extension in GitHub Codespaces. Add to your devcontainer.json: \"customizations\": { \"vscode\": { \"extensions\": [\"git-ai.git-ai-vscode\"] } }".to_string(),
-            });
-            return Ok(results);
-        }
-
-        let cli = resolve_editor_cli("windsurf");
-        let extension_outcome = ensure_vsc_editor_extension(
-            cli.as_ref(),
-            GIT_AI_VSCODE_EXTENSION_ID,
-            dry_run,
-            Self::announce_extension_install,
-        );
-        if let Some(result) =
-            extension_install_result(extension_outcome, &WINDSURF_EXTENSION_PRESENTATION)
-        {
-            results.push(result);
-        }
-
-        Ok(results)
-    }
-
-    fn uninstall_extras(
-        &self,
-        _params: &HookInstallerParams,
-        _dry_run: bool,
-    ) -> Result<Vec<UninstallResult>, GitAiError> {
-        Ok(vec![UninstallResult {
-            changed: false,
-            diff: None,
-            message: "Windsurf: Extension must be uninstalled manually through the editor"
-                .to_string(),
-        }])
-    }
 }
 
 #[cfg(test)]
@@ -303,48 +230,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn windsurf_extension_presentation_keeps_messages() {
-        assert_eq!(WINDSURF_EXTENSION_PRESENTATION.product_name, "Windsurf");
-        assert_eq!(
-            WINDSURF_EXTENSION_PRESENTATION.installed_message,
-            "\tExtension 'git-ai.git-ai-vscode' was successfully installed.",
-        );
-        assert_eq!(
-            WINDSURF_EXTENSION_PRESENTATION.install_failure_instructions,
-            "Unable to automatically install extension. Please cmd+click on the following link to install: windsurf:extension/git-ai.git-ai-vscode (or search for 'git-ai-vscode' in the Windsurf extensions tab)",
-        );
-    }
-
-    #[test]
-    fn extension_install_announcements_keep_windsurf_stdout_text_and_order() {
-        assert_eq!(
-            WindsurfInstaller::extension_install_announcements(),
-            [
-                "Installing extensions...",
-                "\tInstalling extension 'git-ai.git-ai-vscode'...",
-            ]
-        );
-    }
-
-    #[test]
-    fn test_install_extras_does_not_nag_when_cli_absent() {
-        // Regression: when the Windsurf app/CLI isn't resolvable (e.g. only the
-        // ~/.codeium dotfiles exist), install_extras must not emit the misleading
-        // "Unable to automatically install extension" message. dry_run=true means
-        // a real install is never attempted, so this never spawns an editor.
+    fn native_hooks_do_not_install_editor_extensions() {
         let params = HookInstallerParams {
-            binary_path: std::path::PathBuf::from("/usr/local/bin/git-ai"),
+            binary_path: PathBuf::from("/usr/local/bin/git-ai"),
         };
-        let results = WindsurfInstaller.install_extras(&params, true).unwrap();
-        assert!(
-            results
-                .iter()
-                .all(|r| !r.message.contains("Unable to automatically install")),
-            "unexpected extension nag: {:?}",
-            results
-                .iter()
-                .map(|r| r.message.clone())
-                .collect::<Vec<_>>()
-        );
+        for dry_run in [true, false] {
+            assert!(
+                WindsurfInstaller
+                    .install_extras(&params, dry_run)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                WindsurfInstaller
+                    .uninstall_extras(&params, dry_run)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 }

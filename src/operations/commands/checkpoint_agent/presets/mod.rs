@@ -1,7 +1,6 @@
 pub mod parse;
 
 mod agent_v1;
-mod ai_tab;
 mod amp;
 mod amp_enrichment;
 mod claude;
@@ -165,7 +164,6 @@ const AGENT_PRESETS: &[PresetRegistration] = preset_registry![
     "cursor-background" => cursor::CursorBackgroundPreset,
     "github-copilot" => github_copilot::GithubCopilotPreset,
     "amp" => amp::AmpPreset,
-    "ai_tab" => ai_tab::AiTabPreset,
     "firebender" => firebender::FirebenderPreset,
     "agent-v1" => agent_v1::AgentV1Preset,
     "droid" => droid::DroidPreset,

@@ -8,7 +8,6 @@ pub(super) struct InstallOptions {
     pub(super) dry_run: bool,
     pub(super) verbose: bool,
     pub(super) install_skills: bool,
-    pub(super) include_visual_studio_extension: bool,
     pub(super) api_base: Option<String>,
     pub(super) api_key: Option<String>,
     pub(super) installer_environment: InstallerEnvironment,
@@ -88,7 +87,6 @@ pub(super) fn parse_install_action(args: &[String]) -> Result<InstallAction, Git
             "--dry-run=false" => options.dry_run = false,
             "--verbose" | "-v" => options.verbose = true,
             "--skills" => options.install_skills = true,
-            "--visual-studio-extension" => options.include_visual_studio_extension = true,
             value if value.starts_with("--installer-env=") => {
                 options.installer_environment.insert(&value[16..])?;
             }
@@ -138,10 +136,6 @@ pub(crate) fn print_install_help(command: &str) {
     println!("  --skills                     Also install agent skill files");
     println!("  --installer-env NAME=ABSOLUTE_PATH");
     println!("                               Package-only user path handoff (repeatable)");
-    println!(
-        "  --visual-studio-extension    Include Visual Studio detection and status checks on Windows"
-    );
-    println!("                               This does not install a VSIX package");
     println!("  --api-base <url>              Save an API base URL in git-ai configuration");
     println!("  --api-key <key>               Save an API key in git-ai configuration");
     println!("                               Use --api-key=<key> for a key starting with '-'");
@@ -168,9 +162,6 @@ fn required_value(option: &str, value: &str) -> Result<String, GitAiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operations::commands::install_hooks::{
-        VISUAL_STUDIO_INSTALLER_ID, should_include_installer,
-    };
 
     fn parsed_install_options(args: &[String]) -> InstallOptions {
         let InstallAction::Install(options) = parse_install_action(args).unwrap() else {
@@ -180,21 +171,14 @@ mod tests {
     }
 
     #[test]
-    fn defaults_visual_studio_extension_to_disabled() {
-        let options = parsed_install_options(&[]);
-        assert!(!options.include_visual_studio_extension);
-        assert!(!should_include_installer(
-            VISUAL_STUDIO_INSTALLER_ID,
-            &options
-        ));
-        assert!(should_include_installer("vscode", &options));
+    fn rejects_retired_visual_studio_option() {
+        assert!(parse_install_action(&["--visual-studio-extension".to_string()]).is_err());
     }
 
     #[test]
     fn accepts_supported_flags_and_aliases() {
         let args = vec![
             "--dry-run".to_string(),
-            "--visual-studio-extension".to_string(),
             "--skills".to_string(),
             "-v".to_string(),
         ];
@@ -202,11 +186,6 @@ mod tests {
         assert!(options.dry_run);
         assert!(options.verbose);
         assert!(options.install_skills);
-        assert!(options.include_visual_studio_extension);
-        assert!(should_include_installer(
-            VISUAL_STUDIO_INSTALLER_ID,
-            &options
-        ));
     }
 
     #[test]

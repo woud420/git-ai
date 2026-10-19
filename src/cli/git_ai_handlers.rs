@@ -369,7 +369,6 @@ fn print_help() {
     eprintln!("    --installer-env NAME=ABSOLUTE_PATH");
     eprintln!("                           Package-only user path handoff (repeatable)");
     eprintln!("    --skills               Also install agent skill files");
-    eprintln!("    --visual-studio-extension");
     eprintln!(
         "                           Include Visual Studio detection and status checks on Windows"
     );

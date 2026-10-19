@@ -94,7 +94,7 @@ pub trait HookInstaller: Send + Sync {
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError>;
 
-    /// Install extras (e.g., VS Code extensions, git.path configuration)
+    /// Install extras (e.g., native chat settings, socket permissions)
     /// Codex and Claude use the shared opt-in socket permission installer.
     fn install_extras(
         &self,
@@ -111,7 +111,7 @@ pub trait HookInstaller: Send + Sync {
         vec![]
     }
 
-    /// Uninstall extras (e.g., VS Code extensions, git.path configuration)
+    /// Uninstall extras (e.g., managed socket permissions)
     /// Codex and Claude use the shared opt-in socket permission installer.
     fn uninstall_extras(
         &self,

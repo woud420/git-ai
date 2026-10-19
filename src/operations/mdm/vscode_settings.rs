@@ -1,22 +1,10 @@
 use crate::error::GitAiError;
-pub use crate::operations::mdm::editor_extension::{
-    install_vsc_editor_extension, is_vsc_editor_extension_installed,
-};
 use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
 use crate::operations::mdm::paths::home_dir;
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::CstRootNode;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// Check if running in GitHub Codespaces environment
-/// In Codespaces, VS Code extensions must be configured via devcontainer.json
-/// rather than installed via CLI
-pub fn is_github_codespaces() -> bool {
-    std::env::var("CODESPACES")
-        .map(|v| v == "true")
-        .unwrap_or(false)
-}
 
 /// Check if a settings target path should be processed
 pub fn should_process_settings_target(path: &Path) -> bool {
@@ -165,40 +153,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    #[test]
-    fn test_is_github_codespaces() {
-        // Save original value
-        let original = std::env::var("CODESPACES").ok();
-
-        // SAFETY: This test modifies environment variables which is inherently
-        // unsafe in multi-threaded contexts. This test should run in isolation.
-        unsafe {
-            // Test when CODESPACES is not set
-            std::env::remove_var("CODESPACES");
-            assert!(!is_github_codespaces());
-
-            // Test when CODESPACES is set to "true"
-            std::env::set_var("CODESPACES", "true");
-            assert!(is_github_codespaces());
-
-            // Test when CODESPACES is set to other values
-            std::env::set_var("CODESPACES", "false");
-            assert!(!is_github_codespaces());
-
-            std::env::set_var("CODESPACES", "1");
-            assert!(!is_github_codespaces());
-
-            std::env::set_var("CODESPACES", "");
-            assert!(!is_github_codespaces());
-
-            // Restore original value
-            match original {
-                Some(val) => std::env::set_var("CODESPACES", val),
-                None => std::env::remove_var("CODESPACES"),
-            }
-        }
-    }
 
     #[test]
     fn test_update_vscode_chat_hook_settings_enables_use_hooks() {

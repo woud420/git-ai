@@ -1,6 +1,6 @@
 # Agent Checkpoint Interface
 
-The compatibility surface between AI coding agents (and IDE extensions) and
+The compatibility surface between AI coding agents and evidence-providing integrations and
 git-ai. Agents integrate by invoking the checkpoint command around edits;
 everything else (attribution, notes, stats) derives from these calls.
 
@@ -14,7 +14,7 @@ git-ai checkpoint <preset> [--hook-input <json>] [file …]
   `src/operations/commands/checkpoint_agent/presets/`. The categories are:
   - **Production agent presets**: `claude`, `cline`, `codex`, `gemini`,
     `windsurf`, `continue-cli`, `cursor`, `cursor-background`,
-    `github-copilot`, `amp`, `ai_tab`, `firebender`, `agent-v1`, `droid`,
+    `github-copilot`, `amp`, `firebender`, `agent-v1`, `droid`,
     `opencode`, and `pi`.
   - **Compatibility and human-evidence presets**: `human` records an untracked
     pre-edit boundary; `known_human` records editor-evidenced human input and is
@@ -67,5 +67,7 @@ recorded in
 Preset names, the checkpoint CLI form, hook-input tolerance (encodings,
 unknown fields ignored), the pre/post pairing contract, and exit-code
 semantics are stable. New presets and new optional hook fields are additive.
-Removing a preset or changing pairing semantics is a breaking change to
-every integrated agent — do not.
+Changes to retained presets or pairing semantics require compatibility review.
+The extension-only `ai_tab` preset has been retired explicitly; see the
+[upgrade guide](../operations/retired-ide-extensions.md). Stored legacy
+checkpoint kinds remain readable.

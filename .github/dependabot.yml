@@ -11,16 +11,6 @@ updates:
       prefix: "chore(deps)"
 
   - package-ecosystem: "npm"
-    directory: "/agent-support/vscode"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "chore(vscode-plugin)"
-
-  - package-ecosystem: "npm"
     directory: "/agent-support/opencode"
     target-branch: "main"
     schedule:
@@ -29,16 +19,6 @@ updates:
       default-days: 7
     commit-message:
       prefix: "chore(opencode-plugin)"
-
-  - package-ecosystem: "gradle"
-    directory: "/agent-support/intellij"
-    target-branch: "main"
-    schedule:
-      interval: "weekly"
-    cooldown:
-      default-days: 7
-    commit-message:
-      prefix: "chore(intellij-plugin)"
 
   - package-ecosystem: "github-actions"
     directory: "/"

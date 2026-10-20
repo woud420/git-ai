@@ -17,8 +17,7 @@
 //! part into a shared helper would require enough per-preset parameterization
 //! to make the abstraction harder to read than the duplication it removes.
 //!
-//! `ai_tab` (no bash concept; wants `tool_use_id: None` rather than
-//! `Some(id)`) and `pi` (validation and field-sourcing embedded per variant,
+//! `pi` (validation and field-sourcing embedded per variant,
 //! and a raw `Option<String>` tool_use_id passthrough on file events) do not
 //! fit this shape and are intentionally left concrete.
 

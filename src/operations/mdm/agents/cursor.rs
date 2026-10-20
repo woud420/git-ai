@@ -1,12 +1,6 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::resolve_editor_cli;
-use crate::operations::mdm::editor_extension::{
-    ExtensionInstallPresentation, GIT_AI_VSCODE_EXTENSION_ID, ensure_vsc_editor_extension,
-    extension_install_result,
-};
-use crate::operations::mdm::hook_installer::{
-    HookCheckResult, HookInstaller, HookInstallerParams, InstallResult,
-};
+use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::hooks_merge::{MissingBehavior, edit_settings_json};
 use crate::operations::mdm::hooks_merge_flat::{
     remove_command_hooks_flat, upsert_command_hooks_flat,
@@ -24,11 +18,6 @@ use std::path::PathBuf;
 
 const CURSOR_PRE_TOOL_USE_CMD: &str = "checkpoint cursor --hook-input stdin";
 const CURSOR_HOOK_NAMES: &[&str] = &["preToolUse", "postToolUse"];
-const CURSOR_EXTENSION_PRESENTATION: ExtensionInstallPresentation = ExtensionInstallPresentation {
-    product_name: "Cursor",
-    installed_message: "\tExtension 'git-ai.git-ai-vscode' was successfully installed.",
-    install_failure_instructions: "Unable to automatically install extension. Please cmd+click on the following link to install: cursor:extension/git-ai.git-ai-vscode (or search for 'git-ai-vscode' in the Cursor extensions tab)",
-};
 
 pub struct CursorInstaller;
 
@@ -44,19 +33,6 @@ impl CursorInstaller {
     fn is_cursor_checkpoint_command(cmd: &str) -> bool {
         cmd.contains("git-ai checkpoint cursor")
             || (cmd.contains("git-ai") && cmd.contains("checkpoint") && cmd.contains("cursor"))
-    }
-
-    fn extension_install_announcements() -> [&'static str; 2] {
-        [
-            "Installing extensions...",
-            "\tInstalling extension 'git-ai.git-ai-vscode'...",
-        ]
-    }
-
-    fn announce_extension_install() {
-        for message in Self::extension_install_announcements() {
-            println!("{message}");
-        }
     }
 }
 
@@ -170,29 +146,6 @@ impl HookInstaller for CursorInstaller {
             },
         )
     }
-
-    fn install_extras(
-        &self,
-        _params: &HookInstallerParams,
-        dry_run: bool,
-    ) -> Result<Vec<InstallResult>, GitAiError> {
-        let mut results = Vec::new();
-
-        let cli = resolve_editor_cli("cursor");
-        let extension_outcome = ensure_vsc_editor_extension(
-            cli.as_ref(),
-            GIT_AI_VSCODE_EXTENSION_ID,
-            dry_run,
-            Self::announce_extension_install,
-        );
-        if let Some(result) =
-            extension_install_result(extension_outcome, &CURSOR_EXTENSION_PRESENTATION)
-        {
-            results.push(result);
-        }
-
-        Ok(results)
-    }
 }
 
 #[cfg(test)]
@@ -206,34 +159,6 @@ mod tests {
     fn create_test_binary_path() -> PathBuf {
         PathBuf::from("/usr/local/bin/git-ai")
     }
-
-    #[test]
-    fn cursor_extension_presentation_keeps_messages() {
-        assert_eq!(CURSOR_EXTENSION_PRESENTATION.product_name, "Cursor");
-        assert_eq!(
-            CURSOR_EXTENSION_PRESENTATION.installed_message,
-            "\tExtension 'git-ai.git-ai-vscode' was successfully installed.",
-        );
-        assert_eq!(
-            CURSOR_EXTENSION_PRESENTATION.install_failure_instructions,
-            "Unable to automatically install extension. Please cmd+click on the following link to install: cursor:extension/git-ai.git-ai-vscode (or search for 'git-ai-vscode' in the Cursor extensions tab)",
-        );
-    }
-
-    #[test]
-    fn extension_install_announcements_keep_cursor_stdout_text_and_order() {
-        assert_eq!(
-            CursorInstaller::extension_install_announcements(),
-            [
-                "Installing extensions...",
-                "\tInstalling extension 'git-ai.git-ai-vscode'...",
-            ]
-        );
-    }
-
-    // ---- characterization: real install_hooks/uninstall_hooks invocations ----
-    // (the tests below this point call the trait methods directly, unlike the
-    // pre-existing tests above which hand-construct expected JSON)
 
     #[test]
     #[serial]
@@ -424,25 +349,24 @@ mod tests {
     }
 
     #[test]
-    fn test_install_extras_does_not_nag_when_cli_absent() {
-        // Regression: when the Cursor app/CLI isn't resolvable (e.g. only the
-        // ~/.cursor dotfiles exist), install_extras must not emit the misleading
-        // "Unable to automatically install extension" message. dry_run=true means
-        // a real install is never attempted, so this never spawns an editor.
+    fn native_hooks_do_not_install_editor_extensions() {
         let params = HookInstallerParams {
-            binary_path: create_test_binary_path(),
+            binary_path: PathBuf::from("/usr/local/bin/git-ai"),
         };
-        let results = CursorInstaller.install_extras(&params, true).unwrap();
-        assert!(
-            results
-                .iter()
-                .all(|r| !r.message.contains("Unable to automatically install")),
-            "unexpected extension nag: {:?}",
-            results
-                .iter()
-                .map(|r| r.message.clone())
-                .collect::<Vec<_>>()
-        );
+        for dry_run in [true, false] {
+            assert!(
+                CursorInstaller
+                    .install_extras(&params, dry_run)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                CursorInstaller
+                    .uninstall_extras(&params, dry_run)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 
     #[test]

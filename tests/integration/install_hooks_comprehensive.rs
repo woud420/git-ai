@@ -299,7 +299,6 @@ fn install_help_is_side_effect_free_for_both_aliases() {
                 "--dry-run",
                 "--verbose",
                 "--skills",
-                "--visual-studio-extension",
                 "--api-base",
                 "--api-key",
             ] {

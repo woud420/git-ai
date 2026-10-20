@@ -189,7 +189,7 @@ pub fn execute_preset_checkpoint(
     for event in events {
         let t_event = std::time::Instant::now();
         let event_name = format!("{:?}", std::mem::discriminant(&event));
-        let new_requests = execute_event(event, preset_name)?;
+        let new_requests = execute_event(event)?;
         if perf {
             eprintln!(
                 "[perf] orchestrator: execute_event({})={:.1}ms (requests={})",
@@ -242,13 +242,10 @@ fn event_has_checkpoint_target(event: &ParsedHookEvent) -> bool {
     }
 }
 
-fn execute_event(
-    event: ParsedHookEvent,
-    preset_name: &str,
-) -> Result<Vec<CheckpointRequest>, GitAiError> {
+fn execute_event(event: ParsedHookEvent) -> Result<Vec<CheckpointRequest>, GitAiError> {
     match event {
         ParsedHookEvent::PreFileEdit(e) => execute_pre_file_edit(e),
-        ParsedHookEvent::PostFileEdit(e) => execute_post_file_edit(e, preset_name),
+        ParsedHookEvent::PostFileEdit(e) => execute_post_file_edit(e),
         ParsedHookEvent::PreBashCall(e) => execute_pre_bash_call(e),
         ParsedHookEvent::PostBashCall(e) => execute_post_bash_call(e),
         ParsedHookEvent::KnownHumanEdit(e) => execute_known_human_edit(e),
@@ -309,18 +306,12 @@ fn execute_pre_file_edit(e: PreFileEdit) -> Result<Vec<CheckpointRequest>, GitAi
     ))
 }
 
-fn execute_post_file_edit(
-    e: PostFileEdit,
-    preset_name: &str,
-) -> Result<Vec<CheckpointRequest>, GitAiError> {
+fn execute_post_file_edit(e: PostFileEdit) -> Result<Vec<CheckpointRequest>, GitAiError> {
     let mut files = build_checkpoint_files(&e.file_paths)?;
     if let Some(ref dirty) = e.dirty_files {
         apply_dirty_file_overrides(&mut files, dirty);
     }
-    let checkpoint_kind = match preset_name {
-        "ai_tab" => CheckpointKind::AiTab,
-        _ => CheckpointKind::AiAgent,
-    };
+    let checkpoint_kind = CheckpointKind::AiAgent;
     let mut metadata = e.context.metadata;
     if let Some(tuid) = e.tool_use_id {
         metadata.entry("tool_use_id".to_string()).or_insert(tuid);

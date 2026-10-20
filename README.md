@@ -5,8 +5,7 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/woud420/git-ai)](LICENSE)
 
 `git-ai` is a local-first Git extension for explicit, line-level authorship.
-Coding agents checkpoint directly; editor integrations may recognize agent-originated edits
-from high-confidence event or call-stack signatures. Git-ai connects only that evidence to
+Coding agents checkpoint directly through native hooks. Git-ai connects that evidence to
 agent, model, session, and prompt metadata. Unknown edits remain unknown or untracked;
 git-ai does not inspect source content with an AI detector.
 
@@ -77,7 +76,7 @@ git ai blame path/to/file
 - Platforms: macOS and Linux on x86_64 or ARM64, and Windows on x64 or ARM64.
 - Checkpoint presets accept hook data from Claude Code, Cline, Codex, Gemini,
   Windsurf, Continue CLI, Cursor (including background agents), GitHub Copilot,
-  Amp, AI Tab, Firebender, Droid, OpenCode, Pi, and compatible `agent-v1` clients.
+  Amp, Firebender, Droid, OpenCode, Pi, and compatible `agent-v1` clients.
 - Git workflows include normal commits and merges, amend, rebase and
   `pull --rebase`, cherry-pick, squash merge, reset, stash, revert, and
   `commit-tree`/`update-ref` restacks.
@@ -88,6 +87,7 @@ rewrites fail closed. See the [checkpoint interface](docs/contracts/checkpoint-i
 and [rewrite operations spec](docs/architecture/rewrite-ops-spec.md) for the
 exact contracts and limitations.
 
+Standalone IDE extensions and AI Tab are retired; follow the [upgrade guide](docs/operations/retired-ide-extensions.md).
 ## Uninstall
 
 ```bash

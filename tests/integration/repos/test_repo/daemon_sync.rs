@@ -127,7 +127,6 @@ pub(super) fn is_known_checkpoint_preset(arg: &str) -> bool {
             | "windsurf"
             | "opencode"
             | "pi"
-            | "ai_tab"
             | "firebender"
             | "mock_ai"
             | "mock_known_human"

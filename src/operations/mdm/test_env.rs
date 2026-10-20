@@ -1,6 +1,6 @@
 //! Shared test-only environment fixtures for the mdm agent installers.
 //!
-//! Every agent installer's test module needs to sandbox `HOME`/`USERPROFILE`
+//! Every agent installer's test module needs to sandbox `HOME`/`USERPROFILE`/`APPDATA`
 //! (and sometimes `PATH`) so detection logic never touches the real user
 //! environment. These helpers were duplicated verbatim across ~10 agent test
 //! modules; this is the single canonical copy. Agent modules that also need
@@ -11,7 +11,7 @@
 use std::path::Path;
 use tempfile::TempDir;
 
-/// Temporarily override `HOME` (and `USERPROFILE` on Windows) to a fresh temp
+/// Temporarily override `HOME`, `USERPROFILE`, and Windows `APPDATA` to a fresh temp
 /// directory for the duration of the closure. Must only be called from
 /// `#[serial]` tests to avoid racing with other tests that read `HOME`.
 pub(crate) fn with_temp_home<F: FnOnce(&Path)>(f: F) {
@@ -20,11 +20,15 @@ pub(crate) fn with_temp_home<F: FnOnce(&Path)>(f: F) {
 
     let prev_home = std::env::var_os("HOME");
     let prev_userprofile = std::env::var_os("USERPROFILE");
+    #[cfg(windows)]
+    let prev_appdata = std::env::var_os("APPDATA");
 
     // SAFETY: tests are serialized via #[serial], so mutating process env is safe.
     unsafe {
         std::env::set_var("HOME", &home);
         std::env::set_var("USERPROFILE", &home);
+        #[cfg(windows)]
+        std::env::set_var("APPDATA", home.join("AppData").join("Roaming"));
     }
 
     f(&home);
@@ -34,6 +38,11 @@ pub(crate) fn with_temp_home<F: FnOnce(&Path)>(f: F) {
         match prev_home {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
+        }
+        #[cfg(windows)]
+        match prev_appdata {
+            Some(v) => std::env::set_var("APPDATA", v),
+            None => std::env::remove_var("APPDATA"),
         }
         match prev_userprofile {
             Some(v) => std::env::set_var("USERPROFILE", v),

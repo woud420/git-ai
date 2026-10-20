@@ -73,3 +73,5 @@ can be consumed directly from this repository. The repository also provides a
 source Homebrew tap; stable release builds generate a binary Homebrew formula
 and an embedded Chocolatey package. See [package-manager distribution](../../packaging/package-managers.md)
 for installation, user setup, lifecycle, and release promotion.
+
+[Retired IDE extensions: inventory and upgrade](retired-ide-extensions.md)

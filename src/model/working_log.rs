@@ -89,6 +89,7 @@ pub struct AgentId {
 pub enum CheckpointKind {
     Human,
     AiAgent,
+    // Retained for decoding historical working logs and checkpoint journals.
     AiTab,
     KnownHuman,
 }

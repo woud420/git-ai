@@ -106,24 +106,14 @@ Configuration alone does not change what an external server retains. Before
 enabling any network-capable mode, inspect the endpoint, authentication, and
 operator policy that apply to that deployment.
 
-### Bundled editor extension exception
+### Retired editor extensions
 
-The checked-in VS Code and IntelliJ extensions do not currently use the Rust
-runtime's master telemetry resolver. They use the legacy `telemetry_oss` gate
-directly and initialize their built-in clients unless that value is exactly
-`"off"`; a missing setting is not an opt-out for either extension.
-
-- The VS Code/Cursor extension can send a startup event to
-  `https://us.i.posthog.com`.
-- The IntelliJ extension can send analytics to
-  `https://us.i.posthog.com` and plugin error reports to an
-  `ingest.us.sentry.io` endpoint.
-
-Set `"telemetry_oss": "off"` in `~/.git-ai/config.json` before starting those
-editors to disable their checked-in telemetry clients. These services are
-externally operated; their receipt, retention, and deletion policies are not
-controlled by this fork. The integration-specific READMEs describe the event
-metadata each extension can send.
+This fork no longer ships standalone VS Code, JetBrains/IntelliJ, or Visual
+Studio extensions. Previously installed binaries are not removed by a CLI
+upgrade and can still run their legacy `telemetry_oss`-gated clients. Set
+`"telemetry_oss": "off"` before starting those old clients, then follow the
+[extension uninstall guide](docs/operations/retired-ide-extensions.md).
+Third-party coding agents and marketplaces have independent privacy policies.
 
 ## External-service boundary
 

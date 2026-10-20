@@ -27,7 +27,6 @@ pub(crate) use cli::{
 pub(crate) const TRACE2_EVENT_TARGET_KEY: &str = "trace2.eventTarget";
 pub(crate) const TRACE2_EVENT_NESTING_KEY: &str = "trace2.eventNesting";
 const TRACE2_EVENT_NESTING_VALUE: &str = "0";
-const VISUAL_STUDIO_INSTALLER_ID: &str = "visual-studio";
 
 /// Installation status for a tool
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -379,10 +378,6 @@ fn run_install(options: InstallOptions) -> Result<HashMap<String, String>, GitAi
     Ok(statuses)
 }
 
-fn should_include_installer(id: &str, options: &InstallOptions) -> bool {
-    options.include_visual_studio_extension || id != VISUAL_STUDIO_INSTALLER_ID
-}
-
 #[derive(Default)]
 struct InstallConfig {
     api_base: Option<String>,
@@ -519,10 +514,6 @@ async fn async_run_install(
     for installer in &installers {
         let name = installer.name();
         let id = installer.id();
-
-        if !should_include_installer(id, options) {
-            continue;
-        }
 
         // Check if tool is installed and hooks status
         match installer.check_hooks(params) {

@@ -148,20 +148,8 @@ const RETIRED_SKILL_COMMANDS: &[&str] = &["git-ai search", "git-ai continue", "g
 const ACTIVE_DISTRIBUTION_FILES: &[&str] = &[
     "README-nix.md",
     "CONTRIBUTING.md",
-    "agent-support/intellij/README.md",
-    "agent-support/intellij/gradle.properties",
-    "agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/GitAiService.kt",
     "agent-support/opencode/README.md",
     "agent-support/opencode/git-ai.ts",
-    "agent-support/visualstudio/README.md",
-    "agent-support/visualstudio/src/GitAiVS/GitAiPackage.cs",
-    "agent-support/visualstudio/src/GitAiVS/Services/BinaryResolver.cs",
-    "agent-support/visualstudio/src/GitAiVS/source.extension.vsixmanifest",
-    "agent-support/vscode/README.md",
-    "agent-support/vscode/package.json",
-    "agent-support/vscode/src/ai-edit-manager.ts",
-    "agent-support/vscode/src/blame-service.ts",
-    "agent-support/vscode/src/consts.ts",
     "docs/operations/README.md",
     "flake.nix",
 ];
@@ -528,8 +516,6 @@ fn package_metadata_declares_apache_2_0() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let cargo = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml must be readable");
     let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix must be readable");
-    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
-        .expect("IntelliJ README must be readable");
     let license = fs::read_to_string(root.join("LICENSE")).expect("LICENSE must be readable");
 
     assert!(
@@ -539,10 +525,6 @@ fn package_metadata_declares_apache_2_0() {
     assert!(
         flake.contains("license = licenses.asl20;"),
         "Nix package metadata must use the Apache-2.0 license value"
-    );
-    assert!(
-        intellij.contains("[Apache License 2.0](LICENSE)"),
-        "IntelliJ README must describe its bundled Apache-2.0 license"
     );
     assert!(
         license.contains("Apache License") && license.contains("Version 2.0, January 2004"),
@@ -699,8 +681,6 @@ fn active_docs_distinguish_untracked_and_known_human_evidence() {
     let agents = fs::read_to_string(root.join("AGENTS.md")).expect("AGENTS.md must be readable");
     let opencode = fs::read_to_string(root.join("agent-support/opencode/README.md"))
         .expect("OpenCode README must be readable");
-    let visual_studio = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
-        .expect("Visual Studio design must be readable");
     let checkpoint = fs::read_to_string(root.join("docs/contracts/checkpoint-interface.md"))
         .expect("checkpoint contract must be readable");
 
@@ -715,7 +695,7 @@ fn active_docs_distinguish_untracked_and_known_human_evidence() {
         "Human before_edit / AI after_edit checkpoint pairs",
     ] {
         assert!(
-            ![&agents, &opencode, &visual_studio, &checkpoint]
+            ![&agents, &opencode, &checkpoint]
                 .iter()
                 .any(|contents| contents.contains(stale)),
             "active checkpoint documentation still contains contradictory phrase `{stale}`"
@@ -725,7 +705,6 @@ fn active_docs_distinguish_untracked_and_known_human_evidence() {
     for (name, contents) in [
         ("AGENTS.md", &agents),
         ("OpenCode README", &opencode),
-        ("Visual Studio design", &visual_studio),
         ("checkpoint contract", &checkpoint),
     ] {
         assert!(
@@ -753,12 +732,8 @@ fn active_docs_use_the_configured_authorship_backend() {
     let ingestion =
         fs::read_to_string(root.join("docs/architecture/daemon-trace2-ingestion-spec.md"))
             .expect("ingestion spec must be readable");
-    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
-        .expect("IntelliJ README must be readable");
     let pi = fs::read_to_string(root.join("agent-support/pi/README.md"))
         .expect("Pi README must be readable");
-    let visual_studio = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
-        .expect("Visual Studio design must be readable");
     let persistence = fs::read_to_string(root.join("docs/contracts/persistence-model.md"))
         .expect("persistence contract must be readable");
 
@@ -769,7 +744,7 @@ fn active_docs_use_the_configured_authorship_backend() {
         "**Authorship notes** (`refs/notes/ai`, one note per commit)",
     ] {
         assert!(
-            ![&agents, &rewrite, &intellij, &pi, &visual_studio]
+            ![&agents, &rewrite, &pi]
                 .iter()
                 .any(|contents| contents.contains(stale)),
             "active documentation still assumes the Git Notes backend: `{stale}`"
@@ -797,11 +772,6 @@ fn active_docs_use_the_configured_authorship_backend() {
         "Pi troubleshooting must inspect attribution through the backend-aware CLI"
     );
     assert!(
-        visual_studio.contains("Configured authorship backend")
-            && visual_studio.contains("git-ai log"),
-        "Visual Studio docs must show backend-neutral persistence and inspection"
-    );
-    assert!(
         ingestion.contains("Git Notes sync") && ingestion.contains("`git_notes` backend"),
         "ingestion spec must scope ref synchronization to its Git Notes role"
     );
@@ -813,77 +783,6 @@ fn active_docs_use_the_configured_authorship_backend() {
         assert!(
             persistence.contains(backend),
             "persistence contract is missing authority row `{backend}`"
-        );
-    }
-}
-
-#[test]
-fn visual_studio_docs_match_install_and_detection_behavior() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let readme = fs::read_to_string(root.join("agent-support/visualstudio/README.md"))
-        .expect("Visual Studio README must be readable");
-    let design = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
-        .expect("Visual Studio design must be readable");
-    let detector = fs::read_to_string(
-        root.join("agent-support/visualstudio/src/GitAiVS/Detection/CopilotEditDetector.cs"),
-    )
-    .expect("Visual Studio detector must be readable");
-
-    for required in [
-        "Experimental support",
-        "`git-ai install-hooks` skips Visual Studio",
-        "`git-ai install-hooks --visual-studio-extension`",
-        "not download or install a VSIX",
-        "Extensions > Manage Extensions",
-        "Copilot Chat edits",
-        "Inline completions",
-    ] {
-        assert!(
-            readme.contains(required),
-            "Visual Studio README is missing lifecycle boundary `{required}`"
-        );
-    }
-
-    assert!(
-        readme.contains("agent-support/visualstudio/src/GitAiVS/GitAiVS.csproj")
-            && readme.contains("src/GitAiVS/bin/Release/")
-            && !readme.contains("GitAiVS.sln"),
-        "Visual Studio build instructions must name files and output paths that exist"
-    );
-
-    for required in [
-        "src/operations/mdm/agents/visual_studio.rs",
-        "Chat edits are the only currently evidenced AI detection path",
-        "completions are not attributed",
-        "`install_vsix()` returns `false`",
-    ] {
-        assert!(
-            design.contains(required),
-            "Visual Studio design is missing implementation boundary `{required}`"
-        );
-    }
-
-    for stale in [
-        "Auto-install via `git ai install-hooks`",
-        "Stack trace detection for GitHub Copilot (inline + chat)",
-        "stack trace analysis proved sufficient",
-        "**File**: `src/mdm/agents/visual_studio.rs`",
-        "Implementation.Copilot.*",
-    ] {
-        assert!(
-            !design.contains(stale),
-            "Visual Studio design retains unsupported claim `{stale}`"
-        );
-    }
-
-    for prefix in [
-        "GitHub.Copilot",
-        "Microsoft.VisualStudio.Copilot",
-        "Microsoft.VisualStudio.Conversations.UI.Internal.Copilot",
-    ] {
-        assert!(
-            detector.contains(prefix) && design.contains(prefix),
-            "Visual Studio design and detector disagree on prefix `{prefix}`"
         );
     }
 }
@@ -1030,7 +929,6 @@ fn checkpoint_preset_registry_drives_help_and_contract() {
             "cursor-background",
             "github-copilot",
             "amp",
-            "ai_tab",
             "firebender",
             "agent-v1",
             "droid",
@@ -1080,135 +978,6 @@ fn checkpoint_preset_registry_drives_help_and_contract() {
             "checkpoint contract omits category `{heading}`"
         );
     }
-}
-
-#[test]
-fn intellij_docs_describe_the_plugin_instead_of_the_template() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let docs_root = root.join("agent-support/intellij");
-    let readme =
-        fs::read_to_string(docs_root.join("README.md")).expect("IntelliJ README must be readable");
-    let changelog = fs::read_to_string(docs_root.join("CHANGELOG.md"))
-        .expect("IntelliJ changelog must be readable");
-    let conduct = fs::read_to_string(docs_root.join("CODE_OF_CONDUCT.md"))
-        .expect("IntelliJ conduct note must be readable");
-    let detector = fs::read_to_string(
-        docs_root
-            .join("src/main/kotlin/org/jetbrains/plugins/template/listener/StackTraceAnalyzer.kt"),
-    )
-    .expect("IntelliJ stack-trace analyzer must be readable");
-
-    for required in [
-        "# Git AI for JetBrains IDEs",
-        "## Support status",
-        "## Install",
-        "## Uninstall",
-        "## How attribution works",
-        "## Privacy",
-        "## Development",
-        "## Validation",
-        "## License",
-        "GitHub Copilot",
-        "Junie",
-        "github-copilot-jetbrains",
-        "notes_backend.kind",
-        "git-ai install-hooks",
-        "Settings > Plugins",
-        "./gradlew buildPlugin",
-        "./gradlew check",
-        "Apache License 2.0",
-    ] {
-        assert!(
-            readme.contains(required),
-            "IntelliJ README is missing plugin-specific fact `{required}`"
-        );
-    }
-
-    for pattern in [
-        "com.github.copilot",
-        "com.intellij.ml.llm.matterhorn.junie",
-        "com.intellij.ml.llm.matterhorn",
-    ] {
-        assert!(
-            detector.contains(pattern) && readme.contains(pattern),
-            "IntelliJ README and detector disagree on package prefix `{pattern}`"
-        );
-    }
-
-    for stale in [
-        "IntelliJ Platform Plugin Template",
-        "Use this template",
-        "Template Cleanup",
-        "Sample code",
-        "MyPluginTest",
-        "com.github.username.repository",
-        "JetBrains Open Source and Community Code of Conduct",
-        "github.com/JetBrains/intellij-platform-plugin-template",
-    ] {
-        assert!(
-            ![&readme, &changelog, &conduct]
-                .iter()
-                .any(|contents| contents.contains(stale)),
-            "IntelliJ documentation retains template text `{stale}`"
-        );
-    }
-
-    assert_eq!(
-        readme.matches("<!-- Plugin description -->").count(),
-        1,
-        "IntelliJ README must retain one Gradle description start marker"
-    );
-    assert_eq!(
-        readme.matches("<!-- Plugin description end -->").count(),
-        1,
-        "IntelliJ README must retain one Gradle description end marker"
-    );
-    assert!(
-        conduct.contains("[contribution guide](../../CONTRIBUTING.md)"),
-        "IntelliJ conduct note must route contributors to the repository guide"
-    );
-
-    for required in [
-        "# Git AI JetBrains Plugin Changelog",
-        "## [Unreleased]",
-        "## [0.1.12]",
-        "## [0.1.3]",
-        "GitHub Copilot and Junie",
-    ] {
-        assert!(
-            changelog.contains(required),
-            "IntelliJ changelog is missing project history `{required}`"
-        );
-    }
-
-    let mut markdown_files = Vec::new();
-    collect_markdown_files(&docs_root, &mut markdown_files);
-    let mut broken_links = Vec::new();
-    for path in markdown_files {
-        let contents = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-        for target in local_markdown_targets(&contents) {
-            let target = target.split('#').next().unwrap_or_default();
-            if target.is_empty() {
-                continue;
-            }
-            let resolved = path
-                .parent()
-                .expect("Markdown file must have a parent")
-                .join(target);
-            if !resolved.exists() {
-                broken_links.push(format!(
-                    "{} -> {target}",
-                    path.strip_prefix(root).unwrap_or(&path).display()
-                ));
-            }
-        }
-    }
-    assert!(
-        broken_links.is_empty(),
-        "IntelliJ Markdown contains broken local links:\n{}",
-        broken_links.join("\n")
-    );
 }
 
 #[test]
@@ -1550,13 +1319,6 @@ fn repository_declares_one_rust_minimum() {
 fn readme_qualifies_the_no_heuristics_claim() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let readme = fs::read_to_string(root.join("README.md")).expect("README.md must be readable");
-    let vscode = fs::read_to_string(root.join("agent-support/vscode/README.md"))
-        .expect("VS Code README must be readable");
-    let visual_studio = fs::read_to_string(root.join("agent-support/visualstudio/DESIGN.md"))
-        .expect("Visual Studio design must be readable");
-    let visual_studio = visual_studio.replace("\r\n", "\n");
-    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
-        .expect("IntelliJ README must be readable");
 
     assert!(
         !readme.contains("does not\nuse heuristics or an AI detector")
@@ -1564,8 +1326,7 @@ fn readme_qualifies_the_no_heuristics_claim() {
         "README must not make an absolute no-heuristics claim"
     );
     for required in [
-        "editor integrations may recognize agent-originated edits",
-        "high-confidence event or call-stack signatures",
+        "Coding agents checkpoint directly through native hooks",
         "does not inspect source content with an AI detector",
         "Unknown edits remain unknown or untracked",
     ] {
@@ -1578,158 +1339,6 @@ fn readme_qualifies_the_no_heuristics_claim() {
         readme.lines().count() <= 125,
         "README introduction update must preserve the concise README line budget"
     );
-
-    for (relative, contents, required) in [
-        (
-            "agent-support/vscode/README.md",
-            vscode.as_str(),
-            "effectiveness of the heuristics",
-        ),
-        (
-            "agent-support/visualstudio/DESIGN.md",
-            visual_studio.as_str(),
-            "URI scheme sniffing",
-        ),
-        (
-            "agent-support/intellij/README.md",
-            intellij.as_str(),
-            "high-confidence stack-trace package prefixes",
-        ),
-    ] {
-        assert!(
-            contents.contains(required),
-            "{relative} no longer documents its editor-event recognition mechanism `{required}`"
-        );
-    }
-    assert!(
-        visual_studio.contains("must remain\nunattributed")
-            && intellij.contains("ambiguous matches are not labeled as AI"),
-        "editor integration docs must keep ambiguous edits unattributed"
-    );
-}
-
-#[test]
-fn vscode_cursor_readme_matches_installer_lifecycle() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let readme = fs::read_to_string(root.join("agent-support/vscode/README.md"))
-        .expect("VS Code README must be readable");
-    let package = fs::read_to_string(root.join("agent-support/vscode/package.json"))
-        .expect("VS Code package metadata must be readable");
-    let constants = fs::read_to_string(root.join("agent-support/vscode/src/consts.ts"))
-        .expect("VS Code constants must be readable");
-    let vscode = fs::read_to_string(root.join("src/operations/mdm/agents/vscode.rs"))
-        .expect("VS Code installer must be readable");
-    let cursor = fs::read_to_string(root.join("src/operations/mdm/agents/cursor.rs"))
-        .expect("Cursor installer must be readable");
-
-    for required in [
-        "## Support status",
-        "VS Code 1.99.3 or newer",
-        "Cursor 1.7 or newer",
-        "git-ai 1.0.23 or newer",
-        "git-ai.git-ai-vscode",
-        "externally operated Marketplace",
-        "~/.cursor/hooks.json",
-        "chat.useHooks",
-        "github.copilot.chat.otel.dbSpanExporter.enabled",
-        "git-ai uninstall-hooks --dry-run=false",
-        "does not remove the extension",
-        "restart Cursor",
-        "../../data-privacy.md",
-    ] {
-        assert!(
-            readme.contains(required),
-            "VS Code/Cursor README is missing lifecycle fact `{required}`"
-        );
-    }
-
-    for stale in ["Restart VS Code", "latest release of the `git-ai` CLI"] {
-        assert!(
-            !readme.contains(stale),
-            "VS Code/Cursor README retains stale instruction `{stale}`"
-        );
-    }
-
-    for source_fact in [
-        (package.as_str(), "\"vscode\": \">=1.99.3\""),
-        (constants.as_str(), "MIN_GIT_AI_VERSION = \"1.0.23\""),
-        (vscode.as_str(), "GIT_AI_VSCODE_EXTENSION_ID"),
-        (vscode.as_str(), "update_vscode_chat_hook_settings"),
-        (cursor.as_str(), "MIN_CURSOR_VERSION"),
-        (cursor.as_str(), "hooks.json"),
-    ] {
-        assert!(
-            source_fact.0.contains(source_fact.1),
-            "installer/package source is missing documented fact `{}`",
-            source_fact.1
-        );
-    }
-}
-
-#[test]
-fn privacy_docs_disclose_editor_telemetry_gate() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let privacy =
-        fs::read_to_string(root.join("data-privacy.md")).expect("privacy guide must be readable");
-    let vscode = fs::read_to_string(root.join("agent-support/vscode/README.md"))
-        .expect("VS Code README must be readable");
-    let vscode_source = fs::read_to_string(root.join("agent-support/vscode/src/extension.ts"))
-        .expect("VS Code extension source must be readable");
-    let intellij = fs::read_to_string(root.join("agent-support/intellij/README.md"))
-        .expect("IntelliJ README must be readable");
-    let intellij_source = fs::read_to_string(root.join(
-        "agent-support/intellij/src/main/kotlin/org/jetbrains/plugins/template/services/TelemetryService.kt",
-    ))
-    .expect("IntelliJ telemetry source must be readable");
-
-    for required in [
-        "CLI and daemon telemetry is off by default",
-        "Bundled editor extension exception",
-        "legacy `telemetry_oss` gate",
-        "missing setting is not an opt-out",
-        "https://us.i.posthog.com",
-        "ingest.us.sentry.io",
-        "externally operated",
-    ] {
-        assert!(
-            privacy.contains(required),
-            "privacy guide is missing editor telemetry boundary `{required}`"
-        );
-    }
-    for required in [
-        "## Telemetry",
-        "vscode_extension_startup",
-        "telemetry_oss",
-        "https://us.i.posthog.com",
-        "missing setting",
-    ] {
-        assert!(
-            vscode.contains(required),
-            "VS Code README is missing telemetry fact `{required}`"
-        );
-    }
-    for identifier in [
-        "telemetry_oss",
-        "PostHog",
-        "Sentry",
-        "../../data-privacy.md",
-    ] {
-        assert!(
-            intellij.contains(identifier),
-            "IntelliJ telemetry disclosure omits {identifier}"
-        );
-    }
-    for (source, fact) in [
-        (vscode_source.as_str(), "config.telemetry_oss === \"off\""),
-        (vscode_source.as_str(), "https://us.i.posthog.com"),
-        (intellij_source.as_str(), "telemetry_oss"),
-        (intellij_source.as_str(), "ingest.us.sentry.io"),
-    ] {
-        assert!(
-            source.contains(fact),
-            "editor source is missing fact `{fact}`"
-        );
-    }
 }
 
 #[test]
@@ -2238,4 +1847,26 @@ fn is_local_markdown_target(target: &str) -> bool {
         && !target.starts_with("http://")
         && !target.starts_with("https://")
         && !target.starts_with("mailto:")
+}
+
+#[test]
+fn retired_integration_upgrade_guide_has_resolving_local_links() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in [
+        "README.md",
+        "data-privacy.md",
+        "docs/operations/README.md",
+        "docs/contracts/checkpoint-interface.md",
+        "docs/operations/retired-ide-extensions.md",
+    ] {
+        let path = root.join(relative);
+        let content = fs::read_to_string(&path).unwrap();
+        for target in local_markdown_targets(&content) {
+            let target = target.split('#').next().unwrap();
+            assert!(
+                path.parent().unwrap().join(target).exists(),
+                "{relative}: broken link {target}"
+            );
+        }
+    }
 }

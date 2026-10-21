@@ -65,7 +65,7 @@ filetime = "0.2"
 serial_test = "3.4"
 rstest = "0.26"
 mockito = "1.6"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [profile.dev]
 debug = 1                          # Line tables only -- smaller binaries, faster linking

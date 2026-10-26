@@ -34,6 +34,8 @@ pub enum ControlRequest {
     CheckpointRun { request: Box<CheckpointRequest> },
     #[serde(rename = "checkpoint.deliver")]
     CheckpointDeliver { delivery: Box<CheckpointDelivery> },
+    #[serde(rename = "checkpoint.deliver.capnp.v1")]
+    CheckpointDeliverCapnpV1 { encoded_bytes: u32 },
     #[serde(rename = "sync.family")]
     SyncFamily { repo_working_dir: String },
     #[serde(rename = "status.family")]

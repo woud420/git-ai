@@ -22,6 +22,9 @@ impl ActorDaemonCoordinator {
             ControlRequest::CheckpointDeliver { delivery } => {
                 self.ingest_checkpoint_delivery(*delivery).await
             }
+            ControlRequest::CheckpointDeliverCapnpV1 { .. } => Ok(ControlResponse::err(
+                "binary checkpoint negotiation requires a control connection",
+            )),
             ControlRequest::SyncFamily { repo_working_dir } => {
                 self.sync_family(repo_working_dir).await.and_then(|status| {
                     serde_json::to_value(status)

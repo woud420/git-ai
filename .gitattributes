@@ -1,1 +1,2 @@
 schemas/generated/*.rs linguist-generated=true
+scripts/benchmarks/checkpoint/results/*.json linguist-generated=true

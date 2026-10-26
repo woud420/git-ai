@@ -1,0 +1,1984 @@
+{
+  "boundaries": {
+    "command_ack_ms": "CLI process start through live checkpoint application acknowledgement",
+    "durability": "no process or machine crash simulated by this benchmark",
+    "family_sync_fence_ms": "CLI process start through repository-family synchronization",
+    "material_observed_ms": "family synchronization plus exact checkpoint-index/blob oracle",
+    "payload": "fixed 65-byte scoped edit; no large-payload allocation or RSS claim",
+    "wire_evidence": "native flag readback and pinned source; no passive wire-byte capture"
+  },
+  "compiler": {
+    "cargo_sha256": "46c9483604e913070b085dc5acf972bc560395c10dfec1cdb389c4b6bf17cf67",
+    "cargo_version": "cargo 1.93.0 (083ac5135 2025-12-15)",
+    "rustc_sha256": "87b02c67012c28083fe485a50b10470a662c828c6e2cd0caf4775e00986cdfc8",
+    "rustc_vv": "rustc 1.93.0 (254b59607 2026-01-19)\nbinary: rustc\ncommit-hash: 254b59607d4417e9dffbc307138ae5c86280fe4c\ncommit-date: 2026-01-19\nhost: aarch64-apple-darwin\nrelease: 1.93.0\nLLVM version: 21.1.8"
+  },
+  "created_at": "2026-10-26T16:40:37.182725+00:00",
+  "harness_digest": "caa82a16a5cace51b6c813b1a6de2390a04f302d3804e8eb2f5c25953e124c2f",
+  "machine": {
+    "cpu_model": "Apple M4 Pro",
+    "logical_cpu_count": 14,
+    "machine": "arm64",
+    "physical_memory_bytes": 25769803776,
+    "platform": "macOS-15.6-arm64-arm-64bit-Mach-O",
+    "power_state": "uncontrolled"
+  },
+  "parameters": {
+    "bootstrap_resamples": 10000,
+    "bootstrap_seed": 364,
+    "checkpoint_capnp": true,
+    "comparison_profile": "fork-before-after-v1",
+    "debug_stages": false,
+    "prefill_depths": [
+      0,
+      50,
+      200
+    ],
+    "resource_samples": 20,
+    "samples": 30,
+    "warmups": 5
+  },
+  "protocol_digest": "89664e1af0e85622c43a11168543b920fb29e5f3529a73d23e142943abe1bcf7",
+  "qualification": "decision_evidence",
+  "scenarios": [
+    {
+      "comparisons": {
+        "command_ack_ms": {
+          "comparison_status": "comparable",
+          "paired_difference_ms": {
+            "bootstrap_95_ci": [
+              -0.8855004999999991,
+              0.7383539999999975
+            ],
+            "median": -0.026187999999997658
+          },
+          "paired_ratio": {
+            "bootstrap_95_ci": [
+              0.9817333434155928,
+              1.0155996631640736
+            ],
+            "candidate_over_baseline": 0.9994446891439678
+          }
+        },
+        "family_sync_fence_ms": {
+          "comparison_status": "comparable",
+          "paired_difference_ms": {
+            "bootstrap_95_ci": [
+              -0.874000499999994,
+              0.6271875000000016
+            ],
+            "median": -0.0071044999999969605
+          },
+          "paired_ratio": {
+            "bootstrap_95_ci": [
+              0.9821450403842603,
+              1.0131431780146065
+            ],
+            "candidate_over_baseline": 0.9998509609633177
+          }
+        }
+      },
+      "fixture_comparable": true,
+      "measured_depth_range": [
+        5,
+        34
+      ],
+      "pair_orders": [
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ]
+      ],
+      "prefill_depth": 0,
+      "resource_depth_range": [
+        35,
+        54
+      ],
+      "variants": {
+        "baseline": {
+          "checkpoint_storage": {
+            "blob_bytes": 3575,
+            "blob_count": 55,
+            "checkpoint_journal_bytes": 36080,
+            "total_checkpoint_bytes": 39655
+          },
+          "client_resources": {
+            "cycles_elapsed": {
+              "count": 20,
+              "max": 18753609.0,
+              "min": 17184724.0,
+              "p50": 18121124.0,
+              "p95": 18714600.0
+            },
+            "instructions_retired": {
+              "count": 20,
+              "max": 37872563.0,
+              "min": 37463429.0,
+              "p50": 37569245.5,
+              "p95": 37850615.0
+            },
+            "max_rss_bytes": {
+              "count": 20,
+              "max": 7520256.0,
+              "min": 7143424.0,
+              "p50": 7266304.0,
+              "p95": 7503872.0
+            },
+            "peak_memory_footprint_bytes": {
+              "count": 20,
+              "max": 3047736.0,
+              "min": 2654496.0,
+              "p50": 2801964.0,
+              "p95": 3031352.0
+            },
+            "real_seconds": {
+              "count": 20,
+              "max": 0.05,
+              "min": 0.04,
+              "p50": 0.04,
+              "p95": 0.04
+            },
+            "sys_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "user_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            }
+          },
+          "config": {
+            "effective": null,
+            "method": "native-config-feature-flags-readback/v1",
+            "requested": true,
+            "status": "unsupported",
+            "supported": false
+          },
+          "daemon_resources": {
+            "cycles_elapsed": 645249828,
+            "instructions_retired": 859781474,
+            "max_rss_bytes": 16793600,
+            "peak_memory_footprint_bytes": 8487704,
+            "real_seconds": 5.72,
+            "sys_seconds": 0.7,
+            "user_seconds": 0.85
+          },
+          "timings_ms": {
+            "command_ack_ms": {
+              "count": 30,
+              "max": 51.20175,
+              "min": 47.0015,
+              "p50": 47.989729,
+              "p95": 49.261917,
+              "values": [
+                47.091417,
+                47.218625,
+                48.092916,
+                47.293125,
+                48.104417,
+                48.193791,
+                47.076083,
+                49.261917,
+                47.375458,
+                47.731041,
+                47.055625,
+                48.289917,
+                49.114208,
+                48.157916,
+                48.506833,
+                48.0995,
+                51.20175,
+                47.09375,
+                47.193417,
+                49.225291,
+                47.106709,
+                47.0015,
+                47.249167,
+                48.112583,
+                47.09125,
+                47.927125,
+                48.052333,
+                48.191375,
+                49.083292,
+                47.165166
+              ]
+            },
+            "family_sync_fence_ms": {
+              "count": 30,
+              "max": 51.53125,
+              "min": 47.312417,
+              "p50": 48.328125,
+              "p95": 49.56325,
+              "values": [
+                47.392084,
+                47.533334,
+                48.394333,
+                47.613916,
+                48.406792,
+                48.494125,
+                47.371667,
+                49.56325,
+                47.902542,
+                48.053333,
+                47.344834,
+                48.60275,
+                49.436083,
+                48.459375,
+                48.829041,
+                48.411,
+                51.53125,
+                47.421458,
+                47.503709,
+                49.554666,
+                47.44875,
+                47.312417,
+                47.57025,
+                48.433541,
+                47.464375,
+                48.292875,
+                48.363375,
+                48.507417,
+                49.417334,
+                47.481833
+              ]
+            },
+            "family_sync_minus_ack_ms": {
+              "count": 30,
+              "max": 0.527084,
+              "min": 0.289209,
+              "p50": 0.3163545,
+              "p95": 0.373125,
+              "values": [
+                0.300667,
+                0.314709,
+                0.301417,
+                0.320791,
+                0.302375,
+                0.300334,
+                0.295584,
+                0.301333,
+                0.527084,
+                0.322292,
+                0.289209,
+                0.312833,
+                0.321875,
+                0.301459,
+                0.322208,
+                0.3115,
+                0.3295,
+                0.327708,
+                0.310292,
+                0.329375,
+                0.342041,
+                0.310917,
+                0.321083,
+                0.320958,
+                0.373125,
+                0.36575,
+                0.311042,
+                0.316042,
+                0.334042,
+                0.316667
+              ]
+            },
+            "material_observed_ms": {
+              "count": 30,
+              "max": 51.851625,
+              "min": 47.605584,
+              "p50": 48.650062500000004,
+              "p95": 49.859833,
+              "values": [
+                47.684167,
+                47.81325,
+                48.669125,
+                47.935958,
+                48.686709,
+                48.791416,
+                47.656667,
+                49.852792,
+                48.241833,
+                48.351666,
+                47.63,
+                49.022375,
+                49.745625,
+                48.746375,
+                49.11925,
+                48.721375,
+                51.851625,
+                47.71025,
+                47.808417,
+                49.859833,
+                47.756125,
+                47.605584,
+                47.871709,
+                48.744166,
+                47.781166,
+                48.641083,
+                48.659042,
+                48.8235,
+                49.725042,
+                47.786458
+              ]
+            }
+          }
+        },
+        "candidate": {
+          "checkpoint_storage": {
+            "blob_bytes": 3575,
+            "blob_count": 55,
+            "checkpoint_journal_bytes": 36080,
+            "total_checkpoint_bytes": 39655
+          },
+          "client_resources": {
+            "cycles_elapsed": {
+              "count": 20,
+              "max": 18774113.0,
+              "min": 17351105.0,
+              "p50": 18129583.0,
+              "p95": 18637565.0
+            },
+            "instructions_retired": {
+              "count": 20,
+              "max": 38024356.0,
+              "min": 37586706.0,
+              "p50": 37783049.5,
+              "p95": 38015462.0
+            },
+            "max_rss_bytes": {
+              "count": 20,
+              "max": 7733248.0,
+              "min": 7258112.0,
+              "p50": 7315456.0,
+              "p95": 7553024.0
+            },
+            "peak_memory_footprint_bytes": {
+              "count": 20,
+              "max": 3195192.0,
+              "min": 2720032.0,
+              "p50": 2785604.0,
+              "p95": 3014992.0
+            },
+            "real_seconds": {
+              "count": 20,
+              "max": 0.05,
+              "min": 0.04,
+              "p50": 0.04,
+              "p95": 0.05
+            },
+            "sys_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "user_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            }
+          },
+          "config": {
+            "effective": true,
+            "method": "native-config-feature-flags-readback/v1",
+            "requested": true,
+            "status": "enabled",
+            "supported": true
+          },
+          "daemon_resources": {
+            "cycles_elapsed": 656806529,
+            "instructions_retired": 881389903,
+            "max_rss_bytes": 16941056,
+            "peak_memory_footprint_bytes": 8602296,
+            "real_seconds": 5.98,
+            "sys_seconds": 0.7,
+            "user_seconds": 0.85
+          },
+          "timings_ms": {
+            "command_ack_ms": {
+              "count": 30,
+              "max": 50.159,
+              "min": 46.997375,
+              "p50": 48.038729000000004,
+              "p95": 49.194125,
+              "values": [
+                47.087166,
+                48.173834,
+                47.232625,
+                48.082583,
+                47.2075,
+                47.273375,
+                47.12525,
+                47.187917,
+                48.062708,
+                47.135417,
+                48.238,
+                46.997375,
+                47.390667,
+                47.167667,
+                48.972125,
+                47.078542,
+                48.213958,
+                49.183458,
+                48.006667,
+                48.157583,
+                48.156833,
+                48.167166,
+                49.194125,
+                48.01475,
+                48.336791,
+                48.076833,
+                50.159,
+                47.112042,
+                48.209208,
+                47.117041
+              ]
+            },
+            "family_sync_fence_ms": {
+              "count": 30,
+              "max": 50.467166,
+              "min": 47.314709,
+              "p50": 48.347479,
+              "p95": 49.521333,
+              "values": [
+                47.4215,
+                48.490209,
+                47.562375,
+                48.407125,
+                47.5165,
+                47.617541,
+                47.444583,
+                47.525334,
+                48.363708,
+                47.451459,
+                48.564208,
+                47.314709,
+                47.702,
+                47.487,
+                49.288,
+                47.397083,
+                48.524167,
+                49.521333,
+                48.32575,
+                48.484208,
+                48.483791,
+                48.488208,
+                49.515542,
+                48.33125,
+                48.68375,
+                48.457042,
+                50.467166,
+                47.41175,
+                48.545917,
+                47.438208
+              ]
+            },
+            "family_sync_minus_ack_ms": {
+              "count": 30,
+              "max": 0.380209,
+              "min": 0.299708,
+              "p50": 0.32018749999999996,
+              "p95": 0.346959,
+              "values": [
+                0.334334,
+                0.316375,
+                0.32975,
+                0.324542,
+                0.309,
+                0.344166,
+                0.319333,
+                0.337417,
+                0.301,
+                0.316042,
+                0.326208,
+                0.317334,
+                0.311333,
+                0.319333,
+                0.315875,
+                0.318541,
+                0.310209,
+                0.337875,
+                0.319083,
+                0.326625,
+                0.326958,
+                0.321042,
+                0.321417,
+                0.3165,
+                0.346959,
+                0.380209,
+                0.308166,
+                0.299708,
+                0.336709,
+                0.321167
+              ]
+            },
+            "material_observed_ms": {
+              "count": 30,
+              "max": 50.779833,
+              "min": 47.595542,
+              "p50": 48.639854,
+              "p95": 49.837833,
+              "values": [
+                47.718791,
+                48.775709,
+                47.865833,
+                48.693583,
+                47.816584,
+                47.921791,
+                47.73625,
+                47.817667,
+                48.645708,
+                47.73475,
+                48.882333,
+                47.595542,
+                48.028167,
+                47.779417,
+                49.594875,
+                47.698875,
+                48.818833,
+                49.837833,
+                48.611042,
+                48.78725,
+                48.813416,
+                48.782375,
+                49.818708,
+                48.634,
+                49.005708,
+                48.766458,
+                50.779833,
+                47.707125,
+                48.867625,
+                47.745625
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "comparisons": {
+        "command_ack_ms": {
+          "comparison_status": "comparable",
+          "paired_difference_ms": {
+            "bootstrap_95_ci": [
+              -0.09318800000000138,
+              0.2785000000000011
+            ],
+            "median": -0.0002080000000006521
+          },
+          "paired_ratio": {
+            "bootstrap_95_ci": [
+              0.9980211443803071,
+              1.0059330206458497
+            ],
+            "candidate_over_baseline": 0.9999955928284805
+          }
+        },
+        "family_sync_fence_ms": {
+          "comparison_status": "comparable",
+          "paired_difference_ms": {
+            "bootstrap_95_ci": [
+              -0.10275050000000263,
+              0.3237079999999999
+            ],
+            "median": 0.01966600000000085
+          },
+          "paired_ratio": {
+            "bootstrap_95_ci": [
+              0.9978529658939834,
+              1.00685148676483
+            ],
+            "candidate_over_baseline": 1.0004147913677195
+          }
+        }
+      },
+      "fixture_comparable": true,
+      "measured_depth_range": [
+        55,
+        84
+      ],
+      "pair_orders": [
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ]
+      ],
+      "prefill_depth": 50,
+      "resource_depth_range": [
+        85,
+        104
+      ],
+      "variants": {
+        "baseline": {
+          "checkpoint_storage": {
+            "blob_bytes": 6825,
+            "blob_count": 105,
+            "checkpoint_journal_bytes": 68880,
+            "total_checkpoint_bytes": 75705
+          },
+          "client_resources": {
+            "cycles_elapsed": {
+              "count": 20,
+              "max": 19518190.0,
+              "min": 17247777.0,
+              "p50": 17843055.5,
+              "p95": 18397727.0
+            },
+            "instructions_retired": {
+              "count": 20,
+              "max": 37911316.0,
+              "min": 37341803.0,
+              "p50": 37626266.5,
+              "p95": 37851515.0
+            },
+            "max_rss_bytes": {
+              "count": 20,
+              "max": 7520256.0,
+              "min": 7225344.0,
+              "p50": 7258112.0,
+              "p95": 7520256.0
+            },
+            "peak_memory_footprint_bytes": {
+              "count": 20,
+              "max": 3047736.0,
+              "min": 2736416.0,
+              "p50": 2777400.0,
+              "p95": 3047736.0
+            },
+            "real_seconds": {
+              "count": 20,
+              "max": 0.04,
+              "min": 0.04,
+              "p50": 0.04,
+              "p95": 0.04
+            },
+            "sys_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "user_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            }
+          },
+          "config": {
+            "effective": null,
+            "method": "native-config-feature-flags-readback/v1",
+            "requested": true,
+            "status": "unsupported",
+            "supported": false
+          },
+          "daemon_resources": {
+            "cycles_elapsed": 1205603170,
+            "instructions_retired": 1666767316,
+            "max_rss_bytes": 17055744,
+            "peak_memory_footprint_bytes": 8618632,
+            "real_seconds": 10.46,
+            "sys_seconds": 1.32,
+            "user_seconds": 1.62
+          },
+          "timings_ms": {
+            "command_ack_ms": {
+              "count": 30,
+              "max": 49.009916,
+              "min": 46.027,
+              "p50": 47.141833000000005,
+              "p95": 48.227083,
+              "values": [
+                47.1535,
+                47.288291,
+                48.227083,
+                47.905583,
+                47.179875,
+                48.073583,
+                46.102041,
+                47.161958,
+                46.027,
+                47.293042,
+                48.055666,
+                47.0635,
+                46.917333,
+                48.206583,
+                48.120959,
+                47.028084,
+                47.09925,
+                47.09375,
+                46.102583,
+                47.144666,
+                47.135375,
+                46.957333,
+                47.031875,
+                47.035042,
+                49.009916,
+                48.084833,
+                48.1075,
+                47.139,
+                46.975208,
+                47.134583
+              ]
+            },
+            "family_sync_fence_ms": {
+              "count": 30,
+              "max": 49.341,
+              "min": 46.339875,
+              "p50": 47.456479,
+              "p95": 48.577541,
+              "values": [
+                47.454875,
+                47.674458,
+                48.577541,
+                48.237708,
+                47.506042,
+                48.400291,
+                46.441083,
+                47.476166,
+                46.339875,
+                47.649792,
+                48.377666,
+                47.388417,
+                47.220542,
+                48.5135,
+                48.436334,
+                47.334792,
+                47.397917,
+                47.409333,
+                46.407333,
+                47.451625,
+                47.459166,
+                47.270042,
+                47.336542,
+                47.328375,
+                49.341,
+                48.418042,
+                48.398375,
+                47.432375,
+                47.263542,
+                47.458083
+              ]
+            },
+            "family_sync_minus_ack_ms": {
+              "count": 30,
+              "max": 0.386167,
+              "min": 0.288334,
+              "p50": 0.3147915,
+              "p95": 0.35675,
+              "values": [
+                0.301375,
+                0.386167,
+                0.350458,
+                0.332125,
+                0.326167,
+                0.326708,
+                0.339042,
+                0.314208,
+                0.312875,
+                0.35675,
+                0.322,
+                0.324917,
+                0.303209,
+                0.306917,
+                0.315375,
+                0.306708,
+                0.298667,
+                0.315583,
+                0.30475,
+                0.306959,
+                0.323791,
+                0.312709,
+                0.304667,
+                0.293333,
+                0.331084,
+                0.333209,
+                0.290875,
+                0.293375,
+                0.288334,
+                0.3235
+              ]
+            },
+            "material_observed_ms": {
+              "count": 30,
+              "max": 49.683416,
+              "min": 46.65875,
+              "p50": 47.7918745,
+              "p95": 48.908041,
+              "values": [
+                47.777541,
+                48.029291,
+                48.908041,
+                48.561958,
+                47.836042,
+                48.728208,
+                46.779166,
+                47.791416,
+                46.65875,
+                48.004583,
+                48.698291,
+                47.726875,
+                47.535833,
+                48.837916,
+                48.775625,
+                47.674542,
+                47.724542,
+                47.740333,
+                46.74075,
+                47.796291,
+                47.792333,
+                47.624208,
+                47.651709,
+                47.658375,
+                49.683416,
+                48.746,
+                48.721584,
+                47.775333,
+                47.585375,
+                47.81075
+              ]
+            }
+          }
+        },
+        "candidate": {
+          "checkpoint_storage": {
+            "blob_bytes": 6825,
+            "blob_count": 105,
+            "checkpoint_journal_bytes": 68880,
+            "total_checkpoint_bytes": 75705
+          },
+          "client_resources": {
+            "cycles_elapsed": {
+              "count": 20,
+              "max": 18814754.0,
+              "min": 17227088.0,
+              "p50": 17813365.5,
+              "p95": 18378288.0
+            },
+            "instructions_retired": {
+              "count": 20,
+              "max": 37986411.0,
+              "min": 37511884.0,
+              "p50": 37735109.5,
+              "p95": 37895264.0
+            },
+            "max_rss_bytes": {
+              "count": 20,
+              "max": 7553024.0,
+              "min": 7258112.0,
+              "p50": 7290880.0,
+              "p95": 7471104.0
+            },
+            "peak_memory_footprint_bytes": {
+              "count": 20,
+              "max": 3014968.0,
+              "min": 2703648.0,
+              "p50": 2752824.0,
+              "p95": 2916664.0
+            },
+            "real_seconds": {
+              "count": 20,
+              "max": 0.04,
+              "min": 0.04,
+              "p50": 0.04,
+              "p95": 0.04
+            },
+            "sys_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "user_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            }
+          },
+          "config": {
+            "effective": true,
+            "method": "native-config-feature-flags-readback/v1",
+            "requested": true,
+            "status": "enabled",
+            "supported": true
+          },
+          "daemon_resources": {
+            "cycles_elapsed": 1230727057,
+            "instructions_retired": 1710178147,
+            "max_rss_bytes": 17268736,
+            "peak_memory_footprint_bytes": 8929952,
+            "real_seconds": 10.71,
+            "sys_seconds": 1.34,
+            "user_seconds": 1.63
+          },
+          "timings_ms": {
+            "command_ack_ms": {
+              "count": 30,
+              "max": 53.9455,
+              "min": 46.038292,
+              "p50": 47.145958,
+              "p95": 51.1385,
+              "values": [
+                47.032083,
+                47.955625,
+                47.090208,
+                51.1385,
+                46.959583,
+                46.125208,
+                46.038292,
+                46.096792,
+                47.060458,
+                47.916792,
+                47.096125,
+                47.052291,
+                47.149166,
+                47.178667,
+                47.9745,
+                47.066,
+                47.118625,
+                48.157875,
+                48.004125,
+                47.1405,
+                47.070416,
+                47.2825,
+                48.094583,
+                47.112,
+                48.211208,
+                48.0205,
+                47.163375,
+                47.14275,
+                53.9455,
+                48.11925
+              ]
+            },
+            "family_sync_fence_ms": {
+              "count": 30,
+              "max": 54.281333,
+              "min": 46.36425,
+              "p50": 47.481792,
+              "p95": 51.474667,
+              "values": [
+                47.336166,
+                48.282083,
+                47.405125,
+                51.474667,
+                47.279542,
+                46.44625,
+                46.36425,
+                46.440708,
+                47.393083,
+                48.263167,
+                47.423709,
+                47.384708,
+                47.52975,
+                47.523625,
+                48.301209,
+                47.379167,
+                47.427083,
+                48.498,
+                48.317542,
+                47.461791,
+                47.400958,
+                47.60825,
+                48.449125,
+                47.420583,
+                48.536792,
+                48.33125,
+                47.484667,
+                47.478917,
+                54.281333,
+                48.474125
+              ]
+            },
+            "family_sync_minus_ack_ms": {
+              "count": 30,
+              "max": 0.380584,
+              "min": 0.304083,
+              "p50": 0.3265835,
+              "p95": 0.354875,
+              "values": [
+                0.304083,
+                0.326458,
+                0.314917,
+                0.336167,
+                0.319959,
+                0.321042,
+                0.325958,
+                0.343916,
+                0.332625,
+                0.346375,
+                0.327584,
+                0.332417,
+                0.380584,
+                0.344958,
+                0.326709,
+                0.313167,
+                0.308458,
+                0.340125,
+                0.313417,
+                0.321291,
+                0.330542,
+                0.32575,
+                0.354542,
+                0.308583,
+                0.325584,
+                0.31075,
+                0.321292,
+                0.336167,
+                0.335833,
+                0.354875
+              ]
+            },
+            "material_observed_ms": {
+              "count": 30,
+              "max": 54.615958,
+              "min": 46.681917,
+              "p50": 47.8179795,
+              "p95": 51.806667,
+              "values": [
+                47.647416,
+                48.595792,
+                47.719375,
+                51.806667,
+                47.596917,
+                46.774541,
+                46.681917,
+                46.766875,
+                47.731417,
+                48.604417,
+                47.753584,
+                47.699666,
+                47.900166,
+                47.867583,
+                48.629084,
+                47.696709,
+                47.7615,
+                48.865083,
+                48.68325,
+                47.810875,
+                47.739541,
+                47.950083,
+                48.8015,
+                47.736958,
+                48.90075,
+                48.634208,
+                47.791167,
+                47.825084,
+                54.615958,
+                48.856875
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "comparisons": {
+        "command_ack_ms": {
+          "comparison_status": "comparable",
+          "paired_difference_ms": {
+            "bootstrap_95_ci": [
+              -0.5804159999999996,
+              0.02945900000000279
+            ],
+            "median": -0.045749500000002996
+          },
+          "paired_ratio": {
+            "bootstrap_95_ci": [
+              0.9878818657946526,
+              1.0004375846419742
+            ],
+            "candidate_over_baseline": 0.9990459866417782
+          }
+        },
+        "family_sync_fence_ms": {
+          "comparison_status": "comparable",
+          "paired_difference_ms": {
+            "bootstrap_95_ci": [
+              -0.5637079999999983,
+              0.10704199999999986
+            ],
+            "median": -0.0715830000000004
+          },
+          "paired_ratio": {
+            "bootstrap_95_ci": [
+              0.988307095466135,
+              1.0018135528905645
+            ],
+            "candidate_over_baseline": 0.9985176811137324
+          }
+        }
+      },
+      "fixture_comparable": true,
+      "measured_depth_range": [
+        205,
+        234
+      ],
+      "pair_orders": [
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ],
+        [
+          "candidate",
+          "baseline"
+        ],
+        [
+          "baseline",
+          "candidate"
+        ]
+      ],
+      "prefill_depth": 200,
+      "resource_depth_range": [
+        235,
+        254
+      ],
+      "variants": {
+        "baseline": {
+          "checkpoint_storage": {
+            "blob_bytes": 16575,
+            "blob_count": 255,
+            "checkpoint_journal_bytes": 167280,
+            "total_checkpoint_bytes": 183855
+          },
+          "client_resources": {
+            "cycles_elapsed": {
+              "count": 20,
+              "max": 19501017.0,
+              "min": 17460619.0,
+              "p50": 18266915.5,
+              "p95": 19136708.0
+            },
+            "instructions_retired": {
+              "count": 20,
+              "max": 38116277.0,
+              "min": 37408417.0,
+              "p50": 37677903.0,
+              "p95": 37969891.0
+            },
+            "max_rss_bytes": {
+              "count": 20,
+              "max": 7798784.0,
+              "min": 7176192.0,
+              "p50": 7241728.0,
+              "p95": 7782400.0
+            },
+            "peak_memory_footprint_bytes": {
+              "count": 20,
+              "max": 3342672.0,
+              "min": 2720080.0,
+              "p50": 2769208.0,
+              "p95": 3309880.0
+            },
+            "real_seconds": {
+              "count": 20,
+              "max": 0.05,
+              "min": 0.04,
+              "p50": 0.04,
+              "p95": 0.05
+            },
+            "sys_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "user_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            }
+          },
+          "config": {
+            "effective": null,
+            "method": "native-config-feature-flags-readback/v1",
+            "requested": true,
+            "status": "unsupported",
+            "supported": false
+          },
+          "daemon_resources": {
+            "cycles_elapsed": 3072967574,
+            "instructions_retired": 4729167689,
+            "max_rss_bytes": 17776640,
+            "peak_memory_footprint_bytes": 9372320,
+            "real_seconds": 25.29,
+            "sys_seconds": 3.23,
+            "user_seconds": 4.0
+          },
+          "timings_ms": {
+            "command_ack_ms": {
+              "count": 30,
+              "max": 51.856875,
+              "min": 46.910542,
+              "p50": 47.964479,
+              "p95": 51.78025,
+              "values": [
+                47.838583,
+                47.900167,
+                47.067834,
+                46.966833,
+                47.949375,
+                47.980833,
+                47.810458,
+                48.110666,
+                51.78025,
+                48.068375,
+                47.970583,
+                47.866208,
+                47.93025,
+                49.10325,
+                47.806541,
+                48.001333,
+                48.144958,
+                49.776958,
+                47.841791,
+                51.856875,
+                47.984125,
+                49.001583,
+                46.910542,
+                47.169041,
+                47.962541,
+                49.809417,
+                47.966417,
+                49.914875,
+                47.934375,
+                47.843083
+              ]
+            },
+            "family_sync_fence_ms": {
+              "count": 30,
+              "max": 52.169458,
+              "min": 47.21475,
+              "p50": 48.287667,
+              "p95": 52.080416,
+              "values": [
+                48.15725,
+                48.193834,
+                47.37575,
+                47.317667,
+                48.256,
+                48.287542,
+                48.109542,
+                48.42775,
+                52.080416,
+                48.433083,
+                48.301458,
+                48.174542,
+                48.226417,
+                49.420708,
+                48.130541,
+                48.309458,
+                48.462083,
+                50.08825,
+                48.127458,
+                52.169458,
+                48.289666,
+                49.297041,
+                47.21475,
+                47.496416,
+                48.297666,
+                50.149833,
+                48.271334,
+                50.228,
+                48.287792,
+                48.159375
+              ]
+            },
+            "family_sync_minus_ack_ms": {
+              "count": 30,
+              "max": 0.364708,
+              "min": 0.285667,
+              "p50": 0.3119375,
+              "p95": 0.353417,
+              "values": [
+                0.318667,
+                0.293667,
+                0.307916,
+                0.350834,
+                0.306625,
+                0.306709,
+                0.299084,
+                0.317084,
+                0.300166,
+                0.364708,
+                0.330875,
+                0.308334,
+                0.296167,
+                0.317458,
+                0.324,
+                0.308125,
+                0.317125,
+                0.311292,
+                0.285667,
+                0.312583,
+                0.305541,
+                0.295458,
+                0.304208,
+                0.327375,
+                0.335125,
+                0.340416,
+                0.304917,
+                0.313125,
+                0.353417,
+                0.316292
+              ]
+            },
+            "material_observed_ms": {
+              "count": 30,
+              "max": 52.594083,
+              "min": 47.618125,
+              "p50": 48.6953545,
+              "p95": 52.44325,
+              "values": [
+                48.571375,
+                48.569459,
+                47.76325,
+                47.762583,
+                48.668708,
+                48.675792,
+                48.486875,
+                48.86125,
+                52.44325,
+                48.8435,
+                48.724958,
+                48.593542,
+                48.634458,
+                49.828833,
+                48.548208,
+                48.759583,
+                48.907333,
+                50.523166,
+                48.527625,
+                52.594083,
+                48.69375,
+                49.6875,
+                47.618125,
+                47.93175,
+                48.724625,
+                50.59625,
+                48.696959,
+                50.684625,
+                48.743083,
+                48.588625
+              ]
+            }
+          }
+        },
+        "candidate": {
+          "checkpoint_storage": {
+            "blob_bytes": 16575,
+            "blob_count": 255,
+            "checkpoint_journal_bytes": 167280,
+            "total_checkpoint_bytes": 183855
+          },
+          "client_resources": {
+            "cycles_elapsed": {
+              "count": 20,
+              "max": 25068274.0,
+              "min": 17391953.0,
+              "p50": 18079590.5,
+              "p95": 19584147.0
+            },
+            "instructions_retired": {
+              "count": 20,
+              "max": 40303276.0,
+              "min": 37568970.0,
+              "p50": 37794012.0,
+              "p95": 38144691.0
+            },
+            "max_rss_bytes": {
+              "count": 20,
+              "max": 8536064.0,
+              "min": 7274496.0,
+              "p50": 7471104.0,
+              "p95": 7782400.0
+            },
+            "peak_memory_footprint_bytes": {
+              "count": 20,
+              "max": 3998008.0,
+              "min": 2720032.0,
+              "p50": 2933048.0,
+              "p95": 3244344.0
+            },
+            "real_seconds": {
+              "count": 20,
+              "max": 0.05,
+              "min": 0.04,
+              "p50": 0.04,
+              "p95": 0.05
+            },
+            "sys_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            },
+            "user_seconds": {
+              "count": 20,
+              "max": 0.0,
+              "min": 0.0,
+              "p50": 0.0,
+              "p95": 0.0
+            }
+          },
+          "config": {
+            "effective": true,
+            "method": "native-config-feature-flags-readback/v1",
+            "requested": true,
+            "status": "enabled",
+            "supported": true
+          },
+          "daemon_resources": {
+            "cycles_elapsed": 3117572626,
+            "instructions_retired": 4825685597,
+            "max_rss_bytes": 17629184,
+            "peak_memory_footprint_bytes": 9274016,
+            "real_seconds": 25.55,
+            "sys_seconds": 3.24,
+            "user_seconds": 4.0
+          },
+          "timings_ms": {
+            "command_ack_ms": {
+              "count": 30,
+              "max": 49.924417,
+              "min": 46.884708,
+              "p50": 47.9413335,
+              "p95": 49.782667,
+              "values": [
+                46.884708,
+                49.103458,
+                48.04225,
+                48.9665,
+                46.890042,
+                47.940625,
+                46.949709,
+                48.897292,
+                49.924417,
+                47.947208,
+                47.942042,
+                47.878625,
+                48.904958,
+                48.929417,
+                47.780833,
+                48.856792,
+                47.844875,
+                47.933417,
+                47.87125,
+                47.913,
+                49.782667,
+                47.957375,
+                48.941917,
+                48.6725,
+                47.92975,
+                48.033958,
+                47.805583,
+                47.838167,
+                47.883084,
+                46.898584
+              ]
+            },
+            "family_sync_fence_ms": {
+              "count": 30,
+              "max": 50.302417,
+              "min": 47.207375,
+              "p50": 48.279478999999995,
+              "p95": 50.093042,
+              "values": [
+                47.229542,
+                49.4145,
+                48.347083,
+                49.306375,
+                47.207375,
+                48.277916,
+                47.303167,
+                49.234459,
+                50.302417,
+                48.271667,
+                48.300167,
+                48.281584,
+                49.228208,
+                49.257709,
+                48.128083,
+                49.1565,
+                48.141042,
+                48.281042,
+                48.195084,
+                48.261083,
+                50.093042,
+                48.256666,
+                49.255333,
+                49.001375,
+                48.247833,
+                48.381416,
+                48.114791,
+                48.157792,
+                48.194459,
+                47.21275
+              ]
+            },
+            "family_sync_minus_ack_ms": {
+              "count": 30,
+              "max": 0.402959,
+              "min": 0.296167,
+              "p50": 0.3241465,
+              "p95": 0.378,
+              "values": [
+                0.344834,
+                0.311042,
+                0.304833,
+                0.339875,
+                0.317333,
+                0.337291,
+                0.353458,
+                0.337167,
+                0.378,
+                0.324459,
+                0.358125,
+                0.402959,
+                0.32325,
+                0.328292,
+                0.34725,
+                0.299708,
+                0.296167,
+                0.347625,
+                0.323834,
+                0.348083,
+                0.310375,
+                0.299291,
+                0.313416,
+                0.328875,
+                0.318083,
+                0.347458,
+                0.309208,
+                0.319625,
+                0.311375,
+                0.314166
+              ]
+            },
+            "material_observed_ms": {
+              "count": 30,
+              "max": 50.750042,
+              "min": 47.59775,
+              "p50": 48.713145499999996,
+              "p95": 50.496833,
+              "values": [
+                47.649042,
+                49.790375,
+                48.711541,
+                49.721,
+                47.59775,
+                48.689666,
+                47.72725,
+                49.655417,
+                50.750042,
+                48.680333,
+                48.737084,
+                48.727042,
+                49.617,
+                49.685917,
+                48.570125,
+                49.609333,
+                48.5535,
+                48.717542,
+                48.654959,
+                48.71475,
+                50.496833,
+                48.667833,
+                49.700875,
+                49.432292,
+                48.673292,
+                48.8245,
+                48.513375,
+                48.585625,
+                48.620084,
+                47.639625
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "schema": "git-ai-checkpoint-capnp-release-comparison-summary/1.0.0",
+  "variants": {
+    "baseline": {
+      "binary_sha256": "5356895ff4a3a1eae1a3cf18a533e11c9ff81ff09ab23755881a2d20de674360",
+      "binary_size_bytes": 19782256,
+      "build_duration_seconds": 160.79527316614985,
+      "build_manifest_digest": "019a0c34208719eec9ce186ea04ac288ad39f4baf31d87d1d4ae45658c0a7270",
+      "build_status": "verified_local_build",
+      "cargo_lock_sha256": "e27d548d5d03319976b18c08ad8beca8a304b4b30371ecc21440d65990b7e873",
+      "source_clean": true,
+      "source_commit": "29288e324cec3d802d176f340a893b1745cace6c",
+      "source_unchanged_after_run": true
+    },
+    "candidate": {
+      "binary_sha256": "d262133489cd5956b99fb2d284ee88d5571ebaa43d5d0478d8ec96fb6e407bfb",
+      "binary_size_bytes": 19760624,
+      "build_duration_seconds": 163.38803441589698,
+      "build_manifest_digest": "a1366c549a65d14b485783b0ac06629928ba98a1aa47e880cd838b86d5627d3e",
+      "build_status": "verified_local_build",
+      "cargo_lock_sha256": "e8e7f484891ead7d304804ad05a72395b1e5bd697a8e2dbf6de378393eecd0f7",
+      "source_clean": true,
+      "source_commit": "6f2a71a3b41fd59ff65b579cf8e94f109dde076d",
+      "source_unchanged_after_run": true
+    }
+  }
+}

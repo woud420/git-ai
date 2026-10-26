@@ -69,3 +69,7 @@ attribution, replay identity, admission, deadlines, shutdown, and final ACKs
 behind trace fences. See
 [`scripts/benchmarks/checkpoint/IPC.md`](../../scripts/benchmarks/checkpoint/IPC.md)
 for comparative measurement commands and their scope.
+
+The [2026-10-26 measurements](../decisions/2026-10-26-checkpoint-ipc-measurements.md)
+found a substantial codec gain but no demonstrated small-edit release CLI gain.
+JSON remains the default; the binary transport remains opt-in.

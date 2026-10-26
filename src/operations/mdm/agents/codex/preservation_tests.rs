@@ -189,6 +189,9 @@ fn preserves_inline_hook_entries_and_comments_in_multiline_arrays() {
             "[[hooks.Stop]]\nhooks = [\n{managed}, # managed\n# Custom hook, including a comma\n{custom}, # keep\n]\n"
         ),
         format!("[[hooks.Stop]]\nhooks = [\n# Custom hook\n{custom}, # keep\n{managed},\n]\n"),
+        format!(
+            "[[hooks.Stop]]\nhooks = [\n{custom}, # first\n{managed},\n{{ command = 'echo second' }}, # second\n]\n"
+        ),
         format!("hooks = {{ Stop = [ {{ hooks = [{managed}, {custom}] }} ] }} # keep inline\n"),
         format!(
             "hooks.Stop = [\n{{ hooks = [{managed}] }},\n# Custom group\n{{ hooks = [{custom}] }},\n]\n"
@@ -199,6 +202,13 @@ fn preserves_inline_hook_entries_and_comments_in_multiline_arrays() {
             assert!(output.contains(custom), "{output}");
             if source.contains(&format!("{custom}, # keep")) {
                 assert!(output.contains(&format!("{custom}, # keep")), "{output}");
+            }
+            if source.contains(&format!("{custom}, # first")) {
+                assert!(output.contains(&format!("{custom}, # first")), "{output}");
+                assert!(
+                    output.contains("{ command = 'echo second' }, # second"),
+                    "{output}"
+                );
             }
             for line in source.lines().filter(|line| line.starts_with("# Custom")) {
                 assert!(output.contains(line), "{output}");
@@ -252,7 +262,7 @@ fn preserves_text_during_both_hook_format_migrations() {
 
 #[test]
 #[serial]
-fn invalid_or_mismatched_edits_do_not_write_config() {
+fn invalid_configs_do_not_write_config() {
     with_temp_home(|home| {
         let config_path = home.join(".codex/config.toml");
         fs::create_dir_all(config_path.parent().unwrap()).unwrap();
@@ -260,11 +270,19 @@ fn invalid_or_mismatched_edits_do_not_write_config() {
         let params = HookInstallerParams {
             binary_path: test_binary_path(),
         };
-        for source in ["model = [", "hooks.Stop.unexpected = 'not an array'\n"] {
+        for source in ["model = [", "[features]\nhooks = true\nhooks = false\n"] {
             fs::write(&config_path, source).unwrap();
             assert!(installer.install_hooks(&params, false).is_err());
             assert_eq!(fs::read_to_string(&config_path).unwrap(), source);
         }
         assert!(update_config("# comment\n", &Value::Boolean(true)).is_err());
     });
+}
+
+#[test]
+fn repairs_non_array_hook_fields_using_existing_transformations() {
+    let source = "model = 'gpt-5' # keep\nhooks.Stop.unexpected = 'not an array'\n";
+    let (installed, uninstalled) = install_and_remove(source);
+    assert!(installed.contains("model = 'gpt-5' # keep"));
+    assert!(uninstalled.contains("model = 'gpt-5' # keep"));
 }

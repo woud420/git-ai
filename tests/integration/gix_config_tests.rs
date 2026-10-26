@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use git_ai::operations::git::repository as GitAiRepository;
 
 /// Helper to get git config via CLI for comparison
@@ -275,7 +275,7 @@ fn test_config_local_overrides_global() {
 
 #[test]
 fn test_config_get_str_bare_repo() {
-    let repo = TestRepo::new_bare();
+    let repo = TestRepo::new_bare_with_daemon_scope(DaemonTestScope::NoDaemon);
     let key = "custom.baretest";
 
     repo.git(&["config", key, "bare_value"]).unwrap();
@@ -288,7 +288,7 @@ fn test_config_get_str_bare_repo() {
 
 #[test]
 fn test_config_get_regexp_bare_repo() {
-    let repo = TestRepo::new_bare();
+    let repo = TestRepo::new_bare_with_daemon_scope(DaemonTestScope::NoDaemon);
 
     repo.git(&["config", "baretest.key1", "value1"]).unwrap();
     repo.git(&["config", "baretest.key2", "value2"]).unwrap();

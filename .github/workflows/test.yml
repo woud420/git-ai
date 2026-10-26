@@ -173,7 +173,8 @@ jobs:
           shard_count="$MATRIX_SHARD_COUNT"
           module_infos=()
           module_names=()
-          skip_args=()
+          # Run the wall-clock throughput guard after the parallel suite has exited.
+          skip_args=(--skip daemon_runtime_memory::bounded_helper_pool_sustains_multifile_checkpoint_throughput)
 
           while IFS= read -r name; do
             module_names+=("$name")
@@ -329,6 +330,7 @@ jobs:
               Where-Object { $selectedModules -notcontains $_.Name } |
               ForEach-Object { "--skip $($_.Name)::" }
           )
+          $skipArgs += "--skip daemon_runtime_memory::bounded_helper_pool_sustains_multifile_checkpoint_throughput"
           $skipArgs = $skipArgs -join " "
 
           Write-Host "Running Windows integration shard $($shardIndex + 1)/$shardCount"
@@ -346,6 +348,20 @@ jobs:
           MATRIX_TEST_THREADS: ${{ matrix.test_threads }}
           MATRIX_SHARD_INDEX: ${{ matrix.shard_index }}
           MATRIX_SHARD_COUNT: ${{ matrix.shard_count }}
+
+      - name: Check bounded helper checkpoint throughput in isolation
+        if: contains(matrix.mode, 'integration') && matrix.shard_index == 0
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          make test CARGO_TEST_ARGS="--test integration" \
+            TEST_FILTER=daemon_runtime_memory::bounded_helper_pool_sustains_multifile_checkpoint_throughput \
+            EXTRA_TEST_BINARY_ARGS="--exact" TEST_THREADS=1 NO_CAPTURE=true
+        env:
+          CARGO_INCREMENTAL: 0
+          GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE: 1
+          GIT_AI_TEST_ARTIFACT_DIR: ${{ runner.temp }}/git-ai-test-artifacts
+          RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
 
       - name: Upload daemon completion diagnostics
         if: ${{ always() }}

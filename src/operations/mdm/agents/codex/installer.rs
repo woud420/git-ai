@@ -142,9 +142,8 @@ impl HookInstaller for CodexInstaller {
             let mut diff_output = Vec::new();
 
             if config_changed {
-                let new_config_content = toml::to_string_pretty(&merged_config).map_err(|e| {
-                    GitAiError::Generic(format!("Failed to serialize Codex config.toml: {e}"))
-                })?;
+                let new_config_content =
+                    super::config_edit::update_config(&existing_config_content, &merged_config)?;
                 diff_output.push(generate_diff(
                     &config_path,
                     &existing_config_content,
@@ -190,9 +189,8 @@ impl HookInstaller for CodexInstaller {
 
         // Write config.toml FIRST (contains the replacement inline hooks)
         if config_changed {
-            let new_config_content = toml::to_string_pretty(&merged_config).map_err(|e| {
-                GitAiError::Generic(format!("Failed to serialize Codex config.toml: {e}"))
-            })?;
+            let new_config_content =
+                super::config_edit::update_config(&existing_config_content, &merged_config)?;
             diff_output.push(generate_diff(
                 &config_path,
                 &existing_config_content,
@@ -272,9 +270,8 @@ impl HookInstaller for CodexInstaller {
 
         // Write config.toml changes first
         if config_changed || inline_hooks_changed {
-            let new_config_content = toml::to_string_pretty(&merged_config).map_err(|e| {
-                GitAiError::Generic(format!("Failed to serialize Codex config.toml: {e}"))
-            })?;
+            let new_config_content =
+                super::config_edit::update_config(&existing_config_content, &merged_config)?;
             diff_output.push(generate_diff(
                 &config_path,
                 &existing_config_content,

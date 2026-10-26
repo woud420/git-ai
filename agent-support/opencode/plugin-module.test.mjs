@@ -1,29 +1,31 @@
 import assert from "node:assert/strict"
 import childProcess from "node:child_process"
-import crypto from "node:crypto"
 import { EventEmitter } from "node:events"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough, Writable } from "node:stream"
 import test from "node:test"
-import ts from "typescript"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
-const source = await readFile(new URL("./git-ai.ts", import.meta.url), "utf8")
-const { outputText } = ts.transpileModule(source, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-})
 // The plugin imports `@opencode/plugin` at runtime, and bare specifiers cannot
-// be resolved from a data: URL, so import the transpiled module from a file
+// be resolved from a data: URL, so import the compiled module from a file
 // inside the package directory where node_modules resolution works.
-const buildUrl = new URL(`./git-ai.test-build-${crypto.randomUUID()}.mjs`, import.meta.url)
-await writeFile(buildUrl, outputText)
+const buildDirectory = await mkdtemp(new URL("./git-ai.test-build-", import.meta.url))
 let plugin
 try {
-  plugin = await import(buildUrl)
+  childProcess.execFileSync(process.execPath, [
+    fileURLToPath(new URL("./node_modules/typescript/bin/tsc", import.meta.url)),
+    "--noEmit", "false", "--outDir", buildDirectory,
+  ], {
+    cwd: fileURLToPath(new URL(".", import.meta.url)),
+    stdio: "inherit",
+    timeout: 30_000,
+  })
+  plugin = await import(pathToFileURL(join(buildDirectory, "git-ai.js")))
 } finally {
-  await rm(buildUrl, { force: true })
+  await rm(buildDirectory, { recursive: true, force: true })
 }
 
 const mockCheckpointSpawn = (t, checkpoints) => {

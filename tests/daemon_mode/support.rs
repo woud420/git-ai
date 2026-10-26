@@ -33,6 +33,9 @@ mod control_admission;
 #[path = "checkpoint.rs"]
 mod checkpoint;
 
+#[path = "checkpoint_capnp.rs"]
+mod checkpoint_capnp;
+
 #[path = "trace_listener.rs"]
 mod trace_listener;
 

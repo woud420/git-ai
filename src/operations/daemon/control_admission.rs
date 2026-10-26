@@ -50,7 +50,7 @@ impl ControlAdmission {
         })
     }
 
-    fn checkpoint(&self, encoded_bytes: usize) -> Option<CheckpointPermit> {
+    pub(crate) fn checkpoint(&self, encoded_bytes: usize) -> Option<CheckpointPermit> {
         let bytes = u32::try_from(encoded_bytes).ok()?;
         let slot = self.checkpoints.clone().try_acquire_owned().ok()?;
         let bytes = self

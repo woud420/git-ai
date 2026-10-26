@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -123,10 +124,13 @@ class ContractTests(unittest.TestCase):
         changed.samples = 31
         debug_changed = Namespace(**vars(parameters))
         debug_changed.debug_stages = True
+        capnp_changed = Namespace(**vars(parameters))
+        capnp_changed.checkpoint_capnp = True
 
         exact = cli.protocol_for_run(parameters)
         different = cli.protocol_for_run(changed)
         debug_different = cli.protocol_for_run(debug_changed)
+        capnp_different = cli.protocol_for_run(capnp_changed)
 
         self.assertNotEqual(
             benchmark.canonical_digest(exact), benchmark.canonical_digest(different)
@@ -135,6 +139,62 @@ class ContractTests(unittest.TestCase):
             benchmark.canonical_digest(exact),
             benchmark.canonical_digest(debug_different),
         )
+        self.assertFalse(exact["measurement"]["checkpoint_capnp"])
+        self.assertTrue(capnp_different["measurement"]["checkpoint_capnp"])
+        self.assertNotEqual(
+            benchmark.canonical_digest(exact),
+            benchmark.canonical_digest(capnp_different),
+        )
+
+    def test_capnp_request_is_bound_in_the_report_manifest(self) -> None:
+        args = Namespace(
+            samples=30,
+            warmups=5,
+            resource_samples=20,
+            prefill_depths=[0, 50, 200],
+            bootstrap_resamples=10_000,
+            bootstrap_seed=364,
+            comparison_profile="fork-before-after-v1",
+            debug_stages=False,
+            allow_dirty_sources=False,
+            baseline_ref="pinned-baseline",
+            checkpoint_capnp=True,
+        )
+        variants = {"candidate": {}, "baseline": {}}
+        readbacks = {
+            "candidate": {"status": "enabled", "effective": True},
+            "baseline": {"status": "unsupported", "effective": None},
+        }
+        scenario = {
+            "prefill_depth": 0,
+            "variants": {
+                name: {"checkpoint_capnp_readback": evidence}
+                for name, evidence in readbacks.items()
+            },
+        }
+        with mock.patch.object(cli, "file_set_digest", return_value="fixed-harness"):
+            result = cli.build_result(
+                args=args,
+                script_path=Path(cli.__file__),
+                git_binary="/usr/bin/git",
+                source=variants,
+                binary=variants,
+                build_provenance={
+                    name: {"status": "external_binary_provenance_unverified"}
+                    for name in variants
+                },
+                scenarios=[scenario],
+                environment={},
+            )
+        self.assertTrue(result["parameters"]["checkpoint_capnp"])
+        self.assertTrue(result["fixture_contract"]["checkpoint_capnp_requested"])
+        self.assertTrue(result["protocol"]["measurement"]["checkpoint_capnp"])
+        self.assertEqual(result["qualification"], "smoke_or_diagnostic_non_decision")
+        for name, evidence in readbacks.items():
+            self.assertEqual(
+                result["variants"][name]["checkpoint_capnp_readback_by_depth"],
+                [{"prefill_depth": 0, "evidence": evidence}],
+            )
 
     def test_source_snapshot_must_remain_unchanged_through_the_run(self) -> None:
         expected = {
@@ -215,6 +275,169 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(
                     variant.trace_socket, Path(socket_directory) / "trace.sock"
                 )
+
+    def test_capnp_environment_is_opt_in_and_ambient_flags_stay_excluded(self) -> None:
+        with mock.patch.dict(os.environ, {"GIT_AI_CHECKPOINT_CAPNP": "true"}):
+            default = runner.VariantRunner(
+                label="candidate",
+                binary=Path("/bin/echo"),
+                root=Path("/fixture/candidate"),
+                socket_root=Path("/sockets/candidate"),
+                git_binary="/usr/bin/git",
+                debug_stages=False,
+            )
+            enabled = runner.VariantRunner(
+                label="candidate",
+                binary=Path("/bin/echo"),
+                root=Path("/fixture/candidate"),
+                socket_root=Path("/sockets/candidate"),
+                git_binary="/usr/bin/git",
+                debug_stages=False,
+                checkpoint_capnp=True,
+            )
+        self.assertNotIn("GIT_AI_CHECKPOINT_CAPNP", default.env)
+        self.assertEqual(enabled.env["GIT_AI_CHECKPOINT_CAPNP"], "true")
+        self.assertEqual(
+            {key: value for key, value in enabled.env.items() if key != "GIT_AI_CHECKPOINT_CAPNP"},
+            default.env,
+        )
+
+    def test_capnp_config_readback_records_enabled_and_unsupported_baseline(self) -> None:
+        for label, stdout, expected in (
+            ("candidate", '{"checkpoint_capnp":true}', "enabled"),
+            ("baseline", '{"transcript_sweep":true}', "unsupported"),
+        ):
+            with self.subTest(label=label):
+                completed = subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+                with mock.patch.object(runner, "run_checked", return_value=completed) as run:
+                    evidence = runner.verify_checkpoint_capnp_config(
+                        binary=Path("/fixture/git-ai"), label=label,
+                        cwd=Path("/fixture"), env={}, requested=True,
+                    )
+                self.assertEqual(evidence["status"], expected)
+                self.assertEqual(evidence["effective"], True if label == "candidate" else None)
+                run.assert_called_once_with(
+                    ["/fixture/git-ai", "config", "feature_flags"],
+                    cwd=Path("/fixture"), env={},
+                )
+
+    def test_requested_capnp_config_rejects_disabled_or_unsupported_candidate(self) -> None:
+        for label, stdout in (
+            ("candidate", '{"checkpoint_capnp":false}'),
+            ("candidate", '{}'),
+            ("baseline", '{"checkpoint_capnp":false}'),
+        ):
+            with self.subTest(label=label, stdout=stdout):
+                completed = subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+                with mock.patch.object(runner, "run_checked", return_value=completed):
+                    with self.assertRaisesRegex(RuntimeError, "effective checkpoint_capnp=true"):
+                        runner.verify_checkpoint_capnp_config(
+                            binary=Path("/fixture/git-ai"), label=label,
+                            cwd=Path("/fixture"), env={}, requested=True,
+                        )
+
+    def test_capnp_config_readback_rejects_a_nonboolean_flag(self) -> None:
+        completed = subprocess.CompletedProcess(
+            [], 0, stdout='{"checkpoint_capnp":"true"}', stderr=""
+        )
+        with mock.patch.object(runner, "run_checked", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "must be boolean"):
+                runner.verify_checkpoint_capnp_config(
+                    binary=Path("/fixture/git-ai"), label="candidate",
+                    cwd=Path("/fixture"), env={}, requested=True,
+                )
+
+    def test_default_transport_does_not_add_a_feature_flag_readback(self) -> None:
+        with mock.patch.object(runner, "run_checked") as run:
+            evidence = runner.verify_checkpoint_capnp_config(
+                binary=Path("/fixture/git-ai"), label="candidate",
+                cwd=Path("/fixture"), env={}, requested=False,
+            )
+        run.assert_not_called()
+        self.assertEqual(evidence["status"], "not_requested")
+
+    def test_capnp_qualification_requires_candidate_readback_and_known_baseline_state(self) -> None:
+        enabled = {
+            "status": "enabled", "requested": True, "supported": True,
+            "effective": True, "method": "native-config-feature-flags-readback/v1",
+        }
+        unsupported = {**enabled, "status": "unsupported", "supported": False, "effective": None}
+        scenario = {"variants": {
+            "candidate": {"checkpoint_capnp_readback": enabled},
+            "baseline": {"checkpoint_capnp_readback": unsupported},
+        }}
+        self.assertTrue(cli.has_qualified_checkpoint_capnp_evidence([scenario], requested=True))
+        self.assertFalse(cli.has_qualified_checkpoint_capnp_evidence([], requested=True))
+        self.assertTrue(cli.has_qualified_checkpoint_capnp_evidence([], requested=False))
+        for label, invalid in (
+            ("candidate", {}), ("candidate", unsupported),
+            ("candidate", {**enabled, "effective": False}),
+            ("baseline", {**enabled, "effective": False}),
+        ):
+            changed = {"variants": {name: dict(value) for name, value in scenario["variants"].items()}}
+            changed["variants"][label]["checkpoint_capnp_readback"] = invalid
+            self.assertFalse(cli.has_qualified_checkpoint_capnp_evidence([changed], requested=True))
+
+    def test_run_scenario_passes_capnp_request_to_both_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                mock.patch.object(runner, "create_short_socket_root", return_value=root / "sockets"),
+                mock.patch.object(runner, "VariantRunner") as variants,
+            ):
+                variants.return_value.setup.side_effect = RuntimeError("stop before setup")
+                with self.assertRaisesRegex(RuntimeError, "stop before setup"):
+                    runner.run_scenario(
+                        scenario_root=root,
+                        candidate_binary=Path("/candidate"),
+                        baseline_binary=Path("/baseline"),
+                        git_binary="/usr/bin/git",
+                        prefill_depth=0,
+                        warmups=5,
+                        samples=30,
+                        resource_samples=20,
+                        debug_stages=False,
+                        bootstrap_resamples=10_000,
+                        bootstrap_seed=364,
+                        checkpoint_capnp=True,
+                    )
+        self.assertEqual(len(variants.call_args_list), 2)
+        self.assertEqual(
+            [call.kwargs["checkpoint_capnp"] for call in variants.call_args_list],
+            [True, True],
+        )
+
+    def test_matching_capnp_fixture_identities_remain_comparable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            identities = []
+            for label, requested in (("candidate", True), ("baseline", True), ("default", False)):
+                variant_root = root / label
+                (variant_root / "repo" / ".git").mkdir(parents=True)
+                (variant_root / "home" / ".git-ai").mkdir(parents=True)
+                (variant_root / "repo" / ".git" / "config").write_text("fixed config\n")
+                (variant_root / "home" / ".git-ai" / "config.json").write_text("{}\n")
+                (variant_root / "repo" / "distractor.txt").write_bytes(b"distractor\n")
+                variant = runner.VariantRunner(
+                    label=label,
+                    binary=Path("/bin/echo"),
+                    root=variant_root,
+                    socket_root=root / "sockets" / label,
+                    git_binary="/usr/bin/git",
+                    debug_stages=False,
+                    checkpoint_capnp=requested,
+                )
+                completed = subprocess.CompletedProcess([], 0, stdout="fixed git result\n", stderr="")
+                with mock.patch.object(runner, "run_checked", return_value=completed):
+                    identities.append(variant.fixture_identity())
+        self.assertTrue(identities[0]["checkpoint_capnp_requested"])
+        self.assertEqual(
+            benchmark.comparison_status(identities[0], identities[1], runner.FIXTURE_IDENTITY_KEYS)["status"],
+            "comparable",
+        )
+        mismatch = benchmark.comparison_status(identities[0], identities[2], runner.FIXTURE_IDENTITY_KEYS)
+        self.assertEqual(mismatch["status"], "not_comparable")
+        self.assertIn("checkpoint_capnp_requested", mismatch["mismatches"])
 
     def test_real_harness_file_set_binds_imported_modules(self) -> None:
         paths = cli.harness_files(Path(cli.__file__).resolve())
@@ -499,6 +722,16 @@ class CliContractTests(unittest.TestCase):
 
         self.assertEqual(args.comparison_profile, "fork-vs-upstream-v1")
         self.assertEqual(args.resource_samples, 20)
+        self.assertFalse(args.checkpoint_capnp)
+
+    def test_cli_accepts_explicit_capnp_experiment(self) -> None:
+        argv = [
+            "benchmark", "--candidate-source", "/candidate",
+            "--baseline-source", "/baseline", "--checkpoint-capnp",
+        ]
+        with mock.patch.object(sys, "argv", argv):
+            args = cli.parse_args()
+        self.assertTrue(args.checkpoint_capnp)
 
     def test_protocol_digest_changes_with_comparison_profile(self) -> None:
         upstream = cli.protocol_for_profile("fork-vs-upstream-v1")

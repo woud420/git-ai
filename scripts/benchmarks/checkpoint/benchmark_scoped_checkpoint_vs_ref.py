@@ -242,6 +242,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--keep-fixtures", action="store_true")
     parser.add_argument("--debug-stages", action="store_true")
+    parser.add_argument(
+        "--checkpoint-capnp",
+        action="store_true",
+        help=(
+            "explicitly request experimental Cap'n Proto checkpoint delivery in both "
+            "isolated variants; unsupported older binaries may ignore the flag"
+        ),
+    )
     parser.add_argument("--allow-small-sample", action="store_true")
     parser.add_argument("--allow-dirty-sources", action="store_true")
     args = parser.parse_args()
@@ -317,6 +325,7 @@ def protocol_for_run(args: argparse.Namespace) -> dict[str, Any]:
         "bootstrap_resamples": args.bootstrap_resamples,
         "bootstrap_seed": args.bootstrap_seed,
         "debug_stages": args.debug_stages,
+        "checkpoint_capnp": getattr(args, "checkpoint_capnp", False),
         "per_depth_seed": "bootstrap_seed + prefill_depth",
     }
     return protocol
@@ -372,6 +381,42 @@ def has_qualified_resource_evidence(
     return bool(scenarios)
 
 
+def has_qualified_checkpoint_capnp_evidence(
+    scenarios: list[dict[str, Any]], *, requested: bool
+) -> bool:
+    if not requested:
+        return True
+    if not scenarios:
+        return False
+    for scenario in scenarios:
+        for label in ("candidate", "baseline"):
+            evidence = scenario.get("variants", {}).get(label, {}).get(
+                "checkpoint_capnp_readback", {}
+            )
+            if not isinstance(evidence, dict):
+                return False
+            if (
+                evidence.get("requested") is not True
+                or evidence.get("method") != "native-config-feature-flags-readback/v1"
+            ):
+                return False
+            if evidence.get("status") == "enabled":
+                if (
+                    evidence.get("effective") is not True
+                    or evidence.get("supported") is not True
+                ):
+                    return False
+            elif label == "baseline" and evidence.get("status") == "unsupported":
+                if (
+                    evidence.get("effective") is not None
+                    or evidence.get("supported") is not False
+                ):
+                    return False
+            else:
+                return False
+    return True
+
+
 def build_result(
     *,
     args: argparse.Namespace,
@@ -398,6 +443,7 @@ def build_result(
         "seed": "seed\\n",
         "edits": "sha256(phase:index) hex plus newline",
         "checkpoint": ["checkpoint", "mock_ai", "sample.txt"],
+        "checkpoint_capnp_requested": getattr(args, "checkpoint_capnp", False),
         "material_fence": "sync.family then exact path/blob match in checkpoints.jsonl",
         "repository_authorization": (
             "native config readback plus mismatched-origin denial under a separate daemon"
@@ -421,6 +467,9 @@ def build_result(
             "decision_evidence"
             if has_qualified_measurement_protocol(args)
             and has_qualified_resource_evidence(scenarios, args.resource_samples)
+            and has_qualified_checkpoint_capnp_evidence(
+                scenarios, requested=getattr(args, "checkpoint_capnp", False)
+            )
             and not args.allow_dirty_sources
             and not args.debug_stages
             and all(
@@ -442,6 +491,7 @@ def build_result(
             "bootstrap_resamples": args.bootstrap_resamples,
             "bootstrap_seed": args.bootstrap_seed,
             "debug_stages": args.debug_stages,
+            "checkpoint_capnp": getattr(args, "checkpoint_capnp", False),
             "baseline_ref": args.baseline_ref,
             "comparison_profile": comparison_profile,
         },
@@ -454,11 +504,29 @@ def build_result(
                 "source": source["candidate"],
                 "binary": binary["candidate"],
                 "build": build_provenance["candidate"],
+                "checkpoint_capnp_readback_by_depth": [
+                    {
+                        "prefill_depth": scenario["prefill_depth"],
+                        "evidence": scenario["variants"]["candidate"].get(
+                            "checkpoint_capnp_readback"
+                        ),
+                    }
+                    for scenario in scenarios
+                ],
             },
             "baseline": {
                 "source": source["baseline"],
                 "binary": binary["baseline"],
                 "build": build_provenance["baseline"],
+                "checkpoint_capnp_readback_by_depth": [
+                    {
+                        "prefill_depth": scenario["prefill_depth"],
+                        "evidence": scenario["variants"]["baseline"].get(
+                            "checkpoint_capnp_readback"
+                        ),
+                    }
+                    for scenario in scenarios
+                ],
             },
         },
         "scenarios": scenarios,
@@ -533,6 +601,7 @@ def main() -> int:
                 bootstrap_resamples=args.bootstrap_resamples,
                 bootstrap_seed=args.bootstrap_seed + depth,
                 comparison_profile=args.comparison_profile,
+                checkpoint_capnp=args.checkpoint_capnp,
             )
             for depth in args.prefill_depths
         ]

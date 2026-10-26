@@ -46,6 +46,7 @@ FIXTURE_IDENTITY_KEYS = (
     "git_ai_config_readback_digest",
     "allowlist_denial_control_digest",
     "runner_environment_digest",
+    "checkpoint_capnp_requested",
 )
 
 
@@ -156,6 +157,34 @@ def verify_fixture_git_ai_config(
     }
 
 
+def verify_checkpoint_capnp_config(
+    *, binary: Path, label: str, cwd: Path, env: dict[str, str], requested: bool
+) -> dict[str, Any]:
+    if not requested:
+        return {"status": "not_requested", "requested": False, "effective": None}
+    result = run_checked([str(binary), "config", "feature_flags"], cwd=cwd, env=env)
+    try:
+        flags = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("native feature_flags readback returned invalid JSON") from error
+    if not isinstance(flags, dict):
+        raise RuntimeError("native feature_flags readback must be a JSON object")
+    supported = "checkpoint_capnp" in flags
+    effective = flags.get("checkpoint_capnp")
+    if supported and not isinstance(effective, bool):
+        raise RuntimeError("native checkpoint_capnp readback must be boolean")
+    if effective is False or (label == "candidate" and not supported):
+        raise RuntimeError(f"{label} does not expose effective checkpoint_capnp=true")
+    return {
+        "status": "enabled" if supported else "unsupported",
+        "method": "native-config-feature-flags-readback/v1",
+        "requested": True,
+        "supported": supported,
+        "effective": effective,
+        "wire_observation": "configuration readback; wire bytes not observed",
+    }
+
+
 def create_short_socket_root() -> Path:
     conventional_tmp = Path("/tmp")
     parent = conventional_tmp if conventional_tmp.is_dir() else Path(tempfile.gettempdir())
@@ -172,6 +201,7 @@ class VariantRunner:
         socket_root: Path,
         git_binary: str,
         debug_stages: bool,
+        checkpoint_capnp: bool = False,
     ) -> None:
         self.label = label
         self.binary = binary.resolve()
@@ -190,8 +220,11 @@ class VariantRunner:
         self.daemon_resources: dict[str, float | int] = {}
         self.git_ai_config_readback: dict[str, Any] = {}
         self.allowlist_denial_control: dict[str, Any] = {}
+        self.checkpoint_capnp_readback: dict[str, Any] = {}
 
         env = isolated_environment(root)
+        if checkpoint_capnp:
+            env["GIT_AI_CHECKPOINT_CAPNP"] = "true"
         env.update(
             {
                 "HOME": str(self.home),
@@ -224,6 +257,13 @@ class VariantRunner:
             git_binary=self.git_binary,
             cwd=self.root,
             env=self.env,
+        )
+        self.checkpoint_capnp_readback = verify_checkpoint_capnp_config(
+            binary=self.binary,
+            label=self.label,
+            cwd=self.root,
+            env=self.env,
+            requested=self.env.get("GIT_AI_CHECKPOINT_CAPNP") == "true",
         )
 
         run_checked(
@@ -348,6 +388,7 @@ class VariantRunner:
                 self.allowlist_denial_control
             ),
             "runner_environment_digest": canonical_digest(normalized_env),
+            "checkpoint_capnp_requested": self.env.get("GIT_AI_CHECKPOINT_CAPNP") == "true",
         }
 
     def _configure_daemon_boundary(self, socket_root: Path, daemon_home: Path) -> None:
@@ -597,6 +638,7 @@ def run_scenario(
     bootstrap_resamples: int,
     bootstrap_seed: int,
     comparison_profile: str = DEFAULT_COMPARISON_PROFILE,
+    checkpoint_capnp: bool = False,
 ) -> dict[str, Any]:
     socket_root = create_short_socket_root()
     runners = {
@@ -607,6 +649,7 @@ def run_scenario(
             socket_root=socket_root / "candidate",
             git_binary=git_binary,
             debug_stages=debug_stages,
+            checkpoint_capnp=checkpoint_capnp,
         ),
         "baseline": VariantRunner(
             label="baseline",
@@ -615,12 +658,13 @@ def run_scenario(
             socket_root=socket_root / "baseline",
             git_binary=git_binary,
             debug_stages=debug_stages,
+            checkpoint_capnp=checkpoint_capnp,
         ),
     }
     collected: dict[str, list[dict[str, Any]]] = {"candidate": [], "baseline": []}
     resources: dict[str, list[dict[str, Any]]] = {"candidate": [], "baseline": []}
     stage_snapshots: dict[str, dict[str, Any]] = {}
-    fixture_identities: dict[str, dict[str, str]] = {}
+    fixture_identities: dict[str, dict[str, Any]] = {}
     try:
         for runner in runners.values():
             runner.setup()
@@ -668,6 +712,7 @@ def run_scenario(
     for label, runner in runners.items():
         variants[label] = summarize_variant_samples(collected[label], resources[label])
         variants[label]["daemon_resources"] = runner.daemon_resources
+        variants[label]["checkpoint_capnp_readback"] = runner.checkpoint_capnp_readback
         variants[label]["daemon_stages"] = stage_snapshots.get(label, {})
         variants[label]["checkpoint_storage"] = checkpoint_storage_state(
             runner.repo / ".git" / "ai" / "working_logs"

@@ -83,6 +83,7 @@ define_feature_flags!(
     transcript_streaming: transcript_streaming, debug = true, release = true,
     transcript_sweep: transcript_sweep, debug = true, release = true,
     checkpoint_debug_log: checkpoint_debug_log, debug = false, release = false,
+    checkpoint_capnp: checkpoint_capnp, debug = false, release = false,
     bash_checkpoints_v2: bash_checkpoints_v2, debug = false, release = false,
     whitelist_agent_sandboxes: whitelist_agent_sandboxes, debug = false, release = false,
     daemon_log_upload: daemon_log_upload, debug = true, release = true,
@@ -134,6 +135,7 @@ mod tests {
     #[test]
     fn test_default_feature_flags() {
         let flags = FeatureFlags::default();
+        assert!(!flags.checkpoint_capnp);
         assert!(!flags.send_pack_notes_sync);
         #[cfg(debug_assertions)]
         {
@@ -243,6 +245,7 @@ mod tests {
             transcript_streaming: true,
             transcript_sweep: true,
             checkpoint_debug_log: false,
+            checkpoint_capnp: true,
             bash_checkpoints_v2: true,
             whitelist_agent_sandboxes: true,
             daemon_log_upload: true,
@@ -254,6 +257,7 @@ mod tests {
         assert!(serialized.contains("transcript_streaming"));
         assert!(serialized.contains("transcript_sweep"));
         assert!(serialized.contains("checkpoint_debug_log"));
+        assert!(serialized.contains("checkpoint_capnp"));
         assert!(serialized.contains("bash_checkpoints_v2"));
         assert!(serialized.contains("daemon_log_upload"));
         assert!(serialized.contains("rewrite_metrics_events"));
@@ -267,6 +271,7 @@ mod tests {
             transcript_streaming: true,
             transcript_sweep: true,
             checkpoint_debug_log: true,
+            checkpoint_capnp: true,
             bash_checkpoints_v2: true,
             whitelist_agent_sandboxes: true,
             daemon_log_upload: true,
@@ -277,6 +282,7 @@ mod tests {
         assert_eq!(cloned.transcript_streaming, flags.transcript_streaming);
         assert_eq!(cloned.transcript_sweep, flags.transcript_sweep);
         assert_eq!(cloned.checkpoint_debug_log, flags.checkpoint_debug_log);
+        assert_eq!(cloned.checkpoint_capnp, flags.checkpoint_capnp);
         assert_eq!(cloned.bash_checkpoints_v2, flags.bash_checkpoints_v2);
         assert_eq!(cloned.daemon_log_upload, flags.daemon_log_upload);
         assert_eq!(cloned.rewrite_metrics_events, flags.rewrite_metrics_events);

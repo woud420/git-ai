@@ -1,4 +1,8 @@
 pub(crate) mod checkpoint_content_budget;
+#[rustfmt::skip]
+#[allow(dead_code)]
+#[path = "../schemas/generated/checkpoint_capnp.rs"]
+pub(crate) mod checkpoint_capnp;
 pub mod cli;
 pub mod clients;
 pub mod config;

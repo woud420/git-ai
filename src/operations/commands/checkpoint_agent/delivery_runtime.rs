@@ -1,6 +1,5 @@
 use super::delivery::{CheckpointDeliveryReport, deliver_checkpoint_batch};
 use crate::model::checkpoint_delivery::CheckpointDelivery;
-use crate::model::daemon_control::ControlRequest;
 use crate::model::repository::checkpoint_outbox::{
     CheckpointOutboxError, OutboxFailureClass, candidate_roots, publish_delivery,
     record_publication_failure,
@@ -31,11 +30,9 @@ pub fn deliver_authorized_checkpoint_batch(
     deliver_checkpoint_batch(
         deliveries,
         |delivery| {
-            crate::operations::daemon::send_control_request(
+            crate::operations::daemon::send_checkpoint_delivery(
                 &live_config.control_socket_path,
-                &ControlRequest::CheckpointDeliver {
-                    delivery: Box::new(delivery.clone()),
-                },
+                delivery,
             )
         },
         |delivery| {

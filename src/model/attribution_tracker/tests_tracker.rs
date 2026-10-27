@@ -520,7 +520,7 @@ mod tests {
         let content =
             "if a->b == 0x1F_u8 { s = \"q\\\"x\" + 'c'; } .5e-3 1.2E+4 héllo_1 #$ 🙂 `open";
         let tokens = tokenize_non_whitespace(content, (0, content.len()));
-        let lexemes: Vec<&str> = tokens.iter().map(|t| &t.lexeme[..]).collect();
+        let lexemes: Vec<&str> = tokens.iter().map(|t| t.lexeme).collect();
         assert_eq!(
             lexemes,
             [
@@ -548,12 +548,12 @@ mod tests {
             ]
         );
         for token in &tokens {
-            assert_eq!(&content[token.start..token.end], &token.lexeme[..]);
+            assert_eq!(&content[token.start..token.end], token.lexeme);
         }
 
         let window = (content.find("héllo").unwrap(), content.find(" #").unwrap());
         let windowed = tokenize_non_whitespace(content, window);
         assert_eq!(windowed.len(), 1);
-        assert_eq!(&windowed[0].lexeme[..], "héllo_1");
+        assert_eq!(windowed[0].lexeme, "héllo_1");
     }
 }

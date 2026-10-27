@@ -55,68 +55,39 @@ pub(super) fn collect_line_metadata(content: &str) -> Vec<LineMetadata> {
     metadata
 }
 
+/// A token borrowed from the tokenized content: `lexeme` is always
+/// `&content[start..end]`.
 #[derive(Clone, Debug)]
-pub(super) struct Token {
-    pub(super) lexeme: String,
+pub(super) struct Token<'a> {
+    pub(super) lexeme: &'a str,
     pub(super) start: usize,
     pub(super) end: usize,
 }
 
-impl PartialEq for Token {
+impl PartialEq for Token<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.lexeme == other.lexeme
     }
 }
 
-impl Eq for Token {}
+impl Eq for Token<'_> {}
 
-impl Hash for Token {
+impl Hash for Token<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.lexeme.hash(state);
     }
 }
 
-impl PartialOrd for Token {
+impl PartialOrd for Token<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Token {
+impl Ord for Token<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.lexeme.cmp(&other.lexeme)
+        self.lexeme.cmp(other.lexeme)
     }
-}
-
-/// Check if a character is a single-character operator or delimiter
-fn is_operator_or_delimiter(ch: char) -> bool {
-    matches!(
-        ch,
-        '+' | '-'
-            | '*'
-            | '/'
-            | '%'
-            | '='
-            | '<'
-            | '>'
-            | '!'
-            | '&'
-            | '|'
-            | '^'
-            | '~'
-            | '?'
-            | '@'
-            | ';'
-            | ','
-            | '.'
-            | ':'
-            | '('
-            | ')'
-            | '{'
-            | '}'
-            | '['
-            | ']'
-    )
 }
 
 /// Try to match a multi-character operator by peeking ahead
@@ -149,7 +120,7 @@ fn try_match_multi_char_op(ch: char, peek: Option<char>) -> Option<&'static str>
 }
 
 /// Code-optimized tokenizer that treats syntactic elements as meaningful units
-pub(super) fn tokenize_non_whitespace(content: &str, range: (usize, usize)) -> Vec<Token> {
+pub(super) fn tokenize_non_whitespace(content: &str, range: (usize, usize)) -> Vec<Token<'_>> {
     let (start, end) = range;
     if start >= end {
         return Vec::new();
@@ -171,25 +142,15 @@ pub(super) fn tokenize_non_whitespace(content: &str, range: (usize, usize)) -> V
             continue;
         }
 
+        let token_start = i;
+
         // Peek ahead for multi-character operators
         let peek = content[i + ch_len..end].chars().next();
         if let Some(op) = try_match_multi_char_op(ch, peek) {
-            let op_len = op.len();
-            tokens.push(Token {
-                lexeme: op.to_string(),
-                start: i,
-                end: i + op_len,
-            });
-            i += op_len;
-            continue;
-        }
-
-        // String literals (single token, handle escape sequences)
-        if ch == '"' || ch == '\'' || ch == '`' {
+            i += op.len();
+        } else if ch == '"' || ch == '\'' || ch == '`' {
+            // String literals (single token, handle escape sequences)
             let quote_char = ch;
-            let mut lexeme = String::new();
-            lexeme.push(ch);
-            let token_start = i;
             i += ch_len;
 
             let mut escaped = false;
@@ -198,31 +159,17 @@ pub(super) fn tokenize_non_whitespace(content: &str, range: (usize, usize)) -> V
                     Some(c) => c,
                     None => break,
                 };
-                let str_ch_len = str_ch.len_utf8();
-                lexeme.push(str_ch);
+                i += str_ch.len_utf8();
 
                 if escaped {
                     escaped = false;
                 } else if str_ch == '\\' {
                     escaped = true;
                 } else if str_ch == quote_char {
-                    i += str_ch_len;
                     break;
                 }
-
-                i += str_ch_len;
             }
-
-            tokens.push(Token {
-                lexeme,
-                start: token_start,
-                end: i,
-            });
-            continue;
-        }
-
-        // Numbers (including hex, octal, binary, floats, scientific notation)
-        if ch.is_ascii_digit()
+        } else if ch.is_ascii_digit()
             || (ch == '.'
                 && i + ch_len < end
                 && content[i + ch_len..]
@@ -230,128 +177,67 @@ pub(super) fn tokenize_non_whitespace(content: &str, range: (usize, usize)) -> V
                     .next()
                     .is_some_and(|c| c.is_ascii_digit()))
         {
-            let mut lexeme = String::new();
-            let token_start = i;
+            // Numbers (including hex, octal, binary, floats, scientific notation)
+            let radix_prefix = ch == '0'
+                && i + 1 < end
+                && matches!(
+                    content[i + 1..].chars().next(),
+                    Some('x' | 'X' | 'o' | 'O' | 'b' | 'B')
+                );
 
-            // Handle hex (0x), octal (0o), binary (0b) prefixes
-            if ch == '0' && i + 1 < end {
-                let next_ch = content[i + 1..].chars().next().unwrap();
-                if next_ch == 'x'
-                    || next_ch == 'X'
-                    || next_ch == 'o'
-                    || next_ch == 'O'
-                    || next_ch == 'b'
-                    || next_ch == 'B'
-                {
-                    lexeme.push(ch);
-                    lexeme.push(next_ch);
-                    i += 1 + next_ch.len_utf8();
-
-                    // Consume hex/octal/binary digits
-                    while i < end {
-                        let digit_ch = match content[i..].chars().next() {
-                            Some(c) => c,
-                            None => break,
-                        };
-                        if digit_ch.is_ascii_alphanumeric() || digit_ch == '_' {
-                            lexeme.push(digit_ch);
-                            i += digit_ch.len_utf8();
-                        } else {
-                            break;
-                        }
+            if radix_prefix {
+                // Consume the `0x`/`0o`/`0b` prefix, then hex/octal/binary digits
+                i += 2;
+                while i < end {
+                    match content[i..].chars().next() {
+                        Some(c) if c.is_ascii_alphanumeric() || c == '_' => i += c.len_utf8(),
+                        _ => break,
                     }
-
-                    tokens.push(Token {
-                        lexeme,
-                        start: token_start,
-                        end: i,
-                    });
-                    continue;
                 }
-            }
+            } else {
+                // Regular decimal number
+                while i < end {
+                    let num_ch = match content[i..].chars().next() {
+                        Some(c) => c,
+                        None => break,
+                    };
+                    let num_ch_len = num_ch.len_utf8();
 
-            // Regular decimal number
-            while i < end {
-                let num_ch = match content[i..].chars().next() {
-                    Some(c) => c,
-                    None => break,
-                };
-                let num_ch_len = num_ch.len_utf8();
-
-                if num_ch.is_ascii_digit() || num_ch == '.' || num_ch == '_' {
-                    lexeme.push(num_ch);
-                    i += num_ch_len;
-                } else if (num_ch == 'e' || num_ch == 'E') && i + num_ch_len < end {
-                    // Scientific notation
-                    lexeme.push(num_ch);
-                    i += num_ch_len;
-                    // Handle optional +/- after e
-                    if i < end {
-                        let sign_ch = content[i..].chars().next().unwrap();
-                        if sign_ch == '+' || sign_ch == '-' {
-                            lexeme.push(sign_ch);
-                            i += sign_ch.len_utf8();
+                    if num_ch.is_ascii_digit() || num_ch == '.' || num_ch == '_' {
+                        i += num_ch_len;
+                    } else if (num_ch == 'e' || num_ch == 'E') && i + num_ch_len < end {
+                        // Scientific notation
+                        i += num_ch_len;
+                        // Handle optional +/- after e
+                        if i < end {
+                            let sign_ch = content[i..].chars().next().unwrap();
+                            if sign_ch == '+' || sign_ch == '-' {
+                                i += sign_ch.len_utf8();
+                            }
                         }
+                    } else {
+                        break;
                     }
-                } else {
-                    break;
                 }
             }
-
-            tokens.push(Token {
-                lexeme,
-                start: token_start,
-                end: i,
-            });
-            continue;
-        }
-
-        // Identifiers (alphanumeric + underscore, start with letter or underscore)
-        if ch.is_alphabetic() || ch == '_' {
-            let mut lexeme = String::new();
-            let token_start = i;
-
+        } else if ch.is_alphabetic() || ch == '_' {
+            // Identifiers (alphanumeric + underscore, start with letter or underscore)
             while i < end {
-                let id_ch = match content[i..].chars().next() {
-                    Some(c) => c,
-                    None => break,
-                };
-                let id_ch_len = id_ch.len_utf8();
-
-                if id_ch.is_alphanumeric() || id_ch == '_' {
-                    lexeme.push(id_ch);
-                    i += id_ch_len;
-                } else {
-                    break;
+                match content[i..].chars().next() {
+                    Some(c) if c.is_alphanumeric() || c == '_' => i += c.len_utf8(),
+                    _ => break,
                 }
             }
-
-            tokens.push(Token {
-                lexeme,
-                start: token_start,
-                end: i,
-            });
-            continue;
-        }
-
-        // Single-character operators and delimiters
-        if is_operator_or_delimiter(ch) {
-            tokens.push(Token {
-                lexeme: ch.to_string(),
-                start: i,
-                end: i + ch_len,
-            });
+        } else {
+            // Single-character operators, delimiters, and any other character
             i += ch_len;
-            continue;
         }
 
-        // Fallback: unknown characters as single tokens
         tokens.push(Token {
-            lexeme: ch.to_string(),
-            start: i,
-            end: i + ch_len,
+            lexeme: &content[token_start..i],
+            start: token_start,
+            end: i,
         });
-        i += ch_len;
     }
 
     tokens

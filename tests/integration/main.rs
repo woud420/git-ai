@@ -103,6 +103,7 @@ mod jj_debug_observer_cli;
 mod jj_debug_write_cli;
 mod jj_evidence;
 mod jj_history_platform;
+mod jj_lineage;
 mod jj_observation_journal;
 mod jj_operation;
 mod jj_reconciliation_platform;

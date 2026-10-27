@@ -12,7 +12,7 @@ pub(super) fn validate(value: &JjObserverControlReply, action: &str, ok: bool) -
         || ok != value.error.is_none()
         || !matches!(
             value.runtime.as_str(),
-            "pending" | "active" | "stopping" | "blocked" | "disabled"
+            "pending" | "replaying" | "active" | "stopping" | "blocked" | "disabled"
         )
         || !matches!(
             value.desired_intent.as_deref(),
@@ -60,6 +60,14 @@ pub(super) fn validate(value: &JjObserverControlReply, action: &str, ok: bool) -
         return Err(());
     }
     if value.runtime == "disabled" && (value.in_flight || value.session_cursor.is_some()) {
+        return Err(());
+    }
+    if value.runtime == "replaying"
+        && (value.target.is_none()
+            || value.revision.is_none()
+            || value.desired_intent.as_deref() != Some("enabled")
+            || value.session_cursor.is_some())
+    {
         return Err(());
     }
     for error in [&value.error, &value.last_error].into_iter().flatten() {

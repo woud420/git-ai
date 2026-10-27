@@ -2,24 +2,22 @@ use crate::config::Config;
 use crate::model::jj_observer::{JjObserverError as Error, JjObserverTarget, paths};
 use crate::model::repository::jj_observation_journal::{JjObservationJournal, ReadBudget};
 use crate::model::repository::jj_observer_intent::StoredTarget;
-use crate::operations::jj::admission::{
-    NativeAdmissionCursor, NativeAdmissionOutcome, NativeReconciliationExpectation,
-    NativeReconciliationOutcome, read_registered_admission_state, reconcile_registered_history,
-};
-use crate::operations::workspace_context::{WorkspaceContext, discover};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use crate::operations::jj::admission::NativeAdmissionCursor;
+use crate::operations::jj::observation::{JjObservationSession, JjObservationStep};
+use crate::operations::workspace_context::discover;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const DEADLINE: Duration = Duration::from_secs(5);
 const STARTUP_READ_BYTES: usize = 32 * 1024 * 1024;
-const SAMPLE_READ_BYTES: usize = 48 * 1024 * 1024;
+const SAMPLE_READ_BYTES: usize = 96 * 1024 * 1024;
 
 #[derive(Clone)]
 pub(super) struct Session {
     pub(super) cursor: NativeAdmissionCursor,
-    context: Arc<WorkspaceContext>,
-    journal: PathBuf,
+    pub(super) replaying: bool,
+    native: Arc<Mutex<JjObservationSession>>,
 }
 
 fn fresh_policy() -> Result<Config, Error> {
@@ -75,26 +73,27 @@ pub(super) fn validate(
         )
     })?;
     let journal = open(&journal_path, deadline)?;
-    let state = read_registered_admission_state(
-        &journal,
-        &context,
+    let canonical_workspace_path = paths::encode(&context.workspace_root)?;
+    let native = JjObservationSession::new(
+        journal,
+        context,
         &config,
         deadline,
         &mut ReadBudget::new(STARTUP_READ_BYTES),
     )
     .map_err(|error| Error::new("admission_unavailable", error))?;
-    let cursor = state.cursor();
+    let cursor = native.saved_cursor();
     let target = StoredTarget {
         journal_path_hex: paths::encode(&journal_path)?,
-        workspace_path_hex: paths::encode(&context.workspace_root)?,
+        workspace_path_hex: canonical_workspace_path,
         metadata: JjObserverTarget {
             source_id: cursor.source_id().to_owned(),
             initialization_receipt_id: cursor.initialization_receipt_id().to_owned(),
             reader_profile: cursor.reader_profile().to_owned(),
             baseline_id: cursor.baseline_id().to_owned(),
             baseline_generation: cursor.baseline_generation(),
-            workspace_name: state.registration().workspace_name().to_owned(),
-            attachment_id: state.registration().attachment_id().to_owned(),
+            workspace_name: native.registration().workspace_name().to_owned(),
+            attachment_id: native.registration().attachment_id().to_owned(),
         },
     };
     if pinned.is_some_and(|expected| expected != &target) {
@@ -105,37 +104,29 @@ pub(super) fn validate(
     }
     let session = Session {
         cursor: cursor.clone(),
-        context: Arc::new(context),
-        journal: journal_path,
+        replaying: true,
+        native: Arc::new(Mutex::new(native)),
     };
     check_deadline(deadline)?;
     Ok((target, session))
 }
 
-pub(super) fn sample(mut session: Session, target: &StoredTarget) -> Result<Session, Error> {
+pub(super) fn sample(mut session: Session) -> Result<Session, Error> {
     let deadline = Instant::now() + DEADLINE;
     let config = fresh_policy()?;
-    let mut journal = open(&session.journal, deadline)?;
-    let outcome = reconcile_registered_history(
-        &mut journal,
-        &session.context,
-        &config,
-        NativeReconciliationExpectation {
-            admission: session.cursor.expectation(),
-            workspace_name: &target.metadata.workspace_name,
-            attachment_id: &target.metadata.attachment_id,
-        },
-        deadline,
-        &mut ReadBudget::new(SAMPLE_READ_BYTES),
-    )
-    .map_err(|error| Error::new("admission_unavailable", error))?;
-    session.cursor = match &outcome {
-        NativeReconciliationOutcome::Unchanged(value) => value.cursor(),
-        NativeReconciliationOutcome::Admission(
-            NativeAdmissionOutcome::Admitted(value)
-            | NativeAdmissionOutcome::AlreadyAdmitted(value),
-        ) => value.current_cursor(),
+    let mut native = session.native.lock().map_err(|_| {
+        Error::new(
+            "admission_unavailable",
+            "Native replay session is unavailable.",
+        )
+    })?;
+    let outcome = native
+        .step(&config, deadline, &mut ReadBudget::new(SAMPLE_READ_BYTES))
+        .map_err(|error| Error::new("admission_unavailable", error))?;
+    session.replaying = matches!(outcome, JjObservationStep::Replaying);
+    if let Some(cursor) = native.verified_cursor() {
+        session.cursor = cursor.clone();
     }
-    .clone();
+    drop(native);
     Ok(session)
 }

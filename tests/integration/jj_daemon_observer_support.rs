@@ -158,7 +158,12 @@ impl Harness {
                 return value;
             }
             assert_eq!(output.status.code(), Some(1));
-            assert_eq!(value["error"]["code"], "observer_busy", "{value}");
+            assert_eq!(
+                value["error"]["code"],
+                "observer_busy",
+                "{value}\n{}",
+                self.fixture.repo.daemon_diagnostics().1
+            );
             assert!(Instant::now() < until, "observer stayed busy: {value}");
             std::thread::sleep(Duration::from_millis(100));
         }

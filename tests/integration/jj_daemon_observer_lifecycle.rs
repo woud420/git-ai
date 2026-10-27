@@ -2,6 +2,65 @@ use super::support::Harness;
 use super::*;
 
 #[test]
+fn jj_daemon_observer_segmented_catchup_exceeds_original_limit_and_restarts_after_gc() {
+    let mut h = Harness::new(false);
+    let records = native::chain(257);
+    for record in &records {
+        h.fixture.write_evidence(record);
+    }
+    h.fixture.set_heads(&[&records[127].operation_id]);
+    h.start();
+    let saved = h.saved_rows();
+    h.ready_control("enable");
+    h.active(1, std::slice::from_ref(&records[127].operation_id));
+    h.fixture.set_heads(&[&records[256].operation_id]);
+    h.active(2, std::slice::from_ref(&records[256].operation_id));
+    assert_eq!(h.packet_count(), 2);
+    let raw: Vec<u8> = h
+        .sql()
+        .query_row(
+            "SELECT record FROM jj_native_admissions WHERE generation=2",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let value: ciborium::Value = ciborium::from_reader(raw.as_slice()).unwrap();
+    let ciborium::Value::Map(fields) = value else {
+        panic!("segment is not a map")
+    };
+    let field = |name: &str| {
+        &fields
+            .iter()
+            .find(|(key, _)| key.as_text() == Some(name))
+            .unwrap()
+            .1
+    };
+    assert_eq!(field("record_version").as_integer().unwrap(), 2.into());
+    assert_eq!(field("operations").as_array().unwrap().len(), 129);
+    let previous: String = h
+        .sql()
+        .query_row(
+            "SELECT admission_id FROM jj_native_admissions WHERE generation=1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        field("previous_admission_id").as_text(),
+        Some(previous.as_str())
+    );
+    h.fixture.repo.shutdown_dedicated_daemon_for_test();
+    for record in &records[..256] {
+        fs::remove_file(h.fixture.operation_path(&record.operation_id)).unwrap();
+    }
+    h.fixture.repo.restart_dedicated_daemon_for_test();
+    h.active(2, std::slice::from_ref(&records[256].operation_id));
+    assert_eq!(h.packet_count(), 2);
+    assert_eq!(h.saved_rows(), saved);
+    h.disabled();
+}
+
+#[test]
 fn jj_daemon_observer_enable_admits_and_isolates_separate_daemon_homes() {
     let mut h = Harness::new(true);
     let a = native::rich_parent();

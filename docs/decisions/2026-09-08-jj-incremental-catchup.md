@@ -1,9 +1,12 @@
 # Incremental native admission and bounded prefix replay
 
-Status: proposed catch-up architecture. The current delivery milestone is per-head
-lineage within the existing complete proof; its qualification is recorded with that
-commit. Version 2 segments, resumable replay and a prefix cache are not implemented
-by this decision. The current 256-pair and byte limits remain unchanged.
+Status: accepted — per-head lineage, linked daemon segments and resumable prefix replay.
+
+The [2026-10-27 implementation contract](2026-10-27-jj-incremental-observation.md)
+records the delivered writer selection, compatibility readers and bounded session
+lifecycle. It supersedes this proposal's earlier pending-delivery statements.
+The per-segment 256-pair and byte limits remain unchanged; explicit and finite
+foreground observation retain complete v1 packets.
 
 ## Context
 
@@ -36,7 +39,7 @@ receipt/cursor identities and native v1 bytes stay unchanged. This prerequisite 
 not add prior-head terminals to today's collector or make histories over its current
 limits admissible.
 
-## Version 2 segments: planned first catch-up delivery
+## Version 2 segments
 
 A distinct canonical domain/version will bind a segment to an exact prior admission
 receipt, alongside the unchanged original scope, expectation, sampled heads and local
@@ -75,7 +78,7 @@ registration, selected attachment and required dependency identities rechecked. 
 post-write verification, owned result construction, retained source checks and the
 sole commit retain their existing order; any failure before commit rolls back.
 
-## Bounded restart replay and active cache: planned later delivery
+## Bounded restart replay and active cache
 
 Own one private existing-only WAL connection for the replay/cache lifetime. Start
 pending, with no admission authority. A bounded backward anchor-discovery pass followed

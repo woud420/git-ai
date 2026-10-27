@@ -144,11 +144,7 @@ impl Observer {
             }
             let revision = state.revision();
             match state.jobs.reserve(revision) {
-                Ok(token) => Some((
-                    token,
-                    state.session.as_ref().unwrap().clone(),
-                    state.intent.as_ref().unwrap().target.clone(),
-                )),
+                Ok(token) => Some((token, state.session.as_ref().unwrap().clone())),
                 Err(message) => {
                     state.stopped = true;
                     state.error = Some(Error::new("intent_persistence", message));
@@ -157,10 +153,10 @@ impl Observer {
             }
         };
         drop(gate);
-        let Some((token, session, target)) = prepared else {
+        let Some((token, session)) = prepared else {
             return;
         };
-        let result = tokio::task::spawn_blocking(move || native::sample(session, &target))
+        let result = tokio::task::spawn_blocking(move || native::sample(session))
             .await
             .unwrap_or_else(|_| {
                 Err(Error::new(
@@ -176,8 +172,13 @@ impl Observer {
         match result {
             Ok(session) => {
                 let mut state = poisoned_lock(&self.state);
+                let delay = if session.replaying {
+                    Duration::from_millis(250)
+                } else {
+                    Duration::from_secs(5)
+                };
                 state.session = Some(session);
-                state.next_due = Instant::now() + Duration::from_secs(5);
+                state.next_due = Instant::now() + delay;
             }
             Err(error) => self.block(error).await,
         }

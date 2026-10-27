@@ -33,6 +33,7 @@ const _: () = assert!(MAX_JJ_BASELINE_HEADS < u64::BITS as usize);
 
 struct Terminals<'a> {
     baseline: BTreeMap<&'a str, u64>,
+    frontier: BTreeMap<&'a str, u64>,
 }
 
 impl Terminals<'_> {
@@ -40,7 +41,10 @@ impl Terminals<'_> {
         if is_root(id) {
             Some(ROOT_MASK)
         } else {
-            self.baseline.get(id).copied()
+            self.baseline
+                .get(id)
+                .or_else(|| self.frontier.get(id))
+                .copied()
         }
     }
 
@@ -61,10 +65,22 @@ pub(super) fn order_to_baseline(
     nodes: &[TopologyNode<'_>],
     baseline_heads: &[String],
 ) -> Result<GraphOrder, E> {
+    order_to_frontier(heads, nodes, baseline_heads, &[])
+}
+
+pub(super) fn order_to_frontier(
+    heads: &[String],
+    nodes: &[TopologyNode<'_>],
+    baseline_heads: &[String],
+    frontier: &[JjHeadClosure],
+) -> Result<GraphOrder, E> {
     if nodes.len() > MAX_JJ_OBSERVATION_OPERATIONS {
         return Err(E::Input("topology operation count limit exceeded"));
     }
-    if heads.len() > MAX_JJ_BASELINE_HEADS || baseline_heads.len() > MAX_JJ_BASELINE_HEADS {
+    if heads.len() > MAX_JJ_BASELINE_HEADS
+        || baseline_heads.len() > MAX_JJ_BASELINE_HEADS
+        || frontier.len() > MAX_JJ_BASELINE_HEADS
+    {
         return Err(E::Input("topology head or cutoff count limit exceeded"));
     }
     if nodes
@@ -79,7 +95,7 @@ pub(super) fn order_to_baseline(
         .enumerate()
         .map(|(index, node)| (node.id, index))
         .collect();
-    let terminals = Terminals {
+    let mut terminals = Terminals {
         baseline: baseline_heads
             .iter()
             .map(String::as_str)
@@ -88,7 +104,26 @@ pub(super) fn order_to_baseline(
             .enumerate()
             .map(|(index, id)| (id, 1u64 << index))
             .collect(),
+        frontier: BTreeMap::new(),
     };
+    for closure in frontier {
+        let mut mask = if closure.reaches_root { ROOT_MASK } else { 0 };
+        for id in &closure.reached_baseline_ids {
+            mask |= terminals
+                .baseline
+                .get(id.as_str())
+                .ok_or(E::Input("frontier reaches an unknown original anchor"))?;
+        }
+        if mask == 0
+            || terminals.frontier.insert(&closure.head_id, mask).is_some()
+            || terminals
+                .baseline
+                .get(closure.head_id.as_str())
+                .is_some_and(|bit| *bit != mask)
+        {
+            return Err(E::Input("invalid verified frontier closure"));
+        }
+    }
     let mut roots: Vec<_> = heads.iter().map(String::as_str).collect();
     roots.sort_unstable();
     let mut colors = vec![Color::Unvisited; nodes.len()];

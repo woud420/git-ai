@@ -57,6 +57,9 @@ pub struct NativeAdmissionReceipt {
 }
 
 impl NativeAdmissionReceipt {
+    pub fn cursor(&self) -> &NativeAdmissionCursor {
+        &self.cursor
+    }
     pub fn admission_id(&self) -> &str {
         &self.admission_id
     }
@@ -97,6 +100,10 @@ pub struct RegisteredNativeAdmissionState {
 }
 
 impl RegisteredNativeAdmissionState {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(in crate::operations::jj) fn into_registration(self) -> RegisteredJjCurrentState {
+        self.registration
+    }
     pub fn registration(&self) -> &RegisteredJjCurrentState {
         &self.registration
     }
@@ -117,6 +124,23 @@ pub struct DurableNativeAdmission {
 }
 
 impl DurableNativeAdmission {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(in crate::operations::jj) fn from_proof(
+        receipt: NativeAdmissionReceipt,
+        proof: &crate::operations::jj::ancestry::VerifiedJjAncestry<'_>,
+    ) -> Self {
+        Self {
+            receipt,
+            ordered_operations: proof
+                .ordered_operations()
+                .iter()
+                .map(|proof| proof.evidence().clone())
+                .collect(),
+            head_closures: proof.head_closures().to_vec(),
+            reached_baseline_ids: proof.reached_baseline_ids().to_vec(),
+            reaches_root: proof.reaches_root(),
+        }
+    }
     pub fn receipt(&self) -> &NativeAdmissionReceipt {
         &self.receipt
     }

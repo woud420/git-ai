@@ -20,6 +20,8 @@ use support::{
 mod behavior;
 #[path = "jj_admission_faults.rs"]
 mod faults;
+#[path = "jj_incremental.rs"]
+mod incremental;
 #[path = "jj_admission_policy.rs"]
 mod policy;
 #[path = "jj_admission_real.rs"]
@@ -211,6 +213,7 @@ fn jj_admission_readonly_collector_cannot_advance_existing_admission_state() {
 pub(super) fn dispatch(case: &Case, config: &Config) {
     let name = case.name.strip_prefix("history:admission:").unwrap();
     match name {
+        name if name.starts_with("incremental:") => incremental::run(case, config),
         "zero" | "baseline" => behavior::baseline(case, config),
         "chain" => behavior::chain(case, config),
         "retry" => behavior::retry(case, config),

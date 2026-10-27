@@ -40,7 +40,7 @@ pub(super) fn expectation(expected: &NativeAdmissionExpectation<'_>) -> Result<(
     Ok(())
 }
 
-pub(super) fn scope(
+pub(in crate::operations::jj) fn scope(
     expected: &NativeAdmissionExpectation<'_>,
     registered: &RegisteredJjCurrentState,
 ) -> Result<(), E> {
@@ -79,6 +79,9 @@ pub(super) fn snapshot(snapshot: &StoredAdmissionSnapshot) -> Result<Option<Clos
 
 fn packet(baseline: &BaselineReceipt, stored: &StoredNativeAdmission) -> Result<Closure, E> {
     let record = &stored.record;
+    if record.previous_admission_id.is_some() {
+        return Err(E::Input("segmented admission requires incremental replay"));
+    }
     let operations: Vec<_> = record.operations.iter().collect();
     let proof = verify_ancestry_to_receipt(
         baseline,
@@ -111,7 +114,7 @@ fn packet(baseline: &BaselineReceipt, stored: &StoredNativeAdmission) -> Result<
     })
 }
 
-pub(super) fn cursor(
+pub(in crate::operations::jj) fn cursor(
     registered: &RegisteredJjCurrentState,
     stored: StoredCursor,
 ) -> NativeAdmissionCursor {
@@ -127,7 +130,7 @@ pub(super) fn cursor(
     }
 }
 
-pub(super) fn receipt(stored: &StoredNativeAdmission) -> NativeAdmissionReceipt {
+pub(in crate::operations::jj) fn receipt(stored: &StoredNativeAdmission) -> NativeAdmissionReceipt {
     let record = &stored.record;
     NativeAdmissionReceipt {
         admission_id: stored.admission_id.clone(),

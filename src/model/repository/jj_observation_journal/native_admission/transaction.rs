@@ -84,6 +84,9 @@ fn validate_selection(
 }
 
 impl<'j> NativeAdmissionTransaction<'j> {
+    pub(crate) fn require_replay_epoch(&self, epoch: u64) -> Result<(), JournalError> {
+        super::replay::guard_cached_write(&self.transaction, epoch)
+    }
     pub(crate) fn snapshot(&self) -> &StoredAdmissionSnapshot {
         &self.snapshot
     }

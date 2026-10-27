@@ -11,6 +11,8 @@ mod payload;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod read;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+mod replay;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod request;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod snapshot;
@@ -18,6 +20,8 @@ mod snapshot;
 mod transaction;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod validate;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) use replay::ReplaySelection;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use request::{ExpectedAdmissionCursor, NativeAdmissionScope, PreparedNativeAdmission};

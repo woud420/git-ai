@@ -92,6 +92,26 @@ impl RetainedCapture<'_> {
         baseline: &DurableCurrentStateBaseline,
         hooks: &mut impl HistoryHooks,
     ) -> Result<(), E> {
+        self.collect_history_at(baseline, None, hooks)
+    }
+
+    pub(crate) fn collect_segment(
+        &mut self,
+        baseline: &DurableCurrentStateBaseline,
+        frontier: &crate::operations::jj::ancestry::ClosedJjFrontier,
+    ) -> Result<(), E> {
+        if frontier.baseline_receipt() != baseline.receipt() {
+            return Err(E::invalid("history", "segment original cutoff differs"));
+        }
+        self.collect_history_at(baseline, Some(frontier), &mut DirectCapture)
+    }
+
+    fn collect_history_at(
+        &mut self,
+        baseline: &DurableCurrentStateBaseline,
+        frontier: Option<&crate::operations::jj::ancestry::ClosedJjFrontier>,
+        hooks: &mut impl HistoryHooks,
+    ) -> Result<(), E> {
         if !self.history_mode || self.final_checked {
             return Err(E::invalid(
                 "history",
@@ -129,6 +149,7 @@ impl RetainedCapture<'_> {
         let draft = walk(
             captured,
             baseline,
+            frontier,
             self.operation_directories,
             &self.directories,
             self.budget,
@@ -225,13 +246,18 @@ impl RetainedCapture<'_> {
 fn walk(
     captured: &CapturedJjCurrentState,
     baseline: &DurableCurrentStateBaseline,
+    frontier: Option<&crate::operations::jj::ancestry::ClosedJjFrontier>,
     locations: [usize; 2],
     directories: &DirectoryRegistry,
     budget: &mut CaptureBudget,
     hooks: &mut impl HistoryHooks,
 ) -> Result<HistoryDraft, E> {
     let terminals = baseline.receipt().captured_head_ids();
-    let terminal = |id: &str| is_root(id) || terminals.iter().any(|saved| saved == id);
+    let terminal = |id: &str| {
+        is_root(id)
+            || terminals.iter().any(|saved| saved == id)
+            || frontier.is_some_and(|frontier| frontier.contains(id))
+    };
     let mut nodes = Vec::new();
     let mut indexes = BTreeMap::new();
     for (index, head) in captured.anchors().iter().enumerate() {
@@ -303,17 +329,18 @@ fn walk(
         .collect();
     let receipt = baseline.receipt();
     budget.check(hooks)?;
-    let proof = verify_ancestry_to_baseline(
-        baseline,
-        JjAncestryInput {
-            source_id: receipt.source_id(),
-            reader_profile: receipt.reader_profile(),
-            baseline_id: receipt.baseline_id(),
-            expected_native_generation: receipt.generation(),
-            head_ids: captured.head_ids(),
-            operations: &operations,
-        },
-    );
+    let input = JjAncestryInput {
+        source_id: receipt.source_id(),
+        reader_profile: receipt.reader_profile(),
+        baseline_id: receipt.baseline_id(),
+        expected_native_generation: receipt.generation(),
+        head_ids: captured.head_ids(),
+        operations: &operations,
+    };
+    let proof = match frontier {
+        Some(frontier) => crate::operations::jj::ancestry::verify_ancestry_segment(frontier, input),
+        None => verify_ancestry_to_baseline(baseline, input),
+    };
     budget.check(hooks)?;
     let proof = proof.map_err(|error| E::caused("history", error))?;
     let order = proof

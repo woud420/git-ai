@@ -259,6 +259,29 @@ pub(super) fn read_state(
     deadline: Instant,
     reads: &mut ReadBudget,
 ) -> Result<RegisteredNativeAdmissionState, E> {
+    read_state_impl(journal, context, config, deadline, reads, true)
+}
+
+/// Registration and structural cursor only; the incremental session must replay
+/// before exposing this cursor as verified or using it as an admission boundary.
+pub(in crate::operations::jj) fn read_state_for_replay(
+    journal: &JjObservationJournal,
+    context: &WorkspaceContext,
+    config: &Config,
+    deadline: Instant,
+    reads: &mut ReadBudget,
+) -> Result<RegisteredNativeAdmissionState, E> {
+    read_state_impl(journal, context, config, deadline, reads, false)
+}
+
+fn read_state_impl(
+    journal: &JjObservationJournal,
+    context: &WorkspaceContext,
+    config: &Config,
+    deadline: Instant,
+    reads: &mut ReadBudget,
+    verify_history: bool,
+) -> Result<RegisteredNativeAdmissionState, E> {
     policy::require_opt_in(config)?;
     let mut budget = RegistrationCaptureBudget::new(deadline);
     let mut current = budget.open_initial(context)?;
@@ -274,7 +297,24 @@ pub(super) fn read_state(
         reads,
     )?;
     saved::validate(&current, &snapshot.registration)?;
-    verify::snapshot(&snapshot)?;
+    if verify_history {
+        if let Some(latest) = snapshot
+            .latest
+            .as_ref()
+            .filter(|packet| packet.record.previous_admission_id.is_some())
+        {
+            crate::operations::jj::observation::read_complete(
+                journal,
+                seal.source_id(),
+                &current.captured().checkout().workspace_name,
+                &latest.admission_id,
+                deadline,
+                reads,
+            )?;
+        } else {
+            verify::snapshot(&snapshot)?;
+        }
+    }
     let latest_receipt = snapshot.latest.as_ref().map(verify::receipt);
     let registration = saved::finish(snapshot.registration, current.captured())?;
     let cursor = verify::cursor(&registration, snapshot.cursor);
@@ -301,6 +341,55 @@ pub(super) fn read_known(
     policy::check_deadline(deadline)?;
     let snapshot =
         journal.read_native_admission_snapshot(source_id, None, Some(admission_id), reads)?;
+    if snapshot
+        .latest
+        .as_ref()
+        .is_some_and(|packet| packet.record.previous_admission_id.is_some())
+        || snapshot
+            .requested()
+            .is_some_and(|packet| packet.record.previous_admission_id.is_some())
+    {
+        let workspace = &snapshot
+            .registration
+            .selected_workspace()
+            .record
+            .workspace_name;
+        let latest = snapshot
+            .latest
+            .as_ref()
+            .map(|packet| {
+                crate::operations::jj::observation::read_complete(
+                    journal,
+                    source_id,
+                    workspace,
+                    &packet.admission_id,
+                    deadline,
+                    reads,
+                )
+            })
+            .transpose()?;
+        if snapshot.requested().is_some_and(|packet| {
+            Some(packet.admission_id.as_str())
+                == latest
+                    .as_ref()
+                    .map(|packet| packet.receipt().admission_id())
+        }) {
+            return Ok(latest);
+        }
+        return snapshot
+            .requested()
+            .map(|packet| {
+                crate::operations::jj::observation::read_complete(
+                    journal,
+                    source_id,
+                    workspace,
+                    &packet.admission_id,
+                    deadline,
+                    reads,
+                )
+            })
+            .transpose();
+    }
     let closure = verify::snapshot(&snapshot)?;
     let (_, _, requested) = snapshot.into_requested();
     let result = match (requested, closure) {

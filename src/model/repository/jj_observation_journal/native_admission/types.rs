@@ -34,6 +34,8 @@ pub(crate) struct StoredAdmissionRecord {
         serialize_with = "bounded::serialize_operations"
     )]
     pub operations: Vec<JjOperationEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_admission_id: Option<String>,
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

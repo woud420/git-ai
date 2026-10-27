@@ -10,6 +10,7 @@ pub mod checkout;
 pub mod evidence;
 pub mod history;
 pub mod lineage;
+pub mod observation;
 pub mod operation;
 pub mod view;
 

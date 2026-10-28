@@ -516,6 +516,26 @@ mod tests {
     }
 
     #[test]
+    fn collect_line_metadata_spans_and_text_for_mixed_line_endings() {
+        let content = "a\r\n\nb\r\r\n\r\nhé\rx\nlast\r";
+        let metadata: Vec<(usize, usize, usize, String)> = collect_line_metadata(content)
+            .iter()
+            .map(|line| (line.number, line.start, line.end, line.text.to_string()))
+            .collect();
+        assert_eq!(
+            metadata,
+            vec![
+                (1, 0, 3, "a".to_string()),
+                (2, 3, 4, String::new()),
+                (3, 4, 8, "b\r".to_string()),
+                (4, 8, 10, String::new()),
+                (5, 10, 16, "hé\rx".to_string()),
+                (6, 16, 21, "last".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn tokenizer_lexemes_cover_each_token_kind_and_match_their_spans() {
         let content =
             "if a->b == 0x1F_u8 { s = \"q\\\"x\" + 'c'; } .5e-3 1.2E+4 héllo_1 #$ 🙂 `open";

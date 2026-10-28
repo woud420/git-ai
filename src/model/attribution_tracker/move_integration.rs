@@ -82,11 +82,7 @@ impl AttributionTracker {
         for (insertion_idx, insertion) in insertions.iter().enumerate() {
             for line in new_lines.iter() {
                 if line.start < insertion.end && line.end > insertion.start {
-                    inserted_lines.push(InsertedLine::new(
-                        line.text.clone(),
-                        line.number,
-                        insertion_idx,
-                    ));
+                    inserted_lines.push(InsertedLine::new(line.text, line.number, insertion_idx));
                 }
             }
         }
@@ -95,11 +91,7 @@ impl AttributionTracker {
         for (deletion_idx, deletion) in deletions.iter().enumerate() {
             for line in old_lines.iter() {
                 if line.start < deletion.end && line.end > deletion.start {
-                    deleted_lines.push(DeletedLine::new(
-                        line.text.clone(),
-                        line.number,
-                        deletion_idx,
-                    ));
+                    deleted_lines.push(DeletedLine::new(line.text, line.number, deletion_idx));
                 }
             }
         }

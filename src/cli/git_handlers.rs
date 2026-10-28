@@ -4,6 +4,7 @@ use crate::operations::commands::git_hook_handlers::ENV_SKIP_MANAGED_HOOKS;
 use crate::operations::git::alias_parser::parse_alias_tokens;
 use crate::operations::git::cli_parser::{ParsedGitInvocation, parse_git_cli_args};
 use crate::operations::git::find_repository;
+#[cfg(feature = "test-support")]
 use crate::operations::git::repository::Repository;
 #[cfg(windows)]
 use crate::process_spawn::CREATE_NO_WINDOW;
@@ -71,16 +72,12 @@ pub fn handle_git(args: &[String]) {
         exit_with_status(exit_status);
     }
 
-    let repository = find_repository(&parsed.global_args).ok();
     let exit_status = proxy_to_git(args, false, false);
 
     // After a successful commit, wait briefly for the daemon to produce an
     // authorship note so we can show stats inline (same UX as plain wrapper mode).
-    if exit_status.success()
-        && parsed.command.as_deref() == Some("commit")
-        && let Some(repo) = repository.as_ref()
-    {
-        maybe_show_async_post_commit_stats(&parsed, repo);
+    if exit_status.success() && parsed.command.as_deref() == Some("commit") {
+        maybe_show_async_post_commit_stats(&parsed);
     }
 
     exit_with_status(exit_status);
@@ -126,7 +123,10 @@ pub fn resolve_alias_invocation(
 /// In async (wrapper-to-daemon) mode, after a successful `git commit`, poll for
 /// the daemon-produced authorship note and display stats inline when available.
 /// Mirrors the same skip/display rules as plain wrapper mode in post_commit.rs.
-fn maybe_show_async_post_commit_stats(parsed: &ParsedGitInvocation, repo: &Repository) {
+///
+/// The repository is discovered here, only once stats will actually be shown,
+/// so other mutating commands don't pay for discovery's `git rev-parse` spawns.
+fn maybe_show_async_post_commit_stats(parsed: &ParsedGitInvocation) {
     use crate::operations::authorship::ignore::effective_ignore_patterns;
     use crate::operations::authorship::stats::{stats_for_commit_stats, write_stats_to_terminal};
     use crate::operations::git::cli_parser::is_dry_run;
@@ -150,6 +150,11 @@ fn maybe_show_async_post_commit_stats(parsed: &ParsedGitInvocation, repo: &Repos
     if !is_interactive {
         return;
     }
+
+    let Ok(repository) = find_repository(&parsed.global_args) else {
+        return;
+    };
+    let repo = &repository;
 
     // Determine the new commit SHA.
     let commit_sha = match repo.head().ok().and_then(|h| h.target().ok()) {

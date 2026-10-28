@@ -207,7 +207,7 @@ fn rewrite_metric_repo_url(repo: &Repository) -> Option<String> {
         .iter()
         .find(|(name, _)| name == "origin")
         .or_else(|| remotes.first())?;
-    crate::repo_url::normalize_repo_url(url).ok()
+    crate::operations::git::remote_url::normalize_repo_url(url).ok()
 }
 
 fn rewrite_metric_custom_attributes_json() -> Option<String> {

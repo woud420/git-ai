@@ -75,7 +75,9 @@ pub(super) fn recover_session_event_mtime(
         return Ok(());
     }
 
-    let Some(target_repo_url) = crate::repo_url::resolve_repo_url_from_repo(repo) else {
+    let Some(target_repo_url) =
+        crate::operations::git::remote_url::resolve_repo_url_from_repo(repo)
+    else {
         return Ok(());
     };
     for (file_path, unknown_lines) in timestamp_collection.unknown_by_file {

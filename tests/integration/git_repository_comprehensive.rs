@@ -942,6 +942,59 @@ fn test_get_default_remote_no_remotes() {
     );
 }
 
+#[test]
+fn test_default_remote_prefers_origin_then_first_remote() {
+    let test_repo = TestRepo::new();
+    let repo_path = test_repo.path().to_str().unwrap().to_string();
+    let open = || find_repository(&["-C".to_string(), repo_path.clone()]).unwrap();
+
+    test_repo
+        .git_og(&[
+            "remote",
+            "add",
+            "upstream",
+            "git@github.com:acme/upstream.git",
+        ])
+        .unwrap();
+    test_repo
+        .git_og(&["remote", "add", "fork", "https://github.com/me/fork"])
+        .unwrap();
+    let repo = open();
+    assert_eq!(
+        repo.get_default_remote().unwrap().as_deref(),
+        Some("upstream")
+    );
+    assert_eq!(
+        repo.default_remote_with_url().unwrap(),
+        Some((
+            "upstream".to_string(),
+            "git@github.com:acme/upstream.git".to_string()
+        ))
+    );
+    assert_eq!(
+        git_ai::operations::git::remote_url::resolve_repo_url_from_repo(&repo).as_deref(),
+        Some("https://github.com/acme/upstream")
+    );
+
+    test_repo
+        .git_og(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/origin.git",
+        ])
+        .unwrap();
+    let repo = open();
+    assert_eq!(
+        repo.get_default_remote().unwrap().as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        git_ai::operations::git::remote_url::resolve_repo_url_from_repo(&repo).as_deref(),
+        Some("https://github.com/acme/origin")
+    );
+}
+
 // ============================================================================
 // Commit Range Tests
 // ============================================================================
@@ -1555,6 +1608,7 @@ crate::reuse_tests_in_worktree!(
     test_remotes_with_urls,
     test_get_default_remote,
     test_get_default_remote_no_remotes,
+    test_default_remote_prefers_origin_then_first_remote,
     test_commit_range_length,
     test_merge_base_linear_history,
     test_merge_base_with_branches,

@@ -53,7 +53,7 @@ pub(super) fn recover_commit_metadata(
     }
 
     let workdir = repo.workdir()?;
-    let target_repo_url = crate::repo_url::resolve_repo_url_from_repo(repo);
+    let target_repo_url = crate::operations::git::remote_url::resolve_repo_url_from_repo(repo);
     let timestamp_collection =
         collect_unknown_file_timestamps(&workdir, unknown_by_file, captured_file_timestamps);
     let latest_timestamps = latest_cohort_timestamps(&timestamp_collection.timestamps_by_file);

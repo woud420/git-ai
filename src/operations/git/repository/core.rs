@@ -457,20 +457,18 @@ impl Repository {
 
     // Non-standard method of getting a 'default' remote
     pub fn get_default_remote(&self) -> Result<Option<String>, GitAiError> {
-        let remotes = self.remotes()?;
-        if remotes.is_empty() {
-            return Ok(None);
-        }
-        // Prefer 'origin' if it exists
-        for i in 0..remotes.len() {
-            if let Some(name) = remotes.get(i)
-                && name == "origin"
-            {
-                return Ok(Some("origin".to_string()));
-            }
-        }
-        // Otherwise, just use the first remote
-        Ok(remotes.first().map(|s| s.to_string()))
+        Ok(self.default_remote_with_url()?.map(|(name, _)| name))
+    }
+
+    /// The default remote as `(name, url)`: `origin` if it exists, otherwise
+    /// the first remote. Reads the git config once.
+    pub fn default_remote_with_url(&self) -> Result<Option<(String, String)>, GitAiError> {
+        let mut remotes = self.remotes_with_urls()?;
+        let idx = remotes
+            .iter()
+            .position(|(name, _)| name == "origin")
+            .unwrap_or(0);
+        Ok((idx < remotes.len()).then(|| remotes.swap_remove(idx)))
     }
 
     #[allow(dead_code)]

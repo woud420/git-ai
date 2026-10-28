@@ -1072,7 +1072,7 @@ pub(crate) fn commit_metric_attrs(
     if let Ok(Some(remote_name)) = repo.get_default_remote()
         && let Ok(remotes) = repo.remotes_with_urls()
         && let Some((_, url)) = remotes.into_iter().find(|(n, _)| n == &remote_name)
-        && let Ok(normalized) = crate::repo_url::normalize_repo_url(&url)
+        && let Ok(normalized) = crate::operations::git::remote_url::normalize_repo_url(&url)
     {
         attrs = attrs.repo_url(normalized);
     }

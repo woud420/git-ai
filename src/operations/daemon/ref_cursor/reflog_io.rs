@@ -3,14 +3,16 @@ use super::*;
 pub(crate) fn capture_reflog_start_offsets_for_worktree(worktree: &Path) -> HashMap<String, u64> {
     let mut offsets = HashMap::new();
 
-    if let Some(git_dir) = git_dir_for_worktree(worktree) {
+    let git_dir = git_dir_for_worktree(worktree);
+    if let Some(git_dir) = &git_dir {
         let path = git_dir.join("logs").join("HEAD");
         if let Ok(metadata) = fs::metadata(&path) {
-            offsets.insert(head_key(&git_dir), metadata.len());
+            offsets.insert(head_key(git_dir), metadata.len());
         }
     }
 
-    let Some(common_dir) = common_dir_for_worktree(worktree) else {
+    // Same as `common_dir_for_worktree(worktree)`, without resolving the git dir twice.
+    let Some(common_dir) = git_dir.as_deref().and_then(common_dir_for_git_dir) else {
         return offsets;
     };
     let logs = common_dir.join("logs");

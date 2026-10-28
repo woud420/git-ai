@@ -10,7 +10,7 @@ mod types;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) mod unix;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-mod verify;
+pub(in crate::operations::jj) mod verify;
 
 pub use error::JjNativeAdmissionError;
 pub use types::{

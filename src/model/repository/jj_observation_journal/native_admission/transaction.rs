@@ -57,6 +57,9 @@ impl JjObservationJournal {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| sql_error("begin native admission transaction", error))?;
+        // Check the lookup indexes under the writer reservation, before any
+        // packet selection can scan a concurrently replaced schema.
+        super::super::schema::verify_in_snapshot(&transaction)?;
         let snapshot = read::snapshot(&transaction, source, workspace, requested_id, reads)?;
         Ok(NativeAdmissionTransaction {
             transaction,
@@ -84,6 +87,9 @@ fn validate_selection(
 }
 
 impl<'j> NativeAdmissionTransaction<'j> {
+    pub(crate) fn require_replay_epoch(&self, epoch: u64) -> Result<(), JournalError> {
+        super::replay::guard_cached_write(&self.transaction, epoch)
+    }
     pub(crate) fn snapshot(&self) -> &StoredAdmissionSnapshot {
         &self.snapshot
     }
@@ -126,6 +132,9 @@ impl<'j> NativeAdmissionTransaction<'j> {
             .latest
             .as_ref()
             .map(|packet| packet.admission_id.clone());
+        // Fresh linked writes must bind the receipt as well as its cursor.
+        // Exact historical retries above intentionally retain the later cursor.
+        prepared.request.require_previous(previous_id.as_deref())?;
         let registration_identity = RegistrationIdentity::from(&self.snapshot.registration);
         let Self {
             transaction,

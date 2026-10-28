@@ -6,6 +6,7 @@ use crate::model::jj_observation::{
 };
 
 pub(super) const PACKET_DOMAIN: &str = "git-ai/jj/native-admission/packet/v1";
+pub(super) const SEGMENT_DOMAIN: &str = "git-ai/jj/native-admission/segment/v2";
 pub(super) const STATE_DOMAIN: &str = "git-ai/jj/native-admission/state/v1";
 pub(super) const MAX_PACKET_BYTES: usize = 8 * 1024 * 1024;
 pub(super) const MAX_STATE_BYTES: usize = 128 * 1024;
@@ -79,7 +80,19 @@ pub(super) fn contents<'a>(
 
 impl StoredAdmissionRecord {
     pub(super) fn validate(&self, source: &str, generation: u64) -> Result<(), JournalError> {
-        if self.record_version != 1 || self.domain != PACKET_DOMAIN || self.source_id != source {
+        let version_valid = match self.record_version {
+            1 => self.domain == PACKET_DOMAIN && self.previous_admission_id.is_none(),
+            2 => {
+                self.domain == SEGMENT_DOMAIN
+                    && self.expected_admission_generation > 0
+                    && self
+                        .previous_admission_id
+                        .as_deref()
+                        .is_some_and(|id| validate_source(id).is_ok())
+            }
+            _ => false,
+        };
+        if !version_valid || self.source_id != source {
             return Err(invalid(
                 "native admission packet identity or version invalid",
             ));

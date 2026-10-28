@@ -23,6 +23,8 @@ pub(crate) mod native;
 mod opaque;
 #[path = "jj_ancestry_real.rs"]
 mod real;
+#[path = "jj_segments.rs"]
+mod segments;
 #[path = "jj_ancestry_support.rs"]
 mod support;
 use support::*;

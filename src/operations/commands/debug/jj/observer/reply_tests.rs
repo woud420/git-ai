@@ -56,3 +56,17 @@ fn jj_observer_reply_accepts_empty_command_error_diagnostic() {
     reply.error.as_mut().unwrap().message.clear();
     validate(&reply, "observer_resume", false).unwrap();
 }
+
+#[test]
+fn jj_observer_reply_accepts_replay_without_claiming_a_verified_cursor() {
+    let mut reply = blocked_status();
+    reply.runtime = "replaying".to_owned();
+    reply.session_cursor = None;
+    reply.last_error = None;
+    validate(&reply, "observer_status", true).unwrap();
+    reply.session_cursor = blocked_status().session_cursor;
+    assert!(validate(&reply, "observer_status", true).is_err());
+    reply.session_cursor = None;
+    reply.target = None;
+    assert!(validate(&reply, "observer_status", true).is_err());
+}

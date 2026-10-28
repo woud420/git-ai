@@ -7,8 +7,9 @@ flowchart TD
     start["Enabled, unblocked startup<br/>Fresh policy and native validation"]
     control["Eligible new enable or stopped resume<br/>Fresh policy and native validation"]
     publish["Publish enabled intent<br/>Recheck under mutation gate"]
+    replay["Bounded dependency replay<br/>No verified cursor yet"]
     active["Active session<br/>Pinned target and verified cursor"]
-    tick["Reconcile with fresh policy<br/>Original cutoff and bounded evidence"]
+    tick["Fresh policy and source checks<br/>Epoch under writer lock<br/>One bounded linked segment"]
     block["Native failure: stop session<br/>Attempt durable block"]
     stopped["Disabled or blocked<br/>No new native job"]
     disable["Disable: stop scheduling and cancel<br/>Publish disabled intent; drain job"]
@@ -17,14 +18,18 @@ flowchart TD
     boot -->|Enabled and unblocked| start
     boot -->|Missing, disabled or blocked| stopped
     boot -->|Invalid or unreadable| unknown
-    start -->|Success: no intent write| active
+    start -->|Identity validated; no intent write| replay
     start -->|Failure| block
     control -->|Validated| publish
     control -->|Failure: retain prior stopped state| stopped
-    publish -->|Committed| active
+    publish -->|Committed| replay
     publish -->|Publication error| unknown
     active -->|First tick promptly| tick
+    replay -->|Pending: release snapshot; wait 250 ms| replay
+    replay -->|Saved prefix verified| active
+    replay -->|Failure| block
     tick -->|Success: carry cursor; drop evidence; wait 5 s| active
+    tick -->|Same cursor; changed epoch: discard proof| replay
     tick -->|Failure| block
     block -->|Published block or local terminal stop| stopped
     block -->|Publication error| unknown
@@ -38,6 +43,6 @@ flowchart TD
     classDef external fill:#ECEFF1,stroke:#546E7A,color:#1C2A30
     class control,disable ui
     class active,stopped service
-    class start,tick job
+    class start,tick,replay job
     class boot,publish,block storage
     class unknown external

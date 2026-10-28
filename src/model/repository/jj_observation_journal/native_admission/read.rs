@@ -95,7 +95,7 @@ pub(super) fn snapshot(
     })
 }
 
-fn packet(
+pub(super) fn packet(
     conn: &Connection,
     registration: &StoredRegistrationSnapshot,
     id: &str,

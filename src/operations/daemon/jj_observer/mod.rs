@@ -61,7 +61,15 @@ impl State {
             return "disabled";
         }
         if self.session.is_some() && !self.stopped {
-            "active"
+            if self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.replaying)
+            {
+                "replaying"
+            } else {
+                "active"
+            }
         } else {
             "pending"
         }
@@ -177,6 +185,7 @@ impl Observer {
             session_cursor: state
                 .session
                 .as_ref()
+                .filter(|session| !session.replaying)
                 .map(|session| JjObserverSessionCursor {
                     generation: session.cursor.generation(),
                     admitted_head_ids: session.cursor.admitted_head_ids().to_vec(),

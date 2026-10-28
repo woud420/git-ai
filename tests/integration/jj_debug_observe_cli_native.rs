@@ -8,6 +8,8 @@ mod support;
 use support::*;
 #[path = "jj_debug_observe_cli_behavior.rs"]
 mod behavior;
+#[path = "jj_default_policy.rs"]
+mod default_policy;
 #[path = "jj_debug_observe_cli_errors.rs"]
 mod errors;
 #[path = "jj_debug_observe_cli_output_limit.rs"]
@@ -86,6 +88,7 @@ pub(super) fn dispatch(case: &Case, config: &Config) {
         .strip_prefix("history:admission:cli:observe:")
         .unwrap()
     {
+        name if name.starts_with("default_policy:") => default_policy::dispatch(case, config),
         "head_closure_output" => output_limit::run(case, config),
         "unchanged" => behavior::unchanged(case, config),
         "changed" => behavior::changed(case, config),

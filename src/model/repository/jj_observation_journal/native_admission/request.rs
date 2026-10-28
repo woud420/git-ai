@@ -32,6 +32,8 @@ pub(super) struct Request<'a> {
     captured_head_ids: Vec<&'a String>,
     #[serde(serialize_with = "serialize_operations")]
     operations: Vec<&'a JjOperationEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_admission_id: Option<&'a str>,
 }
 
 fn serialize_operations<S: Serializer>(
@@ -84,6 +86,7 @@ impl<'a> PreparedNativeAdmission<'a> {
             expected_admitted_head_ids,
             captured_head_ids,
             operations: ordered_evidence.to_vec(),
+            previous_admission_id: None,
         };
         let record_bytes = codec::encode(&request, MAX_PACKET_BYTES)?;
         let state = request.state(codec::checksum(&record_bytes));
@@ -99,9 +102,39 @@ impl<'a> PreparedNativeAdmission<'a> {
     pub(crate) fn admission_id(&self) -> &str {
         &self.state.admission_id
     }
+
+    pub(crate) fn new_segment(
+        scope: NativeAdmissionScope<'a>,
+        expected: ExpectedAdmissionCursor<'a>,
+        captured_head_ids: &'a [String],
+        ordered_evidence: &[&'a JjOperationEvidence],
+        previous: &'a str,
+    ) -> Result<Self, JournalError> {
+        if expected.generation == 0 {
+            return Err(invalid("linked segment requires a prior admission"));
+        }
+        crate::model::jj_observation::validate_source(previous)?;
+        let mut prepared = Self::new(scope, expected, captured_head_ids, ordered_evidence)?;
+        prepared.request.record_version = 2;
+        prepared.request.domain = validate::SEGMENT_DOMAIN;
+        prepared.request.previous_admission_id = Some(previous);
+        prepared.record_bytes = codec::encode(&prepared.request, MAX_PACKET_BYTES)?;
+        prepared.state = prepared
+            .request
+            .state(codec::checksum(&prepared.record_bytes));
+        prepared.state_bytes = codec::encode(&prepared.state, MAX_STATE_BYTES)?;
+        Ok(prepared)
+    }
 }
 
 impl Request<'_> {
+    pub(super) fn require_previous(&self, current: Option<&str>) -> Result<(), JournalError> {
+        if self.previous_admission_id.is_some() && self.previous_admission_id != current {
+            return Err(invalid("native admission previous receipt conflict"));
+        }
+        Ok(())
+    }
+
     fn state(&self, admission_id: String) -> NativeAdmissionState {
         NativeAdmissionState {
             state_version: 1,
@@ -123,6 +156,7 @@ impl Request<'_> {
 
     pub(super) fn matches(&self, record: &StoredAdmissionRecord) -> bool {
         self.record_version == record.record_version
+            && self.previous_admission_id == record.previous_admission_id.as_deref()
             && self.domain == record.domain
             && self.source_id == record.source_id
             && self.reader_profile == record.reader_profile

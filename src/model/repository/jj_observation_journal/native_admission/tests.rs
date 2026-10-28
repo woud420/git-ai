@@ -6,6 +6,7 @@ mod codec_cases;
 mod faults;
 mod plans;
 mod reads;
+mod segments;
 mod support;
 mod transactions;
 mod wire;

@@ -5,6 +5,8 @@
 mod graph;
 mod head_closure;
 mod preflight;
+mod segment;
+pub use segment::{ClosedJjFrontier, verify_ancestry_segment};
 
 pub use head_closure::JjHeadClosure;
 
@@ -105,7 +107,24 @@ pub(crate) fn verify_ancestry_to_receipt<'a>(
     baseline: &'a BaselineReceipt,
     input: JjAncestryInput<'a>,
 ) -> Result<VerifiedJjAncestry<'a>, JjAncestryError> {
+    verify_with_frontier(baseline, input, &[])
+}
+
+fn verify_with_frontier<'a>(
+    baseline: &'a BaselineReceipt,
+    input: JjAncestryInput<'a>,
+    frontier: &[JjHeadClosure],
+) -> Result<VerifiedJjAncestry<'a>, JjAncestryError> {
     preflight::validate(baseline, &input)?;
+    if !frontier.is_empty()
+        && input.operations.iter().any(|record| {
+            frontier
+                .iter()
+                .any(|closure| closure.head_id() == record.operation_id)
+        })
+    {
+        return Err(JjAncestryError::Input("resupplied frontier evidence"));
+    }
     let mut verified = Vec::with_capacity(input.operations.len());
     let mut predecessor_references = 0usize;
     let mut view_references = 0usize;
@@ -141,7 +160,16 @@ pub(crate) fn verify_ancestry_to_receipt<'a>(
             parents: &proof.operation().parent_ids,
         })
         .collect();
-    let order = graph::order_to_baseline(input.head_ids, &nodes, baseline.captured_head_ids())?;
+    let order = if frontier.is_empty() {
+        graph::order_to_baseline(input.head_ids, &nodes, baseline.captured_head_ids())?
+    } else {
+        graph::order_to_frontier(
+            input.head_ids,
+            &nodes,
+            baseline.captured_head_ids(),
+            frontier,
+        )?
+    };
     let mut remaining: Vec<_> = verified.into_iter().map(Some).collect();
     let ordered_operations = order
         .operation_indices

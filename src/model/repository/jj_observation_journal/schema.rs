@@ -83,15 +83,19 @@ pub(super) fn verify_current(conn: &mut Connection) -> Result<(), JournalError> 
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Deferred)
         .map_err(|error| sql_error("begin read-only schema verification", error))?;
-    if read_version(&tx)? != 4 {
-        return Err(unsupported_schema());
-    }
-    verify_opaque_schema(&tx)?;
-    native::verify(&tx)?;
-    registration::verify(&tx)?;
-    admission::verify(&tx)?;
+    verify_in_snapshot(&tx)?;
     tx.rollback()
         .map_err(|error| sql_error("finish read-only schema verification", error))
+}
+
+pub(super) fn verify_in_snapshot(conn: &Connection) -> Result<(), JournalError> {
+    if read_version(conn)? != 4 {
+        return Err(unsupported_schema());
+    }
+    verify_opaque_schema(conn)?;
+    native::verify(conn)?;
+    registration::verify(conn)?;
+    admission::verify(conn)
 }
 
 fn advance_version(

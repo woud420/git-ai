@@ -2,6 +2,10 @@
 
 Status: accepted — implemented and locally qualified on macOS for the pinned jj profile.
 
+The [2026-10-27 incremental contract](2026-10-27-jj-incremental-observation.md)
+extends this controller with linked segments, connection-owned replay and explicit
+replay status. Its qualification is separate from the original milestone below.
+
 Refs: [ENG-415](https://linear.app/polarcoordinates/issue/ENG-415),
 [finite foreground observation](2026-09-08-jj-finite-observation.md),
 [reconciliation](2026-09-08-jj-native-reconciliation.md),
@@ -52,9 +56,9 @@ The native admission state and verified latest packet already hold durable sourc
 progress. On daemon startup, load intent once. Missing intent means disabled;
 unreadable or invalid intent means unavailable. An enabled, unblocked record
 permits fresh policy, source, registration and saved-target validation. Successful
-bootstrap establishes the verified current cursor in memory without rewriting
-intent or incrementing its revision. Disabled and durably blocked records do not
-start a native session.
+bootstrap opens a pending replay session without rewriting intent or incrementing
+its revision. Bounded replay must verify the saved frontier before exposing a
+verified current cursor. Disabled and durably blocked records do not start a native session.
 
 Startup and explicit resume intentionally include valid manual admissions made
 while the worker was stopped. This is source-wide progress, not recovery of the
@@ -93,9 +97,9 @@ Controller status separates desired intent from runtime:
 | `revision` | Committed control revision; zero for a known empty slot, null if unknown. |
 | `desired_intent` | Enabled or disabled; null when intent is unavailable. |
 | `target` | Saved source/receipt/profile/baseline/workspace/attachment metadata, without locators. |
-| `runtime` | Pending, active, stopping, blocked or disabled. |
+| `runtime` | Pending, replaying, active, stopping, blocked or disabled. |
 | `in_flight` | A native job still occupies the one reserved slot. |
-| `session_cursor` | Last verified in-memory generation and admitted heads, or null. |
+| `session_cursor` | Last verified in-memory generation and admitted heads, or null; always null while replaying. |
 | `last_error` | Bounded diagnostic and whether its block was persisted. |
 
 Status reads controller metadata only. Active is a verified session state, not a
@@ -116,12 +120,12 @@ exhaustion refuses further work rather than wrapping.
 
 Validation uses a fresh five-second cooperative deadline and a 32-MiB selected-record
 budget. Each tick uses fresh configuration, its own five-second deadline and one
-48-MiB budget. It invokes the existing reconciliation operation with the saved
-workspace target and session cursor. A successful result carries only the verified
-current cursor forward, including when the returned receipt is a historical retry.
-Drop raw evidence and transaction handles before waiting. The first tick runs
-promptly; later ticks wait five seconds after completion, with no overlap or catch-up
-burst. Unchanged ticks append no native packet or durable scheduling progress.
+96-MiB budget. It runs one dependency-replay job or one bounded native observation
+with the pinned workspace target and expected cursor. A completed prefix carries
+only its verified current cursor forward. Drop raw evidence and transaction handles
+before waiting. The first tick runs promptly; replay ticks wait 250 ms and active
+observation ticks wait five seconds after completion, with no overlap. Unchanged
+ticks append no native packet or durable scheduling progress.
 
 Any reconciliation failure stops the session and attempts a revision-guarded durable
 block. A persisted block survives restart until explicit resume. A crash before that
@@ -140,11 +144,12 @@ publication retry, repair or adoption from the discarded cache.
 
 ## Limits and follow-up
 
-Every changed reconciliation still proves complete ancestry to the original cutoff
-or root. The 256-pair and existing raw, semantic and encoded limits can permanently
-prevent further admission. More frequent polling, daemon restart and explicit resume
-do not shorten that history. There is no partial frontier, automatic rebaseline or
-scalable catch-up in this slice.
+Each changed daemon observation proves a bounded segment to the verified prior
+frontier, original anchors or root. Exact per-head summaries preserve original-cutoff
+lineage. Histories can exceed 256 total operations across segments; one previously
+unseen branch exceeding a segment's limits still refuses the entire attempt. There
+is no partial head closure or automatic rebaseline. Explicit/finite v1 APIs retain
+their original-cutoff complete-history contract.
 
 The budgets count selected payload charges, not combined RSS, all SQLite work or
 policy/config include reads. Deadlines are cooperative and cannot interrupt blocking
@@ -153,8 +158,8 @@ outside independently witnessed protection. Default metadata omits raw records a
 locators; existing bounded native errors do not establish blanket redaction.
 
 This connects bounded observation to the shared executable and actual daemon. Native
-ordering for attribution, shared checkpoint/blame/stats behavior and scalable history
-remain separate work. Native attribution is disabled throughout.
+ordering for attribution and shared checkpoint/blame/stats behavior remain separate
+work. Native attribution is disabled throughout.
 
 ## Qualification
 

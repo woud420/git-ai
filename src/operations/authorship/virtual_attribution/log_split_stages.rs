@@ -184,15 +184,15 @@ pub(super) fn fill_committed_gaps(
     let mut gap_fills: Vec<(String, u32)> = Vec::new();
     for hunk in hunks {
         for line in hunk.expand() {
-            if line_to_author
-                .binary_search_by_key(&line, |(l, _)| *l)
-                .is_ok()
-            {
-                continue;
-            }
+            // `line` is absent from the sorted list, so entries before
+            // `insert_at` are its predecessors and the rest its successors.
+            let insert_at = match line_to_author.binary_search_by_key(&line, |(l, _)| *l) {
+                Ok(_) => continue,
+                Err(insert_at) => insert_at,
+            };
 
-            let prev = line_to_author.iter().rev().find(|(l, _)| *l < line);
-            let next = line_to_author.iter().find(|(l, _)| *l > line);
+            let prev = insert_at.checked_sub(1).map(|i| &line_to_author[i]);
+            let next = line_to_author.get(insert_at);
 
             if let (Some((_, prev_author)), Some((_, next_author))) = (prev, next)
                 && prev_author == next_author

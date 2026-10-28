@@ -196,10 +196,8 @@ impl VirtualAttributions {
                     if !is_unstaged {
                         // Convert workdir → commit line number by subtracting
                         // the count of unstaged lines that precede this one.
-                        let adjustment = unstaged_lines
-                            .iter()
-                            .filter(|&&l| l < workdir_line_num)
-                            .count() as u32;
+                        let adjustment =
+                            unstaged_lines.partition_point(|&l| l < workdir_line_num) as u32;
                         let commit_line_num = workdir_line_num - adjustment;
 
                         let is_committed = file_committed_hunks

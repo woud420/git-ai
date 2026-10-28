@@ -128,6 +128,13 @@ impl<'a> PreparedNativeAdmission<'a> {
 }
 
 impl Request<'_> {
+    pub(super) fn require_previous(&self, current: Option<&str>) -> Result<(), JournalError> {
+        if self.previous_admission_id.is_some() && self.previous_admission_id != current {
+            return Err(invalid("native admission previous receipt conflict"));
+        }
+        Ok(())
+    }
+
     fn state(&self, admission_id: String) -> NativeAdmissionState {
         NativeAdmissionState {
             state_version: 1,

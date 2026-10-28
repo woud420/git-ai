@@ -482,7 +482,7 @@ pub(super) fn record_recovery_metric(input: RecoveryMetricInput<'_>) {
     if !input.external_session_id.is_empty() {
         attrs = attrs.external_session_id(input.external_session_id);
     }
-    if let Some(url) = crate::repo_url::resolve_repo_url_from_repo(input.repo) {
+    if let Some(url) = crate::operations::git::remote_url::resolve_repo_url_from_repo(input.repo) {
         attrs = attrs.repo_url(url);
     }
     if let Ok(head_ref) = input.repo.head()

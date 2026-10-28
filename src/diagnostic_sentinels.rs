@@ -8,7 +8,7 @@ pub fn is_debug_self_check_remote_url(url: &str) -> bool {
     let trimmed = url.trim().trim_end_matches('/');
     trimmed == DEBUG_SELF_CHECK_REMOTE_URL
         || trimmed == DEBUG_SELF_CHECK_NORMALIZED_REMOTE_URL
-        || crate::repo_url::normalize_repo_url(trimmed)
+        || crate::operations::git::remote_url::normalize_repo_url(trimmed)
             .is_ok_and(|normalized| normalized == DEBUG_SELF_CHECK_NORMALIZED_REMOTE_URL)
 }
 

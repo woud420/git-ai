@@ -1,11 +1,11 @@
 use crate::repos::test_repo::TestRepo;
 use git_ai::metrics::{EventAttributes, MetricEvent, PosEncoded, SessionEventValues};
 use git_ai::model::stream_watermark::{ByteOffsetWatermark, WatermarkType};
+use git_ai::operations::git::remote_url::resolve_repo_url_from_path;
 use git_ai::operations::streams::agent::Agent;
 use git_ai::operations::streams::agents::ClaudeAgent;
 use git_ai::operations::streams::sweep::StreamFormat;
 use git_ai::operations::streams::{StreamRecord, StreamsDatabase};
-use git_ai::repo_url::resolve_repo_url_from_path;
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};

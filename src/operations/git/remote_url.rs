@@ -85,9 +85,7 @@ fn normalize_ssh_url(host: &str, path: &str) -> Result<String, String> {
 pub fn resolve_repo_url_from_repo(
     repo: &crate::operations::git::repository::Repository,
 ) -> Option<String> {
-    let remote_name = repo.get_default_remote().ok()??;
-    let remotes = repo.remotes_with_urls().ok()?;
-    let (_, url) = remotes.into_iter().find(|(n, _)| n == &remote_name)?;
+    let (_, url) = repo.default_remote_with_url().ok()??;
     normalize_repo_url(&url).ok()
 }
 

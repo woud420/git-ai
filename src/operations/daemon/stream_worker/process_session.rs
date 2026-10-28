@@ -104,7 +104,8 @@ impl StreamWorker {
         }
 
         if let Some(ref work_dir) = resolved_work_dir
-            && let Some(url) = crate::repo_url::resolve_repo_url_from_path(work_dir)
+            && let Some(url) =
+                crate::operations::git::remote_url::resolve_repo_url_from_path(work_dir)
         {
             base_attrs = base_attrs.repo_url(url);
         }

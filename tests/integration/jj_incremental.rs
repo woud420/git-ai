@@ -3,6 +3,8 @@ use git_ai::operations::jj::observation::{JjObservationSession, JjObservationSte
 
 #[path = "jj_incremental_faults.rs"]
 mod faults;
+#[path = "jj_incremental_recovery.rs"]
+mod recovery;
 
 #[test]
 fn jj_incremental_admits_beyond_256_and_replays_after_native_history_gc() {
@@ -16,6 +18,9 @@ fn jj_incremental_admits_beyond_256_and_replays_after_native_history_gc() {
 }
 
 pub(super) fn run(case: &Case, config: &Config) {
+    if case.name.contains(":recovery_") {
+        return recovery::run(case, config);
+    }
     if !case.name.ends_with(":chain") {
         return faults::run(case, config);
     }

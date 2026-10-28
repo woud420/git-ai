@@ -64,6 +64,62 @@ fn native_admission_segments_require_a_positive_generation_and_exact_receipt_id(
 }
 
 #[test]
+fn native_admission_segments_transaction_requires_the_current_receipt_link() {
+    let fixture = Fixture::new();
+    fixture.seed("left");
+    let input = Input::from("merge");
+    let mut journal = fixture.journal();
+    let packets = fixture.packet_rows();
+    let states = fixture.state_rows();
+    let wrong = "ab".repeat(32);
+    let prepared = segment(&input, &wrong).unwrap();
+    let id = prepared.admission_id().to_owned();
+    let tx = journal
+        .begin_native_admission(
+            vectors::SOURCE,
+            Some("default"),
+            Some(&id),
+            &mut unlimited(),
+        )
+        .unwrap();
+    assert!(tx.stage(prepared, &mut unlimited()).is_err());
+    assert_eq!(fixture.packet_rows(), packets);
+    assert_eq!(fixture.state_rows(), states);
+
+    // The same generation and heads are admissible with the exact current link.
+    let prepared = segment(&input, vector("left").admission_id).unwrap();
+    let id = prepared.admission_id().to_owned();
+    let tx = journal
+        .begin_native_admission(
+            vectors::SOURCE,
+            Some("default"),
+            Some(&id),
+            &mut unlimited(),
+        )
+        .unwrap();
+    let (commit, outcome, _) = tx.stage(prepared, &mut unlimited()).unwrap().into_parts();
+    assert_eq!(outcome, NativeAdmissionOutcome::Admitted);
+    commit.commit().unwrap();
+    assert_cursor(&read(&journal, None, &mut unlimited()).unwrap(), 2, "merge");
+
+    // Exact v1 historical retries still preserve the newer linked cursor.
+    let historical = Input::from("left");
+    let prepared = historical.prepare().unwrap();
+    let tx = journal
+        .begin_native_admission(
+            vectors::SOURCE,
+            Some("default"),
+            Some(prepared.admission_id()),
+            &mut unlimited(),
+        )
+        .unwrap();
+    let (commit, outcome, snapshot) = tx.stage(prepared, &mut unlimited()).unwrap().into_parts();
+    assert_eq!(outcome, NativeAdmissionOutcome::AlreadyAdmitted);
+    assert_cursor(&snapshot, 2, "merge");
+    commit.commit().unwrap();
+}
+
+#[test]
 fn native_admission_segments_reject_downgrade_unknown_version_and_zero_generation() {
     let mut input = Input::from("left");
     input.generation = 1;
@@ -113,6 +169,35 @@ fn native_admission_segments_recheck_epoch_after_the_writer_reservation() {
         .begin_native_admission(vectors::SOURCE, Some("default"), None, &mut unlimited())
         .unwrap();
     tx.require_replay_epoch(epoch).unwrap();
+}
+
+#[test]
+fn native_admission_segments_writer_rejects_schema_drift_before_reading_packets() {
+    let fixture = Fixture::new();
+    fixture.seed("left");
+    let mut journal = fixture.journal();
+    // The already-open connection must not scan history after losing its
+    // generation index, even when the selected rows remain perfectly valid.
+    fixture
+        .conn()
+        .execute_batch(
+            "PRAGMA foreign_keys=OFF;
+         CREATE TABLE packet_copy AS SELECT * FROM jj_native_admissions;
+         DROP TABLE jj_native_admissions;
+         CREATE TABLE jj_native_admissions (
+            source_id TEXT NOT NULL, admission_id TEXT NOT NULL,
+            generation INTEGER NOT NULL, record BLOB NOT NULL, checksum TEXT NOT NULL,
+            PRIMARY KEY (source_id, admission_id),
+            FOREIGN KEY (source_id) REFERENCES jj_native_registrations(source_id));
+         INSERT INTO jj_native_admissions SELECT * FROM packet_copy;
+         DROP TABLE packet_copy;",
+        )
+        .unwrap();
+    let mut budget = unlimited();
+    let result =
+        journal.begin_native_admission(vectors::SOURCE, Some("default"), None, &mut budget);
+    assert!(result.is_err());
+    assert_eq!(budget.consumed(), 0);
 }
 
 #[test]

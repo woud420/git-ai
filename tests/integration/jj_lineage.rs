@@ -19,6 +19,54 @@ fn jj_lineage_requires_the_exact_native_parent_set() {
 }
 
 #[test]
+fn jj_lineage_preserves_distinct_parent_values_and_added_removed_workspaces() {
+    mod ordered {
+        include!("fixtures/jj-lineage/vectors.rs");
+    }
+    use git_ai::operations::jj::lineage::JjWorkspaceTransition;
+    use ordered::*;
+    let root = "00".repeat(64);
+    let left = paired(LEFT_ID, LEFT_HEX, &[&root], LEFT_VIEW_ID, LEFT_VIEW_HEX);
+    let right = paired(RIGHT_ID, RIGHT_HEX, &[&root], RIGHT_VIEW_ID, RIGHT_VIEW_HEX);
+    let current = paired(
+        MERGE_ID,
+        MERGE_HEX,
+        &[RIGHT_ID, LEFT_ID],
+        MERGE_VIEW_ID,
+        MERGE_VIEW_HEX,
+    );
+    // Supply the opposite order: only the immutable operation determines order.
+    let proof = verify_transition(PROFILE, &current, &[&left, &right]).unwrap();
+    let expected = [
+        ("added", vec![None, None], Some("66".repeat(20))),
+        (
+            "default",
+            vec![Some("22".repeat(20)), Some("11".repeat(20))],
+            Some("33".repeat(20)),
+        ),
+        ("removed", vec![None, Some("44".repeat(20))], None),
+        ("right-only", vec![Some("55".repeat(20)), None], None),
+    ]
+    .map(|(name, before, after)| JjWorkspaceTransition {
+        workspace_name: name.to_owned(),
+        before,
+        after,
+    });
+    assert_eq!(proof.workspaces(), expected);
+    assert!(proof.recorded_predecessors().unwrap().is_empty());
+    let root_transition = verify_transition(PROFILE, &left, &[]).unwrap();
+    assert!(
+        root_transition
+            .workspaces()
+            .iter()
+            .all(|transition| transition.before == [None])
+    );
+    let mut forged = current.clone();
+    forged.parent_ids.reverse();
+    assert!(verify_transition(PROFILE, &forged, &[&left, &right]).is_err());
+}
+
+#[test]
 fn jj_lineage_preserves_recorded_candidates_without_asserting_rewrite_provenance() {
     let child = merge();
     let left = left();

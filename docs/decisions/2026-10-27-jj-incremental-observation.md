@@ -70,6 +70,11 @@ alter an already verified dependency. Retain transactional exact readback and th
 final held-source recheck before the sole commit. Promote cache state only after
 confirmed commit; any failure invalidates it.
 
+The journal transaction itself checks the schema before selecting packets and
+requires each fresh v2 write's previous receipt to equal the current receipt.
+Generation and head equality alone are insufficient. Exact historical retries
+remain separate from this fresh-write check and keep the later cursor intact.
+
 SQLite's `SQLITE_FCNTL_HAS_MOVED` rejects ordinary database rename/unlink without
 opening a raw database descriptor. Continuity still assumes ordinary SQLite
 transactions and locking on the same live database. Raw byte replacement/rollback,
@@ -99,6 +104,11 @@ after native-history GC, more than 64 linked generations, no held snapshots at
 yields, missing dependency restoration, external progress, short-budget rollback,
 own-trigger refusal and database movement. Dedicated-daemon tests additionally
 cover segmented catch-up/restart while preserving original registration rows.
+Review regressions also exercise rehashed invalid links, expected heads and native
+bytes; interruption and corruption of an old dependency with an unchanged cursor;
+replacement by an identical database; and schema drift on an open writer before
+any packet bytes are read. Restoring the evidence and reopening must recover the
+same original baseline without advancing the applied frontier.
 The CLI reply regression first rejected `replaying`; it now accepts that state
 only with a saved target and without a purported verified cursor.
 

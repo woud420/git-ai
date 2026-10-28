@@ -634,49 +634,45 @@ fn get_checkpoint_entry_for_file(
             return Ok(None);
         }
 
-        // Build a set of lines covered by INITIAL attributions
-        let mut initial_covered_lines: HashSet<u32> = HashSet::new();
-        for attr in &initial_attrs_for_file {
-            for line in attr.start_line..=attr.end_line {
-                initial_covered_lines.insert(line);
-            }
-        }
-
         // Start with INITIAL attributions (they win), augmented by parent note
         let mut prev_line_attributions = initial_attrs_for_file.clone();
 
         // Parent note seeding removed — handled at post-commit via inheritance.
         let _ = &parent_note_attributions;
 
-        let mut blamed_lines: HashSet<u32> = HashSet::new();
-
-        // Default all previous-content lines to "human" (no cross-commit blame).
-        // When INITIAL has a snapshot that DIFFERS from current content, use its
-        // line count (that's what the diff will compare against). When the snapshot
-        // matches current content (no edits after INITIAL), use the HEAD content
-        // line count so the AI fallback can fire for uncovered lines.
-        let effective_prev_content = if !initial_attrs_for_file.is_empty() {
-            let snapshot = initial_snapshot_content
-                .as_deref()
-                .unwrap_or(&previous_content);
-            if content_eq_ignoring_line_endings(snapshot, &current_content) {
-                &previous_content
-            } else {
-                snapshot
-            }
-        } else {
-            &previous_content
-        };
-        let prev_total_lines = effective_prev_content.lines().count() as u32;
-        for line_num in 1..=prev_total_lines {
-            blamed_lines.insert(line_num);
-        }
-
         // For AI checkpoints, attribute any lines NOT in INITIAL and NOT returned by ai_blame
         if kind.is_ai() {
+            // Build a set of lines covered by INITIAL attributions
+            let mut initial_covered_lines: HashSet<u32> = HashSet::new();
+            for attr in &initial_attrs_for_file {
+                for line in attr.start_line..=attr.end_line {
+                    initial_covered_lines.insert(line);
+                }
+            }
+
+            // Default all previous-content lines to "human" (no cross-commit blame).
+            // When INITIAL has a snapshot that DIFFERS from current content, use its
+            // line count (that's what the diff will compare against). When the snapshot
+            // matches current content (no edits after INITIAL), use the HEAD content
+            // line count so the AI fallback can fire for uncovered lines.
+            let effective_prev_content = if !initial_attrs_for_file.is_empty() {
+                let snapshot = initial_snapshot_content
+                    .as_deref()
+                    .unwrap_or(&previous_content);
+                if content_eq_ignoring_line_endings(snapshot, &current_content) {
+                    &previous_content
+                } else {
+                    snapshot
+                }
+            } else {
+                &previous_content
+            };
+            let prev_total_lines = effective_prev_content.lines().count() as u32;
+
             let total_lines = current_content.lines().count() as u32;
-            for line_num in 1..=total_lines {
-                if !initial_covered_lines.contains(&line_num) && !blamed_lines.contains(&line_num) {
+            // Lines 1..=prev_total_lines are human by default, so only later lines qualify.
+            for line_num in (1..=total_lines).skip(prev_total_lines as usize) {
+                if !initial_covered_lines.contains(&line_num) {
                     prev_line_attributions.push(LineAttribution {
                         start_line: line_num,
                         end_line: line_num,

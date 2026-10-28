@@ -13,6 +13,7 @@ pub use crate::model::git_oid as oid;
 pub(crate) mod patch_id;
 pub mod path_format;
 pub mod refs;
+pub mod remote_url;
 pub mod repo_state;
 pub mod repository;
 pub(crate) mod sequencer_args;

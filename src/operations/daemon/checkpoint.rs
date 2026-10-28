@@ -79,7 +79,7 @@ pub fn build_agent_usage_attrs(
         .custom_attributes_map(crate::config::Config::fresh().custom_attributes());
 
     if let Some(repo) = repo {
-        if let Some(url) = crate::repo_url::resolve_repo_url_from_repo(repo) {
+        if let Some(url) = crate::operations::git::remote_url::resolve_repo_url_from_repo(repo) {
             attrs = attrs.repo_url(url);
         }
 
@@ -122,7 +122,7 @@ fn build_checkpoint_attrs(
     attrs = attrs.custom_attributes_map(crate::config::Config::fresh().custom_attributes());
 
     // Add repo URL
-    if let Some(url) = crate::repo_url::resolve_repo_url_from_repo(repo) {
+    if let Some(url) = crate::operations::git::remote_url::resolve_repo_url_from_repo(repo) {
         attrs = attrs.repo_url(url);
     }
 

@@ -972,7 +972,7 @@ fn test_default_remote_prefers_origin_then_first_remote() {
         ))
     );
     assert_eq!(
-        git_ai::repo_url::resolve_repo_url_from_repo(&repo).as_deref(),
+        git_ai::operations::git::remote_url::resolve_repo_url_from_repo(&repo).as_deref(),
         Some("https://github.com/acme/upstream")
     );
 
@@ -990,7 +990,7 @@ fn test_default_remote_prefers_origin_then_first_remote() {
         Some("origin")
     );
     assert_eq!(
-        git_ai::repo_url::resolve_repo_url_from_repo(&repo).as_deref(),
+        git_ai::operations::git::remote_url::resolve_repo_url_from_repo(&repo).as_deref(),
         Some("https://github.com/acme/origin")
     );
 }

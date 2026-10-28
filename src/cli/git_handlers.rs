@@ -59,26 +59,20 @@ pub fn handle_git(args: &[String]) {
     // and delegate directly to the real git so existing completion scripts work.
     if in_shell_completion_context() {
         let orig_args: Vec<String> = std::env::args().skip(1).collect();
-        proxy_to_git(&orig_args, true);
+        let read_only = is_read_only_invocation(&parse_git_cli_args(&orig_args));
+        proxy_to_git(&orig_args, read_only, true);
         return;
     }
 
     let parsed = parse_git_cli_args(args);
 
-    let is_read_only = parsed.command.as_deref().is_some_and(|cmd| {
-        crate::operations::git::command_classification::is_definitely_read_only_git_invocation(
-            cmd,
-            &parsed.command_args,
-        )
-    });
-
-    if is_read_only {
-        let exit_status = proxy_to_git(args, false);
+    if is_read_only_invocation(&parsed) {
+        let exit_status = proxy_to_git(args, true, false);
         exit_with_status(exit_status);
     }
 
     let repository = find_repository(&parsed.global_args).ok();
-    let exit_status = proxy_to_git(args, false);
+    let exit_status = proxy_to_git(args, false, false);
 
     // After a successful commit, wait briefly for the daemon to produce an
     // authorship note so we can show stats inline (same UX as plain wrapper mode).
@@ -231,19 +225,22 @@ fn maybe_show_async_post_commit_stats(parsed: &ParsedGitInvocation, repo: &Repos
     }
 }
 
-fn proxy_to_git(args: &[String], exit_on_completion: bool) -> std::process::ExitStatus {
-    // Suppress trace2 for read-only invocations to avoid hitting the daemon
-    // with events that can never produce meaningful state changes.
-    let suppress_trace2 = {
-        let parsed = parse_git_cli_args(args);
-        parsed.command.as_deref().is_some_and(|cmd| {
-            crate::operations::git::command_classification::is_definitely_read_only_git_invocation(
-                cmd,
-                &parsed.command_args,
-            )
-        })
-    };
+fn is_read_only_invocation(parsed: &ParsedGitInvocation) -> bool {
+    parsed.command.as_deref().is_some_and(|cmd| {
+        crate::operations::git::command_classification::is_definitely_read_only_git_invocation(
+            cmd,
+            &parsed.command_args,
+        )
+    })
+}
 
+/// `suppress_trace2` is set for read-only invocations so the daemon isn't hit
+/// with events that can never produce meaningful state changes.
+fn proxy_to_git(
+    args: &[String],
+    suppress_trace2: bool,
+    exit_on_completion: bool,
+) -> std::process::ExitStatus {
     // Use spawn for interactive commands
     let child = {
         #[cfg(unix)]

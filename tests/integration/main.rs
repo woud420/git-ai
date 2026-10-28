@@ -28,6 +28,7 @@ mod blame_subdirectory;
 mod checkout_switch;
 mod checkpoint_debug_log;
 mod checkpoint_explicit_paths;
+mod checkpoint_ipc_benchmark;
 mod checkpoint_journal;
 mod checkpoint_perf;
 mod checkpoint_size;

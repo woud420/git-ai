@@ -7,15 +7,17 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
+/// A line of the content: `text` borrows `&content[start..end]` without its
+/// line ending (`\n` or `\r\n`).
 #[derive(Clone, Debug)]
-pub(super) struct LineMetadata {
+pub(super) struct LineMetadata<'a> {
     pub(super) number: usize,
     pub(super) start: usize,
     pub(super) end: usize,
-    pub(super) text: String,
+    pub(super) text: &'a str,
 }
 
-pub(super) fn collect_line_metadata(content: &str) -> Vec<LineMetadata> {
+pub(super) fn collect_line_metadata(content: &str) -> Vec<LineMetadata<'_>> {
     let mut metadata = Vec::new();
     let mut line_start = 0usize;
     let mut line_number = 1usize;
@@ -23,15 +25,11 @@ pub(super) fn collect_line_metadata(content: &str) -> Vec<LineMetadata> {
     for (idx, ch) in content.char_indices() {
         if ch == '\n' {
             let slice = &content[line_start..idx];
-            let mut text = slice.to_string();
-            if text.ends_with('\r') {
-                text.pop();
-            }
             metadata.push(LineMetadata {
                 number: line_number,
                 start: line_start,
                 end: idx + 1,
-                text,
+                text: slice.strip_suffix('\r').unwrap_or(slice),
             });
             line_start = idx + 1;
             line_number += 1;
@@ -40,15 +38,11 @@ pub(super) fn collect_line_metadata(content: &str) -> Vec<LineMetadata> {
 
     if line_start < content.len() {
         let slice = &content[line_start..content.len()];
-        let mut text = slice.to_string();
-        if text.ends_with('\r') {
-            text.pop();
-        }
         metadata.push(LineMetadata {
             number: line_number,
             start: line_start,
             end: content.len(),
-            text,
+            text: slice.strip_suffix('\r').unwrap_or(slice),
         });
     }
 

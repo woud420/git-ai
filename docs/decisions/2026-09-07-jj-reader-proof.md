@@ -2,6 +2,11 @@
 
 Status: accepted — selected reader profile and qualification contract for native implementation.
 
+The [2026-10-27 lineage qualification](2026-10-27-jj-lineage-qualification.md)
+records the completed transition proof and the approved explicit-unknown boundary
+for ambiguous import and operation recovery. Recorded predecessors remain
+candidates, never standalone authority to transfer authorship.
+
 The next implementation uses a bounded reader of immutable jj operation and view
 files. The stock CLI remains a test oracle. No observer, checkpoint integration,
 or native attribution is enabled by this research increment.

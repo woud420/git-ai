@@ -16,8 +16,8 @@ pub(super) const TOKEN_DIFF_FAST_PATH_HUGE_BYTES: usize = 256 * 1024;
 pub(super) const TOKEN_DIFF_FAST_PATH_MAX_OPS: usize = 8;
 
 #[derive(Default)]
-pub(super) struct DiffComputation {
-    pub(super) diffs: Vec<ByteDiff>,
+pub(super) struct DiffComputation<'a> {
+    pub(super) diffs: Vec<ByteDiff<'a>>,
     pub(super) substantive_new_ranges: Vec<(usize, usize)>,
 }
 
@@ -117,10 +117,10 @@ pub(super) fn line_range_to_byte_range(
     (start, end)
 }
 
-pub(super) fn append_range_diffs(
-    diffs: &mut Vec<ByteDiff>,
-    old_content: &str,
-    new_content: &str,
+pub(super) fn append_range_diffs<'a>(
+    diffs: &mut Vec<ByteDiff<'a>>,
+    old_content: &'a str,
+    new_content: &'a str,
     old_range: (usize, usize),
     new_range: (usize, usize),
     force_split: bool,
@@ -148,12 +148,12 @@ pub(super) fn append_range_diffs(
     }
 }
 
-pub(super) fn build_token_aligned_diffs(
-    old_content: &str,
-    new_content: &str,
+pub(super) fn build_token_aligned_diffs<'a>(
+    old_content: &'a str,
+    new_content: &'a str,
     old_range: (usize, usize),
     new_range: (usize, usize),
-) -> (Vec<ByteDiff>, Vec<(usize, usize)>) {
+) -> (Vec<ByteDiff<'a>>, Vec<(usize, usize)>) {
     let (old_start, old_end) = old_range;
     let (new_start, new_end) = new_range;
 

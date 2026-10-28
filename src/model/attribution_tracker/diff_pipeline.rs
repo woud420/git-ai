@@ -20,12 +20,12 @@ use super::types::{Deletion, Insertion};
 use crate::model::imara_diff_utils::{ByteDiff, ByteDiffOp, DiffOp, capture_diff_slices};
 
 impl AttributionTracker {
-    pub(super) fn compute_diffs(
+    pub(super) fn compute_diffs<'a>(
         &self,
-        old_content: &str,
-        new_content: &str,
+        old_content: &'a str,
+        new_content: &'a str,
         is_ai_checkpoint: bool,
-    ) -> Result<DiffComputation, GitAiError> {
+    ) -> Result<DiffComputation<'a>, GitAiError> {
         let compute_start = Instant::now();
         let line_metadata_start = Instant::now();
         let old_lines = collect_line_metadata(old_content);
@@ -101,12 +101,12 @@ impl AttributionTracker {
         Ok(computation)
     }
 
-    fn push_equal_lines(
+    fn push_equal_lines<'a>(
         &self,
         op: DiffOp,
         old_lines: &[LineMetadata],
-        old_content: &str,
-        diffs: &mut Vec<ByteDiff>,
+        old_content: &'a str,
+        diffs: &mut Vec<ByteDiff<'a>>,
     ) -> Result<(), GitAiError> {
         if let DiffOp::Equal { old_index, len, .. } = op {
             if len == 0 {
@@ -132,14 +132,14 @@ impl AttributionTracker {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn process_changed_hunk(
+    fn process_changed_hunk<'a>(
         &self,
         ops: &[DiffOp],
         old_lines: &[LineMetadata],
         new_lines: &[LineMetadata],
-        old_content: &str,
-        new_content: &str,
-        computation: &mut DiffComputation,
+        old_content: &'a str,
+        new_content: &'a str,
+        computation: &mut DiffComputation<'a>,
         is_ai_checkpoint: bool,
     ) -> Result<(), GitAiError> {
         if ops.is_empty() {
@@ -216,7 +216,10 @@ impl AttributionTracker {
         Ok(())
     }
 
-    pub(super) fn build_diff_catalog(&self, diffs: &[ByteDiff]) -> (Vec<Deletion>, Vec<Insertion>) {
+    pub(super) fn build_diff_catalog(
+        &self,
+        diffs: &[ByteDiff<'_>],
+    ) -> (Vec<Deletion>, Vec<Insertion>) {
         let mut deletions = Vec::new();
         let mut insertions = Vec::new();
 

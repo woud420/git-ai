@@ -21,7 +21,7 @@ impl AttributionTracker {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn transform_attributions(
         &self,
-        diffs: &[ByteDiff],
+        diffs: &[ByteDiff<'_>],
         old_attributions: &[Attribution],
         current_author: &str,
         insertions: &[Insertion],

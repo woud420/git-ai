@@ -21,20 +21,18 @@ pub enum ByteDiffOp {
     Insert,
 }
 
-/// A single diff segment containing an operation and the associated byte data.
+/// A single diff segment: an operation and the bytes it covers, borrowed
+/// from the old or new content being diffed.
 #[derive(Debug, Clone)]
-pub struct ByteDiff {
+pub struct ByteDiff<'a> {
     op: ByteDiffOp,
-    data: Vec<u8>,
+    data: &'a [u8],
 }
 
-impl ByteDiff {
+impl<'a> ByteDiff<'a> {
     /// Create a new ByteDiff with the given operation and data.
-    pub fn new(op: ByteDiffOp, data: &[u8]) -> Self {
-        ByteDiff {
-            op,
-            data: data.to_vec(),
-        }
+    pub fn new(op: ByteDiffOp, data: &'a [u8]) -> Self {
+        ByteDiff { op, data }
     }
 
     /// Returns the operation type for this diff segment.
@@ -43,8 +41,8 @@ impl ByteDiff {
     }
 
     /// Returns the byte data for this diff segment.
-    pub fn data(&self) -> &[u8] {
-        &self.data
+    pub fn data(&self) -> &'a [u8] {
+        self.data
     }
 }
 

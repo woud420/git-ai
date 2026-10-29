@@ -26,8 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TESTS_FILE = REPO_ROOT / "tests" / "git-compat" / "core-tests.txt"
 DEFAULT_WHITELIST = REPO_ROOT / "tests" / "git-compat" / "whitelist.csv"
 DEFAULT_GIT_URL = os.environ.get("GIT_COMPAT_URL", "https://github.com/git/git.git")
-DEFAULT_GIT_REF = os.environ.get("GIT_COMPAT_REF", "v2.54.0")
-DEFAULT_GIT_SHA = os.environ.get("GIT_COMPAT_SHA", "94f057755b7941b321fd11fec1b2e3ca5313a4e0")
+DEFAULT_GIT_REF = os.environ.get("GIT_COMPAT_REF", "v2.56.0")
+DEFAULT_GIT_SHA = os.environ.get("GIT_COMPAT_SHA", "a018953688f1b10bddf91bff8747068f5f4746a4")
 DEFAULT_CLONE_DIR = Path("/tmp/git-core-tests")
 
 

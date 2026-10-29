@@ -5,8 +5,8 @@ permissions:
 
 env:
   GIT_COMPAT_URL: https://github.com/git/git.git
-  GIT_COMPAT_REF: v2.54.0
-  GIT_COMPAT_SHA: 94f057755b7941b321fd11fec1b2e3ca5313a4e0
+  GIT_COMPAT_REF: v2.56.0
+  GIT_COMPAT_SHA: a018953688f1b10bddf91bff8747068f5f4746a4
   GIT_COMPAT_CLEAN_SOURCE: "1"
 
 on:

@@ -6,12 +6,19 @@ use crate::operations::mdm::paths::home_dir;
 use super::{FileConfig, config_file_path, is_real_git_candidate};
 
 pub(super) fn resolve_git_path(file_cfg: &Option<FileConfig>) -> String {
+    // The Git compat harness pins the Git under test without a GIT_* name, because
+    // Git's own suite rejects stray GIT_* variables in alias scripts.
+    let internal_path = std::env::var("_GITAI_INTERNAL_GIT_PATH").ok();
     // Nix wrappers supply their store Git without taking ownership of user config.
     let environment_path = std::env::var("GIT_AI_GIT_PATH").ok();
     let configured_path = file_cfg.as_ref().and_then(|cfg| cfg.git_path.as_deref());
-    for path in [environment_path.as_deref(), configured_path]
-        .into_iter()
-        .flatten()
+    for path in [
+        internal_path.as_deref(),
+        environment_path.as_deref(),
+        configured_path,
+    ]
+    .into_iter()
+    .flatten()
     {
         let trimmed = path.trim();
         if !trimmed.is_empty() {

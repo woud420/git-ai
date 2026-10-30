@@ -236,6 +236,9 @@ def ensure_git_build(clone_dir: Path, jobs: int, force: bool, env: dict) -> None
             f"-j{jobs}",
             "NO_CURL=YesPlease",
             "NO_GETTEXT=YesPlease",
+            # Git 2.56 builds optional Rust by default; none of the core
+            # tests need it, and it would make the build depend on rustup.
+            "NO_RUST=YesPlease",
         ],
         check=True,
         env=env,

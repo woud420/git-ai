@@ -64,3 +64,21 @@ fn environment_git_path_works_without_creating_config() {
     );
     assert!(!config_path.exists());
 }
+
+#[test]
+fn internal_git_path_overrides_environment_and_config() {
+    let (repo, configured) = configured_repo();
+    let supplied = repo.test_home_path().join("supplied-git.exe");
+    let pinned = repo.test_home_path().join("pinned-git.exe");
+    fs::copy(&configured, &supplied).unwrap();
+    fs::copy(&configured, &pinned).unwrap();
+    let envs = [
+        ("_GITAI_INTERNAL_GIT_PATH", pinned.to_str().unwrap()),
+        ("GIT_AI_GIT_PATH", supplied.to_str().unwrap()),
+    ];
+
+    assert_eq!(
+        get_json_with_env(&repo, "git_path", &envs),
+        pinned.to_str().unwrap()
+    );
+}

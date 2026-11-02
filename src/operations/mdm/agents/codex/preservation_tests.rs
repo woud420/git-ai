@@ -95,15 +95,19 @@ fn preserves_unrelated_text_across_toml_representations() {
                     || line.contains("# inline settings")
             })
         {
-            if line.contains("codex_hooks") || line.starts_with("hooks =") {
-                assert!(
-                    installed.contains(line.split('#').nth(1).unwrap()),
-                    "{installed}"
-                );
-                assert!(
-                    uninstalled.contains(line.split('#').nth(1).unwrap()),
-                    "{uninstalled}"
-                );
+            if line.contains("codex_hooks") {
+                // Only the owned flag inside the inline table changes; the
+                // line's comment belongs to the surviving `features` key.
+                let comment = line.split('#').nth(1).unwrap();
+                assert!(installed.contains(comment), "{installed}");
+                assert!(uninstalled.contains(comment), "{uninstalled}");
+            } else if line.starts_with("hooks =") {
+                // git-ai owns this flag: install flips it in place, and
+                // uninstall removes the line together with its trailing comment.
+                let flipped = line.replace("false", "true");
+                assert!(installed.contains(&flipped), "{installed}");
+                let comment = line.split('#').nth(1).unwrap();
+                assert!(!uninstalled.contains(comment), "{uninstalled}");
             } else {
                 assert!(installed.contains(line), "missing {line:?} in {installed}");
                 assert!(
@@ -285,4 +289,42 @@ fn repairs_non_array_hook_fields_using_existing_transformations() {
     let (installed, uninstalled) = install_and_remove(source);
     assert!(installed.contains("model = 'gpt-5' # keep"));
     assert!(uninstalled.contains("model = 'gpt-5' # keep"));
+}
+
+#[test]
+fn preserves_comments_on_matcher_groups_without_hooks() {
+    let table =
+        "# my Bash matcher group, keep this note\n[[hooks.Stop]]\nmatcher = 'Bash' # important\n";
+    // Install normalizes the group to `hooks = []`; the existing uninstall
+    // transformation drops hookless groups, so only install is asserted here.
+    let (installed, _) = install_and_remove(table);
+    assert!(installed.starts_with(table), "{installed}");
+    let inline = "hooks.Stop = [ # keep me\n{ matcher = 'Bash' }, # trailing\n]\n";
+    let (installed, _) = install_and_remove(inline);
+    assert!(
+        installed.starts_with("hooks.Stop = [ # keep me\n{ matcher = 'Bash'"),
+        "{installed}"
+    );
+    assert!(installed.contains("}, # trailing\n"), "{installed}");
+}
+
+#[test]
+fn removed_keys_keep_comment_lines_in_place_and_drop_trailing_comments() {
+    let source = "# notify comment\nnotify = ['/old/git-ai', 'checkpoint', 'codex', '--hook-input'] # managed\nmodel = 'x' # keep\n[features]\n# legacy flag\ncodex_hooks = true # old flag\n";
+    let (installed, uninstalled) = install_and_remove(source);
+    assert!(
+        installed.starts_with(
+            "# notify comment\nmodel = 'x' # keep\n[features]\n# legacy flag\nhooks = true\n"
+        ),
+        "{installed}"
+    );
+    assert!(
+        uninstalled.starts_with("# notify comment\nmodel = 'x' # keep\n"),
+        "{uninstalled}"
+    );
+    for output in [&installed, &uninstalled] {
+        assert_eq!(output.matches("# notify comment").count(), 1, "{output}");
+        assert!(!output.contains("# managed"), "{output}");
+        assert!(!output.contains("# old flag"), "{output}");
+    }
 }

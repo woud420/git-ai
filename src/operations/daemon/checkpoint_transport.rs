@@ -139,14 +139,12 @@ fn read_response(
     socket_path: &Path,
     deadline: Instant,
 ) -> Result<ControlResponse, GitAiError> {
-    let remaining = deadline
-        .checked_duration_since(Instant::now())
-        .ok_or_else(|| {
-            transport_error(
-                std::io::ErrorKind::TimedOut,
-                "checkpoint response timed out".into(),
-            )
-        })?;
+    let remaining = time_left(deadline).ok_or_else(|| {
+        transport_error(
+            std::io::ErrorKind::TimedOut,
+            "checkpoint response timed out".into(),
+        )
+    })?;
     set_daemon_client_stream_timeouts(reader.get_mut(), socket_path, remaining)?;
     let line = read_daemon_client_line(reader, socket_path, remaining)?;
     serde_json::from_str(line.trim()).map_err(GitAiError::from)
@@ -219,9 +217,7 @@ fn read_checkpoint_body<R: Read>(
                 "daemon is shutting down before binary checkpoint body completed",
             ));
         }
-        let remaining = deadline
-            .checked_duration_since(Instant::now())
-            .ok_or_else(body_timeout)?;
+        let remaining = time_left(deadline).ok_or_else(body_timeout)?;
         if remaining < BODY_READ_POLL_INTERVAL {
             set_read_timeout(reader.get_mut(), Some(remaining))?;
         }
@@ -243,10 +239,18 @@ fn read_checkpoint_body<R: Read>(
             Err(error) => return Err(error),
         }
     }
-    if Instant::now() >= deadline {
-        return Err(body_timeout());
-    }
+    // A body whose final bytes arrived is complete even if the deadline
+    // elapsed during that last read.
     Ok(body)
+}
+
+/// Remaining time before `deadline`, or `None` once it has elapsed. Zero is
+/// treated as elapsed: a zero socket read timeout is rejected with
+/// `InvalidInput` on Unix rather than reported as a timeout.
+fn time_left(deadline: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
 }
 
 fn body_timeout() -> io::Error {
@@ -260,8 +264,11 @@ pub(crate) fn write_response<W: Write>(
     writer: &mut W,
     response: &ControlResponse,
 ) -> Result<(), GitAiError> {
-    serde_json::to_writer(&mut *writer, response)?;
-    writer.write_all(b"\n")?;
+    // Serialize first so the unbuffered socket sees one write per response,
+    // not one per serializer token.
+    let mut frame = serde_json::to_vec(response)?;
+    frame.push(b'\n');
+    writer.write_all(&frame)?;
     writer.flush()?;
     Ok(())
 }
@@ -287,6 +294,43 @@ mod tests {
             assert!(!unknown_capnp_method(&ControlResponse::err(error)));
         }
         assert!(!unknown_capnp_method(&ControlResponse::ok(None, None)));
+    }
+
+    #[test]
+    fn write_response_issues_one_write_per_response() {
+        struct CountingWriter {
+            writes: usize,
+            bytes: Vec<u8>,
+        }
+        impl Write for CountingWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.writes += 1;
+                self.bytes.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let response = ControlResponse::ok(
+            None,
+            Some(json!({ "checkpoint_capnp_v1": "ready", "nested": { "list": [1, 2, 3] } })),
+        );
+        let mut writer = CountingWriter {
+            writes: 0,
+            bytes: Vec::new(),
+        };
+        write_response(&mut writer, &response).unwrap();
+        assert_eq!(writer.writes, 1);
+        let mut expected = serde_json::to_vec(&response).unwrap();
+        expected.push(b'\n');
+        assert_eq!(writer.bytes, expected);
+    }
+
+    #[test]
+    fn elapsed_or_zero_deadline_has_no_time_left() {
+        assert_eq!(time_left(Instant::now()), None);
+        assert!(time_left(Instant::now() + Duration::from_secs(60)).is_some());
     }
 
     #[test]

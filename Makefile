@@ -33,7 +33,7 @@ export GIT_AI_TEST_SHARED_DAEMON_POOL_SIZE := $(TEST_THREADS)
 .PHONY: test-fuzz-partial test-fuzz-destructive test-fuzz-squash
 .PHONY: test-fuzz-combined test-fuzz-workflow test-fuzz-marathon
 .PHONY: lint check-windows doc fmt format-check coverage coverage-html
-.PHONY: coverage-lcov coverage-check test-bats check
+.PHONY: coverage-lcov coverage-check test-bats check schema-check
 
 install:
 	rustup show active-toolchain
@@ -87,6 +87,10 @@ lint:
 
 check-windows:
 	cargo check --all-targets --target x86_64-pc-windows-gnu
+
+# Requires Cap'n Proto 1.5.0 on PATH or in CAPNP; see schemas/README.md.
+schema-check:
+	cargo run --locked --manifest-path tools/checkpoint-schema/Cargo.toml -- --check
 
 doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps

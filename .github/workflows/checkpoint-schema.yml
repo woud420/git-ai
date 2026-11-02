@@ -1,0 +1,85 @@
+name: Checkpoint Schema
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'schemas/**'
+      - 'tools/checkpoint-schema/**'
+      - 'Makefile'
+      - '.github/actions/setup-gnu-make/**'
+      - '.github/actions/setup-rust/**'
+      - '.github/workflows/checkpoint-schema.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'schemas/**'
+      - 'tools/checkpoint-schema/**'
+      - 'Makefile'
+      - '.github/actions/setup-gnu-make/**'
+      - '.github/actions/setup-rust/**'
+      - '.github/workflows/checkpoint-schema.yml'
+  merge_group:
+    branches: [main]
+
+# Cancel a pull request's in-progress run when a newer commit is pushed. Every
+# other event gets its own group, so pushes to main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CAPNP_VERSION: 1.5.0
+  # Official release archive and digest recorded in schemas/README.md when the
+  # checked-in artifact was first generated. Bump both together.
+  CAPNP_SHA256: 77dbc13ca82d9c87ddb4581dd49559d45b63096433d3dadea08b7f31b360a5ba
+
+jobs:
+  drift:
+    name: Generated code drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up GNU Make
+        uses: ./.github/actions/setup-gnu-make
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: msrv
+
+      - id: capnp-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/capnproto
+          key: ${{ runner.os }}-capnproto-${{ env.CAPNP_VERSION }}-${{ env.CAPNP_SHA256 }}
+
+      - name: Build Cap'n Proto
+        if: steps.capnp-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/capnproto-c++-$CAPNP_VERSION.tar.gz"
+          prefix="$RUNNER_TEMP/capnproto"
+          curl --fail --location --retry 3 \
+            "https://capnproto.org/capnproto-c++-$CAPNP_VERSION.tar.gz" \
+            --output "$archive"
+          echo "$CAPNP_SHA256  $archive" | sha256sum --check -
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/capnproto-c++-$CAPNP_VERSION"
+          ./configure --prefix="$prefix" --disable-shared
+          make --jobs "$(nproc)"
+          make install
+
+      - name: Check generated schema artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CAPNP="$RUNNER_TEMP/capnproto/bin/capnp"
+          "$CAPNP" --version
+          make schema-check

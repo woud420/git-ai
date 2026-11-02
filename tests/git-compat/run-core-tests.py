@@ -474,6 +474,11 @@ def main() -> int:
                 f"#!/bin/bash\n"
                 f"_GITAI_INTERNAL_DISABLE_WRAPPER_DAEMON_AUTOSPAWN=1\n"
                 f"export _GITAI_INTERNAL_DISABLE_WRAPPER_DAEMON_AUTOSPAWN\n"
+                # Pin the Git that git-ai proxies to the Git under test. test-lib.sh
+                # resets HOME, so the isolated config's git_path is never read and
+                # git-ai would otherwise fall back to the runner's system Git.
+                f'_GITAI_INTERNAL_GIT_PATH="{args.clone_dir.resolve() / "bin-wrappers" / "git"}"\n'
+                f"export _GITAI_INTERNAL_GIT_PATH\n"
                 # exec -a git sets argv[0] to "git" so git-ai's binary-name check
                 # routes to handle_git() instead of handle_git_ai() (help text).
                 # bash is required for exec -a; /bin/sh (dash) does not support it.

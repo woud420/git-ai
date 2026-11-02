@@ -68,7 +68,7 @@ python3 scripts/benchmarks/checkpoint/benchmark_scoped_checkpoint_vs_ref.py \
   --baseline-ref exact-baseline-commit \
   --samples 30 --warmups 5 --resource-samples 20 \
   --prefill-depths 0,50,200 \
-  --output /private/tmp/checkpoint-ipc-release-before-after.json
+  --output /tmp/checkpoint-ipc-release-before-after.json
 ```
 
 The option explicitly sets `GIT_AI_CHECKPOINT_CAPNP=true` for both isolated
@@ -106,5 +106,5 @@ reported timing. These microbenchmarks report observed distributions; they do
 not impose a machine-dependent timing assertion or claim statistical significance.
 
 The [2026-10-26 measurement record](../../../docs/decisions/2026-10-26-checkpoint-ipc-measurements.md)
-contains the measured distributions, sanitized raw data, limitations, and the
-decision to keep JSON as the default.
+contains the measured distributions, links to the sanitized raw data,
+limitations, and the decision to keep JSON as the default.

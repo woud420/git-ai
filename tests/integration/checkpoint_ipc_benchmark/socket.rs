@@ -90,8 +90,6 @@ fn benchmark_checkpoint_ipc_socket_ack() {
             .zip(&durations[0])
             .map(|(capnp, json)| (capnp.as_secs_f64() - json.as_secs_f64()) * 1e9)
             .collect();
-        let mut sorted_ratios = ratios.clone();
-        sorted_ratios.sort_by(f64::total_cmp);
         results.push(json!({
             "fixture": fixture.name,
             "files": fixture.files,
@@ -103,7 +101,6 @@ fn benchmark_checkpoint_ipc_socket_ack() {
             "capnp": { "ack": Measurement::from_durations(&durations[1]) },
             "paired_capnp_over_json": ratios,
             "paired_difference_ns": differences,
-            "paired_ratio_nearest_rank_p50": sorted_ratios[(sorted_ratios.len() - 1) / 2],
             "post_ack_oracles_verified_per_transport": settings.samples,
             "captured_content_verified_after_every_ack": true,
         }));

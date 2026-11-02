@@ -1,19 +1,52 @@
 # Checkpoint IPC measurements
 
-Status: historical
+Status: accepted
 Date: 2026-10-26
 
 ## Decision
 
-Keep JSON as the default and retain Cap’n Proto as an opt-in checkpoint transport.
-Cap’n Proto substantially reduces codec time, but the release CLI experiment did
-not demonstrate faster small checkpoints. The direct socket experiment showed
-modest gains for the large and escaping-heavy fixtures on this machine. These
-results support further targeted evaluation, rather than a default change.
+Keep JSON as the default checkpoint transport, and do not carry the opt-in
+Cap’n Proto transport from [#380](https://github.com/woud420/git-ai/pull/380)
+as a maintained path. Cap’n Proto cuts codec time by up to 8×, but codec time is
+at most about 2% of an end-to-end acknowledgement on this path, the release CLI
+experiment showed parity for small edits, and the transport adds a schema mirror
+of the delivery DTOs, a pinned runtime dependency, and a regeneration step that
+needs a source-built schema compiler. The branch is kept as a reference. The one
+default-path change worth landing on its own is borrowing the delivery instead
+of cloning it before live JSON serialization.
 
 The maintained protocol and configuration authority is
 [Checkpoint IPC](../architecture/checkpoint-ipc.md). This record describes one
 measurement run, not a permanent performance guarantee.
+
+## Options considered
+
+1. **Switch the default to Cap’n Proto.** Rejected: all six small-edit release
+   CLI intervals include parity, and the direct-socket gain is 2.36% at 1 MiB.
+2. **Merge the transport as opt-in behind `checkpoint_capnp`.** Not adopted.
+   Review of #380 found no end-to-end case for it and real carrying costs:
+   about 5,000 lines (2,973 generated), `capnp` as a runtime dependency pinned
+   in lockstep with a separate `capnpc` pin, a schema that must track every
+   delivery DTO or `StreamFormat` change, no CI check for generated-code drift,
+   a daemon that accepts the binary method whether or not the flag is set, and,
+   in the submitted code, one write call per JSON token on every control reply
+   instead of a single buffered write. Its useful patterns, admission before
+   allocation and a monotonic body deadline, can be ported to the JSON path on
+   their own.
+3. **Park the branch and keep the evidence.** Chosen. Keep this record, the
+   benchmark guide, and the statistics reproducer; link the raw data instead of
+   committing it; land the JSON borrow-instead-of-clone as a small PR.
+
+## Consequences
+
+- No wire-format change ships. Clients and daemons keep the JSON control
+  protocol and the existing same-ID outbox replay.
+- Reopening the question needs evidence of a workload with large deliveries on
+  Linux or Windows, where nothing has been measured, and should start from the
+  codec ceiling in [Limits of this evidence](#limits-of-this-evidence) rather
+  than from codec microbenchmarks.
+- The ignored codec and socket benchmarks stay runnable against the pinned
+  commits so the comparison can be repeated.
 
 ## Environment and source identity
 
@@ -129,7 +162,9 @@ The fixture is a fixed 65-byte scoped edit. Actual measured journal depths are
 5–34, 55–84, and 205–234, because warmups remain in the fixture. Candidate native
 configuration readback reported `checkpoint_capnp=true` at every depth. The older
 baseline reported the flag as unsupported. This readback is configuration
-evidence, not passive observation of wire bytes.
+evidence, not passive observation of wire bytes. Unlike the codec and socket
+tables, the p50 and p95 columns below are conventional medians and percentiles
+as the release harness reports them, not nearest-rank values.
 
 | Prefill | Boundary | Before p50 / p95 ms | After p50 / p95 ms | Paired median ratio [95% interval] |
 | ---: | --- | ---: | ---: | ---: |
@@ -148,6 +183,23 @@ variants at every depth: 39,655, 75,705, and 183,855 bytes respectively.
 The storage oracle verifies exact content and scoped-file exclusion. No crash
 was simulated, so the timing/oracle results make no new crash-durability claim.
 
+## Limits of this evidence
+
+- One macOS host, with power state uncontrolled. Nothing was measured on Linux,
+  where production and CI mostly run, or on Windows, where the control channel
+  is a named pipe rather than a Unix socket.
+- Real delivery sizes were not sampled. The 1 MiB fixture is the only case with
+  a measurable socket gain, and how often real checkpoints approach it is
+  unknown.
+- Codec time is a small share of an acknowledgement: about 3 µs of 21.7 ms at
+  1 KiB and at most about 0.9 ms of 41.3 ms at 1 MiB. No codec change can gain
+  more than roughly 2% end to end on this path, so the 2.36% observed at 1 MiB
+  is at that ceiling, not below it.
+- Only the fixed 65-byte CLI edit was measured end to end. Large-payload CLI
+  latency, allocations, RSS, and crash durability were not measured.
+- Intervals are exploratory, with no multiplicity correction, and the
+  before/after CLI run combines the transport with the clone removal.
+
 ## Reproduction and retained evidence
 
 Use the maintained commands in the
@@ -165,23 +217,31 @@ binaries would downgrade decision qualification. Run each measurement separately
 without competing local tests/builds.
 
 Reproduce and check the stored socket intervals with the existing statistics
-helpers:
+helpers, after downloading the codec and socket data file linked below:
 
 ```bash
 python3 scripts/benchmarks/checkpoint/derive_ipc_socket_statistics.py \
-  scripts/benchmarks/checkpoint/results/2026-10-26-capnp-codec-socket.json
+  /path/to/2026-10-26-capnp-codec-socket.json
 ```
 
-Sanitized artifacts retain raw timings, iteration/pair order, distributions,
-uncertainty, resource summaries, correctness observations, and source/binary
-identities. They omit local user and temporary paths:
+The sanitized data files are kept out of the source tree, at the commit that
+first recorded them. They are hand-sanitized summaries of the harness reports,
+and each records the SHA-256 of the unsanitized report it came from. They
+retain raw timings, iteration/pair order, distributions, uncertainty, resource
+summaries, correctness observations, and source/binary identities, and omit
+local user and temporary paths. Check downloads against these digests:
 
-- [Release CLI data](../../scripts/benchmarks/checkpoint/results/2026-10-26-capnp-cli.json).
-- [Codec and socket data](../../scripts/benchmarks/checkpoint/results/2026-10-26-capnp-codec-socket.json).
+- [Release CLI data](https://github.com/woud420/git-ai/blob/6dffb7b030288a8690117291536dc071d69e622f/scripts/benchmarks/checkpoint/results/2026-10-26-capnp-cli.json),
+  51,308 bytes, SHA-256
+  `dd71d75a82fe6225f7433c0a1853ea57dcc81385851349753ac5ae5254e8777c`.
+- [Codec and socket data](https://github.com/woud420/git-ai/blob/6dffb7b030288a8690117291536dc071d69e622f/scripts/benchmarks/checkpoint/results/2026-10-26-capnp-codec-socket.json),
+  102,032 bytes, SHA-256
+  `70c17c350f776acc0cf30e2aa4b716eea5ee0ed0a037d47da3aafa68dc356947`.
 
-JSON remains the compatibility default. Cap’n Proto can be selected for further
-workload evaluation with `GIT_AI_CHECKPOINT_CAPNP=true`. The existing negotiated
-old-daemon fallback remains limited to an explicit unknown-method refusal before
-body transfer; ambiguous submission continues through the existing same-ID
-outbox/replay path. Trace2, actor ownership, and persistence formats are outside
-this transport experiment.
+JSON remains the compatibility default. On the parked
+[#380](https://github.com/woud420/git-ai/pull/380) branch, Cap’n Proto can be
+selected for further workload evaluation with `GIT_AI_CHECKPOINT_CAPNP=true`;
+its negotiated old-daemon fallback is limited to an explicit unknown-method
+refusal before body transfer, and ambiguous submission continues through the
+existing same-ID outbox/replay path. Trace2, actor ownership, and persistence
+formats are outside this transport experiment.

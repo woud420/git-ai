@@ -209,6 +209,10 @@ was simulated, so the timing/oracle results make no new crash-durability claim.
   latency, allocations, RSS, and crash durability were not measured.
 - Intervals are exploratory, with no multiplicity correction, and the
   before/after CLI run combines the transport with the clone removal.
+- The measured after binary (`6f2a71a3`) still wrote every control reply one
+  JSON token at a time, a regression fixed in #380 before merge. Both lanes of
+  the same-binary socket comparison shared it. In the release CLI comparison it
+  handicapped the Cap’n Proto side, by far less than the interval width.
 
 ## Reproduction and retained evidence
 
@@ -235,7 +239,8 @@ python3 scripts/benchmarks/checkpoint/derive_ipc_socket_statistics.py \
 ```
 
 The sanitized data files are kept out of the source tree, at the commit that
-first recorded them. They are hand-sanitized summaries of the harness reports,
+first recorded them (`6dffb7b0`, kept reachable by the ref
+`refs/data/checkpoint-ipc-measurements-2026-10-26`). They are hand-sanitized summaries of the harness reports,
 and each records the SHA-256 of the unsanitized report it came from. They
 retain raw timings, iteration/pair order, distributions, uncertainty, resource
 summaries, correctness observations, and source/binary identities, and omit

@@ -3,9 +3,7 @@ use super::report::{BenchSettings, Measurement, write_report};
 use crate::repos::test_repo::{TestRepo, get_binary_path};
 use git_ai::model::checkpoint_delivery::CheckpointDelivery;
 use git_ai::model::checkpoint_request::BaseCommit;
-use git_ai::operations::daemon::{
-    CheckpointTransport, send_checkpoint_delivery_with_transport,
-};
+use git_ai::operations::daemon::{CheckpointTransport, send_checkpoint_delivery_with_transport};
 use git_ai::operations::git::repo_storage::PersistedWorkingLog;
 use serde_json::{Value, json};
 use std::path::Path;

@@ -99,4 +99,5 @@ for comparative measurement commands and their scope.
 
 The [2026-10-26 measurements](../decisions/2026-10-26-checkpoint-ipc-measurements.md)
 found a substantial codec gain but no demonstrated small-edit release CLI gain.
-JSON remains the default; the binary transport is not adopted as a maintained path.
+JSON remains the default; the binary transport is an opt-in, default-off
+reference implementation for evaluating workloads with large deliveries.

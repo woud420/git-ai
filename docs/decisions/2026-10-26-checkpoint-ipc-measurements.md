@@ -5,15 +5,21 @@ Date: 2026-10-26
 
 ## Decision
 
-Keep JSON as the default checkpoint transport, and do not carry the opt-in
-Cap’n Proto transport from [#380](https://github.com/woud420/git-ai/pull/380)
-as a maintained path. Cap’n Proto cuts codec time by up to 8×, but codec time is
-at most about 2% of an end-to-end acknowledgement on this path, the release CLI
-experiment showed parity for small edits, and the transport adds a schema mirror
-of the delivery DTOs, a pinned runtime dependency, and a regeneration step that
-needs a source-built schema compiler. The branch is kept as a reference. The one
-default-path change worth landing on its own is borrowing the delivery instead
-of cloning it before live JSON serialization.
+Keep JSON as the default checkpoint transport, and merge the Cap’n Proto
+transport from [#380](https://github.com/woud420/git-ai/pull/380) as an opt-in,
+default-off path behind `checkpoint_capnp`. It is a reference implementation for
+evaluating workloads with large deliveries, not a recommended setting. Cap’n
+Proto cuts codec time by up to 8×, but codec time is at most about 2% of an
+end-to-end acknowledgement on this path, and the release CLI experiment showed
+parity for small edits, so nothing here justifies changing the default.
+
+The transport merges only after review fixes to #380: control responses are
+serialized once and written with a single `write_all` again, guarded by a
+write-count unit test; the daemon's unconditional acceptance of the binary
+method is documented as deliberate; a CI workflow (`make schema-check`) fails
+when the checked-in generated code drifts from the schema; and the body receive
+deadline treats zero remaining time as expired and accepts a body whose last
+bytes arrived as the deadline elapsed.
 
 The maintained protocol and configuration authority is
 [Checkpoint IPC](../architecture/checkpoint-ipc.md). This record describes one
@@ -23,30 +29,34 @@ measurement run, not a permanent performance guarantee.
 
 1. **Switch the default to Cap’n Proto.** Rejected: all six small-edit release
    CLI intervals include parity, and the direct-socket gain is 2.36% at 1 MiB.
-2. **Merge the transport as opt-in behind `checkpoint_capnp`.** Not adopted.
-   Review of #380 found no end-to-end case for it and real carrying costs:
-   about 5,000 lines (2,973 generated), `capnp` as a runtime dependency pinned
-   in lockstep with a separate `capnpc` pin, a schema that must track every
-   delivery DTO or `StreamFormat` change, no CI check for generated-code drift,
-   a daemon that accepts the binary method whether or not the flag is set, and,
-   in the submitted code, one write call per JSON token on every control reply
-   instead of a single buffered write. Its useful patterns, admission before
-   allocation and a monotonic body deadline, can be ported to the JSON path on
-   their own.
-3. **Park the branch and keep the evidence.** Chosen. Keep this record, the
-   benchmark guide, and the statistics reproducer; link the raw data instead of
-   committing it; land the JSON borrow-instead-of-clone as a small PR.
+2. **Merge the transport as opt-in behind `checkpoint_capnp`.** Chosen. The
+   carrying costs are real and accepted: about 5,000 lines (2,973 generated),
+   `capnp` as a runtime dependency pinned in lockstep with the generator's
+   `capnpc` pin, a schema that must track every delivery DTO or `StreamFormat`
+   change, a regeneration step that needs a source-built schema compiler, and a
+   daemon that accepts the binary method whether or not its own flag is set.
+   Review fixes landed with it: one buffered write per control reply instead
+   of one write per JSON token, a CI drift check for the generated code,
+   documented server acceptance, and fail-closed handling of a zero remaining
+   body deadline.
+3. **Park the branch and keep only the evidence.** Not chosen. The owner prefers
+   to keep the opt-in path available in the product for further evaluation
+   rather than leave it on an unmerged branch that would drift from main.
 
 ## Consequences
 
-- No wire-format change ships. Clients and daemons keep the JSON control
-  protocol and the existing same-ID outbox replay.
-- Reopening the question needs evidence of a workload with large deliveries on
-  Linux or Windows, where nothing has been measured, and should start from the
-  codec ceiling in [Limits of this evidence](#limits-of-this-evidence) rather
-  than from codec microbenchmarks.
-- The ignored codec and socket benchmarks stay runnable against the pinned
-  commits so the comparison can be repeated.
+- The default wire format does not change. Clients and daemons keep the JSON
+  control protocol and the existing same-ID outbox replay unless a client opts
+  in with `checkpoint_capnp` or `GIT_AI_CHECKPOINT_CAPNP=true`.
+- Delivery DTO changes now also require a schema update and a regenerated
+  artifact; CI enforces that the artifact matches the schema.
+- Promoting Cap’n Proto to the default needs evidence from Linux and Windows,
+  where nothing has been measured, and from a real workload with large
+  deliveries. It should start from the codec ceiling in
+  [Limits of this evidence](#limits-of-this-evidence) rather than from codec
+  microbenchmarks.
+- The ignored codec and socket benchmarks stay runnable so the comparison can
+  be repeated.
 
 ## Environment and source identity
 
@@ -238,8 +248,8 @@ local user and temporary paths. Check downloads against these digests:
   102,032 bytes, SHA-256
   `70c17c350f776acc0cf30e2aa4b716eea5ee0ed0a037d47da3aafa68dc356947`.
 
-JSON remains the compatibility default. On the parked
-[#380](https://github.com/woud420/git-ai/pull/380) branch, Cap’n Proto can be
+JSON remains the compatibility default. With the opt-in transport from
+[#380](https://github.com/woud420/git-ai/pull/380), Cap’n Proto can be
 selected for further workload evaluation with `GIT_AI_CHECKPOINT_CAPNP=true`;
 its negotiated old-daemon fallback is limited to an explicit unknown-method
 refusal before body transfer, and ambiguous submission continues through the

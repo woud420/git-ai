@@ -168,7 +168,8 @@ fn codex_socket_permission_is_opt_in_previewable_and_owned_on_uninstall() {
     let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     let path = repo.test_home_path().join(".codex/config.toml");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, "[features.network_proxy]\nenabled = true\n[features.network_proxy.domains]\n\"example.com\" = \"allow\"\n[features.network_proxy.unix_sockets]\n\"/tmp/user.sock\" = \"allow\"\n").unwrap();
+    let user_socket = "# my socket\n\"/tmp/user.sock\" = \"allow\" # keep\n";
+    fs::write(&path, format!("[features.network_proxy]\nenabled = true\n[features.network_proxy.domains]\n\"example.com\" = \"allow\"\n[features.network_proxy.unix_sockets]\n{user_socket}")).unwrap();
     let socket = repo
         .test_home_path()
         .join("active-trace.sock")
@@ -189,10 +190,13 @@ fn codex_socket_permission_is_opt_in_previewable_and_owned_on_uninstall() {
         config()["features"]["network_proxy"]["unix_sockets"][&socket].as_str(),
         Some("allow")
     );
-    let installed = fs::read(&path).unwrap();
+    let installed = fs::read_to_string(&path).unwrap();
+    assert!(installed.contains(user_socket), "{installed}");
     run(&repo, &["install-hooks"], Some(true));
-    assert_eq!(fs::read(&path).unwrap(), installed);
+    assert_eq!(fs::read_to_string(&path).unwrap(), installed);
     run(&repo, &["uninstall-hooks"], Some(false));
+    let uninstalled = fs::read_to_string(&path).unwrap();
+    assert!(uninstalled.contains(user_socket), "{uninstalled}");
     let config = config();
     let network = &config["features"]["network_proxy"];
     assert!(network["unix_sockets"].get(&socket).is_none());

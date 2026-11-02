@@ -1,5 +1,6 @@
 use super::{Agent, invalid_config};
 use crate::error::GitAiError;
+use crate::operations::mdm::agents::update_codex_config;
 use serde_json::{Value as Json, json};
 use std::path::Path;
 use toml::Value as Toml;
@@ -23,7 +24,6 @@ fn codex(
 ) -> Result<(String, Option<String>), GitAiError> {
     let error = |message: &str| invalid_config(Path::new("config.toml"), message);
     let mut config: Toml = toml::from_str(before).map_err(|e| error(&format!("{e}")))?;
-    let original = config.clone();
     let proxy = config
         .get_mut("features")
         .and_then(|v| v.get_mut("network_proxy"));
@@ -90,12 +90,7 @@ fn codex(
             }
         }
     }
-    let after = if config == original {
-        before.into()
-    } else {
-        toml::to_string_pretty(&config).map_err(|e| error(&format!("{e}")))?
-    };
-    Ok((after, next_owned))
+    Ok((update_codex_config(before, &config)?, next_owned))
 }
 
 fn claude(

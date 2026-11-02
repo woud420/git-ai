@@ -15,6 +15,7 @@ pub use amp::AmpInstaller;
 pub use claude_code::ClaudeCodeInstaller;
 pub use cline::ClineInstaller;
 pub use codex::CodexInstaller;
+pub(crate) use codex::update_codex_config;
 pub use cursor::CursorInstaller;
 pub use droid::DroidInstaller;
 pub use firebender::FirebenderInstaller;

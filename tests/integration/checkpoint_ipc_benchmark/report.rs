@@ -116,17 +116,18 @@ impl Measurement {
     }
 }
 
-fn command_output(arguments: &[&str]) -> String {
+/// Best-effort provenance probe: a missing tool or a non-repository checkout
+/// records `None` instead of aborting the benchmark report.
+fn command_output(arguments: &[&str]) -> Option<String> {
     let output = Command::new(arguments[0])
         .args(&arguments[1..])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
-        .expect("read benchmark provenance");
-    assert!(
-        output.status.success(),
-        "benchmark provenance command failed"
-    );
-    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 fn file_digest(path: &Path) -> String {
@@ -137,39 +138,6 @@ fn binary_version(path: &Path) -> String {
     let output = Command::new(path).arg("--version").output().unwrap();
     assert!(output.status.success(), "daemon version probe failed");
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
-}
-
-fn benchmark_sources_digest() -> String {
-    let sources = [
-        (
-            "tests/integration/checkpoint_ipc_benchmark.rs",
-            include_str!("../checkpoint_ipc_benchmark.rs"),
-        ),
-        (
-            "tests/integration/checkpoint_ipc_benchmark/codecs.rs",
-            include_str!("codecs.rs"),
-        ),
-        (
-            "tests/integration/checkpoint_ipc_benchmark/fixtures.rs",
-            include_str!("fixtures.rs"),
-        ),
-        (
-            "tests/integration/checkpoint_ipc_benchmark/report.rs",
-            include_str!("report.rs"),
-        ),
-        (
-            "tests/integration/checkpoint_ipc_benchmark/socket.rs",
-            include_str!("socket.rs"),
-        ),
-    ];
-    let mut digest = Sha256::new();
-    for (path, source) in sources {
-        digest.update((path.len() as u64).to_le_bytes());
-        digest.update(path.as_bytes());
-        digest.update((source.len() as u64).to_le_bytes());
-        digest.update(source.as_bytes());
-    }
-    format!("{:x}", digest.finalize())
 }
 
 pub(super) fn write_report(
@@ -188,9 +156,8 @@ pub(super) fn write_report(
         "settings": settings,
         "provenance": {
             "source_commit": command_output(&["git", "rev-parse", "HEAD"]),
-            "source_dirty": !command_output(&["git", "status", "--porcelain"]).is_empty(),
-            "tracked_diff_sha256": format!("{:x}", Sha256::digest(diff.as_bytes())),
-            "benchmark_sources_sha256": benchmark_sources_digest(),
+            "source_dirty": command_output(&["git", "status", "--porcelain"]).map(|status| !status.is_empty()),
+            "tracked_diff_sha256": diff.map(|diff| format!("{:x}", Sha256::digest(diff.as_bytes()))),
             "runtime_rustc": command_output(&["rustc", "--version"]),
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,

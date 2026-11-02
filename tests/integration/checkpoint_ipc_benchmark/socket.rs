@@ -2,7 +2,7 @@ use super::fixtures::FIXTURES;
 use super::report::{BenchSettings, Measurement, write_report};
 use crate::repos::test_repo::{TestRepo, get_binary_path};
 use git_ai::model::checkpoint_request::BaseCommit;
-use git_ai::operations::daemon::{ControlRequest, DaemonConfig, send_control_request_with_timeout};
+use git_ai::operations::daemon::{ControlRequest, send_control_request_with_timeout};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -24,7 +24,7 @@ fn benchmark_checkpoint_ipc_socket_ack() {
             .commit_sha;
         repo.sync_daemon();
         let working_log = repo.current_working_logs();
-        let socket = DaemonConfig::from_home(repo.test_home_path()).control_socket_path;
+        let socket = repo.daemon_control_socket_path();
         let mut durations = Vec::with_capacity(settings.samples);
         let mut measured_ids = Vec::with_capacity(settings.samples);
         let mut latest = base;

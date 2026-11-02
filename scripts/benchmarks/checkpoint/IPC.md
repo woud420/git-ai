@@ -11,7 +11,7 @@ limit. Clone measurements separately expose the cost of copying a delivery.
 Run the codec benchmark in an optimized integration-test process:
 
 ```bash
-GIT_AI_CHECKPOINT_IPC_BENCH_OUTPUT=/private/tmp/checkpoint-ipc-codecs.json \
+GIT_AI_CHECKPOINT_IPC_BENCH_OUTPUT=/tmp/checkpoint-ipc-codecs.json \
   make test CARGO_TEST_ARGS="--release --test integration" \
   TEST_FILTER=benchmark_checkpoint_ipc_codecs \
   EXTRA_TEST_BINARY_ARGS="--ignored" NO_CAPTURE=true TEST_THREADS=1
@@ -23,7 +23,7 @@ snapshot and its exact binary path supplied to the prescribed harness:
 ```bash
 cargo build --locked --release --bin git-ai --features test-support
 GIT_AI_TEST_BINARY_PATH=/absolute/path/to/target/release/git-ai \
-GIT_AI_CHECKPOINT_IPC_BENCH_OUTPUT=/private/tmp/checkpoint-ipc-socket.json \
+GIT_AI_CHECKPOINT_IPC_BENCH_OUTPUT=/tmp/checkpoint-ipc-socket.json \
   make test CARGO_TEST_ARGS="--release --test integration" \
   TEST_FILTER=benchmark_checkpoint_ipc_socket_ack \
   EXTRA_TEST_BINARY_ARGS="--ignored" NO_CAPTURE=true TEST_THREADS=1
@@ -46,8 +46,8 @@ that the latest captured content is present for every fixture file.
 Use `benchmark_scoped_checkpoint_vs_ref.py` with
 `--comparison-profile fork-before-after-v1` for release CLI-to-daemon comparisons
 at the common application-ACK and family-sync boundaries; see the neighboring
-README. Neither this codec benchmark nor the direct socket benchmark substitutes
-for that CLI measurement or demonstrates crash durability.
+[README](README.md). Neither this codec benchmark nor the direct socket
+benchmark substitutes for that CLI measurement or demonstrates crash durability.
 
 Defaults are 30 samples, 100 ms of codec warmup per codec/fixture, at least 10 ms
 per codec sample, and 5 socket warmups. Codec and operation order alternate to

@@ -278,7 +278,7 @@ pub fn seal_bytes(source: &str) -> Vec<u8> {
     format!("git-ai/jj/source-seal/v1\nsource_id={source}\nreader_profile={JJ_OBSERVATION_READER_PROFILE}\n").into_bytes()
 }
 pub fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    git_ai::hex::encode(&Sha256::digest(bytes))
 }
 pub fn hex_id(id: &str) {
     assert_eq!(id.len(), 64);

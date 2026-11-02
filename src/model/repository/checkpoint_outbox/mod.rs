@@ -254,7 +254,7 @@ fn daemon_instance_key(internal_dir: &Path) -> String {
     }
     #[cfg(not(any(unix, windows)))]
     hasher.update(internal_dir.to_string_lossy().as_bytes());
-    format!("{:x}", hasher.finalize())[..16].to_string()
+    crate::hex::encode(&hasher.finalize())[..16].to_string()
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ pub(super) fn vector(label: &str) -> &'static vectors::RecordVector {
         .unwrap()
 }
 pub(super) fn checksum(raw: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(raw))
+    crate::hex::encode(&Sha256::digest(raw))
 }
 pub(super) fn value(raw: &[u8]) -> Value {
     ciborium::from_reader(raw).unwrap()

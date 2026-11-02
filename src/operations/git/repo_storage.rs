@@ -283,7 +283,7 @@ pub(crate) fn persist_file_version_to_blob_dir(
 ) -> Result<String, GitAiError> {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
-    let sha = format!("{:x}", hasher.finalize());
+    let sha = crate::hex::encode(&hasher.finalize());
 
     create_directory_durably(blobs_dir)?;
     let blob_path = blobs_dir.join(&sha);

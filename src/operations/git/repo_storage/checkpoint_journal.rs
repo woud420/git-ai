@@ -197,7 +197,7 @@ fn decode_record(bytes: &[u8]) -> Result<(Checkpoint, bool), CheckpointJournalEr
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    crate::hex::encode(&hasher.finalize())
 }
 
 #[cfg(any(test, feature = "test-support"))]

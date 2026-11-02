@@ -351,7 +351,7 @@ fn tool_agent_hash_hex(agent_id: &str, tool: &str) -> String {
     let combined = format!("{}:{}", tool, agent_id);
     let mut hasher = Sha256::new();
     hasher.update(combined.as_bytes());
-    format!("{:x}", hasher.finalize())
+    crate::hex::encode(&hasher.finalize())
 }
 
 /// Generate a short hash (16 characters) from agent_id and tool
@@ -365,7 +365,7 @@ pub fn generate_short_hash(agent_id: &str, tool: &str) -> String {
 pub fn generate_human_short_hash(author_identity: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(author_identity.as_bytes());
-    let hex = format!("{:x}", hasher.finalize());
+    let hex = crate::hex::encode(&hasher.finalize());
     format!("h_{}", &hex[..14])
 }
 

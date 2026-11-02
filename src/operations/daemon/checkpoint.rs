@@ -239,7 +239,7 @@ fn execute_resolved_checkpoint(
         combined_hasher.update(file_path.as_bytes());
         combined_hasher.update(hash.as_bytes());
     }
-    let combined_hash = format!("{:x}", combined_hasher.finalize());
+    let combined_hash = crate::hex::encode(&combined_hasher.finalize());
     tracing::debug!(
         "[BENCHMARK] Hash computation took {:?}",
         hash_compute_start.elapsed()

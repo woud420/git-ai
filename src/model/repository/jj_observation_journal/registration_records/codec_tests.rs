@@ -19,7 +19,7 @@ const OVER_NAME: &[u8] = include_bytes!(concat!(
 ));
 
 fn decodes(raw: &[u8]) -> bool {
-    let checksum = format!("{:x}", Sha256::digest(raw));
+    let checksum = crate::hex::encode(&Sha256::digest(raw));
     decode_workspace(raw, raw.len() as u64, &checksum).is_ok()
 }
 

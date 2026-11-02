@@ -122,7 +122,7 @@ fn encode(value: &Value) -> Vec<u8> {
 }
 
 fn checksum(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex::encode(&Sha256::digest(bytes))
 }
 
 pub(super) fn replace_registration_receipt(path: &Path) {

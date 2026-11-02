@@ -13,7 +13,7 @@ fn encode(value: &impl Serialize) -> Vec<u8> {
 }
 
 fn checksum(raw: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(raw))
+    crate::hex::encode(&Sha256::digest(raw))
 }
 
 fn load_records(path: &Path) -> (RegistrationRecord, WorkspaceRecord) {

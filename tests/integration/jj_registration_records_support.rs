@@ -14,7 +14,7 @@ pub(super) fn record_fixture() -> (Fixture, Connection) {
 }
 
 pub(super) fn digest(raw: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(raw))
+    git_ai::hex::encode(&Sha256::digest(raw))
 }
 
 pub(super) fn table(record: &RecordVector) -> &'static str {

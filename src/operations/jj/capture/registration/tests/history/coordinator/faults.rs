@@ -132,7 +132,7 @@ fn encode(value: &Value) -> Vec<u8> {
 }
 
 fn checksum(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex::encode(&Sha256::digest(bytes))
 }
 
 fn corrupt_native_prior(path: &Path) {

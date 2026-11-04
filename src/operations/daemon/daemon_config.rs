@@ -135,7 +135,7 @@ pub struct DaemonConfig {
 pub(super) fn test_completion_log_path(dir: &Path, family_key: &str) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(family_key.as_bytes());
-    let digest = format!("{:x}", hasher.finalize());
+    let digest = crate::hex::encode(&hasher.finalize());
     dir.join(format!("{}.jsonl", &digest[..16]))
 }
 
@@ -152,7 +152,7 @@ impl DaemonConfig {
             if too_long(&trace_socket_path) || too_long(&control_socket_path) {
                 let mut hasher = Sha256::new();
                 hasher.update(internal_dir.to_string_lossy().as_bytes());
-                let digest = format!("{:x}", hasher.finalize());
+                let digest = crate::hex::encode(&hasher.finalize());
                 let short = &digest[..16];
                 let short_dir = std::env::temp_dir().join(format!("git-ai-d-{}", short));
                 lock_path = short_dir.join("daemon.lock");
@@ -167,7 +167,7 @@ impl DaemonConfig {
         let (lock_path, trace_socket_path, control_socket_path) = {
             let mut hasher = Sha256::new();
             hasher.update(internal_dir.to_string_lossy().as_bytes());
-            let digest = format!("{:x}", hasher.finalize());
+            let digest = crate::hex::encode(&hasher.finalize());
             let short = &digest[..16];
             (
                 daemon_dir.join("daemon.lock"),

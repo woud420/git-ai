@@ -153,5 +153,5 @@ fn checksum_raw_record(bytes: &[u8], marker_start: usize) -> String {
     let mut hasher = Sha256::new();
     hasher.update(&bytes[..marker_start]);
     hasher.update(b"}");
-    format!("{:x}", hasher.finalize())
+    crate::hex::encode(&hasher.finalize())
 }

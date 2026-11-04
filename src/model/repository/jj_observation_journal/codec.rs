@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 
 pub(super) fn checksum(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex::encode(&Sha256::digest(bytes))
 }
 
 pub(super) fn encode<T: Serialize>(value: &T, limit: usize) -> Result<Vec<u8>, JournalError> {

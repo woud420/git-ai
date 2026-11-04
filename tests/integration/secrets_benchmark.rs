@@ -61,7 +61,7 @@ fn generate_test_data(target_size_kb: usize) -> String {
         r#"fn calculate_hash(input: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
-    format!("{:x}", hasher.finalize())
+    git_ai::hex::encode(&hasher.finalize())
 }
 
 const API_KEY: &str = "sk_test_4eC39HqLyjWDarjtT1zdp7dc";

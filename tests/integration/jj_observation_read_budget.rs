@@ -232,7 +232,7 @@ fn jj_journal_budget_charges_checksums_valid_but_undecodable_payloads() {
         &fixture,
         1,
         invalid,
-        &format!("{:x}", Sha256::digest(invalid)),
+        &git_ai::hex::encode(&Sha256::digest(invalid)),
     );
     let (state, payloads) = stored_lengths(&fixture, &[1]);
     let total = state + payloads[0];
@@ -420,7 +420,7 @@ fn jj_journal_budget_preserves_raw_evidence_cap_after_encoded_blob_selection() {
         &fixture,
         1,
         &payload,
-        &format!("{:x}", Sha256::digest(&payload)),
+        &git_ai::hex::encode(&Sha256::digest(&payload)),
     );
     let (state, lengths) = stored_lengths(&fixture, &[1]);
     let total = state + lengths[0];

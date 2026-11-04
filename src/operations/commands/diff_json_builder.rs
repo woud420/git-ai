@@ -332,7 +332,7 @@ fn hash_hunk_content(lines: &[String]) -> String {
     let joined = lines.join("\n");
     let mut hasher = Sha256::new();
     hasher.update(joined.as_bytes());
-    format!("{:x}", hasher.finalize())
+    crate::hex::encode(&hasher.finalize())
 }
 
 pub(crate) fn ensure_commit_metadata(

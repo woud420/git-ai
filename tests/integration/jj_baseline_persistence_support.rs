@@ -124,7 +124,7 @@ pub fn native_rows(fixture: &Fixture) -> Vec<(String, String, Vec<u8>, String)> 
 }
 
 pub fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    git_ai::hex::encode(&Sha256::digest(bytes))
 }
 
 pub fn encode(value: &Value) -> Vec<u8> {

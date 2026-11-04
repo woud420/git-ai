@@ -63,7 +63,7 @@ impl Fixture {
 }
 
 pub(super) fn digest(raw: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(raw))
+    crate::hex::encode(&Sha256::digest(raw))
 }
 
 pub(super) fn encode(record: &impl serde::Serialize) -> Vec<u8> {

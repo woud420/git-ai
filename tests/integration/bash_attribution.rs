@@ -196,6 +196,12 @@ fn test_bash_checkpoints_v2_records_for_recovery_without_working_log_checkpoints
         .with_transcript_path(&transcript_path),
     );
 
+    // Mtimes come from the kernel tick clock (4 ms at Linux HZ=250, ~15.6 ms on
+    // Windows) but the call's start is precise. A write in the pre hook's own
+    // tick gets an mtime before start, which recovery treats as a manual edit
+    // made before the call (see
+    // test_bash_recovery_does_not_attribute_manual_edit_before_unrelated_bash).
+    thread::sleep(Duration::from_millis(20));
     fs::write(&file_path, "original line\nwritten by bash\n").unwrap();
 
     checkpoint_codex(

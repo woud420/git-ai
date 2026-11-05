@@ -111,6 +111,7 @@ const REQUIRED_MAKE_INTERFACE: &[&str] = &[
 const GNU_MAKE_SETUP_ACTION: &str = ".github/actions/setup-gnu-make/action.yml";
 const GNU_MAKE_SETUP_USE: &str = "uses: ./.github/actions/setup-gnu-make";
 const GNU_MAKE_WORKFLOWS: &[(&str, usize)] = &[
+    (".github/workflows/checkpoint-schema.yml", 1),
     (".github/workflows/e2e-tests.yml", 1),
     (".github/workflows/lint-format.yml", 3),
     (".github/workflows/test.yml", 1),

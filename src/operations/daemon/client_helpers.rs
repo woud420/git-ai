@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-const DAEMON_CONTROL_MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const DAEMON_CONTROL_MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
 #[cfg(not(windows))]
 use interprocess::local_socket::ConnectOptions;
@@ -40,14 +40,16 @@ pub(crate) fn checkpoint_control_response_timeout(
         // tear down captured state mid-request. Product mode keeps the short
         // control timeout so a wedged prior Git root fails the checkpoint rather
         // than making the caller wait indefinitely.
-        ControlRequest::CheckpointRun { .. } | ControlRequest::CheckpointDeliver { .. }
+        ControlRequest::CheckpointRun { .. }
+        | ControlRequest::CheckpointDeliver { .. }
+        | ControlRequest::CheckpointDeliverCapnpV1 { .. }
             if use_ci_or_test_budget =>
         {
             DAEMON_CHECKPOINT_RESPONSE_TIMEOUT
         }
-        ControlRequest::CheckpointRun { .. } | ControlRequest::CheckpointDeliver { .. } => {
-            DAEMON_CONTROL_RESPONSE_TIMEOUT
-        }
+        ControlRequest::CheckpointRun { .. }
+        | ControlRequest::CheckpointDeliver { .. }
+        | ControlRequest::CheckpointDeliverCapnpV1 { .. } => DAEMON_CONTROL_RESPONSE_TIMEOUT,
         ControlRequest::SyncFamily { .. } if use_ci_or_test_budget => {
             DAEMON_CHECKPOINT_RESPONSE_TIMEOUT
         }
@@ -254,7 +256,7 @@ fn daemon_request_io_error(action: &str, socket_path: &Path, e: std::io::Error) 
     )
 }
 
-fn write_all_daemon_client_stream(
+pub(crate) fn write_all_daemon_client_stream(
     stream: &mut DaemonClientStream,
     socket_path: &Path,
     payload: &[u8],
@@ -268,7 +270,7 @@ fn write_all_daemon_client_stream(
     Ok(())
 }
 
-fn read_daemon_client_line(
+pub(crate) fn read_daemon_client_line(
     reader: &mut BufReader<DaemonClientStream>,
     socket_path: &Path,
     response_timeout: Duration,
@@ -341,6 +343,7 @@ fn send_control_request_with_timeouts(
     connect_timeout: Duration,
     response_timeout: Duration,
 ) -> Result<ControlResponse, GitAiError> {
+    ensure_single_frame_request(request)?;
     let mut stream = open_local_socket_stream_with_timeout(socket_path, connect_timeout)?;
     set_daemon_client_stream_timeouts(&mut stream, socket_path, response_timeout)?;
     let mut body = serde_json::to_vec(request)?;
@@ -375,6 +378,7 @@ pub fn send_control_request_fire_and_forget(
     socket_path: &Path,
     request: &ControlRequest,
 ) -> Result<(), GitAiError> {
+    ensure_single_frame_request(request)?;
     let mut stream =
         open_local_socket_stream_with_timeout(socket_path, DAEMON_CONTROL_CONNECT_TIMEOUT)?;
     let write_timeout = Duration::from_millis(500);
@@ -385,6 +389,16 @@ pub fn send_control_request_fire_and_forget(
     Ok(())
 }
 
+fn ensure_single_frame_request(request: &ControlRequest) -> Result<(), GitAiError> {
+    if matches!(request, ControlRequest::CheckpointDeliverCapnpV1 { .. }) {
+        return Err(transport_error(
+            std::io::ErrorKind::InvalidInput,
+            "binary checkpoint negotiation requires the checkpoint transport sender".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 pub fn handle_windows_control_pipe_connection(
     mut server: WindowsPipeServer,
@@ -392,8 +406,15 @@ pub fn handle_windows_control_pipe_connection(
     runtime_handle: tokio::runtime::Handle,
 ) {
     let mut reader = BufReader::new(&mut server);
-    if let Err(e) = handle_control_connection_actor_reader(&mut reader, coordinator, runtime_handle)
-    {
+    if let Err(e) = handle_control_connection_actor_reader_with_timeout(
+        &mut reader,
+        coordinator,
+        runtime_handle,
+        |server, timeout| {
+            server.set_read_timeout(timeout);
+            Ok(())
+        },
+    ) {
         tracing::debug!(%e, "control connection error");
     }
 }
@@ -405,13 +426,37 @@ pub fn handle_control_connection_actor(
     runtime_handle: tokio::runtime::Handle,
 ) -> Result<(), GitAiError> {
     let mut reader = BufReader::new(stream);
-    handle_control_connection_actor_reader(&mut reader, coordinator, runtime_handle)
+    handle_control_connection_actor_reader_with_timeout(
+        &mut reader,
+        coordinator,
+        runtime_handle,
+        |stream, timeout| stream.set_recv_timeout(timeout),
+    )
 }
 
 pub fn handle_control_connection_actor_reader<R: Read + Write>(
     reader: &mut BufReader<R>,
     coordinator: Arc<ActorDaemonCoordinator>,
     runtime_handle: tokio::runtime::Handle,
+) -> Result<(), GitAiError> {
+    handle_control_connection_actor_reader_with_timeout(
+        reader,
+        coordinator,
+        runtime_handle,
+        |_, _| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "binary checkpoint bodies require a receive timeout",
+            ))
+        },
+    )
+}
+
+fn handle_control_connection_actor_reader_with_timeout<R: Read + Write>(
+    reader: &mut BufReader<R>,
+    coordinator: Arc<ActorDaemonCoordinator>,
+    runtime_handle: tokio::runtime::Handle,
+    mut set_read_timeout: impl FnMut(&mut R, Option<Duration>) -> std::io::Result<()>,
 ) -> Result<(), GitAiError> {
     while let Some(line) = read_json_line_bounded(reader, DAEMON_CONTROL_MAX_FRAME_BYTES)? {
         let trimmed = line.trim();
@@ -421,6 +466,16 @@ pub fn handle_control_connection_actor_reader<R: Read + Write>(
         let parsed = serde_json::from_str::<ControlRequest>(trimmed);
         let encoded_bytes = line.len();
         drop(line);
+        if let Ok(ControlRequest::CheckpointDeliverCapnpV1 { encoded_bytes }) = &parsed {
+            super::checkpoint_transport::handle_capnp_checkpoint(
+                reader,
+                &coordinator,
+                &runtime_handle,
+                *encoded_bytes as usize,
+                &mut set_read_timeout,
+            )?;
+            continue;
+        }
         let mut checkpoint_admission = None;
         let mut shutdown_after_response = false;
         let response = match parsed {
@@ -435,13 +490,7 @@ pub fn handle_control_connection_actor_reader<R: Read + Write>(
             Err(e) => ControlResponse::err(format!("invalid control request: {}", e)),
         };
         let should_stop = shutdown_after_response && response.ok;
-        let write_result = (|| -> Result<(), GitAiError> {
-            let raw = serde_json::to_string(&response)?;
-            reader.get_mut().write_all(raw.as_bytes())?;
-            reader.get_mut().write_all(b"\n")?;
-            reader.get_mut().flush()?;
-            Ok(())
-        })();
+        let write_result = super::checkpoint_transport::write_response(reader.get_mut(), &response);
         if should_stop {
             coordinator.request_stop();
         }

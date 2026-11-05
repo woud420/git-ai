@@ -20,6 +20,7 @@ fn setup() {
         transcript_streaming: true,
         transcript_sweep: true,
         checkpoint_debug_log: false,
+        checkpoint_capnp: false,
         bash_checkpoints_v2: false,
         whitelist_agent_sandboxes: false,
         daemon_log_upload: true,

@@ -2,6 +2,7 @@
 pub mod analyzers;
 pub mod bash_sessions;
 pub mod checkpoint;
+pub mod checkpoint_transport;
 pub mod control_api;
 pub mod coordinator;
 pub mod daemon_log_layer;
@@ -96,6 +97,9 @@ mod workspace_side_effects;
 // need a glob re-export here; impl-block-only modules are omitted.
 #[doc(hidden)]
 pub use actor_types::*;
+pub use checkpoint_transport::{
+    CheckpointTransport, send_checkpoint_delivery, send_checkpoint_delivery_with_transport,
+};
 #[doc(hidden)]
 pub use client_helpers::*;
 #[doc(hidden)]

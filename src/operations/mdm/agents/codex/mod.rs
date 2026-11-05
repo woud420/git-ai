@@ -1,3 +1,5 @@
+mod config_edit;
+pub(crate) use config_edit::update_config as update_codex_config;
 mod config_toml;
 mod hooks_json;
 #[cfg(test)]
@@ -5,6 +7,8 @@ mod hooks_json_tests;
 #[cfg(test)]
 mod install_tests;
 mod installer;
+#[cfg(test)]
+mod preservation_tests;
 #[cfg(test)]
 mod tests;
 

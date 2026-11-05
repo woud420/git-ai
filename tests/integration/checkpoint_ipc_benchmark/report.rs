@@ -131,7 +131,7 @@ fn command_output(arguments: &[&str]) -> Option<String> {
 }
 
 fn file_digest(path: &Path) -> String {
-    format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()))
+    git_ai::hex::encode(&Sha256::digest(std::fs::read(path).unwrap()))
 }
 
 fn binary_version(path: &Path) -> String {
@@ -157,7 +157,7 @@ pub(super) fn write_report(
         "provenance": {
             "source_commit": command_output(&["git", "rev-parse", "HEAD"]),
             "source_dirty": command_output(&["git", "status", "--porcelain"]).map(|status| !status.is_empty()),
-            "tracked_diff_sha256": diff.map(|diff| format!("{:x}", Sha256::digest(diff.as_bytes()))),
+            "tracked_diff_sha256": diff.map(|diff| git_ai::hex::encode(&Sha256::digest(diff.as_bytes()))),
             "runtime_rustc": command_output(&["rustc", "--version"]),
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,

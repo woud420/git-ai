@@ -100,7 +100,11 @@ pub fn should_ignore_file(path: &str, patterns: &[String]) -> bool {
 }
 
 pub fn load_linguist_generated_patterns_from_root_gitattributes(repo: &Repository) -> Vec<String> {
-    let Some(contents) = load_root_gitattributes_contents(repo) else {
+    linguist_generated_patterns(repo, is_bare(repo))
+}
+
+fn linguist_generated_patterns(repo: &Repository, is_bare: bool) -> Vec<String> {
+    let Some(contents) = load_root_text_file_contents(repo, is_bare, ".gitattributes") else {
         return Vec::new();
     };
     parse_linguist_generated_patterns(&contents)
@@ -152,12 +156,16 @@ fn parse_linguist_generated_patterns(contents: &str) -> Vec<String> {
     dedupe_patterns(patterns)
 }
 
-fn load_root_gitattributes_contents(repo: &Repository) -> Option<String> {
-    load_root_text_file_contents(repo, ".gitattributes")
+fn is_bare(repo: &Repository) -> bool {
+    repo.is_bare_repository().unwrap_or(false)
 }
 
-fn load_root_text_file_contents(repo: &Repository, relative_name: &str) -> Option<String> {
-    if repo.is_bare_repository().unwrap_or(false) {
+fn load_root_text_file_contents(
+    repo: &Repository,
+    is_bare: bool,
+    relative_name: &str,
+) -> Option<String> {
+    if is_bare {
         return repo
             .get_file_content(relative_name, "HEAD")
             .ok()
@@ -172,7 +180,11 @@ fn load_root_text_file_contents(repo: &Repository, relative_name: &str) -> Optio
 /// The file follows `.gitignore` syntax: one glob pattern per line, blank lines
 /// and lines starting with `#` are skipped.
 pub fn load_git_ai_ignore_patterns(repo: &Repository) -> Vec<String> {
-    let Some(contents) = load_root_git_ai_ignore_contents(repo) else {
+    git_ai_ignore_patterns(repo, is_bare(repo))
+}
+
+fn git_ai_ignore_patterns(repo: &Repository, is_bare: bool) -> Vec<String> {
+    let Some(contents) = load_root_text_file_contents(repo, is_bare, ".git-ai-ignore") else {
         return Vec::new();
     };
 
@@ -191,10 +203,6 @@ fn parse_git_ai_ignore_patterns(contents: &str) -> Vec<String> {
     }
 
     dedupe_patterns(patterns)
-}
-
-fn load_root_git_ai_ignore_contents(repo: &Repository) -> Option<String> {
-    load_root_text_file_contents(repo, ".git-ai-ignore")
 }
 
 /// Load `.git-ai-ignore` patterns from a repo root path directly (no Repository object needed).
@@ -222,11 +230,11 @@ pub fn effective_ignore_patterns(
     user_patterns: &[String],
     extra_patterns: &[String],
 ) -> Vec<String> {
+    // One bare check for both root files; each costs a git spawn.
+    let is_bare = is_bare(repo);
     let mut patterns = default_ignore_patterns();
-    patterns.extend(load_linguist_generated_patterns_from_root_gitattributes(
-        repo,
-    ));
-    patterns.extend(load_git_ai_ignore_patterns(repo));
+    patterns.extend(linguist_generated_patterns(repo, is_bare));
+    patterns.extend(git_ai_ignore_patterns(repo, is_bare));
     patterns.extend(extra_patterns.iter().cloned());
     patterns.extend(user_patterns.iter().cloned());
     dedupe_patterns(patterns)

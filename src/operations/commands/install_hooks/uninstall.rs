@@ -122,7 +122,7 @@ pub(super) async fn async_run_uninstall(
     Ok(statuses)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use crate::operations::mdm::test_env::with_temp_home;
     use serial_test::serial;
@@ -131,7 +131,6 @@ mod tests {
     /// `check_hooks` reports `hooks_installed` for the current hook layout
     /// only; hooks written by an older layout must still be removed.
     #[test]
-    #[cfg(not(windows))]
     #[serial]
     fn uninstall_removes_hooks_from_layouts_check_hooks_does_not_recognise() {
         const OLD_LAYOUTS: [(&str, &str, &str); 2] = [

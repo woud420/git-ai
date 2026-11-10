@@ -1,7 +1,7 @@
 use super::parse::parse_key_path;
 use super::pattern::log_array_removals;
 use super::spec::resolve_key;
-use crate::config::NotesBackendKind;
+use crate::config::NotesBackendConfig;
 
 pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
     let mut file_config = crate::config::load_file_config_public()?;
@@ -316,21 +316,20 @@ pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
         }
         let field = key_path[1].as_str();
         let mut backend = file_config.notes_backend.clone().unwrap_or_default();
+        // A backend that is back to defaults is omitted from the file.
+        let non_default = |backend: NotesBackendConfig| {
+            Some(backend).filter(|b| *b != NotesBackendConfig::default())
+        };
         match field {
             "kind" => {
-                let old = backend.kind;
-                backend.kind = NotesBackendKind::GitNotes; // reset to default
-                file_config.notes_backend = Some(backend);
+                let old = std::mem::take(&mut backend.kind); // reset to default
+                file_config.notes_backend = non_default(backend);
                 crate::config::save_file_config(&file_config)?;
                 println!("- [notes_backend.kind]: {}", old.as_str());
             }
             "backend_url" => {
                 if let Some(old_url) = backend.backend_url.take() {
-                    file_config.notes_backend = if backend.kind == NotesBackendKind::GitNotes {
-                        None // whole object is back to defaults, omit from file
-                    } else {
-                        Some(backend)
-                    };
+                    file_config.notes_backend = non_default(backend);
                     crate::config::save_file_config(&file_config)?;
                     println!("- [notes_backend.backend_url]: {}", old_url);
                 }

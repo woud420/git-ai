@@ -411,6 +411,15 @@ impl RefCursor {
     }
 
     pub(super) fn consume_entry(&mut self, entry: &CursorEntry) -> Result<(), GitAiError> {
+        self.mark_entry_consumed(entry);
+        self.compact_consumed_entries(&entry.key, &entry.path, &entry.reference)
+    }
+
+    /// Records ownership of `entry` without compacting. Compaction forgets the
+    /// rows it advances past, so a span walk marks all of its rows before it
+    /// compacts once; compacting in between would let the walk reclaim a row
+    /// that an earlier command consumed right after one of its own.
+    pub(super) fn mark_entry_consumed(&mut self, entry: &CursorEntry) {
         self.consumed_offsets
             .entry(entry.key.clone())
             .or_default()
@@ -419,7 +428,6 @@ impl RefCursor {
             .entry(entry.key.clone())
             .or_default()
             .insert(entry.end_offset, ReflogAnchor::from(entry));
-        self.compact_consumed_entries(&entry.key, &entry.path, &entry.reference)
     }
 
     pub(super) fn advance_cursor_to_entry(&mut self, entry: &CursorEntry) {

@@ -55,13 +55,12 @@ impl RefCursor {
                 )
             },
         );
-        self.consume_entry(&first)?;
-
-        let failed = cmd.exit_code != 0;
-        if failed {
+        if cmd.exit_code != 0 {
+            self.consume_entry(&first)?;
             cmd.ref_changes = changes;
             return Ok(());
         }
+        self.mark_entry_consumed(&first);
 
         let mut consumed_finish = rebase_reflog_action_is(&first.message, "finish");
         let mut next_start = first.end_offset;
@@ -120,9 +119,10 @@ impl RefCursor {
                     )
                 },
             );
-            self.consume_entry(&next)?;
+            self.mark_entry_consumed(&next);
             changes.push(entry_to_ref_change(&next));
         }
+        self.compact_consumed_entries(&first.key, &first.path, &first.reference)?;
 
         self.consume_common_refs_matching_transition(&old, &new, &mut changes)?;
         self.consume_rebase_finish_branch_ref(cmd.worktree.as_deref(), &new, state, &mut changes)?;
@@ -293,7 +293,7 @@ impl RefCursor {
         let mut consumed_finish = pull_reflog_action_state(&first.message, action).is_none()
             || pull_reflog_action_is(&first.message, action, "finish");
         let mut next_start = first.end_offset;
-        self.consume_entry(&first)?;
+        self.mark_entry_consumed(&first);
 
         while !consumed_finish
             && let Some(next) = self.find_head_entry_after(
@@ -314,9 +314,10 @@ impl RefCursor {
             new = next.new.clone();
             consumed_finish = pull_reflog_action_is(&next.message, action, "finish");
             next_start = next.end_offset;
-            self.consume_entry(&next)?;
+            self.mark_entry_consumed(&next);
             changes.push(entry_to_ref_change(&next));
         }
+        self.compact_consumed_entries(&first.key, &first.path, &first.reference)?;
 
         self.consume_common_refs_matching_transition(&old, &new, &mut changes)?;
         self.consume_pull_finish_branch_ref(

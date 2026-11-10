@@ -443,7 +443,7 @@ impl RefCursor {
         let mut new = first.new.clone();
         let mut changes = vec![entry_to_ref_change(&first)];
         let mut next_start = first.end_offset;
-        self.consume_entry(&first)?;
+        self.mark_entry_consumed(&first);
 
         while changes.len() < limit
             && let Some(next) = self.find_head_entry_after(
@@ -460,9 +460,10 @@ impl RefCursor {
         {
             new = next.new.clone();
             next_start = next.end_offset;
-            self.consume_entry(&next)?;
+            self.mark_entry_consumed(&next);
             changes.push(entry_to_ref_change(&next));
         }
+        self.compact_consumed_entries(&first.key, &first.path, &first.reference)?;
 
         self.consume_common_refs_matching_transition(&old, &new, &mut changes)?;
         dedup_ref_changes(&mut changes);

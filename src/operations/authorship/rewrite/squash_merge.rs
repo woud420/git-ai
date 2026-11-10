@@ -1,11 +1,10 @@
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::model::hunk_shift::apply_hunk_shifts_to_file_attestation;
 use crate::operations::git::notes_api;
 use crate::operations::git::repository::Repository;
 
 use super::diff_tree::compute_diff_trees_batch;
-use super::note_shift::{merge_authorship_logs, write_authorship_log};
+use super::note_shift::{merge_authorship_logs, shift_authorship_log, write_authorship_log};
 use super::range_diff::{find_merge_base, list_commits_in_range};
 use super::{RewriteMetricCommit, RewriteMetricOperation, RewriteOutcome, rewrite_metrics_enabled};
 
@@ -90,24 +89,7 @@ pub(super) fn handle_squash_merge(
         let mut log = note.log;
 
         if let Some(idx) = note.diff_idx {
-            let diff_to_tip = &diff_results[idx];
-            for (old_path, new_path) in &diff_to_tip.renames {
-                for attestation in &mut log.attestations {
-                    if attestation.file_path == *old_path {
-                        attestation.file_path = new_path.clone();
-                    }
-                }
-            }
-            if !diff_to_tip.hunks_by_file.is_empty() {
-                log.attestations = log
-                    .attestations
-                    .iter()
-                    .filter_map(|fa| match diff_to_tip.hunks_by_file.get(&fa.file_path) {
-                        Some(hunks) => apply_hunk_shifts_to_file_attestation(fa, hunks),
-                        None => Some(fa.clone()),
-                    })
-                    .collect();
-            }
+            shift_authorship_log(&mut log, &diff_results[idx]);
         }
 
         match merged_log.as_mut() {
@@ -121,26 +103,7 @@ pub(super) fn handle_squash_merge(
     };
 
     // Phase 2: Shift merged log from source_head to squash_commit
-    let diff_result = &diff_results[final_diff_idx];
-
-    for (old_path, new_path) in &diff_result.renames {
-        for attestation in &mut final_log.attestations {
-            if attestation.file_path == *old_path {
-                attestation.file_path = new_path.clone();
-            }
-        }
-    }
-
-    if !diff_result.hunks_by_file.is_empty() {
-        final_log.attestations = final_log
-            .attestations
-            .iter()
-            .filter_map(|fa| match diff_result.hunks_by_file.get(&fa.file_path) {
-                Some(hunks) => apply_hunk_shifts_to_file_attestation(fa, hunks),
-                None => Some(fa.clone()),
-            })
-            .collect();
-    }
+    shift_authorship_log(&mut final_log, &diff_results[final_diff_idx]);
 
     final_log.metadata.base_commit_sha = squash_commit.to_string();
 

@@ -360,8 +360,7 @@ fn apply_blame_for_side(
 
     let mut line_to_commit: HashMap<u32, String> = HashMap::new();
     for blame_hunk in &analysis.blame_hunks {
-        crate::operations::commands::diff_json_builder::ensure_commit_metadata(
-            repo,
+        crate::operations::commands::diff_json_builder::reference_commit(
             &blame_hunk.commit_sha,
             commits,
         );

@@ -93,7 +93,7 @@ pub struct DiffJsonHunk {
     pub human_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DiffCommitMetadata {
     pub authored_time: String,
     pub msg: String,

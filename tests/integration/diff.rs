@@ -2254,13 +2254,17 @@ fn test_diff_json_deleted_hunks_line_level_exact_mapping() {
         .stage_all_and_commit("Delete exact target lines")
         .unwrap();
 
+    let spawn_log = repo.test_home_path().join("diff-metadata-spawns.log");
     let json_output = repo
-        .git_ai(&[
-            "diff",
-            &deletion_commit.commit_sha,
-            "--json",
-            "--blame-deletions",
-        ])
+        .git_ai_with_env(
+            &[
+                "diff",
+                &deletion_commit.commit_sha,
+                "--json",
+                "--blame-deletions",
+            ],
+            &[("GIT_AI_SPAWN_LOG", spawn_log.to_str().unwrap())],
+        )
         .expect("diff --json --blame-deletions should succeed");
     let json: Value = serde_json::from_str(&json_output).expect("diff JSON should parse");
 
@@ -2325,6 +2329,31 @@ fn test_diff_json_deleted_hunks_line_level_exact_mapping() {
             .as_str()
             .expect("msg should be string"),
         "Delete exact target lines"
+    );
+    for commit in [&source_commit, &deletion_commit] {
+        let metadata = &commits[&commit.commit_sha];
+        assert_eq!(metadata["author"], "Test User <test@example.com>");
+        assert_eq!(metadata["full_msg"], metadata["msg"]);
+        assert!(
+            metadata["authored_time"]
+                .as_str()
+                .is_some_and(|time| time.contains('T')),
+            "authored_time should be ISO 8601: {metadata}"
+        );
+        assert!(metadata["authorship_note"].is_string(), "{metadata}");
+    }
+
+    // Metadata for every referenced commit comes from one `git log`, not a
+    // `git show` per commit.
+    let spawns = std::fs::read_to_string(&spawn_log).expect("read diff spawn log");
+    assert_eq!(
+        spawns.lines().filter(|line| *line == "log").count(),
+        1,
+        "spawns:\n{spawns}"
+    );
+    assert!(
+        spawns.lines().filter(|line| *line == "show").count() < commits.len(),
+        "spawns:\n{spawns}"
     );
 }
 

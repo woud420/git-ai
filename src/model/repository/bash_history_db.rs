@@ -249,32 +249,13 @@ impl BashHistoryDatabase {
     }
 
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
-        use crate::model::repository::sqlite;
-
-        sqlite::ensure_schema_metadata_table(&self.conn)?;
-        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
-        sqlite::migration_runner(
+        crate::model::repository::sqlite::apply_migrations(
             &mut self.conn,
             "bash history",
-            current_version,
             SCHEMA_VERSION,
-            Self::apply_migration,
+            MIGRATIONS,
+            |_, _| Ok(()),
         )
-    }
-
-    fn apply_migration(conn: &mut Connection, from_version: usize) -> Result<(), GitAiError> {
-        if from_version >= MIGRATIONS.len() {
-            return Err(PersistenceError::no_migration_path(
-                "bash history",
-                from_version,
-                from_version + 1,
-            ));
-        }
-
-        let tx = conn.transaction()?;
-        tx.execute_batch(MIGRATIONS[from_version])?;
-        tx.commit()?;
-        Ok(())
     }
 
     pub fn record_start(&mut self, call: &BashCallStart) -> Result<(), GitAiError> {

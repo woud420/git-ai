@@ -53,14 +53,14 @@ pub fn open_with_flags_and_memory_limits(
 // factor out only the mechanical parts that are code-identical across them (modulo comments/whitespace):
 // opening a connection at a path, reading the current schema version, and
 // running the compare-then-apply migration loop. Each store keeps its own
-// `SCHEMA_VERSION`, `MIGRATIONS`, and `apply_migration` body concrete.
+// `SCHEMA_VERSION` and `MIGRATIONS` sequence and passes them to
+// `apply_migrations`.
 //
-// `internal_db` does not call `migration_runner`: its fast path treats a
-// newer on-disk schema as forward-compatible (returns `Ok(())`) instead of
-// failing closed with `PersistenceError::schema_version`, and it runs an
-// extra post-loop verification step. It still uses
-// `ensure_schema_metadata_table`/`read_schema_version` for the mechanical
-// reads that don't differ.
+// `internal_db` differs in two ways it handles itself, around its
+// `apply_migrations` call: its fast path treats a newer on-disk schema as
+// forward-compatible (returns `Ok(())`) instead of failing closed with
+// `PersistenceError::schema_version`, and it runs an extra post-loop
+// verification step.
 
 /// Create parent directories, open a writable connection with the standard
 /// memory limits, and hand it to `init` to build and schema-initialize the
@@ -167,6 +167,39 @@ pub fn migration_runner(
         )?;
     }
     Ok(())
+}
+
+/// The singleton stores' `initialize_schema`: create `schema_metadata`, read
+/// the current version, and bring the schema to `target` by running each
+/// missing entry of the store's own `migrations` (index N upgrades version N
+/// to N + 1) in its own transaction, via [`migration_runner`].
+///
+/// `before_step` runs ahead of a step's transaction, for the store whose
+/// migrations need more than SQL (metrics' column backfills).
+pub fn apply_migrations(
+    conn: &mut Connection,
+    db_label: &'static str,
+    target: usize,
+    migrations: &[&str],
+    mut before_step: impl FnMut(&Connection, usize) -> Result<(), GitAiError>,
+) -> Result<(), GitAiError> {
+    ensure_schema_metadata_table(conn)?;
+    let current = read_schema_version(conn).unwrap_or(0);
+    migration_runner(conn, db_label, current, target, |conn, from_version| {
+        let Some(migration_sql) = migrations.get(from_version) else {
+            return Err(PersistenceError::no_migration_path(
+                db_label,
+                from_version,
+                from_version + 1,
+            ));
+        };
+        before_step(conn, from_version)?;
+
+        let tx = conn.transaction()?;
+        tx.execute_batch(migration_sql)?;
+        tx.commit()?;
+        Ok(())
+    })
 }
 
 #[cfg(test)]

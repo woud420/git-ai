@@ -4,7 +4,7 @@
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
 use dirs;
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -170,60 +170,25 @@ impl InternalDatabase {
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
         use crate::model::repository::sqlite;
 
-        // FAST PATH: Check if database is already at current version
-        // This avoids expensive schema operations on every process start
-        if let Some(current_version) = sqlite::read_schema_version(&self.conn) {
-            if current_version == SCHEMA_VERSION {
-                // Database is up-to-date, no migrations needed
-                return Ok(());
-            }
-            if current_version > SCHEMA_VERSION {
-                // Forward-compatible: an older binary can still read/write
-                // known tables even if a newer binary added extra tables.
-                // Just skip migrations and use what we have.
-                return Ok(());
-            }
-            // Fall through to apply missing migrations (current_version < SCHEMA_VERSION)
-        }
-        // If the read found nothing, the table doesn't exist - proceed with full
-        // initialization.
-
-        // Step 1: Create schema_metadata table (this is the only table we create directly)
-        sqlite::ensure_schema_metadata_table(&self.conn)?;
-
-        // Step 2: Get current schema version (0 if brand new database)
-        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
-
-        // Step 3: Apply all missing migrations sequentially
-        for target_version in current_version..SCHEMA_VERSION {
-            tracing::debug!(
-                "[Migration] Upgrading database from version {} to {}",
-                target_version,
-                target_version + 1
-            );
-
-            // Apply the migration (FATAL on error)
-            self.apply_migration(target_version)?;
-
-            // Use an upsert so concurrent initializers do not race on version row creation.
-            self.conn.execute(
-                r#"
-                INSERT INTO schema_metadata (key, value)
-                VALUES ('version', ?1)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value
-                WHERE CAST(schema_metadata.value AS INTEGER) < CAST(excluded.value AS INTEGER)
-                "#,
-                params![(target_version + 1).to_string()],
-            )?;
-
-            tracing::debug!(
-                "[Migration] Successfully upgraded to version {}",
-                target_version + 1
-            );
+        // FAST PATH: the database is already at the current version, which
+        // avoids schema operations on every process start. A newer version is
+        // forward-compatible: an older binary can still read/write the tables
+        // it knows even if a newer binary added more, so skip migrations.
+        if sqlite::read_schema_version(&self.conn).is_some_and(|v| v >= SCHEMA_VERSION) {
+            return Ok(());
         }
 
-        // Step 5: Verify final version matches expected
+        // No version yet (brand new database) or an older one: apply all
+        // missing migrations sequentially (FATAL on error).
+        sqlite::apply_migrations(
+            &mut self.conn,
+            "internal",
+            SCHEMA_VERSION,
+            MIGRATIONS,
+            |_, _| Ok(()),
+        )?;
+
+        // Verify final version matches expected
         let final_version: usize = self.conn.query_row(
             "SELECT value FROM schema_metadata WHERE key = 'version'",
             [],
@@ -241,27 +206,6 @@ impl InternalDatabase {
                 SCHEMA_VERSION, final_version
             )));
         }
-
-        Ok(())
-    }
-
-    /// Apply a single migration
-    /// Migration failures are FATAL - the program cannot continue with a partially migrated database
-    fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
-        if from_version >= MIGRATIONS.len() {
-            return Err(PersistenceError::no_migration_path(
-                "internal",
-                from_version,
-                from_version + 1,
-            ));
-        }
-
-        let migration_sql = MIGRATIONS[from_version];
-
-        // Execute migration in a transaction for atomicity
-        let tx = self.conn.transaction()?;
-        tx.execute_batch(migration_sql)?;
-        tx.commit()?;
 
         Ok(())
     }
@@ -355,6 +299,34 @@ mod tests {
         db.initialize_schema().unwrap();
 
         assert_persisted_schema_version(&db.conn, "3");
+    }
+
+    #[test]
+    fn test_initialize_schema_accepts_newer_schema_version() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("newer.db");
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
+
+        // Written by a newer binary: forward-compatible, so neither an error
+        // nor a downgrade of the recorded version.
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_metadata (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            );
+            INSERT INTO schema_metadata (key, value) VALUES ('version', '99');
+            "#,
+        )
+        .unwrap();
+
+        let mut db = InternalDatabase {
+            conn,
+            _db_path: db_path,
+        };
+        db.initialize_schema().unwrap();
+
+        assert_persisted_schema_version(&db.conn, "99");
     }
 
     #[test]

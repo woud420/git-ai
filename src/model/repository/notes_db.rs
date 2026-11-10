@@ -145,34 +145,13 @@ impl NotesDatabase {
 
     /// Apply schema migrations until the DB is at `SCHEMA_VERSION`.
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
-        use crate::model::repository::sqlite;
-
-        sqlite::ensure_schema_metadata_table(&self.conn)?;
-        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
-        sqlite::migration_runner(
+        crate::model::repository::sqlite::apply_migrations(
             &mut self.conn,
             "notes",
-            current_version,
             SCHEMA_VERSION,
-            Self::apply_migration,
+            MIGRATIONS,
+            |_, _| Ok(()),
         )
-    }
-
-    fn apply_migration(conn: &mut Connection, from_version: usize) -> Result<(), GitAiError> {
-        if from_version >= MIGRATIONS.len() {
-            return Err(PersistenceError::no_migration_path(
-                "notes",
-                from_version,
-                from_version + 1,
-            ));
-        }
-
-        let migration_sql = MIGRATIONS[from_version];
-        let tx = conn.transaction()?;
-        tx.execute_batch(migration_sql)?;
-        tx.commit()?;
-
-        Ok(())
     }
 
     // ----- Write operations -----

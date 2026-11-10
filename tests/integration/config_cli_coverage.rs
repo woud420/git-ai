@@ -151,6 +151,24 @@ fn test_config_transcript_streaming_lookback_days_set_get_unset() {
 }
 
 #[test]
+fn test_config_update_channel_accepts_every_runtime_channel() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+
+    // Every channel the runtime honors in config.json is settable.
+    for channel in ["latest", "next", "enterprise-latest", "enterprise-next"] {
+        repo.git_ai(&["config", "set", "update_channel", channel])
+            .unwrap_or_else(|e| panic!("set update_channel {channel} failed: {e}"));
+        assert_eq!(get_json(&repo, "update_channel"), channel);
+    }
+
+    assert!(
+        repo.git_ai(&["config", "set", "update_channel", "bogus"])
+            .is_err()
+    );
+    assert_eq!(get_json(&repo, "update_channel"), "enterprise-next");
+}
+
+#[test]
 fn test_config_checkpoint_budget_set_get_unset() {
     let repo = TestRepo::new();
 

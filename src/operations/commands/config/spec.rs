@@ -162,7 +162,7 @@ const CONFIG_KEY_SPECS: &[ConfigKeySpec] = &[
         sensitive: false,
         nesting: ConfigNesting::None,
         mutation: ConfigMutation::Replace,
-        help: "update_channel               Update channel (latest/next)",
+        help: "update_channel               Update channel (latest/next/enterprise-latest/enterprise-next)",
         show_in_help: true,
     },
     ConfigKeySpec {

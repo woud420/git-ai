@@ -525,34 +525,4 @@ impl Repository {
         }
         Ok(Tree { repo: self, oid })
     }
-
-    /// Read file content from a tree, using fast filesystem reads with git CLI fallback.
-    pub fn read_file_blob_at_tree(
-        &self,
-        tree_oid: &str,
-        path: &Path,
-    ) -> Result<Vec<u8>, GitAiError> {
-        let reader =
-            crate::operations::git::fast_reader::FastObjectReader::new(&self.git_common_dir);
-        if let Some(blob_oid) = reader.try_tree_entry_for_path(tree_oid, path) {
-            if let Some(content) = reader.try_read_blob(&blob_oid) {
-                return Ok(content);
-            }
-            let blob = Blob {
-                repo: self,
-                oid: blob_oid,
-            };
-            return blob.content();
-        }
-        let tree = Tree {
-            repo: self,
-            oid: tree_oid.to_string(),
-        };
-        let entry = tree.get_path(path)?;
-        let blob = Blob {
-            repo: self,
-            oid: entry.id(),
-        };
-        blob.content()
-    }
 }

@@ -1,7 +1,7 @@
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
 use crate::model::attribution::{ceil_char_boundary, floor_char_boundary};
-use crate::model::attribution_tracker::Attribution;
+use crate::model::attribution_tracker::{Attribution, covered_char_ranges, uncovered_ranges};
 use std::collections::HashMap;
 
 /// Merge two VirtualAttributions, favoring the primary for overlaps
@@ -166,70 +166,23 @@ fn merge_char_attributions(
     secondary: &[Attribution],
     content: &str,
 ) -> Vec<Attribution> {
-    let content_len = content.len();
-    if content_len == 0 {
+    if content.is_empty() {
         return primary.to_vec();
     }
 
-    // Create coverage map for primary (byte-based).
-    let mut covered = vec![false; content_len];
-    #[allow(clippy::needless_range_loop)]
-    for attr in primary {
-        for i in attr.start..attr.end.min(content_len) {
-            covered[i] = true;
-        }
-    }
-
-    let mut result = Vec::new();
-
-    // Add all primary attributions.
-    result.extend(primary.iter().cloned());
+    // Chars that a non-empty primary range touches.
+    let primary_ranges = primary.iter().filter(|a| a.start < a.end);
+    let covered = covered_char_ranges(content, primary_ranges.map(|a| (a.start, a.end)));
 
     // Add secondary attributions only where primary doesn't cover, on UTF-8 boundaries.
+    let mut result = primary.to_vec();
     for attr in secondary {
-        let mut range_start: Option<usize> = None;
-        let safe_start = floor_char_boundary(content, attr.start);
-        let safe_end = ceil_char_boundary(content, attr.end);
-
-        if safe_start >= safe_end {
-            continue;
-        }
-
-        let slice = &content[safe_start..safe_end];
-        for (rel_idx, ch) in slice.char_indices() {
-            let start = safe_start + rel_idx;
-            let end = start + ch.len_utf8();
-            let mut is_covered = false;
-            #[allow(clippy::needless_range_loop)]
-            for i in start..end.min(content_len) {
-                if covered[i] {
-                    is_covered = true;
-                    break;
-                }
-            }
-
-            if is_covered {
-                if let Some(range_start_idx) = range_start.take()
-                    && range_start_idx < start
-                {
-                    result.push(Attribution::new(
-                        range_start_idx,
-                        start,
-                        attr.author_id.clone(),
-                        attr.ts,
-                    ));
-                }
-            } else if range_start.is_none() {
-                range_start = Some(start);
-            }
-        }
-
-        if let Some(range_start_idx) = range_start.take()
-            && range_start_idx < safe_end
-        {
+        let start = floor_char_boundary(content, attr.start);
+        let end = ceil_char_boundary(content, attr.end);
+        for (gap_start, gap_end) in uncovered_ranges(&covered, start, end) {
             result.push(Attribution::new(
-                range_start_idx,
-                safe_end,
+                gap_start,
+                gap_end,
                 attr.author_id.clone(),
                 attr.ts,
             ));
@@ -244,6 +197,117 @@ fn merge_char_attributions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The byte-map implementation `merge_char_attributions` replaced, kept
+    /// verbatim as the oracle.
+    fn merge_with_byte_map(
+        primary: &[Attribution],
+        secondary: &[Attribution],
+        content: &str,
+    ) -> Vec<Attribution> {
+        let content_len = content.len();
+        if content_len == 0 {
+            return primary.to_vec();
+        }
+
+        // Create coverage map for primary (byte-based).
+        let mut covered = vec![false; content_len];
+        #[allow(clippy::needless_range_loop)]
+        for attr in primary {
+            for i in attr.start..attr.end.min(content_len) {
+                covered[i] = true;
+            }
+        }
+
+        let mut result = Vec::new();
+
+        // Add all primary attributions.
+        result.extend(primary.iter().cloned());
+
+        // Add secondary attributions only where primary doesn't cover, on UTF-8 boundaries.
+        for attr in secondary {
+            let mut range_start: Option<usize> = None;
+            let safe_start = floor_char_boundary(content, attr.start);
+            let safe_end = ceil_char_boundary(content, attr.end);
+
+            if safe_start >= safe_end {
+                continue;
+            }
+
+            let slice = &content[safe_start..safe_end];
+            for (rel_idx, ch) in slice.char_indices() {
+                let start = safe_start + rel_idx;
+                let end = start + ch.len_utf8();
+                let mut is_covered = false;
+                #[allow(clippy::needless_range_loop)]
+                for i in start..end.min(content_len) {
+                    if covered[i] {
+                        is_covered = true;
+                        break;
+                    }
+                }
+
+                if is_covered {
+                    if let Some(range_start_idx) = range_start.take()
+                        && range_start_idx < start
+                    {
+                        result.push(Attribution::new(
+                            range_start_idx,
+                            start,
+                            attr.author_id.clone(),
+                            attr.ts,
+                        ));
+                    }
+                } else if range_start.is_none() {
+                    range_start = Some(start);
+                }
+            }
+
+            if let Some(range_start_idx) = range_start.take()
+                && range_start_idx < safe_end
+            {
+                result.push(Attribution::new(
+                    range_start_idx,
+                    safe_end,
+                    attr.author_id.clone(),
+                    attr.ts,
+                ));
+            }
+        }
+
+        // Sort by start position.
+        result.sort_by_key(|a| (a.start, a.end));
+        result
+    }
+
+    /// Two primary ranges and one secondary range, over every byte range of the
+    /// content: zero-length, inverted, overlapping, mid-char and out-of-bounds.
+    #[test]
+    fn matches_the_byte_map_merge_for_every_range_combination() {
+        for content in ["", "ab", "é😀b"] {
+            let limit = content.len() + 1;
+            let ranges: Vec<(usize, usize)> = (0..=limit)
+                .flat_map(|start| (0..=limit).map(move |end| (start, end)))
+                .collect();
+            let attr = |(start, end): (usize, usize), author: &str, ts: u128| {
+                Attribution::new(start, end, author.to_string(), ts)
+            };
+
+            for (i, &first) in ranges.iter().enumerate() {
+                for &second in &ranges[i..] {
+                    let primary = [attr(first, "p1", 1), attr(second, "p2", 2)];
+                    for &filler in &ranges {
+                        let secondary = [attr(filler, "s", 3)];
+                        assert_eq!(
+                            merge_char_attributions(&primary, &secondary, content),
+                            merge_with_byte_map(&primary, &secondary, content),
+                            "content {content:?}, primary {primary:?}, secondary {secondary:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn secondary_split_byte_range_expands_to_whole_scalar() {

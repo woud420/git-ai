@@ -4,12 +4,11 @@ use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, Hoo
 #[cfg(test)]
 use crate::operations::mdm::hooks_merge::is_git_ai_checkpoint_command;
 use crate::operations::mdm::hooks_merge::{
-    MissingBehavior, catch_all_hook_status, edit_settings_json, install_catch_all_hooks,
-    uninstall_catch_all_hooks,
+    catch_all_hook_status, check_settings_hooks, install_catch_all_hooks_at, parse_json,
+    uninstall_catch_all_hooks_at,
 };
 use crate::operations::mdm::paths::gemini_config_dir;
 use serde_json::{Value, json};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 // Command patterns for hooks
@@ -44,11 +43,14 @@ impl GeminiInstaller {
         );
         let after_tool_cmd = format!("{} {}", params.binary_path.display(), GEMINI_AFTER_TOOL_CMD);
 
-        edit_settings_json(
+        install_catch_all_hooks_at(
             settings_path,
             dry_run,
-            MissingBehavior::TreatAsEmpty,
-            |content| Ok(serde_json::from_str(content)?),
+            parse_json,
+            &[
+                ("BeforeTool", before_tool_cmd.as_str()),
+                ("AfterTool", after_tool_cmd.as_str()),
+            ],
             |merged| {
                 // Ensure tools.enableHooks is set to true.
                 if let Some(tools_obj) = merged.get_mut("tools").and_then(|t| t.as_object_mut()) {
@@ -58,18 +60,6 @@ impl GeminiInstaller {
                 } else if let Some(root) = merged.as_object_mut() {
                     root.insert("tools".to_string(), json!({ "enableHooks": true }));
                 }
-
-                let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
-                install_catch_all_hooks(
-                    &mut hooks_obj,
-                    &[
-                        ("BeforeTool", before_tool_cmd.as_str()),
-                        ("AfterTool", after_tool_cmd.as_str()),
-                    ],
-                );
-                if let Some(root) = merged.as_object_mut() {
-                    root.insert("hooks".to_string(), hooks_obj);
-                }
             },
         )
     }
@@ -78,21 +68,11 @@ impl GeminiInstaller {
         settings_path: &Path,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        edit_settings_json(
+        uninstall_catch_all_hooks_at(
             settings_path,
             dry_run,
-            MissingBehavior::NoOp,
-            |content| Ok(serde_json::from_str(content)?),
-            |merged| {
-                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
-                    return;
-                };
-                if uninstall_catch_all_hooks(&mut hooks_obj, &["BeforeTool", "AfterTool"])
-                    && let Some(root) = merged.as_object_mut()
-                {
-                    root.insert("hooks".to_string(), hooks_obj);
-                }
-            },
+            parse_json,
+            &["BeforeTool", "AfterTool"],
         )
     }
 }
@@ -118,19 +98,7 @@ impl HookInstaller for GeminiInstaller {
             return Ok(HookCheckResult::tool_not_installed());
         }
 
-        let settings_path = Self::settings_path();
-        if !settings_path.exists() {
-            return Ok(HookCheckResult::installed_without_hooks());
-        }
-
-        let content = fs::read_to_string(&settings_path)?;
-        let existing: Value = serde_json::from_str(&content).unwrap_or_else(|_| json!({}));
-        let (hooks_installed, hooks_up_to_date) = Self::hook_status(&existing);
-
-        Ok(HookCheckResult::installed(
-            hooks_installed,
-            hooks_up_to_date,
-        ))
+        check_settings_hooks(&Self::settings_path(), parse_json, Self::hook_status)
     }
 
     fn install_hooks(

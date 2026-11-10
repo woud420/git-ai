@@ -4,15 +4,14 @@ use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, Hoo
 #[cfg(test)]
 use crate::operations::mdm::hooks_merge::is_git_ai_checkpoint_command;
 use crate::operations::mdm::hooks_merge::{
-    MissingBehavior, catch_all_hook_status, edit_settings_json, install_catch_all_hooks,
-    uninstall_catch_all_hooks,
+    catch_all_hook_status, check_settings_hooks, install_catch_all_hooks_at, parse_json,
+    uninstall_catch_all_hooks_at,
 };
 use crate::operations::mdm::paths::{claude_config_dir, normalize_windows_path_for_shell};
 use crate::operations::mdm::version::{
     MIN_CLAUDE_VERSION, get_binary_version, parse_version, version_meets_requirement,
 };
-use serde_json::{Value, json};
-use std::fs;
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 // Command patterns for hooks
@@ -44,24 +43,15 @@ impl ClaudeCodeInstaller {
         let pre_tool_cmd = format!("{} {}", binary_path_str, CLAUDE_PRE_TOOL_CMD);
         let post_tool_cmd = format!("{} {}", binary_path_str, CLAUDE_POST_TOOL_CMD);
 
-        edit_settings_json(
+        install_catch_all_hooks_at(
             settings_path,
             dry_run,
-            MissingBehavior::TreatAsEmpty,
-            |content| Ok(serde_json::from_str(content)?),
-            |merged| {
-                let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
-                install_catch_all_hooks(
-                    &mut hooks_obj,
-                    &[
-                        ("PreToolUse", pre_tool_cmd.as_str()),
-                        ("PostToolUse", post_tool_cmd.as_str()),
-                    ],
-                );
-                if let Some(root) = merged.as_object_mut() {
-                    root.insert("hooks".to_string(), hooks_obj);
-                }
-            },
+            parse_json,
+            &[
+                ("PreToolUse", pre_tool_cmd.as_str()),
+                ("PostToolUse", post_tool_cmd.as_str()),
+            ],
+            |_settings| {},
         )
     }
 
@@ -69,21 +59,11 @@ impl ClaudeCodeInstaller {
         settings_path: &Path,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        edit_settings_json(
+        uninstall_catch_all_hooks_at(
             settings_path,
             dry_run,
-            MissingBehavior::NoOp,
-            |content| Ok(serde_json::from_str(content)?),
-            |merged| {
-                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
-                    return;
-                };
-                if uninstall_catch_all_hooks(&mut hooks_obj, &["PreToolUse", "PostToolUse"])
-                    && let Some(root) = merged.as_object_mut()
-                {
-                    root.insert("hooks".to_string(), hooks_obj);
-                }
-            },
+            parse_json,
+            &["PreToolUse", "PostToolUse"],
         )
     }
 }
@@ -116,19 +96,7 @@ impl HookInstaller for ClaudeCodeInstaller {
             )));
         }
 
-        let settings_path = Self::settings_path();
-        if !settings_path.exists() {
-            return Ok(HookCheckResult::installed_without_hooks());
-        }
-
-        let content = fs::read_to_string(&settings_path)?;
-        let existing: Value = serde_json::from_str(&content).unwrap_or_else(|_| json!({}));
-        let (hooks_installed, hooks_up_to_date) = Self::hook_status(&existing);
-
-        Ok(HookCheckResult::installed(
-            hooks_installed,
-            hooks_up_to_date,
-        ))
+        check_settings_hooks(&Self::settings_path(), parse_json, Self::hook_status)
     }
 
     fn process_names(&self) -> Vec<&str> {
@@ -156,6 +124,7 @@ impl HookInstaller for ClaudeCodeInstaller {
 mod tests {
     use super::*;
     use crate::operations::mdm::paths::{clean_path, normalize_windows_path_for_shell};
+    use serde_json::json;
     use std::fs;
     use tempfile::TempDir;
 

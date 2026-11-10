@@ -49,54 +49,36 @@ pub(crate) fn refs_at_reflog_start_offsets(
             continue;
         };
         if valid_non_zero_oid(&record.new) {
-            refs.insert(reference, record.new);
+            refs.insert(reference.to_string(), record.new);
         }
     }
 
     Ok(refs)
 }
 
-pub(super) fn reflog_reference_and_path_for_key(
+pub(super) fn reflog_reference_and_path_for_key<'a>(
     common_dir: &Path,
-    key: &str,
-) -> Option<(String, PathBuf)> {
+    key: &'a str,
+) -> Option<(&'a str, PathBuf)> {
     if let Some(reference) = key.strip_prefix("common:") {
-        return Some((
-            reference.to_string(),
-            common_dir.join("logs").join(reference),
-        ));
+        return Some((reference, common_dir.join("logs").join(reference)));
     }
     let git_dir = key
         .strip_prefix("worktree:")
         .and_then(|value| value.strip_suffix(":HEAD"))?;
-    Some((
-        "HEAD".to_string(),
-        PathBuf::from(git_dir).join("logs").join("HEAD"),
-    ))
+    Some(("HEAD", PathBuf::from(git_dir).join("logs").join("HEAD")))
 }
 
+/// Reflog entries that move the ref; identity rows (`old == new`) are dropped.
 pub(super) fn read_reflog_entries(
     key: String,
     path: &Path,
     reference: &str,
     start_offset: Option<u64>,
 ) -> Result<Vec<CursorEntry>, GitAiError> {
-    let records = read_reflog_records(path, start_offset)?;
-    Ok(records
-        .into_iter()
-        .filter(|record| record.old != record.new)
-        .map(|record| CursorEntry {
-            key: key.clone(),
-            path: path.to_path_buf(),
-            reference: reference.to_string(),
-            old: record.old,
-            new: record.new,
-            message: record.message,
-            timestamp_secs: record.timestamp_secs,
-            start_offset: record.start_offset,
-            end_offset: record.end_offset,
-        })
-        .collect())
+    let mut entries = read_reflog_entries_including_noops(key, path, reference, start_offset)?;
+    entries.retain(|entry| entry.old != entry.new);
+    Ok(entries)
 }
 
 pub(super) fn read_reflog_entries_including_noops(

@@ -2,7 +2,7 @@ pub use super::working_log_discard::remove_working_log_attributions_for_pathspec
 use crate::error::GitAiError;
 use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
 use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
-use crate::operations::git::cli_parser::summarize_rebase_args;
+use crate::operations::git::cli_parser::{ParsedGitInvocation, summarize_rebase_args};
 use crate::operations::git::find_repository_in_path;
 use crate::operations::git::oid::is_non_zero_oid;
 pub use crate::operations::git::oid::{is_full_oid as is_valid_oid, is_zero_oid};
@@ -202,16 +202,7 @@ pub fn apply_checkout_switch_working_log_side_effect(
         return Ok(());
     }
 
-    let is_merge = parsed.has_command_flag("--merge") || parsed.has_command_flag("-m");
-    let is_force = match cmd.primary_command.as_deref() {
-        Some("checkout") => parsed.has_command_flag("--force") || parsed.has_command_flag("-f"),
-        Some("switch") => {
-            parsed.has_command_flag("--discard-changes")
-                || parsed.has_command_flag("--force")
-                || parsed.has_command_flag("-f")
-        }
-        _ => false,
-    };
+    let (is_force, is_merge) = checkout_switch_force_and_merge(cmd, &parsed);
 
     if is_force {
         repo.storage.delete_working_log_for_base_commit(&old_head)?;
@@ -257,6 +248,23 @@ pub fn recent_checkout_switch_prerequisite_from_command(
         return None;
     }
 
+    let (is_force, is_merge) = checkout_switch_force_and_merge(cmd, &parsed);
+    if is_force || is_merge {
+        return None;
+    }
+
+    Some(RecentReplayPrerequisite::CheckoutSwitchRename {
+        target_head: new_head,
+        old_head,
+    })
+}
+
+/// Whether a checkout/switch invocation discards local changes (`force`) or
+/// carries them across with a three-way merge (`merge`).
+fn checkout_switch_force_and_merge(
+    cmd: &crate::model::domain::NormalizedCommand,
+    parsed: &ParsedGitInvocation,
+) -> (bool, bool) {
     let is_force = match cmd.primary_command.as_deref() {
         Some("checkout") => parsed.has_command_flag("--force") || parsed.has_command_flag("-f"),
         Some("switch") => {
@@ -266,20 +274,10 @@ pub fn recent_checkout_switch_prerequisite_from_command(
         }
         _ => false,
     };
-    if is_force {
-        return None;
-    }
-
     let is_merge = parsed.has_command_flag("--merge") || parsed.has_command_flag("-m");
-    if is_merge {
-        return None;
-    }
-
-    Some(RecentReplayPrerequisite::CheckoutSwitchRename {
-        target_head: new_head,
-        old_head,
-    })
+    (is_force, is_merge)
 }
+
 pub fn family_key_for_repository(repo: &Repository) -> String {
     crate::operations::git::canonicalize::canonicalize_or_self(repo.common_dir())
         .to_string_lossy()
@@ -297,14 +295,6 @@ pub fn is_ancestor_commit(repository: &Repository, ancestor: &str, descendant: &
     repository
         .is_ancestor(ancestor, descendant)
         .unwrap_or(false)
-}
-
-pub fn repo_is_ancestor(
-    repository: &crate::operations::git::repository::Repository,
-    ancestor: &str,
-    descendant: &str,
-) -> bool {
-    is_ancestor_commit(repository, ancestor, descendant)
 }
 
 pub fn rebase_is_control_mode(cmd: &crate::model::domain::NormalizedCommand) -> bool {

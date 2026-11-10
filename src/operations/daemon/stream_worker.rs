@@ -25,6 +25,8 @@ use tokio::time::{Duration, interval};
 mod checkpoint_notification;
 #[cfg(test)]
 mod checkpoint_notification_tests;
+#[cfg(test)]
+mod drain_tests;
 mod process_session;
 
 const TRIGGERED_SWEEP_COOLDOWN: Duration = Duration::from_secs(30);
@@ -262,10 +264,11 @@ impl StreamWorkerHandle {
         })
     }
 
-    /// Request that the worker drain all immediate processing tasks.
+    /// Request that the worker drain all ready processing tasks.
     ///
     /// Returns after the worker has finished processing all currently-enqueued
-    /// immediate-priority tasks and any that are already in flight.
+    /// ready tasks and any that are already in flight. Tasks backing off after
+    /// a transient failure keep their retry schedule.
     pub async fn drain(&self) -> Result<(), String> {
         let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
         self.drain_tx
@@ -469,11 +472,9 @@ impl StreamWorker {
                 .await;
         }
 
-        // Process immediate priority tasks that are already queued.
-        self.drain_immediate_tasks().await;
-
-        // Continue processing newly promoted tasks until there is no ready
-        // work and no in-flight processing.
+        // Process ready tasks, immediate priority first, until there is no
+        // ready work and no in-flight processing. Failures keep their normal
+        // retry handling: a drain outside shutdown must not consume a retry.
         while !self.priority_queue.is_empty() || !self.in_flight.is_empty() {
             self.process_next_task().await;
         }
@@ -939,46 +940,33 @@ impl StreamWorker {
             return;
         }
 
-        // Mark as in-flight
-        self.in_flight
-            .insert((task.canonical_path.clone(), task.stream_kind.clone()));
+        if let Err(e) = self.run_task(&task).await {
+            self.handle_processing_error(task, e).await;
+        }
+    }
 
-        // Process the session (spawn blocking to avoid blocking the worker loop)
+    /// Run one task on the blocking pool (so the worker loop stays responsive),
+    /// tracking it as in-flight meanwhile. A panic is reported as a fatal error.
+    async fn run_task(&mut self, task: &ProcessingTask) -> Result<(), StreamError> {
+        let in_flight_key = (task.canonical_path.clone(), task.stream_kind.clone());
+        self.in_flight.insert(in_flight_key.clone());
+
         let db = self.streams_db.clone();
         let telemetry = self.telemetry_handle.clone();
         let shutdown_flag = self.shutdown_flag.clone();
         let task_clone = task.clone();
-
         let result = tokio::task::spawn_blocking(move || {
             Self::process_session_blocking(&db, &telemetry, &task_clone, &shutdown_flag)
         })
         .await;
 
-        // Remove from in-flight
-        self.in_flight
-            .remove(&(task.canonical_path.clone(), task.stream_kind.clone()));
-
-        // Handle result
-        match result {
-            Ok(Ok(())) => {
-                // Success - task is done
-            }
-            Ok(Err(e)) => {
-                // Error - handle retry logic
-                self.handle_processing_error(task, e).await;
-            }
-            Err(e) => {
-                // Panic in spawn_blocking
-                tracing::error!(error = %e, session_id = %task.session_id, "task panicked");
-                self.handle_processing_error(
-                    task,
-                    StreamError::Fatal {
-                        message: format!("task panicked: {}", e),
-                    },
-                )
-                .await;
-            }
-        }
+        self.in_flight.remove(&in_flight_key);
+        result.unwrap_or_else(|e| {
+            tracing::error!(error = %e, session_id = %task.session_id, "task panicked");
+            Err(StreamError::Fatal {
+                message: format!("task panicked: {}", e),
+            })
+        })
     }
 
     /// Handle a processing error with exponential backoff.
@@ -1069,31 +1057,10 @@ impl StreamWorker {
 
         tracing::info!(tasks = immediate_tasks.len(), "draining immediate tasks");
 
-        // Process immediate tasks
+        // Nothing runs after shutdown, so failures are logged rather than retried.
         for task in immediate_tasks {
-            self.in_flight
-                .insert((task.canonical_path.clone(), task.stream_kind.clone()));
-            let db = self.streams_db.clone();
-            let telemetry = self.telemetry_handle.clone();
-            let shutdown_flag = self.shutdown_flag.clone();
-            let task_clone = task.clone();
-
-            let result = tokio::task::spawn_blocking(move || {
-                Self::process_session_blocking(&db, &telemetry, &task_clone, &shutdown_flag)
-            })
-            .await;
-
-            self.in_flight
-                .remove(&(task.canonical_path.clone(), task.stream_kind.clone()));
-
-            match result {
-                Err(e) => {
-                    tracing::error!(error = %e, session_id = %task.session_id, "drain task panicked");
-                }
-                Ok(Err(e)) => {
-                    tracing::error!(error = %e, session_id = %task.session_id, "drain task processing error");
-                }
-                Ok(Ok(())) => {}
+            if let Err(e) = self.run_task(&task).await {
+                tracing::error!(error = %e, session_id = %task.session_id, "drain task processing error");
             }
         }
     }

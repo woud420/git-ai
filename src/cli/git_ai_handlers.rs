@@ -823,28 +823,15 @@ fn handle_stats(args: &[String]) {
                 i += 1;
             }
             "--ignore" => {
-                // Collect all arguments after --ignore until we hit another flag or commit SHA
+                // Collect all arguments after --ignore until we hit another flag or a commit range.
                 // This supports shell glob expansion: `--ignore *.lock` expands to `--ignore Cargo.lock package.lock`
                 i += 1;
-                let mut found_pattern = false;
-                while i < args.len() {
-                    let arg = &args[i];
-                    // Stop if we hit another flag
-                    if arg.starts_with("--") {
-                        break;
-                    }
-                    // Stop if this looks like a commit SHA or range (contains ..)
-                    if arg.contains("..")
-                        || (commit_sha.is_none() && !found_pattern && arg.len() >= 7)
-                    {
-                        // Could be a commit SHA, stop collecting patterns
-                        break;
-                    }
-                    ignore_patterns.push(arg.clone());
-                    found_pattern = true;
+                let first_pattern = i;
+                while i < args.len() && !args[i].starts_with("--") && !args[i].contains("..") {
+                    ignore_patterns.push(args[i].clone());
                     i += 1;
                 }
-                if !found_pattern {
+                if i == first_pattern {
                     eprintln!("--ignore requires at least one pattern argument");
                     std::process::exit(1);
                 }

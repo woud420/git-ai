@@ -180,16 +180,22 @@ impl ActorDaemonCoordinator {
 
         let root = trace_root_sid(&sid).to_string();
         let argv = trace_payload_argv(payload);
-        let started_at_ns = trace_payload_time_ns(payload);
+        let has_own_argv = !argv.is_empty();
         let early_primary =
-            trace_payload_primary_command(payload).or_else(|| trace_argv_primary_command(&argv));
+            trace_payload_cmd_name(payload).or_else(|| trace_argv_primary_command(&argv));
         let event_is_read_only =
             trace_invocation_is_definitely_read_only(early_primary.as_deref(), &argv);
         let root_start = event == "start" && sid == root;
+        // Only a root's own start frame records when the root began.
+        let started_at_ns = if root_start {
+            trace_payload_time_ns(payload)
+        } else {
+            None
+        };
         // Nothing reads the repository of a read-only root: its frames are
         // never queued and the family fences skip it. The root's own start
         // frame settles that here; later frames learn it under the lock.
-        let worktree_hint = if root_start && !argv.is_empty() && event_is_read_only {
+        let worktree_hint = if root_start && has_own_argv && event_is_read_only {
             None
         } else {
             trace_payload_worktree_hint(payload)
@@ -227,22 +233,25 @@ impl ActorDaemonCoordinator {
             ingress.root_worktrees.insert(root.clone(), worktree);
         }
 
-        if root_start && !argv.is_empty() {
-            ingress.root_argv.insert(root.clone(), argv.clone());
+        let effective_argv = if has_own_argv {
+            argv.as_slice()
+        } else {
+            ingress
+                .root_argv
+                .get(&root)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+        };
+        let effective_primary =
+            early_primary.or_else(|| trace_argv_primary_command(effective_argv));
+        let command_mutates_refs =
+            trace_invocation_may_mutate_refs(effective_primary.as_deref(), effective_argv);
+        if root_start && has_own_argv {
             if event_is_read_only {
                 ingress.root_definitely_read_only.insert(root.clone());
             }
+            ingress.root_argv.insert(root.clone(), argv);
         }
-
-        let effective_argv = if argv.is_empty() {
-            ingress.root_argv.get(&root).cloned().unwrap_or_default()
-        } else {
-            argv
-        };
-        let effective_primary =
-            early_primary.or_else(|| trace_argv_primary_command(&effective_argv));
-        let command_mutates_refs =
-            trace_invocation_may_mutate_refs(effective_primary.as_deref(), &effective_argv);
         if let Some(primary) = effective_primary.as_deref() {
             ingress
                 .root_mutating
@@ -287,12 +296,21 @@ impl ActorDaemonCoordinator {
         }
 
         let read_only_root = event_is_read_only || known_read_only_root;
-        let inherited = (
-            ingress.root_argv.get(&root).cloned(),
-            ingress.root_started_at_ns.get(&root).copied(),
-            ingress.root_reflog_start_offsets.get(&root).cloned(),
-            ingress.root_worktrees.get(&root).cloned(),
-        );
+        // The caller drops read-only frames, so only a frame that will be
+        // queued inherits its root's context, and one that carries its own
+        // argv never takes the root's.
+        let inherited = (!read_only_root).then(|| {
+            (
+                ingress
+                    .root_argv
+                    .get(&root)
+                    .filter(|_| !has_own_argv)
+                    .cloned(),
+                ingress.root_started_at_ns.get(&root).copied(),
+                ingress.root_reflog_start_offsets.get(&root).cloned(),
+                ingress.root_worktrees.get(&root).cloned(),
+            )
+        });
         if terminal {
             ingress.root_worktrees.remove(&root);
             ingress.root_families.remove(&root);
@@ -307,7 +325,9 @@ impl ActorDaemonCoordinator {
 
         drop(ingress);
 
-        if let Some(object) = payload.as_object_mut() {
+        if let Some(inherited) = inherited
+            && let Some(object) = payload.as_object_mut()
+        {
             if object.get("argv").is_none()
                 && let Some(root_argv) = inherited.0
             {

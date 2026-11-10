@@ -9,7 +9,8 @@ use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::checkpoint_request::StreamFormat as CheckpointStreamFormat;
 use crate::model::repository::streams_db::{StreamRecord, StreamsDatabase};
 use crate::model::stream_types::StreamError;
-use crate::model::stream_watermark::{WatermarkStrategy, WatermarkType};
+#[cfg(test)]
+use crate::model::stream_watermark::WatermarkType;
 use crate::operations::daemon::telemetry_worker::DaemonTelemetryWorkerHandle;
 use crate::operations::streams::agent::{SHARED_STREAM_SESSION_ID, StreamDescriptor};
 use crate::operations::streams::sweep::StreamFormat;
@@ -703,11 +704,14 @@ impl StreamWorker {
                 }
             }
 
-            // Ensure the subagent session exists in the DB
-            if let Err(e) = self.ensure_subagent_session(
+            // Ensure the subagent session exists in the DB. A subagent
+            // transcript is an ordinary Claude transcript stream.
+            if let Err(e) = self.ensure_stream_session(
                 &session_id,
+                "claude",
+                &StreamDescriptor::identity_transcript(StreamFormat::ClaudeJsonl),
                 &canonical,
-                &external_session_id,
+                Some(&external_session_id),
                 external_parent_session_id.as_deref(),
                 notification.repo_work_dir.as_deref(),
             ) {
@@ -818,48 +822,6 @@ impl StreamWorker {
 
     fn should_enqueue_shared_stream_immediately(tool: &str, stream: &StreamDescriptor) -> bool {
         matches!(tool, "copilot" | "github-copilot") && stream.stream_kind == "otel_traces"
-    }
-
-    fn ensure_subagent_session(
-        &self,
-        session_id: &str,
-        path: &Path,
-        external_session_id: &str,
-        external_parent_session_id: Option<&str>,
-        repo_work_dir: Option<&Path>,
-    ) -> Result<(), StreamError> {
-        let path_str = path.display().to_string();
-        if self
-            .streams_db
-            .get_stream(session_id, "transcript", &path_str)?
-            .is_some()
-        {
-            return Ok(());
-        }
-
-        use crate::model::stream_watermark::ByteOffsetWatermark;
-
-        let initial_watermark = ByteOffsetWatermark::new(0);
-        let record = StreamRecord {
-            session_id: session_id.to_string(),
-            stream_kind: "transcript".to_string(),
-            tool: "claude".to_string(),
-            stream_path: path_str,
-            stream_format: StreamFormat::ClaudeJsonl,
-            watermark_type: WatermarkType::ByteOffset,
-            watermark_value: initial_watermark.serialize(),
-            external_session_id: external_session_id.to_string(),
-            external_parent_session_id: external_parent_session_id.map(|s| s.to_string()),
-            first_seen_at: chrono::Utc::now().timestamp(),
-            last_processed_at: 0,
-            last_known_size: 0,
-            last_modified: None,
-            processing_errors: 0,
-            last_error: None,
-            repo_work_dir: repo_work_dir.map(|p| p.display().to_string()),
-        };
-
-        self.streams_db.insert_stream(&record)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1496,6 +1458,10 @@ mod subagent_sweep_tests {
         assert_eq!(rec1.external_session_id, "agent-sub1");
         assert_eq!(rec1.external_parent_session_id.as_deref(), Some("sess-abc"));
         assert_eq!(rec1.tool, "claude");
+        assert_eq!(rec1.stream_format, StreamFormat::ClaudeJsonl);
+        assert_eq!(rec1.watermark_type, WatermarkType::ByteOffset);
+        assert_eq!(rec1.watermark_value, "0");
+        assert_eq!(rec1.repo_work_dir, Some(tmp.path().display().to_string()));
 
         let rec2 = db
             .get_stream(

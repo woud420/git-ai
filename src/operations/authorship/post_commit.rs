@@ -24,7 +24,7 @@ use crate::operations::git::notes_api::write_note;
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::repository::Repository;
 use snapshots::{commit_tree_snapshot_for_files, recovery_committed_hunks};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::IsTerminal;
 
 /// Skip expensive post-commit stats when this threshold is exceeded.
@@ -339,63 +339,27 @@ where
 
     authorship_log.metadata.base_commit_sha = commit_sha.clone();
 
-    // No-hooks background agents (Devin, Codex Cloud, etc.) may not fire checkpoints
-    // for all edits. Attribute any committed lines that have no existing attestation
-    // ("holes") to the detected agent, preserving explicit attributions.
-    if !matches!(
-        crate::operations::authorship::background_agent::detect(),
-        crate::operations::authorship::background_agent::BackgroundAgent::None
-            | crate::operations::authorship::background_agent::BackgroundAgent::WithHooks { .. }
-    ) {
-        // Prefer the batched parent→commit diff when supplied (no extra spawn);
-        // otherwise fall back to a per-commit `git diff`.
-        let committed_hunks: Option<HashMap<String, Vec<crate::model::authorship_log::LineRange>>> =
-            if let Some(diff) = context.precomputed_parent_diff {
-                Some(
-                    crate::operations::authorship::virtual_attribution::committed_hunks_from_diff_result(
-                        diff, None,
-                    ),
-                )
-            } else {
-                // Same bounding as recovery: on the daemon fast-forward `update-ref`
-                // path `parent_sha` is the far-behind old branch tip, so diff against
-                // the finalized commit's immediate parent to avoid buffering the whole
-                // pulled range. No-hooks agents (Devin/Codex Cloud)
-                // can be active during a pull, so this path is exposed too.
-                let diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
-                repo.diff_added_lines(&diff_base, &commit_sha, None)
-                    .ok()
-                    .map(|added_lines| {
-                        added_lines
-                            .into_iter()
-                            .filter(|(_, lines)| !lines.is_empty())
-                            .map(|(path, lines)| {
-                                (
-                                    path,
-                                    crate::model::authorship_log::LineRange::compress_lines(&lines),
-                                )
-                            })
-                            .collect()
-                    })
-            };
-        if let Some(committed_hunks) = committed_hunks {
-            crate::operations::authorship::background_agent::fill_unattributed_lines(
-                &mut authorship_log,
-                &committed_hunks,
-                &human_author,
-            );
-        }
-    }
-
-    authorship_log = transform(authorship_log)?;
-    authorship_log.metadata.base_commit_sha = commit_sha.clone();
-
+    // Lines added by the commit being finalized, from the batched parent→commit
+    // diff when supplied (no extra spawn) and one bounded `git diff` otherwise.
     let mut recovery_hunks = recovery_committed_hunks(
         repo,
         &parent_sha,
         &commit_sha,
         context.precomputed_parent_diff,
     )?;
+
+    // No-hooks background agents (Devin, Codex Cloud, etc.) may not fire checkpoints
+    // for all edits. Attribute any committed lines that have no existing attestation
+    // ("holes") to the detected agent, preserving explicit attributions.
+    crate::operations::authorship::background_agent::fill_unattributed_lines(
+        &mut authorship_log,
+        &recovery_hunks,
+        &human_author,
+    );
+
+    authorship_log = transform(authorship_log)?;
+    authorship_log.metadata.base_commit_sha = commit_sha.clone();
+
     stale_checkpoint::CheckpointEvidence {
         working_log: &working_log,
         checkpoints: &parent_working_log,
@@ -673,37 +637,13 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();
 
     // Fill unattributed lines for background agents
-    if !matches!(
-        crate::operations::authorship::background_agent::detect(),
-        crate::operations::authorship::background_agent::BackgroundAgent::None
-            | crate::operations::authorship::background_agent::BackgroundAgent::WithHooks { .. }
-    ) {
-        let diff_base = if parent_sha == "initial" {
-            "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-        } else {
-            &parent_sha
-        };
-        if let Ok(added_lines) = repo.diff_added_lines(diff_base, amended_commit, None) {
-            let committed_hunks: HashMap<String, Vec<crate::model::authorship_log::LineRange>> =
-                added_lines
-                    .into_iter()
-                    .filter(|(_, lines)| !lines.is_empty())
-                    .map(|(path, lines)| {
-                        (
-                            path,
-                            crate::model::authorship_log::LineRange::compress_lines(&lines),
-                        )
-                    })
-                    .collect();
-            crate::operations::authorship::background_agent::fill_unattributed_lines(
-                &mut authorship_log,
-                &committed_hunks,
-                &human_author,
-            );
-        }
-    }
-
     let recovery_hunks = recovery_committed_hunks(repo, &parent_sha, amended_commit, None)?;
+    crate::operations::authorship::background_agent::fill_unattributed_lines(
+        &mut authorship_log,
+        &recovery_hunks,
+        &human_author,
+    );
+
     crate::operations::authorship::attribution_recovery::recover_attribution(
         repo,
         &parent_sha,

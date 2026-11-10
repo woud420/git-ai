@@ -196,7 +196,7 @@ fn post_squash_resolution_working_log(
     let commit_for_transform = squash_commit.to_string();
     let author = repo.effective_author_identity().formatted_or_unknown();
     let post_commit_result =
-        crate::operations::authorship::post_commit::post_commit_from_working_log_with_transform_and_options_detailed(
+        crate::operations::authorship::post_commit::post_commit_from_working_log_with_transform_context_detailed(
             repo,
             Some(onto.to_string()),
             squash_commit.to_string(),
@@ -207,6 +207,7 @@ fn post_squash_resolution_working_log(
                 recover_attribution: false,
                 defer_note_write: false,
             },
+            crate::operations::authorship::post_commit::PostCommitContext::default(),
             move |resolution_log| {
                 Ok(
                     crate::operations::authorship::conflict_resolution::merge_conflict_resolution_authorship(

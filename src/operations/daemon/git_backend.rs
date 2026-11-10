@@ -43,6 +43,15 @@ pub trait GitBackend: Send + Sync + 'static {
     fn init_target(&self, argv: &[String], cwd_hint: Option<&Path>) -> Option<PathBuf>;
 }
 
+/// The family key of a repository: its canonical common git dir.
+pub(crate) fn family_key_for_common_dir(common_dir: &Path) -> FamilyKey {
+    FamilyKey::new(
+        crate::operations::git::canonicalize::canonicalize_or_self(common_dir)
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
 const ALIAS_CACHE_TTL_SECS: u64 = 60;
 
 struct AliasCacheEntry {
@@ -88,11 +97,7 @@ impl SystemGitBackend {
         alias_name: &str,
     ) -> Result<Option<String>, GitAiError> {
         let family_key = match common_dir_for_worktree(worktree) {
-            Some(common_dir) => {
-                crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
-                    .to_string_lossy()
-                    .to_string()
-            }
+            Some(common_dir) => family_key_for_common_dir(&common_dir).0,
             None => return self.resolve_alias_uncached(worktree, alias_name),
         };
 
@@ -271,8 +276,7 @@ impl GitBackend for SystemGitBackend {
                 worktree.display()
             ))
         })?;
-        let common = crate::operations::git::canonicalize::canonicalize_or_self(&common);
-        Ok(FamilyKey::new(common.to_string_lossy().to_string()))
+        Ok(family_key_for_common_dir(&common))
     }
 
     fn resolve_primary_command(

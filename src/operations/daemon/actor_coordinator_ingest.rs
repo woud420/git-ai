@@ -224,11 +224,8 @@ impl ActorDaemonCoordinator {
 
         if !known_read_only_root && let Some(worktree) = worktree_hint.clone() {
             if let Some(common_dir) = common_dir_for_worktree(&worktree) {
-                let family =
-                    crate::operations::git::canonicalize::canonicalize_or_self(&common_dir);
-                ingress
-                    .root_families
-                    .insert(root.clone(), family.to_string_lossy().to_string());
+                let family = git_backend::family_key_for_common_dir(&common_dir).0;
+                ingress.root_families.insert(root.clone(), family);
             }
             ingress.root_worktrees.insert(root.clone(), worktree);
         }

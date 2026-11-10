@@ -3,11 +3,10 @@ use std::io::{self, IsTerminal, Write};
 
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 
-use crate::error::GitAiError;
 use crate::model::authorship_log::PromptRecord;
-use crate::operations::git::repository::Repository;
 
 use super::GitAiBlameOptions;
+use super::hunk_parser::BlameRenderPreparation;
 
 pub(super) fn format_blame_date(
     author_time: i64,
@@ -45,17 +44,14 @@ pub(super) fn format_blame_date(
 }
 
 pub(super) fn output_default_format(
-    repo: &Repository,
+    prepared: &BlameRenderPreparation,
     line_authors: &HashMap<u32, String>,
     prompt_records: &HashMap<String, PromptRecord>,
     file_path: &str,
     lines: &[&str],
-    line_ranges: &[(u32, u32)],
     options: &GitAiBlameOptions,
-) -> Result<(), GitAiError> {
+) {
     let mut output = String::new();
-
-    let prepared = repo.prepare_blame_render(file_path, line_ranges, options)?;
 
     // Calculate the maximum line number width for proper padding
     let max_line_num = lines.len() as u32;
@@ -92,7 +88,7 @@ pub(super) fn output_default_format(
             .unwrap_or(0)
     };
 
-    for line_num in prepared.requested_lines {
+    for &line_num in &prepared.requested_lines {
         let line_index = (line_num - 1) as usize;
         let line_content = if line_index < lines.len() {
             lines[line_index]
@@ -147,18 +143,6 @@ pub(super) fn output_default_format(
                 format!("{:<width$}", author_display, width = max_author_width)
             } else {
                 author_display
-            };
-
-            let _filename_display = if options.show_name {
-                format!("{} ", file_path)
-            } else {
-                "".to_string()
-            };
-
-            let _number_display = if options.show_number {
-                format!("{} ", line_num)
-            } else {
-                "".to_string()
             };
 
             // Format exactly like git blame: sha (author date line) code
@@ -259,5 +243,4 @@ pub(super) fn output_default_format(
         // Not a terminal, output directly
         print!("{}", output);
     }
-    Ok(())
 }

@@ -8,6 +8,7 @@ use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::git::path_format::normalize_to_posix;
 use crate::operations::git::repository::Repository;
 
+use super::hunk_parser::prepare_blame_hunks;
 use super::json_output::output_json_format;
 use super::output::output_default_format;
 use super::overlay::overlay_ai_authorship;
@@ -235,18 +236,21 @@ impl Repository {
     ) -> Result<(HashMap<u32, String>, HashMap<String, PromptRecord>), GitAiError> {
         let request = self.prepare_blame_request(file_path, options)?;
         let lines: Vec<&str> = request.file_content.lines().collect();
+        // The renderers print git's own hunks and the overlay works per line,
+        // so one unsplit blame serves both.
+        let mut analysis_options = request.options.clone();
+        analysis_options.split_hunks_by_ai_author = false;
         let (analysis, authorship_logs, prompt_commits, commits_with_notes) = self
             .run_blame_analysis_pipeline(
                 &request.relative_file_path,
                 &request.line_ranges,
-                &request.options,
+                &analysis_options,
             )?;
         let BlameAnalysisResult {
             line_authors,
             prompt_records,
-            session_records: _,
-            blame_hunks: _,
-            humans: _,
+            blame_hunks,
+            ..
         } = analysis;
 
         if request.options.no_output {
@@ -263,33 +267,22 @@ impl Repository {
                 &prompt_commits,
                 &request.relative_file_path,
             )?;
-        } else if request.options.porcelain || request.options.line_porcelain {
-            output_porcelain_format(
-                self,
-                &request.relative_file_path,
-                &lines,
-                &request.line_ranges,
-                &request.options,
-                &commits_with_notes,
-            )?;
-        } else if request.options.incremental {
-            output_incremental_format(
-                self,
-                &request.relative_file_path,
-                &request.line_ranges,
-                &request.options,
-                &commits_with_notes,
-            )?;
         } else {
-            output_default_format(
-                self,
-                &line_authors,
-                &prompt_records,
-                &request.relative_file_path,
-                &lines,
-                &request.line_ranges,
-                &request.options,
-            )?;
+            let prepared = prepare_blame_hunks(blame_hunks);
+            if request.options.porcelain || request.options.line_porcelain {
+                output_porcelain_format(&prepared, &lines, &request.options, &commits_with_notes);
+            } else if request.options.incremental {
+                output_incremental_format(&prepared, &commits_with_notes);
+            } else {
+                output_default_format(
+                    &prepared,
+                    &line_authors,
+                    &prompt_records,
+                    &request.relative_file_path,
+                    &lines,
+                    &request.options,
+                );
+            }
         }
 
         Ok((line_authors, prompt_records))

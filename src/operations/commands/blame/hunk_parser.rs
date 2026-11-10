@@ -13,7 +13,7 @@ pub(super) struct BlameRenderPreparation {
     pub(super) requested_lines: Vec<u32>,
 }
 
-fn prepare_blame_hunks(hunks: Vec<BlameHunk>) -> BlameRenderPreparation {
+pub(super) fn prepare_blame_hunks(hunks: Vec<BlameHunk>) -> BlameRenderPreparation {
     let mut line_to_hunk = HashMap::new();
     for hunk in &hunks {
         for line_num in hunk.range.0..=hunk.range.1 {

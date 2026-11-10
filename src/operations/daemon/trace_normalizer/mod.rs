@@ -130,6 +130,9 @@ impl<B: GitBackend> TraceNormalizer<B> {
 
         for root_sid in roots {
             if let Some(pending) = self.remove_pending_root(root_sid) {
+                // A non-atexit `exit` seen after `start` is deferred while the
+                // command stays pending, so a pending root can own both.
+                self.state.deferred_exits.remove(root_sid);
                 removed.push(OrphanTraceRoot {
                     root_sid: root_sid.clone(),
                     raw_argv: pending.raw_argv,

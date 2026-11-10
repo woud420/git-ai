@@ -32,19 +32,24 @@ pub(super) async fn async_run_uninstall(
         match installer.check_hooks(params) {
             Ok(check_result) => {
                 let owned_socket = crate::operations::mdm::sandbox_socket::has_ownership(id);
-                if (!check_result.tool_installed || !check_result.hooks_installed) && !owned_socket
-                {
+                if !check_result.tool_installed && !owned_socket {
                     statuses.insert(id.to_string(), InstallStatus::NotFound);
                     continue;
                 }
-
-                any_checked = true;
+                // `hooks_installed` only recognises the current hook layout, so
+                // it cannot rule out hooks left behind by an older one.
+                let hooks_detected = check_result.hooks_installed || owned_socket;
 
                 // Uninstall hooks
                 let spinner = Spinner::new(&format!("{}: removing hooks", name));
                 spinner.start();
 
                 match installer.uninstall_hooks(params, dry_run) {
+                    Ok(None) if !hooks_detected => {
+                        spinner.finish_and_clear();
+                        statuses.insert(id.to_string(), InstallStatus::NotFound);
+                        continue;
+                    }
                     Ok(Some(diff)) => {
                         if dry_run {
                             spinner.pending(&format!("{}: Pending removal", name));
@@ -68,6 +73,7 @@ pub(super) async fn async_run_uninstall(
                         statuses.insert(id.to_string(), InstallStatus::Failed);
                     }
                 }
+                any_checked = true;
 
                 // Uninstall extras
                 match installer.uninstall_extras(params, dry_run) {
@@ -114,4 +120,55 @@ pub(super) async fn async_run_uninstall(
     }
 
     Ok(statuses)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::operations::mdm::test_env::with_temp_home;
+    use serial_test::serial;
+    use std::fs;
+
+    /// `check_hooks` reports `hooks_installed` for the current hook layout
+    /// only; hooks written by an older layout must still be removed.
+    #[test]
+    #[cfg(not(windows))]
+    #[serial]
+    fn uninstall_removes_hooks_from_layouts_check_hooks_does_not_recognise() {
+        const OLD_LAYOUTS: [(&str, &str, &str); 2] = [
+            // Current Windsurf layout hooks five events; this has one.
+            (
+                "windsurf",
+                ".codeium/windsurf/hooks.json",
+                r#"{"hooks":{"pre_write_code":[{"command":"git-ai checkpoint windsurf --hook-input stdin"}]}}"#,
+            ),
+            // Current Firebender layout has no `matcher`.
+            (
+                "firebender",
+                ".firebender/hooks.json",
+                r#"{"hooks":{"preToolUse":[{"matcher":"Write","command":"git-ai checkpoint firebender --hook-input stdin"}]}}"#,
+            ),
+        ];
+
+        with_temp_home(|home| {
+            for (_, path, content) in OLD_LAYOUTS {
+                let path = home.join(path);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, content).unwrap();
+            }
+
+            let statuses = super::super::run_uninstall(&["--dry-run".to_string()]).unwrap();
+
+            for (id, ..) in OLD_LAYOUTS {
+                assert_eq!(
+                    statuses.get(id).map(String::as_str),
+                    Some("installed"),
+                    "{id}: old-layout hooks were not offered for removal"
+                );
+            }
+            // Installed tools with no git-ai hooks at all stay silent.
+            fs::create_dir_all(home.join(".factory")).unwrap();
+            let statuses = super::super::run_uninstall(&["--dry-run".to_string()]).unwrap();
+            assert_eq!(statuses.get("droid").map(String::as_str), Some("not_found"));
+        });
+    }
 }

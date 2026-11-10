@@ -1,5 +1,6 @@
 use crate::error::GitAiError;
 use crate::model::domain::FamilyKey;
+use crate::operations::daemon::trace_helpers::{trace_args_after_command, trace_invocation_args};
 use crate::operations::git::alias_parser::parse_alias_tokens;
 use crate::operations::git::cli_parser::parse_git_cli_args;
 use crate::operations::git::command_policy::is_builtin_command;
@@ -183,7 +184,7 @@ impl SystemGitBackend {
         worktree: &Path,
         argv: &[String],
     ) -> Result<Option<(String, Vec<String>)>, GitAiError> {
-        let mut current = parse_git_cli_args(git_invocation_tokens(argv));
+        let mut current = parse_git_cli_args(trace_invocation_args(argv));
         let mut seen = HashSet::new();
         loop {
             let Some(command) = current.command.clone() else {
@@ -298,7 +299,7 @@ impl GitBackend for SystemGitBackend {
     }
 
     fn clone_target(&self, argv: &[String], cwd_hint: Option<&Path>) -> Option<PathBuf> {
-        let args = command_args(argv, "clone");
+        let args = trace_args_after_command(trace_invocation_args(argv), "clone");
         let positional = clone_init_positionals(&args);
         if positional.is_empty() {
             return None;
@@ -312,7 +313,7 @@ impl GitBackend for SystemGitBackend {
     }
 
     fn init_target(&self, argv: &[String], cwd_hint: Option<&Path>) -> Option<PathBuf> {
-        let args = command_args(argv, "init");
+        let args = trace_args_after_command(trace_invocation_args(argv), "init");
         let positional = clone_init_positionals(&args);
         let target = positional
             .first()
@@ -320,45 +321,6 @@ impl GitBackend for SystemGitBackend {
             .unwrap_or_else(|| PathBuf::from("."));
         resolve_target(target, cwd_hint)
     }
-}
-
-fn is_git_binary(token: &str) -> bool {
-    if token == "git" || token == "git.exe" {
-        return true;
-    }
-    Path::new(token)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name == "git" || name == "git.exe")
-        .unwrap_or(false)
-}
-
-fn git_invocation_tokens(argv: &[String]) -> &[String] {
-    if argv
-        .first()
-        .map(|token| is_git_binary(token))
-        .unwrap_or(false)
-    {
-        &argv[1..]
-    } else {
-        argv
-    }
-}
-
-fn command_args(argv: &[String], command: &str) -> Vec<String> {
-    let slice = git_invocation_tokens(argv);
-    let mut seen = false;
-    let mut out = Vec::new();
-    for token in slice {
-        if !seen {
-            if token == command {
-                seen = true;
-            }
-            continue;
-        }
-        out.push(token.clone());
-    }
-    out
 }
 
 fn clone_init_positionals(args: &[String]) -> Vec<String> {

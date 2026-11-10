@@ -5,11 +5,13 @@ use std::sync::{Arc, Mutex};
 use crate::error::GitAiError;
 use crate::model::domain::FamilyKey;
 use crate::operations::daemon::git_backend::GitBackend;
-use crate::operations::daemon::trace_helpers::trace_argv_primary_command;
+use crate::operations::daemon::trace_helpers::{
+    trace_args_after_command, trace_argv_primary_command,
+};
 use crate::operations::git::cli_parser::parse_git_cli_args;
 
 use super::TraceNormalizer;
-use super::frame_helpers::{args_after_command, payload_timestamp_ns};
+use super::frame_helpers::payload_timestamp_ns;
 
 pub(super) fn normalize_path_key_from_str(path: &str) -> String {
     PathBuf::from(path).to_string_lossy().replace('\\', "/")
@@ -83,7 +85,7 @@ impl GitBackend for MockBackend {
             .get(&worktree_key)
             .and_then(|commands| commands.get(&command))
             .cloned();
-        let trailing = args_after_command(argv, &command);
+        let trailing = trace_args_after_command(argv, &command);
         match expansion {
             Some(target) => {
                 let mut tokens = target.split_whitespace().map(str::to_string);

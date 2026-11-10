@@ -1,5 +1,5 @@
 use crate::error::GitAiError;
-use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log::{LineRange, metadata_key};
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -490,7 +490,7 @@ pub fn accepted_lines_from_attestations(
 
             // Session entries (s_ prefix): look up in sessions map
             if entry.hash.starts_with("s_") {
-                let session_key = entry.hash.split("::").next().unwrap_or(&entry.hash);
+                let session_key = metadata_key(&entry.hash);
                 if let Some(session_record) = log.metadata.sessions.get(session_key) {
                     let tool_model = format!(
                         "{}::{}",

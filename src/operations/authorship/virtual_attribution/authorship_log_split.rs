@@ -6,10 +6,10 @@ use super::log_split_stages::{
 use super::types::{AuthorshipLogDiffContext, VirtualAttributions};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
-use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log::{LineRange, is_ai_author_id};
 use crate::model::hunk_shift::apply_hunk_shifts_to_line_attributions;
 use crate::model::repository::error::PersistenceError;
-use crate::model::working_log::{CheckpointKind, InitialAttributions};
+use crate::model::working_log::InitialAttributions;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 
@@ -201,10 +201,7 @@ impl VirtualAttributions {
                                 .entry(line_attr.author_id.clone())
                                 .or_default()
                                 .push(commit_line_num);
-                        } else if is_renamed_file
-                            && line_attr.author_id != CheckpointKind::Human.to_str()
-                            && !line_attr.author_id.starts_with("h_")
-                        {
+                        } else if is_renamed_file && is_ai_author_id(&line_attr.author_id) {
                             // For renamed files, git blame attributes ALL lines to
                             // this commit.  Include AI lines even outside committed
                             // hunks so they have an attestation entry.

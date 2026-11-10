@@ -1,6 +1,5 @@
 //! In-memory buffer for telemetry events awaiting the next flush cycle.
 
-use crate::metrics::MetricEvent;
 use crate::model::api_types::DaemonLogEvent;
 use crate::model::daemon_control::CasSyncPayload;
 use crate::model::telemetry::TelemetryEnvelope;
@@ -34,7 +33,6 @@ pub(super) struct TelemetryBuffer {
     pub(super) errors: Vec<ErrorEvent>,
     pub(super) performances: Vec<PerformanceEvent>,
     pub(super) messages: Vec<MessageEvent>,
-    pub(super) metrics: Vec<MetricEvent>,
     pub(super) cas_records: Vec<CasSyncPayload>,
     pub(super) daemon_logs: Vec<DaemonLogEvent>,
 }
@@ -45,7 +43,6 @@ impl TelemetryBuffer {
             errors: Vec::new(),
             performances: Vec::new(),
             messages: Vec::new(),
-            metrics: Vec::new(),
             cas_records: Vec::new(),
             daemon_logs: Vec::new(),
         }
@@ -55,7 +52,6 @@ impl TelemetryBuffer {
         self.errors.is_empty()
             && self.performances.is_empty()
             && self.messages.is_empty()
-            && self.metrics.is_empty()
             && self.cas_records.is_empty()
             && self.daemon_logs.is_empty()
     }
@@ -102,15 +98,14 @@ impl TelemetryBuffer {
                         context,
                     });
                 }
-                TelemetryEnvelope::Metrics { events } => {
-                    self.metrics.extend(events);
-                }
+                // The handle persists metrics to the metrics DB instead of
+                // buffering them; see `split_metric_envelopes`.
+                TelemetryEnvelope::Metrics { .. } => {}
             }
         }
         Self::cap_oldest(&mut self.errors);
         Self::cap_oldest(&mut self.performances);
         Self::cap_oldest(&mut self.messages);
-        Self::cap_oldest(&mut self.metrics);
     }
 
     pub(super) fn ingest_cas(&mut self, records: Vec<CasSyncPayload>) {
@@ -141,7 +136,6 @@ impl TelemetryBuffer {
             errors: std::mem::take(&mut self.errors),
             performances: std::mem::take(&mut self.performances),
             messages: std::mem::take(&mut self.messages),
-            metrics: std::mem::take(&mut self.metrics),
             cas_records: std::mem::take(&mut self.cas_records),
             daemon_logs: std::mem::take(&mut self.daemon_logs),
         }

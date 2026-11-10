@@ -194,7 +194,7 @@ pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
             | "max_transcript_batch_bytes"
             | "max_transcript_file_bytes"
             | "max_metrics_flush_chunk_bytes" => {
-                let old_value = match key {
+                let old_value = match resolved.spec.name {
                     "max_transcript_line_bytes" => file_config.max_transcript_line_bytes.take(),
                     "max_transcript_batch_bytes" => file_config.max_transcript_batch_bytes.take(),
                     "max_transcript_file_bytes" => file_config.max_transcript_file_bytes.take(),
@@ -202,7 +202,7 @@ pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
                 };
                 crate::config::save_file_config(&file_config)?;
                 if let Some(value) = old_value {
-                    println!("- [{}]: {}", key, value);
+                    println!("- [{}]: {}", resolved.spec.name, value);
                 }
             }
             "daemon_memory_limit_mb" => {

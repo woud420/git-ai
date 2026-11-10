@@ -252,10 +252,10 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                     .ok_or_else(|| {
                         format!(
                             "Invalid {} value '{}'. Expected a positive integer in bytes",
-                            key, value
+                            resolved.spec.name, value
                         )
                     })?;
-                match key {
+                match resolved.spec.name {
                     "max_transcript_line_bytes" => {
                         file_config.max_transcript_line_bytes = Some(bytes)
                     }
@@ -268,7 +268,7 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                     _ => file_config.max_metrics_flush_chunk_bytes = Some(bytes),
                 }
                 crate::config::save_file_config(&file_config)?;
-                println!("[{}]: {}", key, bytes);
+                println!("[{}]: {}", resolved.spec.name, bytes);
             }
             "daemon_memory_limit_mb" => {
                 let limit_mb = value.trim().parse::<u64>().map_err(|_| {

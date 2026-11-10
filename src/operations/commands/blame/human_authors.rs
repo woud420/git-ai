@@ -43,7 +43,9 @@ impl Repository {
 
             // If we have an authorship log, look up human_author for each line
             if let Some(authorship_log) = authorship_log {
-                // Collect human_author for each line in this hunk
+                // Collect human_author for each line in this hunk. The note
+                // knows the file by its name at that commit (handles renames).
+                let lookup_path = hunk.orig_filename.as_deref().unwrap_or(file_path);
                 let num_lines = hunk.range.1 - hunk.range.0 + 1;
                 let mut line_authors: Vec<Option<String>> = Vec::with_capacity(num_lines as usize);
 
@@ -52,7 +54,7 @@ impl Repository {
                     let human_author = get_line_attribution(
                         authorship_log,
                         self,
-                        file_path,
+                        lookup_path,
                         orig_line_num,
                         &mut foreign_prompts_cache,
                     )

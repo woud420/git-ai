@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::metrics::EventValues;
 use crate::metrics::events::rewrite_committed_pos;

@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::model::repository::notes_db::NotesDatabase;
 use crate::operations::git::test_utils::TmpRepo;

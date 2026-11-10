@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::model::stream_watermark::{ByteOffsetWatermark, RecordIndexWatermark};
 use crate::operations::streams::agents::test_support::{

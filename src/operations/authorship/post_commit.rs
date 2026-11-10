@@ -532,25 +532,7 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         for (id, record) in original_log.metadata.humans {
             authorship_log.metadata.humans.entry(id).or_insert(record);
         }
-        let referenced_session_ids: HashSet<String> = authorship_log
-            .attestations
-            .iter()
-            .flat_map(|fa| fa.entries.iter())
-            .filter_map(|entry| {
-                if entry.hash.starts_with("s_") {
-                    Some(
-                        entry
-                            .hash
-                            .split("::")
-                            .next()
-                            .unwrap_or(&entry.hash)
-                            .to_string(),
-                    )
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let referenced_session_ids = authorship_log.referenced_session_ids();
         for (id, record) in original_log.metadata.sessions {
             if referenced_session_ids.contains(&id) {
                 authorship_log.metadata.sessions.entry(id).or_insert(record);

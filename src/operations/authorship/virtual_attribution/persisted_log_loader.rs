@@ -1,6 +1,7 @@
 use super::types::VirtualAttributions;
 use super::working_log_state::{WorkingLogContentSource, load_working_log_state};
 use crate::error::GitAiError;
+use crate::model::authorship_log::metadata_key;
 use crate::operations::git::repository::Repository;
 use std::collections::HashMap;
 
@@ -85,7 +86,7 @@ impl VirtualAttributions {
         let referenced_session_ids: std::collections::HashSet<String> = referenced_in_merged
             .iter()
             .filter(|id| id.starts_with("s_"))
-            .map(|id| id.split("::").next().unwrap_or(id).to_string())
+            .map(|id| metadata_key(id).to_string())
             .collect();
         merged_va
             .sessions

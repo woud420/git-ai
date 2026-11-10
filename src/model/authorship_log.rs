@@ -1,7 +1,35 @@
-use crate::model::working_log::AgentId;
+use crate::model::authorship_log_serialization::AuthorshipLog;
+use crate::model::working_log::{AgentId, CheckpointKind};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+/// The metadata key an attestation hash or author id resolves through. A
+/// session attests as `s_<session>::t_<trace>` (one trace per checkpoint) while
+/// `metadata.sessions` is keyed by `s_<session>`; prompt hashes and `h_` ids
+/// carry no suffix and are their own key.
+pub fn metadata_key(hash: &str) -> &str {
+    hash.split("::").next().unwrap_or(hash)
+}
+
+/// Whether an author id names an AI: neither the legacy `human` sentinel nor a
+/// known-human `h_` id.
+pub fn is_ai_author_id(author_id: &str) -> bool {
+    author_id != CheckpointKind::Human.to_str() && !author_id.starts_with("h_")
+}
+
+impl AuthorshipLog {
+    /// The session ids (`s_<session>`, without the trace suffix) that the
+    /// attestations reference.
+    pub fn referenced_session_ids(&self) -> HashSet<String> {
+        self.attestations
+            .iter()
+            .flat_map(|file| &file.entries)
+            .filter(|entry| entry.hash.starts_with("s_"))
+            .map(|entry| metadata_key(&entry.hash).to_string())
+            .collect()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Author {

@@ -7,6 +7,7 @@
 use crate::model::attribution::{
     Attribution, LineAttribution, ceil_char_boundary, floor_char_boundary,
 };
+use crate::model::authorship_log::is_ai_author_id;
 use crate::model::working_log::CheckpointKind;
 
 /// Helper struct to track line boundaries in content
@@ -220,9 +221,7 @@ fn find_dominant_author_for_line_candidates(
         // h_<hash> IDs are known-human attestations; treat them like "human" for
         // whitespace-inclusion purposes so their newline ranges don't bleed into
         // adjacent lines during an AI checkpoint.
-        let is_ai_author = attribution.author_id != CheckpointKind::Human.to_str()
-            && !attribution.author_id.starts_with("h_");
-        let include_ai_whitespace = is_ai_checkpoint && is_ai_author;
+        let include_ai_whitespace = is_ai_checkpoint && is_ai_author_id(&attribution.author_id);
         if has_non_whitespace || is_line_empty || is_deletion_marker || include_ai_whitespace {
             candidate_attrs.push(attribution);
         } else {
@@ -247,10 +246,10 @@ fn find_dominant_author_for_line_candidates(
     let mut last_human_edit: Option<&Attribution> = None;
     for attr in &candidate_attrs {
         // Both legacy "human" and KnownHuman h_<hash> IDs are human edits.
-        if attr.author_id == CheckpointKind::Human.to_str() || attr.author_id.starts_with("h_") {
-            last_human_edit = Some(attr);
-        } else {
+        if is_ai_author_id(&attr.author_id) {
             last_ai_edit = Some(attr);
+        } else {
+            last_human_edit = Some(attr);
         }
     }
     let overrode = match (last_ai_edit, last_human_edit) {

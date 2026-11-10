@@ -6,7 +6,7 @@ mod timestamp_collection;
 
 use crate::error::GitAiError;
 use crate::metrics::{CheckpointValues, EventAttributes, MetricEvent, PosEncoded};
-use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log::{LineRange, is_ai_author_id, metadata_key};
 use crate::model::authorship_log_serialization::{AuthorshipLog, generate_trace_id};
 use crate::model::stat_snapshot::StatEntry;
 use crate::model::working_log::{AgentId, CheckpointKind};
@@ -141,12 +141,7 @@ fn recover_adjacent_edges(
                 continue;
             };
             let trace_id = generate_trace_id();
-            let source_session = recovery
-                .source_author
-                .split("::")
-                .next()
-                .unwrap_or(&recovery.source_author)
-                .to_string();
+            let source_session = metadata_key(&recovery.source_author).to_string();
             let (tool, model, external_session_id) =
                 recovery_agent_id(authorship_log, &recovery.source_author)
                     .map(|agent_id| {
@@ -233,19 +228,6 @@ fn system_time_to_ns(time: SystemTime) -> u128 {
     time.duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
-}
-
-pub(super) fn existing_commit_session_ids(authorship_log: &AuthorshipLog) -> HashSet<String> {
-    let mut sessions = HashSet::new();
-    for file_attestation in &authorship_log.attestations {
-        for entry in &file_attestation.entries {
-            let session = ai_session_key(&entry.hash);
-            if session.starts_with("s_") {
-                sessions.insert(session.to_string());
-            }
-        }
-    }
-    sessions
 }
 
 pub(super) fn unknown_lines_by_file(
@@ -343,9 +325,9 @@ fn edge_recovery_for_run(
 
     match (prev, next) {
         (Some(left), Some(right))
-            if is_ai_attestation(left)
-                && is_ai_attestation(right)
-                && ai_session_key(left) == ai_session_key(right) =>
+            if is_ai_author_id(left)
+                && is_ai_author_id(right)
+                && metadata_key(left) == metadata_key(right) =>
         {
             let mut lines = run
                 .iter()
@@ -360,11 +342,11 @@ fn edge_recovery_for_run(
                 lines,
             })
         }
-        (Some(left), None) if is_ai_attestation(left) => Some(EdgeRecovery {
+        (Some(left), None) if is_ai_author_id(left) => Some(EdgeRecovery {
             source_author: left.clone(),
             lines: run.iter().take(EDGE_EXTENSION_MAX_LINES).copied().collect(),
         }),
-        (None, Some(right)) if is_ai_attestation(right) => Some(EdgeRecovery {
+        (None, Some(right)) if is_ai_author_id(right) => Some(EdgeRecovery {
             source_author: right.clone(),
             lines: run
                 .iter()
@@ -385,19 +367,11 @@ fn edge_recovered_lines(line_to_author: &BTreeMap<u32, String>, run: &[u32]) -> 
     })
 }
 
-pub(super) fn is_ai_attestation(author: &str) -> bool {
-    author != CheckpointKind::Human.to_str() && !author.starts_with("h_")
-}
-
-pub(super) fn ai_session_key(author: &str) -> &str {
-    author.split("::").next().unwrap_or(author)
-}
-
 fn recovery_agent_id<'a>(log: &'a AuthorshipLog, author: &str) -> Option<&'a AgentId> {
     let metadata = &log.metadata;
     metadata
         .sessions
-        .get(ai_session_key(author))
+        .get(metadata_key(author))
         .map(|session| &session.agent_id)
         .or_else(|| metadata.prompts.get(author).map(|prompt| &prompt.agent_id))
 }

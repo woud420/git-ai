@@ -1,5 +1,5 @@
 use crate::error::GitAiError;
-use crate::model::authorship_log::{LineRange, SessionRecord};
+use crate::model::authorship_log::{LineRange, SessionRecord, metadata_key};
 use crate::model::authorship_log_serialization::{AuthorshipLog, generate_trace_id};
 use crate::model::session_recovery_candidate::SessionEventRecoveryCandidate;
 use crate::model::working_log::AgentId;
@@ -15,7 +15,7 @@ use super::session_event_recovery::{session_event_distance, session_event_model}
 use super::timestamp_collection::collect_unknown_file_timestamps;
 use super::{
     FileTimestampsByPath, RecoveryMetricInput, SESSION_EVENT_RECOVERY_WINDOW_NS, add_attestation,
-    ai_session_key, record_recovery_metric, unknown_lines_by_file,
+    record_recovery_metric, unknown_lines_by_file,
 };
 
 #[derive(Clone, Debug)]
@@ -294,7 +294,7 @@ fn attested_line_count_for_session(authorship_log: &AuthorshipLog, session_id: &
         .attestations
         .iter()
         .flat_map(|attestation| &attestation.entries)
-        .filter(|entry| ai_session_key(&entry.hash) == session_id)
+        .filter(|entry| metadata_key(&entry.hash) == session_id)
         .flat_map(|entry| entry.line_ranges.iter().flat_map(LineRange::expand))
         .count()
 }

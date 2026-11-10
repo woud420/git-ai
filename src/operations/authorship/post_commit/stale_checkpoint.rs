@@ -1,5 +1,5 @@
 use crate::error::GitAiError;
-use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log::{LineRange, metadata_key};
 use crate::model::authorship_log_serialization::{AttestationEntry, AuthorshipLog};
 use crate::model::imara_diff_utils::content_eq_ignoring_line_endings;
 use crate::model::working_log::{Checkpoint, InitialAttributions, WorkingLogEntry};
@@ -161,7 +161,7 @@ impl CheckpointEvidence<'_> {
         // Projection prunes metadata for unstaged sessions. Restoring an earlier
         // checkpoint must restore its identity as well as its line ranges.
         for author in restored_authors {
-            let session_id = author.split("::").next().unwrap_or(&author);
+            let session_id = metadata_key(&author);
             if let Some(session) = self.attribution_metadata.sessions.get(session_id) {
                 log.metadata
                     .sessions

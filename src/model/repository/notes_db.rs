@@ -54,9 +54,10 @@ const MIGRATIONS: &[&str] = &[
 ];
 
 /// Shared upsert SQL for the queue-backend note path (single writes and
-/// batches): preserves `synced`/`attempts`/`next_retry_at` when content is
-/// unchanged, otherwise resets them so the updated note is re-queued for
-/// upload.
+/// batches): preserves `synced`/`attempts`/`next_retry_at` and the upload
+/// lease (`processing_started_at`) when content is unchanged, otherwise resets
+/// them so the updated note is re-queued and an upload of the old content
+/// that is still in flight can no longer mark the row.
 const UPSERT_NOTE_SQL: &str = r#"
 INSERT INTO notes (commit_sha, content, synced, created_at, updated_at, next_retry_at)
 VALUES (?1, ?2, 0, ?3, ?3, ?3)
@@ -65,6 +66,7 @@ ON CONFLICT(commit_sha) DO UPDATE SET
     synced         = CASE WHEN notes.content = excluded.content THEN notes.synced ELSE 0 END,
     attempts       = CASE WHEN notes.content = excluded.content THEN notes.attempts ELSE 0 END,
     next_retry_at  = CASE WHEN notes.content = excluded.content THEN notes.next_retry_at ELSE excluded.next_retry_at END,
+    processing_started_at = CASE WHEN notes.content = excluded.content THEN notes.processing_started_at END,
     updated_at     = excluded.updated_at
 "#;
 
@@ -347,7 +349,8 @@ impl NotesDatabase {
     /// Mark a set of notes as successfully synced.
     ///
     /// Sets `synced = 1` and clears `processing_started_at`. Returns the number
-    /// of rows updated.
+    /// of rows updated. Rows that lost their lease since `dequeue_pending`
+    /// (content rewritten mid-upload) are skipped and stay pending.
     pub fn mark_synced(&mut self, commit_shas: &[String]) -> Result<usize, GitAiError> {
         if commit_shas.is_empty() {
             return Ok(0);
@@ -355,7 +358,7 @@ impl NotesDatabase {
         let now = unix_now();
         let sql = format!(
             "UPDATE notes SET synced = 1, last_sync_at = ?, processing_started_at = NULL \
-             WHERE commit_sha IN ({})",
+             WHERE processing_started_at IS NOT NULL AND commit_sha IN ({})",
             in_placeholders(commit_shas.len())
         );
         let updated = self.conn.execute(
@@ -366,7 +369,7 @@ impl NotesDatabase {
     }
 
     /// Mark a batch as failed: release the lock, increment attempts, and schedule
-    /// exponential-backoff retry.
+    /// exponential-backoff retry. Like `mark_synced`, skips rows without a lease.
     pub fn mark_failed(&mut self, commit_shas: &[String], error: &str) -> Result<(), GitAiError> {
         if commit_shas.is_empty() {
             return Ok(());
@@ -381,7 +384,7 @@ impl NotesDatabase {
                        last_sync_error       = ?1,
                        last_sync_at          = ?2,
                        next_retry_at         = ?2 + (1 << MIN(attempts + 1, 8)) * 5
-                   WHERE commit_sha = ?3 AND synced = 0"#,
+                   WHERE commit_sha = ?3 AND synced = 0 AND processing_started_at IS NOT NULL"#,
                 params![error, now, sha],
             )?;
         }
@@ -855,6 +858,30 @@ mod tests {
             processing_started_at.is_none(),
             "processing_started_at should be cleared after mark_failed"
         );
+    }
+
+    // --- rewrite while an upload is in flight (lock dropped for the HTTP call) ---
+
+    #[test]
+    fn test_note_rewritten_during_upload_is_neither_synced_nor_penalised() {
+        for upload_succeeds in [true, false] {
+            let (mut db, _tmp) = create_test_db();
+            db.upsert_note("sha", "v1").unwrap();
+            let in_flight = vec![db.dequeue_pending(10).unwrap().remove(0).commit_sha];
+            db.upsert_note("sha", "v2").unwrap();
+
+            if upload_succeeds {
+                let marked = db.mark_synced(&in_flight).unwrap();
+                assert_eq!(marked, 0, "the v1 upload must not mark v2 synced");
+            } else {
+                db.mark_failed(&in_flight, "v1 upload failed").unwrap();
+            }
+
+            let pending = db.dequeue_pending(10).unwrap();
+            assert_eq!(pending.len(), 1, "v2 still pending (ok: {upload_succeeds})");
+            let v2 = &pending[0];
+            assert_eq!((v2.content.as_str(), v2.attempts), ("v2", 0));
+        }
     }
 
     // --- get_notes (batch) ---

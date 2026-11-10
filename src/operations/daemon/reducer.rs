@@ -8,28 +8,6 @@ use std::path::PathBuf;
 
 mod analysis_refs;
 
-/// Convenience wrapper around [`reduce_family_command_with_ref_snapshot`] for
-/// unit tests.
-///
-/// **Skips canonicalization** — worktrees are keyed by the raw path from
-/// `cmd.worktree` (i.e. `canonical_worktree = None`).  Production callers
-/// must use [`reduce_family_command_with_ref_snapshot`] with a
-/// pre-canonicalized path so that symlinked worktree paths (e.g. `/tmp` →
-/// `/private/tmp` on macOS) resolve to a single canonical key.
-pub fn reduce_family_command(
-    state: &mut FamilyState,
-    cmd: NormalizedCommand,
-    analyzers: &AnalyzerRegistry,
-) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
-    reduce_family_command_with_ref_snapshot(
-        state,
-        cmd,
-        analyzers,
-        &std::collections::HashMap::new(),
-        None,
-    )
-}
-
 pub fn reduce_family_command_with_ref_snapshot(
     state: &mut FamilyState,
     cmd: NormalizedCommand,

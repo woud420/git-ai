@@ -176,6 +176,7 @@ fn push_unique_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
     }
 }
 
+#[cfg(test)]
 pub fn encode_delivery(delivery: &CheckpointDelivery) -> Result<Vec<u8>, CheckpointOutboxError> {
     encode_delivery_with_limit(delivery, publication::DEFAULT_MAX_ENCODED_RECORD_BYTES)
 }

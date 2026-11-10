@@ -80,10 +80,6 @@ impl Default for AmpAgent {
 }
 
 impl Agent for AmpAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::amp_threads_path().into_iter().collect()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,

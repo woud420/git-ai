@@ -1,14 +1,6 @@
 //! Runtime environment detection for CLI startup checks: interactive
 //! terminal, background AI agent, and superuser (root/Administrator) guards.
 
-/// Returns true if the process is running inside a background AI agent environment.
-pub fn is_in_background_agent() -> bool {
-    !matches!(
-        crate::operations::authorship::background_agent::detect(),
-        crate::operations::authorship::background_agent::BackgroundAgent::None
-    )
-}
-
 /// Returns true if the current process is running with elevated privileges
 /// (root on Unix, Administrator on Windows).
 #[cfg(unix)]

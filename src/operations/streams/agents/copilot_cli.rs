@@ -34,10 +34,6 @@ impl Default for CopilotCliAgent {
 }
 
 impl Agent for CopilotCliAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::session_state_base_dir().into_iter().collect()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,

@@ -50,51 +50,6 @@ impl ParsedGitInvocation {
         self.command_args.iter().any(|arg| arg == flag)
     }
 
-    /// Returns the n-th positional argument after the command (0-indexed).
-    /// Skips all arguments that start with '-' (flags and their inline values).
-    ///
-    /// Examples:
-    /// - `git merge abc --squash` => pos_command(0) returns Some("abc")
-    /// - `git merge --squash --no-verify abc` => pos_command(0) returns Some("abc")
-    /// - `git merge abc def --squash` => pos_command(1) returns Some("def")
-    pub fn pos_command(&self, n: u8) -> Option<String> {
-        let mut positional_count = 0u8;
-        let mut skip_next = false;
-
-        for arg in &self.command_args {
-            // If we're skipping this arg because it's a value for a previous flag
-            if skip_next {
-                skip_next = false;
-                continue;
-            }
-
-            // Skip flags
-            if arg.starts_with('-') {
-                // Check if this is a flag that takes a separate value
-                // (e.g., -m, -X, --message without =)
-                if arg.contains('=') {
-                    // Flag with inline value like --message=foo, count as one arg
-                    continue;
-                } else if is_flag_with_value(arg) {
-                    // Flag that takes the next arg as its value
-                    skip_next = true;
-                    continue;
-                } else {
-                    // Flag without value
-                    continue;
-                }
-            }
-
-            // This is a positional argument
-            if positional_count == n {
-                return Some(arg.clone());
-            }
-            positional_count += 1;
-        }
-
-        None
-    }
-
     /// Returns all arguments after the `--` separator in command_args.
     /// These are typically pathspecs (file paths) that should be treated literally.
     ///
@@ -232,10 +187,6 @@ pub fn summarize_rebase_args(command_args: &[String]) -> RebaseArgsSummary {
     }
 }
 
-pub fn rebase_has_control_mode(command_args: &[String]) -> bool {
-    summarize_rebase_args(command_args).is_control_mode
-}
-
 pub fn explicit_rebase_branch_arg(command_args: &[String]) -> Option<String> {
     let summary = summarize_rebase_args(command_args);
     if summary.is_control_mode {
@@ -247,54 +198,6 @@ pub fn explicit_rebase_branch_arg(command_args: &[String]) -> Option<String> {
     } else {
         summary.positionals.get(1).cloned()
     }
-}
-
-pub fn stash_subcommand(command_args: &[String]) -> Option<&str> {
-    match command_args.first().map(String::as_str) {
-        Some("push" | "save" | "apply" | "pop" | "drop" | "list" | "branch" | "show") => {
-            command_args.first().map(String::as_str)
-        }
-        _ => None,
-    }
-}
-
-pub fn stash_requires_target_resolution(command_args: &[String]) -> bool {
-    matches!(
-        stash_subcommand(command_args),
-        Some("apply" | "pop" | "drop" | "branch")
-    )
-}
-
-pub fn stash_target_spec(command_args: &[String]) -> Option<&str> {
-    if !stash_requires_target_resolution(command_args) {
-        return None;
-    }
-
-    // For "branch", the format is: git stash branch <branchname> [<stash>]
-    // The stash ref is the second positional arg (after the branch name).
-    let is_branch = stash_subcommand(command_args) == Some("branch");
-
-    let remaining = command_args.get(1..)?;
-    let mut saw_separator = false;
-    let mut positional_count = 0u32;
-    for arg in remaining {
-        if arg == "--" {
-            saw_separator = true;
-            continue;
-        }
-        if !saw_separator && arg.starts_with('-') {
-            continue;
-        }
-        positional_count += 1;
-        // For "branch", skip the first positional (branch name) and return the second (stash ref).
-        // For other subcommands, return the first positional (stash ref).
-        if is_branch && positional_count == 1 {
-            continue;
-        }
-        return Some(arg.as_str());
-    }
-
-    None
 }
 
 pub fn parse_git_cli_args(args: &[String]) -> ParsedGitInvocation {
@@ -735,74 +638,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pos_command_basic() {
-        // Test: git merge abc --squash
-        let args = vec![
-            "merge".to_string(),
-            "abc".to_string(),
-            "--squash".to_string(),
-        ];
-        let parsed = parse_git_cli_args(&args);
-        assert_eq!(parsed.pos_command(0), Some("abc".to_string()));
-        assert_eq!(parsed.pos_command(1), None);
-    }
-
-    #[test]
-    fn test_pos_command_flags_before() {
-        // Test: git merge --squash --no-verify abc
-        let args = vec![
-            "merge".to_string(),
-            "--squash".to_string(),
-            "--no-verify".to_string(),
-            "abc".to_string(),
-        ];
-        let parsed = parse_git_cli_args(&args);
-        assert_eq!(parsed.pos_command(0), Some("abc".to_string()));
-        assert_eq!(parsed.pos_command(1), None);
-    }
-
-    #[test]
-    fn test_pos_command_multiple_positional() {
-        // Test: git merge abc def --squash
-        let args = vec![
-            "merge".to_string(),
-            "abc".to_string(),
-            "def".to_string(),
-            "--squash".to_string(),
-        ];
-        let parsed = parse_git_cli_args(&args);
-        assert_eq!(parsed.pos_command(0), Some("abc".to_string()));
-        assert_eq!(parsed.pos_command(1), Some("def".to_string()));
-        assert_eq!(parsed.pos_command(2), None);
-    }
-
-    #[test]
-    fn test_pos_command_with_flag_value() {
-        // Test: git commit -m "message" file.txt
-        let args = vec![
-            "commit".to_string(),
-            "-m".to_string(),
-            "message".to_string(),
-            "file.txt".to_string(),
-        ];
-        let parsed = parse_git_cli_args(&args);
-        assert_eq!(parsed.pos_command(0), Some("file.txt".to_string()));
-        assert_eq!(parsed.pos_command(1), None);
-    }
-
-    #[test]
-    fn test_pos_command_inline_flag_value() {
-        // Test: git merge --strategy=recursive abc
-        let args = vec![
-            "merge".to_string(),
-            "--strategy=recursive".to_string(),
-            "abc".to_string(),
-        ];
-        let parsed = parse_git_cli_args(&args);
-        assert_eq!(parsed.pos_command(0), Some("abc".to_string()));
-    }
-
-    #[test]
     fn test_derive_directory_from_url() {
         assert_eq!(
             derive_directory_from_url("https://github.com/user/repo.git"),
@@ -929,7 +764,6 @@ mod tests {
     fn test_explicit_rebase_branch_arg_control_mode_returns_none() {
         let args = vec!["--continue".to_string()];
         assert_eq!(explicit_rebase_branch_arg(&args), None);
-        assert!(rebase_has_control_mode(&args));
     }
 
     #[test]

@@ -50,15 +50,6 @@ pub fn u64_to_json(field: &PosField<u64>) -> Option<Value> {
     }
 }
 
-/// Convert a `PosField<f64>` to JSON Value for sparse array.
-pub fn f64_to_json(field: &PosField<f64>) -> Option<Value> {
-    match field {
-        None => None,
-        Some(None) => Some(Value::Null),
-        Some(Some(f)) => serde_json::Number::from_f64(*f).map(Value::Number),
-    }
-}
-
 /// Get a string field from a sparse array at a position.
 #[allow(dead_code)]
 pub fn sparse_get_string(arr: &SparseArray, pos: usize) -> PosField<String> {
@@ -122,17 +113,6 @@ pub fn vec_string_to_json(field: &PosField<Vec<String>>) -> Option<Value> {
 
 /// Convert a `PosField<Vec<u32>>` to JSON array.
 pub fn vec_u32_to_json(field: &PosField<Vec<u32>>) -> Option<Value> {
-    match field {
-        None => None,
-        Some(None) => Some(Value::Null),
-        Some(Some(vec)) => Some(Value::Array(
-            vec.iter().map(|n| Value::Number((*n).into())).collect(),
-        )),
-    }
-}
-
-/// Convert a `PosField<Vec<u64>>` to JSON array.
-pub fn vec_u64_to_json(field: &PosField<Vec<u64>>) -> Option<Value> {
     match field {
         None => None,
         Some(None) => Some(Value::Null),
@@ -299,19 +279,6 @@ mod tests {
                 Value::Number(10.into()),
                 Value::Number(20.into()),
                 Value::Number(30.into())
-            ]))
-        );
-    }
-
-    #[test]
-    fn test_vec_u64_to_json() {
-        assert_eq!(vec_u64_to_json(&None), None);
-        assert_eq!(vec_u64_to_json(&Some(None)), Some(Value::Null));
-        assert_eq!(
-            vec_u64_to_json(&Some(Some(vec![1000000000000u64, 2000000000000u64]))),
-            Some(Value::Array(vec![
-                Value::Number(1000000000000u64.into()),
-                Value::Number(2000000000000u64.into())
             ]))
         );
     }

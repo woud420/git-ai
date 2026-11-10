@@ -1,9 +1,5 @@
-use std::collections::HashMap;
-use std::time::Duration;
-
 use crate::metrics::MetricEvent;
 
-pub mod performance_targets;
 #[doc(hidden)]
 pub mod wltrace;
 
@@ -28,23 +24,6 @@ pub fn log_error(error: &dyn std::error::Error, context: Option<serde_json::Valu
         timestamp: chrono::Utc::now().to_rfc3339(),
         message: error.to_string(),
         context,
-    };
-    submit_telemetry_envelope(vec![envelope]);
-}
-
-/// Log a performance metric to Sentry (via daemon telemetry worker)
-pub fn log_performance(
-    operation: &str,
-    duration: Duration,
-    context: Option<serde_json::Value>,
-    tags: Option<HashMap<String, String>>,
-) {
-    let envelope = crate::model::telemetry::TelemetryEnvelope::Performance {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        operation: operation.to_string(),
-        duration_ms: duration.as_millis(),
-        context,
-        tags,
     };
     submit_telemetry_envelope(vec![envelope]);
 }
@@ -88,8 +67,6 @@ pub fn log_metrics(events: Vec<MetricEvent>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::time::Duration;
 
     // Test error logging
     #[test]
@@ -106,27 +83,6 @@ mod tests {
         let error = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
         let context = json!({"file": "test.txt", "operation": "read"});
         log_error(&error, Some(context));
-    }
-
-    // Test performance logging
-    #[test]
-    fn test_log_performance_basic() {
-        log_performance("test_operation", Duration::from_millis(100), None, None);
-    }
-
-    #[test]
-    fn test_log_performance_with_context() {
-        use serde_json::json;
-        let context = json!({"files": 5, "lines": 100});
-        log_performance("test_op", Duration::from_secs(1), Some(context), None);
-    }
-
-    #[test]
-    fn test_log_performance_with_tags() {
-        let mut tags = HashMap::new();
-        tags.insert("command".to_string(), "commit".to_string());
-        tags.insert("repo".to_string(), "test".to_string());
-        log_performance("commit_op", Duration::from_millis(500), None, Some(tags));
     }
 
     // Test message logging

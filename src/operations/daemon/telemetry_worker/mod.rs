@@ -204,17 +204,6 @@ impl DaemonTelemetryWorkerHandle {
         buffered.saturating_add(pending)
     }
 
-    /// Persist metrics directly from an existing blocking worker.
-    ///
-    /// Transcript sweeps can emit many batches in a tight loop. Routing those
-    /// through the async telemetry entrypoint creates one fire-and-forget
-    /// `spawn_blocking` task per batch, so a fast producer can retain many raw
-    /// transcript events while SQLite writes catch up. This path keeps the
-    /// producer coupled to the metrics DB write and bounds peak memory.
-    pub fn persist_metrics_blocking(&self, events: &[MetricEvent]) -> Result<Vec<i64>, GitAiError> {
-        store_metrics_in_db_with(metrics_store(self.stores), events)
-    }
-
     /// Flush pending notes synchronously (for the FlushNotes control-request arm).
     pub fn flush_notes_sync(&self) {
         flush_notes_with(self.stores);
@@ -237,16 +226,6 @@ impl DaemonTelemetryWorkerHandle {
             && let Err(e) = store_metrics_in_db_with(metrics_store(self.stores), &metric_events)
         {
             tracing::warn!(%e, "telemetry: failed to persist daemon metrics locally");
-        }
-    }
-
-    /// Submit CAS records synchronously (best-effort, non-blocking).
-    ///
-    /// Used by daemon-owned post-commit paths that cannot route through the
-    /// control socket because the daemon cannot connect to itself.
-    pub fn submit_cas_sync(&self, records: Vec<CasSyncPayload>) {
-        if let Ok(mut buf) = self.buffer.try_lock() {
-            buf.ingest_cas(records);
         }
     }
 
@@ -313,24 +292,6 @@ fn split_metric_envelopes(
     }
 
     (buffered_envelopes, metric_events)
-}
-
-/// Submit CAS records from within the daemon process (sync, best-effort).
-/// Returns true if the handle was available and records were submitted.
-pub fn submit_daemon_internal_cas(records: Vec<CasSyncPayload>) -> bool {
-    if let Some(handle) = DAEMON_INTERNAL_TELEMETRY.get() {
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let handle = handle.clone();
-            runtime.spawn(async move {
-                handle.submit_cas(records).await;
-            });
-        } else {
-            handle.submit_cas_sync(records);
-        }
-        true
-    } else {
-        false
-    }
 }
 
 /// Submit daemon diagnostic events from within the daemon process.

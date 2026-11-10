@@ -78,22 +78,6 @@ impl Repository {
         args
     }
 
-    pub fn require_pre_command_head(&mut self) {
-        if self.pre_command_base_commit.is_some() || self.pre_command_refname.is_some() {
-            return;
-        }
-
-        // Safely handle empty repositories
-        if let Ok(head_ref) = self.head()
-            && let Ok(target) = head_ref.target()
-        {
-            let target_string = target;
-            let refname = head_ref.name().map(|n| n.to_string());
-            self.pre_command_base_commit = Some(target_string);
-            self.pre_command_refname = refname;
-        }
-    }
-
     // Internal util to get the git object type for a given OID
     pub(super) fn object_type(&self, oid: &str) -> Result<String, GitAiError> {
         let reader =
@@ -330,20 +314,6 @@ impl Repository {
     pub fn effective_author_identity(&self) -> GitAuthorIdentity {
         let git_id = self.git_author_identity();
         git_id.with_author_config(&config::Config::fresh_author_cached())
-    }
-
-    /// Get the effective git commit author identity for this repository.
-    ///
-    /// Uses `git var GIT_AUTHOR_IDENT` which respects:
-    /// `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` env vars > `user.name`/`user.email` config >
-    /// system defaults.
-    ///
-    /// Falls back to `git config user.name` / `user.email` if `git var` fails.
-    ///
-    /// This is the correct method to use when resolving the commit **author** identity
-    /// (as opposed to committer), e.g. in commit hooks.
-    pub fn git_commit_author_identity(&self) -> GitAuthorIdentity {
-        self.resolve_git_var_identity("GIT_AUTHOR_IDENT")
     }
 
     /// Internal: resolve git identity via the specified `git var` variable.

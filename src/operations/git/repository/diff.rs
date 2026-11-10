@@ -2,11 +2,11 @@
 //! rely on. Also hosts Git version and numstat parsing shared by Git-facing
 //! callers, and the public `parse_diff_added_lines_with_insertions` entry point.
 
+use super::MAX_PATHSPEC_ARGS;
 use super::core::Repository;
 use crate::clients::git_cli::{InternalGitProfile, exec_git, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::operations::git::path_format::parse_diff_path_from_header_line;
-use crate::operations::git::status::MAX_PATHSPEC_ARGS;
 use std::collections::{HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 

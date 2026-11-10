@@ -13,7 +13,6 @@ mod recovery_queries;
 mod reingestion;
 mod schema;
 mod status_queries;
-mod throttle;
 mod types;
 mod upload_queue;
 

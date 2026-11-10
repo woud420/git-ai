@@ -12,8 +12,8 @@ use crate::operations::authorship::stats::{
 use crate::operations::authorship::virtual_attribution::VirtualAttributions;
 use crate::operations::git::find_repository;
 use crate::operations::git::path_format::unescape_git_path;
+use crate::operations::git::repository::MAX_PATHSPEC_ARGS;
 use crate::operations::git::repository::{Repository, parse_numstat_line};
-use crate::operations::git::status::MAX_PATHSPEC_ARGS;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};

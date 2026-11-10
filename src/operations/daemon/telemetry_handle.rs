@@ -8,7 +8,7 @@
 //! callers (telemetry, CAS, and potentially checkpoints). This avoids the
 //! overhead of opening a new connection for every fire-and-forget event.
 
-use crate::model::daemon_control::{CasSyncPayload, ControlRequest, ControlResponse};
+use crate::model::daemon_control::{ControlRequest, ControlResponse};
 use crate::model::telemetry::TelemetryEnvelope;
 use crate::operations::daemon::{DaemonClientStream, open_local_socket_stream_with_timeout};
 use std::io::{BufRead, BufReader, Write};
@@ -227,17 +227,6 @@ pub fn submit_telemetry(envelopes: Vec<TelemetryEnvelope>) {
         return;
     }
     let request = ControlRequest::SubmitTelemetry { envelopes };
-    let _ = send_via_daemon(&request);
-}
-
-/// Submit CAS sync records to the daemon over the control socket.
-///
-/// Fire-and-forget: same as submit_telemetry.
-pub fn submit_cas(records: Vec<CasSyncPayload>) {
-    if records.is_empty() {
-        return;
-    }
-    let request = ControlRequest::SubmitCas { records };
     let _ = send_via_daemon(&request);
 }
 

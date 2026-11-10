@@ -25,13 +25,6 @@ const AGENT_EMAIL_MAPPINGS: &[(&str, &str)] = &[
     ("roomote@roocode.com", "roo-background"),
 ];
 
-/// Known GitHub username mappings: (username, platform)
-const AGENT_USERNAME_MAPPINGS: &[(&str, &str)] = &[
-    ("copilot-swe-agent[bot]", "github-copilot-agent"),
-    ("devin-ai-integration[bot]", "devin"),
-    ("cursor[bot]", "cursor-agent"),
-];
-
 /// Match a commit author email to a known AI agent tool name.
 ///
 /// Returns the tool name (e.g. "cursor-agent", "github-copilot-agent", "devin", "claude-web", "codex-cloud")
@@ -59,27 +52,6 @@ pub fn match_email_to_agent(email: &str) -> Option<&'static str> {
             }
         })
         .map(|(_, tool)| *tool)
-}
-
-/// Match a GitHub username to a known AI platform name.
-///
-/// Returns the platform name (e.g. "github-copilot", "devin", "cursor")
-/// if the username matches a known agent pattern, or `None` otherwise.
-///
-/// # Examples
-/// ```
-/// use git_ai::operations::authorship::agent_detection::match_username_to_platform;
-///
-/// assert_eq!(match_username_to_platform("copilot-swe-agent[bot]"), Some("github-copilot-agent"));
-/// assert_eq!(match_username_to_platform("devin-ai-integration[bot]"), Some("devin"));
-/// assert_eq!(match_username_to_platform("regular-user"), None);
-/// ```
-pub fn match_username_to_platform(username: &str) -> Option<&'static str> {
-    let username_lower = username.to_lowercase();
-    AGENT_USERNAME_MAPPINGS
-        .iter()
-        .find(|(pattern, _)| pattern.to_lowercase() == username_lower)
-        .map(|(_, platform)| *platform)
 }
 
 /// Simulate an `AuthorshipLog` for a commit made by a known AI agent
@@ -234,45 +206,6 @@ mod tests {
     // ========================================================================
     // match_username_to_platform tests
     // ========================================================================
-
-    #[test]
-    fn test_match_username_copilot() {
-        assert_eq!(
-            match_username_to_platform("copilot-swe-agent[bot]"),
-            Some("github-copilot-agent")
-        );
-    }
-
-    #[test]
-    fn test_match_username_devin() {
-        assert_eq!(
-            match_username_to_platform("devin-ai-integration[bot]"),
-            Some("devin")
-        );
-    }
-
-    #[test]
-    fn test_match_username_cursor() {
-        assert_eq!(
-            match_username_to_platform("cursor[bot]"),
-            Some("cursor-agent")
-        );
-    }
-
-    #[test]
-    fn test_match_username_case_insensitive() {
-        assert_eq!(
-            match_username_to_platform("Copilot-SWE-Agent[bot]"),
-            Some("github-copilot-agent")
-        );
-    }
-
-    #[test]
-    fn test_match_username_no_match() {
-        assert_eq!(match_username_to_platform("regular-user"), None);
-        assert_eq!(match_username_to_platform("octocat"), None);
-        assert_eq!(match_username_to_platform(""), None);
-    }
 
     // ========================================================================
     // simulate_agent_authorship tests

@@ -223,13 +223,6 @@ impl EventAttributes {
         self
     }
 
-    pub fn external_session_id_opt(self, value: Option<String>) -> Self {
-        match value {
-            Some(v) => self.external_session_id(v),
-            None => self,
-        }
-    }
-
     // Builder methods for external_parent_session_id
     pub fn external_parent_session_id(mut self, value: impl Into<String>) -> Self {
         self.external_parent_session_id = Some(Some(value.into()));
@@ -724,18 +717,5 @@ mod tests {
             restored.external_parent_session_id,
             Some(Some("parent-uuid-456".to_string()))
         );
-    }
-
-    #[test]
-    fn test_event_attributes_external_session_id_opt() {
-        let attrs = EventAttributes::with_version("1.0.0")
-            .external_session_id_opt(Some("has-value".to_string()))
-            .external_parent_session_id_opt(None);
-
-        assert_eq!(
-            attrs.external_session_id,
-            Some(Some("has-value".to_string()))
-        );
-        assert_eq!(attrs.external_parent_session_id, None);
     }
 }

@@ -237,28 +237,6 @@ impl<'a> Reference<'a> {
     }
 }
 
-pub struct References<'a> {
-    repo: &'a Repository,
-    refs: Vec<String>,
-    index: usize,
-}
-
-impl<'a> Iterator for References<'a> {
-    type Item = Result<Reference<'a>, GitAiError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.refs.len() {
-            return None;
-        }
-        let ref_name = self.refs[self.index].clone();
-        self.index += 1;
-        Some(Ok(Reference {
-            repo: self.repo,
-            ref_name,
-        }))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{has_resolved_loose_ref, shorthand_ref_name};

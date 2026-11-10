@@ -4,8 +4,8 @@
 //! prompt emit an agent_usage event?" with a sqlite SELECT + upsert under the
 //! global metrics-database mutex — per AI checkpoint. This limiter replaces
 //! that disk transaction with a constant-time in-memory check. The
-//! `agent_usage_throttle` table and its `MetricsDatabase` accessor are kept
-//! for schema compatibility, but the checkpoint path no longer touches them.
+//! `agent_usage_throttle` table is kept for schema compatibility, but nothing
+//! reads or writes it any more.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};

@@ -44,24 +44,6 @@ pub(super) fn write_authorship_log(
         .unwrap_or_default())
 }
 
-/// Shift authorship notes from source commits to their rewritten counterparts.
-/// Pre-existing non-empty notes on target commits are skipped (not replaced).
-pub fn shift_authorship_notes(
-    repo: &Repository,
-    mappings: &[(String, String)],
-) -> Result<(), GitAiError> {
-    shift_authorship_notes_with_existing_mode(repo, mappings, false).map(|_| ())
-}
-
-/// Like [`shift_authorship_notes`] but merges shifted content into any
-/// pre-existing non-empty note on the target commit rather than skipping it.
-pub fn shift_authorship_notes_merging_existing(
-    repo: &Repository,
-    mappings: &[(String, String)],
-) -> Result<(), GitAiError> {
-    shift_authorship_notes_with_existing_mode(repo, mappings, true).map(|_| ())
-}
-
 /// Like [`shift_authorship_notes_merging_existing`] but also returns the
 /// written `(commit_sha, serialized_note)` pairs for the metrics path.
 pub(crate) fn shift_authorship_notes_merging_existing_with_notes(

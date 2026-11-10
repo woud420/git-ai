@@ -19,12 +19,9 @@ pub(in crate::operations::git) use note_reads::{
     notes_for_commits_utf8, parse_reference_as_authorship_log_v3,
 };
 
-use note_fanout::write_note_entry;
 #[doc(hidden)]
-pub use note_fanout::{
-    fanout_note_pathspec_for_commit, fanout_note_pathspec_for_ref, flat_note_pathspec_for_commit,
-    flat_note_pathspec_for_ref, notes_path_for_object,
-};
+pub use note_fanout::notes_path_for_object;
+use note_fanout::write_note_entry;
 pub(in crate::operations::git) use note_fanout::{write_blob_stanza, write_notes_commit_header};
 
 // Modern refspecs without force to enable proper merging
@@ -772,26 +769,6 @@ mod tests {
                 "abc1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd"
             ),
             "ab/c1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd"
-        );
-    }
-
-    #[test]
-    fn test_flat_note_pathspec_for_commit() {
-        let sha = "abcdef1234567890abcdef1234567890abcdef12";
-        let pathspec = flat_note_pathspec_for_commit(sha);
-        assert_eq!(
-            pathspec,
-            "refs/notes/ai:abcdef1234567890abcdef1234567890abcdef12"
-        );
-    }
-
-    #[test]
-    fn test_fanout_note_pathspec_for_commit() {
-        let sha = "abcdef1234567890abcdef1234567890abcdef12";
-        let pathspec = fanout_note_pathspec_for_commit(sha);
-        assert_eq!(
-            pathspec,
-            "refs/notes/ai:ab/cdef1234567890abcdef1234567890abcdef12"
         );
     }
 

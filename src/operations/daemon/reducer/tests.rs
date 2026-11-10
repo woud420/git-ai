@@ -6,6 +6,16 @@ use crate::model::domain::{
 use crate::operations::daemon::analyzers::AnalyzerRegistry;
 use std::collections::HashMap;
 
+/// Reduce without a ref snapshot or canonical worktree: worktrees are keyed
+/// by the raw path from `cmd.worktree`.
+pub(super) fn reduce_family_command(
+    state: &mut FamilyState,
+    cmd: NormalizedCommand,
+    analyzers: &AnalyzerRegistry,
+) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
+    reduce_family_command_with_ref_snapshot(state, cmd, analyzers, &HashMap::new(), None)
+}
+
 pub(super) fn family_state() -> FamilyState {
     FamilyState {
         family_key: FamilyKey::new("family:/tmp/repo"),

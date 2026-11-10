@@ -18,7 +18,6 @@ pub(crate) use diff_tree::compute_diff_trees_batch;
 pub(crate) use note_shift::{
     shift_authorship_log, shift_authorship_notes_merging_existing_with_notes,
 };
-pub use note_shift::{shift_authorship_notes, shift_authorship_notes_merging_existing};
 pub(crate) use range_diff::list_commits_in_range;
 pub(crate) use rebase_range::RebaseRange;
 

@@ -54,21 +54,6 @@ fn fetch_metric_history(
     db_lock.get_metric_history(since_ts, repo_filter, USAGE_EVENT_IDS)
 }
 
-/// Aggregate metric history since `since_ts` (Unix seconds) into activity stats.
-///
-/// When `repo_filter` is `Some(url)`, only events from that repository are
-/// aggregated. When `None`, events from all repositories are included.
-pub fn compute_activity(
-    since_ts: u32,
-    period_label: String,
-    granularity: BucketGranularity,
-    repo_filter: Option<&str>,
-) -> Result<LocalActivityStats, GitAiError> {
-    let records = fetch_metric_history(since_ts, repo_filter)?;
-    let refs: Vec<&MetricHistoryRecord> = records.iter().collect();
-    compute_activity_from_records(&refs, since_ts, period_label, granularity)
-}
-
 /// Aggregate a pre-fetched slice of `MetricHistoryRecord`s into activity stats.
 ///
 /// Separated from `compute_activity` so callers that already hold all events
@@ -377,18 +362,4 @@ pub fn compute_all(
     let stats = compute_activity_from_records(&refs, since_ts, period_label, granularity)?;
     let repos = repo_summaries_from_records(&records, since_ts, granularity)?;
     Ok((stats, repos))
-}
-
-/// Compute a per-repository breakdown for the given time window.
-///
-/// Fetches all matching events in a single DB query, groups them in memory by
-/// `repo_url`, and aggregates each group — O(n) instead of O(n × repos).
-/// Sorted by `ai_lines` descending.
-pub fn compute_repo_summaries(
-    since_ts: u32,
-    granularity: BucketGranularity,
-    repo_filter: Option<&str>,
-) -> Result<Vec<RepoActivitySummary>, GitAiError> {
-    let all_records = fetch_metric_history(since_ts, repo_filter)?;
-    repo_summaries_from_records(&all_records, since_ts, granularity)
 }

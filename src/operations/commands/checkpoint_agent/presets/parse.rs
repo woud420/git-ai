@@ -1,7 +1,6 @@
 use crate::error::GitAiError;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Parse a checkpoint hook's raw JSON payload into `T` (usually `serde_json::Value`
@@ -268,23 +267,6 @@ pub fn collect_apply_patch_paths_from_text(raw: &str, out: &mut Vec<String>) {
     }
 }
 
-pub fn dirty_files_from_value(data: &Value, cwd: &str) -> Option<HashMap<PathBuf, String>> {
-    let df = data.get("dirty_files")?;
-    let obj = df.as_object()?;
-    let mut result = HashMap::new();
-    for (key, value) in obj {
-        if let Some(content) = value.as_str() {
-            let path = resolve_absolute(key, cwd);
-            result.insert(path, content.to_string());
-        }
-    }
-    if result.is_empty() {
-        None
-    } else {
-        Some(result)
-    }
-}
-
 pub fn string_array(data: &Value, key: &str) -> Option<Vec<String>> {
     let arr = data.get(key)?.as_array()?;
     let strings: Vec<String> = arr
@@ -297,15 +279,6 @@ pub fn string_array(data: &Value, key: &str) -> Option<Vec<String>> {
     } else {
         Some(strings)
     }
-}
-
-pub fn pathbuf_array(data: &Value, key: &str, cwd: &str) -> Vec<PathBuf> {
-    string_array(data, key)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .map(|s| resolve_absolute(&s, cwd))
-        .collect()
 }
 
 #[cfg(test)]
@@ -547,22 +520,6 @@ mod tests {
         assert_eq!(
             paths,
             vec!["src/main.rs".to_string(), "src/other.rs".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_dirty_files_from_hook_data() {
-        let data = json!({
-            "dirty_files": {
-                "/home/user/file.txt": "old content"
-            }
-        });
-        let result = dirty_files_from_value(&data, "/home/user");
-        assert!(result.is_some());
-        let map = result.unwrap();
-        assert_eq!(
-            map.get(&PathBuf::from("/home/user/file.txt")).unwrap(),
-            "old content"
         );
     }
 }

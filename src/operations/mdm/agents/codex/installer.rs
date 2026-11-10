@@ -104,10 +104,6 @@ impl HookInstaller for CodexInstaller {
         let config_path = Self::config_path();
         let hooks_json_path = Self::hooks_json_path();
 
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
         let existing_config_content = if config_path.exists() {
             fs::read_to_string(&config_path)?
         } else {

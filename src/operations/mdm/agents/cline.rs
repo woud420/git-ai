@@ -181,9 +181,6 @@ impl ClineInstaller {
         let diff = generate_diff(path, &existing, content);
 
         if !dry_run {
-            if let Some(dir) = path.parent() {
-                fs::create_dir_all(dir)?;
-            }
             write_atomic(path, content.as_bytes())?;
 
             #[cfg(unix)]
@@ -277,10 +274,6 @@ impl HookInstaller for ClineInstaller {
         let post_path = Self::hook_path(POST_HOOK_NAME);
         Self::ensure_hook_script_is_writable(&pre_path)?;
         Self::ensure_hook_script_is_writable(&post_path)?;
-
-        if !dry_run {
-            fs::create_dir_all(Self::hooks_dir())?;
-        }
 
         let script = Self::generate_hook_script(&params.binary_path);
 

@@ -82,12 +82,6 @@ pub fn file_drop_install(
 ) -> Result<Option<String>, GitAiError> {
     let dest_path = (spec.dest_path)();
 
-    if let Some(dir) = dest_path.parent()
-        && !dry_run
-    {
-        fs::create_dir_all(dir)?;
-    }
-
     let existing_content = if dest_path.exists() {
         fs::read_to_string(&dest_path)?
     } else {
@@ -102,9 +96,6 @@ pub fn file_drop_install(
     let diff_output = generate_diff(&dest_path, &existing_content, &new_content);
 
     if !dry_run {
-        if let Some(dir) = dest_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
         write_atomic(&dest_path, new_content.as_bytes())?;
     }
 

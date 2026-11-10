@@ -1,6 +1,7 @@
 use super::parse::*;
 use super::pattern::*;
 use super::spec::{ConfigMutation, ConfigNesting, ConfigValueKind, config_key_specs, resolve_key};
+use crate::config::mask_api_key;
 use serde_json::Value;
 
 #[test]
@@ -221,6 +222,14 @@ fn test_mask_api_key_nine_chars() {
     let key = "123456789";
     let masked = mask_api_key(key);
     assert_eq!(masked, "1234...6789");
+}
+
+#[test]
+fn test_mask_api_key_non_ascii() {
+    // Characters, not bytes: a multi-byte key must neither be sliced
+    // mid-character nor count as long because of its byte length.
+    assert_eq!(mask_api_key("日本語のキーです長い"), "日本語の...です長い");
+    assert_eq!(mask_api_key("ключик"), "****");
 }
 
 #[test]

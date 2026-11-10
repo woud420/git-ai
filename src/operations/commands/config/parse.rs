@@ -155,15 +155,6 @@ pub(super) fn parse_author_config_object(value: &str) -> Result<AuthorConfig, St
         .map_err(|e| format!("Invalid author config: {}", e))
 }
 
-/// Mask an API key for display (show first 4 and last 4 chars if long enough)
-pub(super) fn mask_api_key(key: &str) -> String {
-    if key.len() > 8 {
-        format!("{}...{}", &key[..4], &key[key.len() - 4..])
-    } else {
-        "****".to_string()
-    }
-}
-
 /// Parse notes backend kind from a string value
 pub(super) fn parse_notes_backend_kind(value: &str) -> Result<NotesBackendKind, String> {
     match value.trim().to_lowercase().as_str() {

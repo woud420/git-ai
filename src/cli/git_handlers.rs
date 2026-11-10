@@ -10,6 +10,7 @@ use crate::operations::git::repository::Repository;
 use crate::process_spawn::CREATE_NO_WINDOW;
 #[cfg(windows)]
 use crate::process_spawn::is_interactive_terminal;
+use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 #[cfg(unix)]
@@ -55,19 +56,24 @@ fn uninstall_forwarding_handlers() {
     }
 }
 
-pub fn handle_git(args: &[String]) {
+pub fn handle_git(args: &[OsString]) {
+    // Git receives the arguments byte for byte (file names need not be
+    // UTF-8); only our own classification reads them as text.
+    let lossy_args: Vec<String> = args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let parsed = parse_git_cli_args(&lossy_args);
+    let read_only = is_read_only_invocation(&parsed);
+
     // If we're being invoked from a shell completion context, bypass git-ai logic
     // and delegate directly to the real git so existing completion scripts work.
     if in_shell_completion_context() {
-        let orig_args: Vec<String> = std::env::args().skip(1).collect();
-        let read_only = is_read_only_invocation(&parse_git_cli_args(&orig_args));
-        proxy_to_git(&orig_args, read_only, true);
+        proxy_to_git(args, read_only, true);
         return;
     }
 
-    let parsed = parse_git_cli_args(args);
-
-    if is_read_only_invocation(&parsed) {
+    if read_only {
         let exit_status = proxy_to_git(args, true, false);
         exit_with_status(exit_status);
     }
@@ -242,7 +248,7 @@ fn is_read_only_invocation(parsed: &ParsedGitInvocation) -> bool {
 /// `suppress_trace2` is set for read-only invocations so the daemon isn't hit
 /// with events that can never produce meaningful state changes.
 fn proxy_to_git(
-    args: &[String],
+    args: &[OsString],
     suppress_trace2: bool,
     exit_on_completion: bool,
 ) -> std::process::ExitStatus {

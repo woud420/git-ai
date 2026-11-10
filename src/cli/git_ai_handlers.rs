@@ -115,7 +115,7 @@ pub fn handle_git_ai(args: &[String]) {
         "checkpoint" => {
             if let Some(t) = perf_entry {
                 eprintln!(
-                    "[perf] checkpoint: entry_overhead={:.1}ms (binary startup + clap + dispatch)",
+                    "[perf] checkpoint: entry_overhead={:.1}ms (binary startup + dispatch)",
                     t.elapsed().as_secs_f64() * 1000.0
                 );
             }

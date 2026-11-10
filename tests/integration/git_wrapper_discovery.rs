@@ -72,3 +72,36 @@ fn wrapper_commit_discovers_repository_for_post_commit_stats() {
         "expected {expected:?} in wrapper output:\n{output_text}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn wrapper_passes_non_utf8_arguments_through_to_git() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let repo = TestRepo::new();
+    // A Latin-1 file name: valid on disk and for git, but not UTF-8.
+    let name = std::ffi::OsStr::from_bytes(b"caf\xe9.txt");
+    fs::write(repo.path().join(name), "a\n").unwrap();
+
+    let output = repo
+        .git_ai_command_without_pre_sync_for_test(&["add"], &[("GIT_AI", "git")])
+        .arg(name)
+        .output()
+        .expect("git wrapper should run");
+    assert!(output.status.success(), "{}", combined(&output));
+
+    let staged = repo.git_og(&["diff", "--cached", "--name-only"]).unwrap();
+    assert_eq!(staged.trim(), r#""caf\351.txt""#);
+}
+
+#[test]
+fn wrapper_does_not_swallow_a_leading_double_dash() {
+    let repo = TestRepo::new();
+
+    // Real git rejects `git -- version`; the wrapper must not turn it into
+    // `git version`.
+    let output = run_wrapper(&repo, &["--", "version"], &[]);
+    let output_text = combined(&output);
+    assert!(!output.status.success(), "{output_text}");
+    assert!(output_text.contains("unknown option: --"), "{output_text}");
+}

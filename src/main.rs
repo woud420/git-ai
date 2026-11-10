@@ -1,17 +1,20 @@
-use clap::Parser;
 use git_ai::cli::environment::{
     SuperuserCheckResult, check_superuser_guard, print_superuser_warning,
 };
 use git_ai::{cli, operations};
+use std::ffi::OsString;
 
-#[derive(Parser)]
-#[command(name = "git-ai")]
-#[command(about = "git proxy with AI authorship tracking", long_about = None)]
-#[command(disable_help_flag = true, disable_version_flag = true)]
-struct Cli {
-    /// Git command and arguments
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    args: Vec<String>,
+/// `git-ai` subcommands take UTF-8 arguments. Only the git proxy forwards
+/// arbitrary bytes.
+fn utf8_args_or_exit(args: Vec<OsString>) -> Vec<String> {
+    args.into_iter()
+        .map(|arg| {
+            arg.into_string().unwrap_or_else(|_| {
+                eprintln!("error: invalid UTF-8 was detected in one or more arguments");
+                std::process::exit(2);
+            })
+        })
+        .collect()
 }
 
 fn is_superuser_exempt_command(args: &[String]) -> bool {
@@ -39,8 +42,9 @@ fn is_superuser_exempt_command(args: &[String]) -> bool {
 fn main() {
     git_ai::observability::wltrace::initialize_from_env();
 
-    // Get the binary name that was called
-    let binary_name = std::env::args_os()
+    // Get the binary name that was called; the rest is passed on untouched.
+    let mut argv = std::env::args_os();
+    let binary_name = argv
         .next()
         .and_then(|arg| arg.into_string().ok())
         .and_then(|path| {
@@ -61,22 +65,23 @@ fn main() {
         std::process::exit(0);
     }
 
-    let cli = Cli::parse();
+    let args: Vec<OsString> = argv.collect();
 
     #[cfg(debug_assertions)]
     {
         if std::env::var("GIT_AI").as_deref() == Ok("git") {
-            cli::git_handlers::handle_git(&cli.args);
+            cli::git_handlers::handle_git(&args);
             return;
         }
     }
 
     if binary_name == "git-ai" || binary_name == "git-ai.exe" {
+        let args = utf8_args_or_exit(args);
         // Block elevated privileges to prevent creating root-owned files
         // that break normal-user daemon startup. Only applies to direct
         // `git-ai` commands (not the git proxy, which must stay transparent).
         // Exempt commands that must work regardless (upgrade, daemon run, help, etc.).
-        if !is_superuser_exempt_command(&cli.args) {
+        if !is_superuser_exempt_command(&args) {
             match check_superuser_guard() {
                 SuperuserCheckResult::WarnFutureBlock => print_superuser_warning(),
                 SuperuserCheckResult::AllowedWithWarning => {
@@ -87,9 +92,9 @@ fn main() {
                 SuperuserCheckResult::Allowed => {}
             }
         }
-        cli::git_ai_handlers::handle_git_ai(&cli.args);
+        cli::git_ai_handlers::handle_git_ai(&args);
         std::process::exit(0);
     }
 
-    cli::git_handlers::handle_git(&cli.args);
+    cli::git_handlers::handle_git(&args);
 }

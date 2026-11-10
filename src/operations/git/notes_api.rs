@@ -25,7 +25,7 @@ use crate::operations::git::notes_store::{
     AuthorshipNoteStore, GitNotesStore, HttpNoteStore, SqliteNoteStore, db_check_exists,
     db_read_notes,
 };
-use crate::operations::git::repository::{Repository, resolve_api_author_identity};
+use crate::operations::git::repository::Repository;
 use std::collections::{HashMap, HashSet};
 
 // Re-export CommitAuthorship so callers don't need to import from refs directly.

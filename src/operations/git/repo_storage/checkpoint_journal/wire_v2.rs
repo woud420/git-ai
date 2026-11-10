@@ -3,7 +3,7 @@ use crate::model::attribution::{Attribution, LineAttribution};
 use crate::model::working_log::{
     AgentId, Checkpoint, CheckpointKind, CheckpointLineStats, KnownHumanMetadata, WorkingLogEntry,
 };
-use serde::ser::{SerializeSeq, SerializeTuple};
+use serde::ser::SerializeTuple;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -315,11 +315,7 @@ impl Serialize for EntriesRef<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for entry in self.0 {
-            sequence.serialize_element(&EntryRef(entry))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(EntryRef))
     }
 }
 
@@ -342,11 +338,7 @@ impl Serialize for AttributionsRef<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for attribution in self.0 {
-            sequence.serialize_element(&AttributionRef(attribution))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(AttributionRef))
     }
 }
 
@@ -369,11 +361,7 @@ impl Serialize for LineAttributionsRef<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for attribution in self.0 {
-            sequence.serialize_element(&LineAttributionRef(attribution))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(LineAttributionRef))
     }
 }
 

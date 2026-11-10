@@ -368,8 +368,10 @@ fn proxy_to_git(
     }
 }
 
-// Exit mirroring the child's termination: same signal if signaled, else exit code
-fn exit_with_status(status: std::process::ExitStatus) -> ! {
+/// Exit mirroring the child's termination status, re-raising the original
+/// signal on Unix so the calling shell sees the correct termination reason
+/// (e.g. SIGPIPE from `git ai log | head`).
+pub(crate) fn exit_with_status(status: std::process::ExitStatus) -> ! {
     #[cfg(unix)]
     {
         if let Some(sig) = status.signal() {

@@ -2028,6 +2028,9 @@ fn test_update_ref_stdin_resolves_the_repository_once_for_all_moved_branches() {
         let baseline = repo.daemon_total_completion_count();
         raw_traced_git_stdin(&repo, &["update-ref", "--stdin"], &updates);
         repo.wait_for_daemon_total_completion_count(baseline, baseline + 1);
+        // The completion count can advance before the command's side effects
+        // have spawned everything; read the log once the daemon is idle.
+        repo.sync_daemon();
 
         let commands = fs::read_to_string(&log_path).unwrap();
         println!("update-ref daemon Git processes for {branch_count} branches: {commands:?}");

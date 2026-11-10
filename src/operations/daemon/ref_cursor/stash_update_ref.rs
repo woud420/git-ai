@@ -344,24 +344,16 @@ impl RefCursor {
 
     pub(super) fn apply_stash_ref_entry(&mut self, kind: &str, entry: &CursorEntry) {
         match kind {
-            "push" | "save" => {
-                if valid_non_zero_oid(&entry.new)
-                    && !self.stash_stack.iter().any(|oid| oid == &entry.new)
-                {
-                    self.stash_stack.insert(0, entry.new.clone());
-                }
-            }
+            "push" | "save" => {}
             "pop" | "drop" | "branch" => {
                 if let Some(position) = self.stash_stack.iter().position(|oid| oid == &entry.old) {
                     self.stash_stack.remove(position);
                 }
-                if valid_non_zero_oid(&entry.new)
-                    && !self.stash_stack.iter().any(|oid| oid == &entry.new)
-                {
-                    self.stash_stack.insert(0, entry.new.clone());
-                }
             }
-            _ => {}
+            _ => return,
+        }
+        if valid_non_zero_oid(&entry.new) && !self.stash_stack.iter().any(|oid| oid == &entry.new) {
+            self.stash_stack.insert(0, entry.new.clone());
         }
     }
 

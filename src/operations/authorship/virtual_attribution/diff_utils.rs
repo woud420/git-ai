@@ -1,4 +1,3 @@
-use super::blame_loader::file_exists_in_commit;
 use crate::error::GitAiError;
 use crate::model::authorship_log::LineRange;
 use crate::model::imara_diff_utils::{
@@ -113,15 +112,17 @@ pub(super) fn collect_unstaged_hunks(
     if let Some(paths) = pathspecs
         && let Ok(workdir) = repo.workdir()
     {
-        for pathspec in paths {
-            // Skip if we already found this file in git diff
-            if unstaged_hunks.contains_key(pathspec) {
-                continue;
-            }
+        // Skip files we already found in git diff
+        let candidates: Vec<&String> = paths
+            .iter()
+            .filter(|pathspec| !unstaged_hunks.contains_key(*pathspec))
+            .collect();
+        let committed = files_in_commit(repo, commit_sha, &candidates);
 
+        for pathspec in candidates {
             // Check if file exists in the commit - if it does, it's tracked and git diff should handle it
             // Only process truly untracked files (files that don't exist in the commit tree)
-            if file_exists_in_commit(repo, commit_sha, pathspec).unwrap_or(false) {
+            if committed.contains(pathspec) {
                 continue;
             }
 
@@ -145,6 +146,41 @@ pub(super) fn collect_unstaged_hunks(
     }
 
     Ok((unstaged_hunks, pure_insertion_hunks))
+}
+
+/// The subset of `paths` that are files in `commit_sha`'s tree, from one
+/// batched read instead of a tree lookup per path. The caller's path may be
+/// NFC or NFD while the tree stores the opposite form, so both normalisations
+/// are tried. A failed read reports no file as committed.
+fn files_in_commit<'a>(
+    repo: &Repository,
+    commit_sha: &str,
+    paths: &[&'a String],
+) -> HashSet<&'a String> {
+    use unicode_normalization::UnicodeNormalization;
+
+    let spellings = |path: &str| -> Vec<(String, String)> {
+        let mut spellings = vec![path.to_string()];
+        if !path.is_ascii() {
+            spellings.extend([path.nfc().collect::<String>(), path.nfd().collect()]);
+        }
+        spellings
+            .into_iter()
+            .map(|spelling| (commit_sha.to_string(), spelling))
+            .collect()
+    };
+
+    let requests: Vec<(String, String)> = paths.iter().flat_map(|path| spellings(path)).collect();
+    let found = batch_read_paths_at_treeishes(repo, &requests).unwrap_or_default();
+    paths
+        .iter()
+        .copied()
+        .filter(|path| {
+            spellings(path)
+                .iter()
+                .any(|request| found.contains_key(request))
+        })
+        .collect()
 }
 
 #[allow(clippy::type_complexity)]

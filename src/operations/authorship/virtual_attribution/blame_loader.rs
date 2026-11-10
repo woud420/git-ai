@@ -198,31 +198,3 @@ pub(super) fn get_file_content_at_commit(
         Err(_) => Ok(String::new()),
     }
 }
-
-/// Check if a file exists in a commit's tree
-pub(super) fn file_exists_in_commit(
-    repo: &Repository,
-    commit_sha: &str,
-    file_path: &str,
-) -> Result<bool, GitAiError> {
-    use unicode_normalization::UnicodeNormalization;
-
-    let commit = repo.find_commit(commit_sha.to_string())?;
-    let tree = commit.tree()?;
-    if tree.get_path(std::path::Path::new(file_path)).is_ok() {
-        return Ok(true);
-    }
-    // The caller's path may be NFC or NFD while the tree stores the opposite
-    // form.  Try both normalisations before giving up.
-    if !file_path.is_ascii() {
-        let nfc_path: String = file_path.nfc().collect();
-        if nfc_path != file_path && tree.get_path(std::path::Path::new(&nfc_path)).is_ok() {
-            return Ok(true);
-        }
-        let nfd_path: String = file_path.nfd().collect();
-        if nfd_path != file_path && tree.get_path(std::path::Path::new(&nfd_path)).is_ok() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}

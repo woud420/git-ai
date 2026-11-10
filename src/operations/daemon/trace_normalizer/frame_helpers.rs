@@ -1,7 +1,7 @@
 use crate::error::GitAiError;
 use crate::operations::daemon::trace_helpers::{
-    rfc3339_to_unix_nanos, trace_argv_primary_command, trace_token_is_git_executable,
-    trace_token_is_git_executable_ascii_case_insensitive,
+    rfc3339_to_unix_nanos, trace_args_after_command, trace_argv_primary_command,
+    trace_token_is_git_executable, trace_token_is_git_executable_ascii_case_insensitive,
 };
 use crate::operations::git::cli_parser::parse_git_cli_args;
 use crate::operations::git::repo_state::worktree_root_for_path;
@@ -100,18 +100,10 @@ pub(super) fn canonical_invocation(
     if let Some(command) = primary_command.filter(|value| !value.trim().is_empty()) {
         return (
             Some(command.to_string()),
-            args_after_command(tokens, command),
+            trace_args_after_command(tokens, command),
         );
     }
     (None, Vec::new())
-}
-
-pub(super) fn args_after_command(argv: &[String], command: &str) -> Vec<String> {
-    argv.iter()
-        .position(|arg| arg == command)
-        .and_then(|idx| argv.get(idx + 1..))
-        .map(|args| args.to_vec())
-        .unwrap_or_default()
 }
 
 pub(super) fn is_internal_cmd_name(name: &str) -> bool {

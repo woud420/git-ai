@@ -199,8 +199,8 @@ fn assert_multiple_range_blame_matches_git(args: &[&str], message: &str) {
     let spawns = std::fs::read_to_string(spawn_log).expect("read blame spawn log");
     assert_eq!(
         spawns.lines().filter(|line| *line == "blame").count(),
-        2,
-        "each invocation should use one analysis blame and one renderer-preparation blame; spawns:\n{spawns}"
+        1,
+        "one blame should serve both analysis and rendering; spawns:\n{spawns}"
     );
 }
 

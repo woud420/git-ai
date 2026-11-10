@@ -15,7 +15,7 @@ pub(super) struct BlameRenderPreparation {
     pub(super) requested_lines: Vec<u32>,
 }
 
-fn prepare_blame_hunks(hunks: Vec<BlameHunk>) -> BlameRenderPreparation {
+pub(super) fn prepare_blame_hunks(hunks: Vec<BlameHunk>) -> BlameRenderPreparation {
     let mut line_to_hunk = HashMap::new();
     for hunk in &hunks {
         for line_num in hunk.range.0..=hunk.range.1 {
@@ -156,18 +156,6 @@ impl Repository {
         let hunks = self.populate_ai_human_authors(hunks, file_path, options)?;
 
         Ok(hunks)
-    }
-
-    pub(super) fn prepare_blame_render(
-        &self,
-        file_path: &str,
-        line_ranges: &[(u32, u32)],
-        options: &GitAiBlameOptions,
-    ) -> Result<BlameRenderPreparation, GitAiError> {
-        let mut no_split_options = options.clone();
-        no_split_options.split_hunks_by_ai_author = false;
-        self.blame_hunks_for_ranges(file_path, line_ranges, &no_split_options)
-            .map(prepare_blame_hunks)
     }
 
     pub(super) fn blame_requested_abbrev_len(

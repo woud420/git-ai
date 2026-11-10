@@ -1,386 +1,124 @@
 use super::parse::parse_key_path;
-use super::spec::resolve_key;
-use crate::config::mask_api_key;
-use serde_json::Value;
+use super::spec::{config_key_specs, resolve_key};
+use crate::config::{Config, FileConfig, mask_api_key};
+use serde_json::{Value, json};
 
-pub(super) fn show_all_config() -> Result<(), String> {
-    let file_config = crate::config::load_file_config_public()?;
-
-    // Build a complete effective config representation
-    let mut effective_config = serde_json::Map::new();
-
-    // Get the actual runtime config
-    let runtime_config = crate::config::Config::get();
-
-    // Add fields with their effective values
-    effective_config.insert(
-        "git_path".to_string(),
-        Value::String(runtime_config.git_cmd().to_string()),
-    );
-
-    // Arrays
-    if let Some(ref repos) = file_config.exclude_prompts_in_repositories {
-        effective_config.insert(
-            "exclude_prompts_in_repositories".to_string(),
-            serde_json::to_value(repos).unwrap(),
-        );
-    } else {
-        effective_config.insert(
-            "exclude_prompts_in_repositories".to_string(),
-            Value::Array(vec![]),
-        );
-    }
-
-    if let Some(ref repos) = file_config.allowed_repositories {
-        effective_config.insert(
-            "allowed_repositories".to_string(),
-            serde_json::to_value(repos).unwrap(),
-        );
-    } else {
-        effective_config.insert("allowed_repositories".to_string(), Value::Array(vec![]));
-    }
-
-    if let Some(ref repos) = file_config.exclude_repositories {
-        effective_config.insert(
-            "exclude_repositories".to_string(),
-            serde_json::to_value(repos).unwrap(),
-        );
-    } else {
-        effective_config.insert("exclude_repositories".to_string(), Value::Array(vec![]));
-    }
-
-    // Booleans with runtime values
-    effective_config.insert(
-        "telemetry".to_string(),
-        Value::String(if runtime_config.telemetry_enabled() {
-            "on".to_string()
+/// The value `git-ai config <name>` prints for a top-level key, or `None` if
+/// `name` is not one. Settings without a runtime default are read from the
+/// file and are `null` (an empty list for repository patterns) while unset.
+fn top_level_value(name: &str, file_config: &FileConfig, runtime_config: &Config) -> Option<Value> {
+    let patterns = |list: &Option<Vec<String>>| json!(list.as_deref().unwrap_or_default());
+    Some(match name {
+        "git_path" => json!(runtime_config.git_cmd()),
+        "exclude_prompts_in_repositories" => patterns(&file_config.exclude_prompts_in_repositories),
+        "allowed_repositories" => patterns(&file_config.allowed_repositories),
+        "exclude_repositories" => patterns(&file_config.exclude_repositories),
+        "telemetry" => json!(if runtime_config.telemetry_enabled() {
+            "on"
         } else {
-            "off".to_string()
+            "off"
         }),
-    );
-    effective_config.insert(
-        "telemetry_oss_disabled".to_string(),
-        Value::Bool(runtime_config.is_telemetry_oss_disabled()),
-    );
-    effective_config.insert(
-        "disable_version_checks".to_string(),
-        Value::Bool(runtime_config.version_checks_disabled()),
-    );
-    effective_config.insert(
-        "disable_auto_updates".to_string(),
-        Value::Bool(runtime_config.auto_updates_disabled()),
-    );
-
-    // Optional strings
-    if let Some(ref dsn) = file_config.telemetry_enterprise_dsn {
-        effective_config.insert(
-            "telemetry_enterprise_dsn".to_string(),
-            Value::String(dsn.clone()),
-        );
-    }
-
-    effective_config.insert(
-        "update_channel".to_string(),
-        Value::String(runtime_config.update_channel().as_str().to_string()),
-    );
-
-    effective_config.insert(
-        "prompt_storage".to_string(),
-        Value::String(runtime_config.prompt_storage().to_string()),
-    );
-
-    // include_prompts_in_repositories
-    if let Some(ref repos) = file_config.include_prompts_in_repositories {
-        effective_config.insert(
-            "include_prompts_in_repositories".to_string(),
-            serde_json::to_value(repos).unwrap_or(Value::Array(vec![])),
-        );
-    }
-
-    // default_prompt_storage
-    if let Some(ref storage) = file_config.default_prompt_storage {
-        effective_config.insert(
-            "default_prompt_storage".to_string(),
-            Value::String(storage.clone()),
-        );
-    }
-
-    effective_config.insert("quiet".to_string(), Value::Bool(runtime_config.is_quiet()));
-
-    effective_config.insert(
-        "author".to_string(),
-        serde_json::to_value(runtime_config.author())
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-    );
-
-    effective_config.insert(
-        "git_ai_hooks".to_string(),
-        serde_json::to_value(runtime_config.git_ai_hooks())
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-    );
-
-    effective_config.insert(
-        "codex_hooks_format".to_string(),
-        Value::String(runtime_config.codex_hooks_format().as_str().to_string()),
-    );
-
-    effective_config.insert(
-        "allow_superuser".to_string(),
-        Value::Bool(runtime_config.allow_superuser()),
-    );
-
-    // transcript_streaming_lookback_days: runtime normalizes 0 -> None (unlimited).
-    // Surface unlimited as 0 so it round-trips through `config set`.
-    effective_config.insert(
-        "transcript_streaming_lookback_days".to_string(),
-        Value::Number(
+        "telemetry_oss" => json!(runtime_config.is_telemetry_oss_disabled()),
+        "telemetry_enterprise_dsn" => json!(file_config.telemetry_enterprise_dsn),
+        "disable_version_checks" => json!(runtime_config.version_checks_disabled()),
+        "disable_auto_updates" => json!(runtime_config.auto_updates_disabled()),
+        "update_channel" => json!(runtime_config.update_channel().as_str()),
+        // Effective flags, with defaults applied.
+        "feature_flags" => json!(runtime_config.get_feature_flags()),
+        "api_base_url" => json!(runtime_config.api_base_url()),
+        "api_key" => json!(file_config.api_key.as_deref().map(mask_api_key)),
+        "prompt_storage" => json!(runtime_config.prompt_storage()),
+        "include_prompts_in_repositories" => patterns(&file_config.include_prompts_in_repositories),
+        "default_prompt_storage" => json!(file_config.default_prompt_storage),
+        "quiet" => json!(runtime_config.is_quiet()),
+        "author" => json!(runtime_config.author()),
+        "git_ai_hooks" => json!(runtime_config.git_ai_hooks()),
+        "codex_hooks_format" => json!(runtime_config.codex_hooks_format().as_str()),
+        "allow_superuser" => json!(runtime_config.allow_superuser()),
+        // The runtime normalizes 0 to None (unlimited). Surface unlimited as
+        // 0 so it round-trips through `config set`.
+        "transcript_streaming_lookback_days" => json!(
             runtime_config
                 .transcript_streaming_lookback_days()
                 .unwrap_or(0)
-                .into(),
         ),
-    );
-
-    effective_config.insert(
-        "max_checkpoint_file_size_bytes".to_string(),
-        Value::Number(runtime_config.max_checkpoint_file_size_bytes().into()),
-    );
-    effective_config.insert(
-        "max_checkpoint_total_size_bytes".to_string(),
-        Value::Number(runtime_config.max_checkpoint_total_size_bytes().into()),
-    );
-    effective_config.insert(
-        "max_checkpoint_total_lines".to_string(),
-        Value::Number(runtime_config.max_checkpoint_total_lines().into()),
-    );
-    effective_config.insert(
-        "max_transcript_line_bytes".to_string(),
-        Value::Number(runtime_config.max_transcript_line_bytes().into()),
-    );
-    effective_config.insert(
-        "max_transcript_batch_bytes".to_string(),
-        Value::Number(runtime_config.max_transcript_batch_bytes().into()),
-    );
-    effective_config.insert(
-        "max_transcript_file_bytes".to_string(),
-        Value::Number(runtime_config.max_transcript_file_bytes().into()),
-    );
-    effective_config.insert(
-        "max_metrics_flush_chunk_bytes".to_string(),
-        Value::Number(runtime_config.max_metrics_flush_chunk_bytes().into()),
-    );
-    effective_config.insert(
-        "daemon_memory_limit_mb".to_string(),
-        runtime_config
-            .daemon_memory_limit_mb()
-            .map(|limit| Value::Number(limit.into()))
-            .unwrap_or(Value::Null),
-    );
-
-    effective_config.insert(
-        "custom_attributes".to_string(),
-        serde_json::to_value(runtime_config.custom_attributes())
-            .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-    );
-
-    // Feature flags - show effective flags with defaults applied
-    let flags_value = serde_json::to_value(runtime_config.get_feature_flags())
-        .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
-    effective_config.insert("feature_flags".to_string(), flags_value);
-
-    // API base URL
-    effective_config.insert(
-        "api_base_url".to_string(),
-        Value::String(runtime_config.api_base_url().to_string()),
-    );
-
-    // API key - show masked value if set
-    if let Some(ref key) = file_config.api_key {
-        let masked = mask_api_key(key);
-        effective_config.insert("api_key".to_string(), Value::String(masked));
-    }
-
-    // notes_backend
-    {
-        let nb = runtime_config.notes_backend();
-        let mut nb_map = serde_json::Map::new();
-        nb_map.insert(
-            "kind".to_string(),
-            Value::String(nb.kind.as_str().to_string()),
-        );
-        if let Some(ref url) = nb.backend_url {
-            nb_map.insert("backend_url".to_string(), Value::String(url.clone()));
+        "max_checkpoint_file_size_bytes" => json!(runtime_config.max_checkpoint_file_size_bytes()),
+        "max_checkpoint_total_size_bytes" => {
+            json!(runtime_config.max_checkpoint_total_size_bytes())
         }
-        effective_config.insert("notes_backend".to_string(), Value::Object(nb_map));
-    }
+        "max_checkpoint_total_lines" => json!(runtime_config.max_checkpoint_total_lines()),
+        "max_transcript_line_bytes" => json!(runtime_config.max_transcript_line_bytes()),
+        "max_transcript_batch_bytes" => json!(runtime_config.max_transcript_batch_bytes()),
+        "max_transcript_file_bytes" => json!(runtime_config.max_transcript_file_bytes()),
+        "max_metrics_flush_chunk_bytes" => json!(runtime_config.max_metrics_flush_chunk_bytes()),
+        "daemon_memory_limit_mb" => json!(runtime_config.daemon_memory_limit_mb()),
+        "custom_attributes" => json!(runtime_config.custom_attributes()),
+        "notes_backend" => json!(runtime_config.notes_backend()),
+        _ => return None,
+    })
+}
 
-    let json = serde_json::to_string_pretty(&effective_config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
+fn print_json(value: &Value) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|e| format!("Failed to serialize value: {}", e))?;
     println!("{}", json);
     Ok(())
 }
 
+pub(super) fn show_all_config() -> Result<(), String> {
+    let file_config = crate::config::load_file_config_public()?;
+    let runtime_config = Config::get();
+
+    let mut effective_config = serde_json::Map::new();
+    for spec in config_key_specs() {
+        // Settings that only exist in the file are left out while unset.
+        let unset = match spec.name {
+            "telemetry_enterprise_dsn" => file_config.telemetry_enterprise_dsn.is_none(),
+            "include_prompts_in_repositories" => {
+                file_config.include_prompts_in_repositories.is_none()
+            }
+            "default_prompt_storage" => file_config.default_prompt_storage.is_none(),
+            "api_key" => file_config.api_key.is_none(),
+            _ => false,
+        };
+        if !unset && let Some(value) = top_level_value(spec.name, &file_config, runtime_config) {
+            // The legacy key is listed under the name of the value it reports.
+            let name = match spec.name {
+                "telemetry_oss" => "telemetry_oss_disabled",
+                name => name,
+            };
+            effective_config.insert(name.to_string(), value);
+        }
+    }
+
+    print_json(&Value::Object(effective_config))
+}
+
 pub(super) fn get_config_value(key: &str) -> Result<(), String> {
     let file_config = crate::config::load_file_config_public()?;
-    let runtime_config = crate::config::Config::get();
+    let runtime_config = Config::get();
     let resolved = resolve_key(key)?;
 
     let key_path = parse_key_path(key);
 
     // Handle top-level keys
     if key_path.len() == 1 {
-        let value = match resolved.spec.name {
-            "git_path" => Value::String(runtime_config.git_cmd().to_string()),
-            "exclude_prompts_in_repositories" => {
-                if let Some(ref repos) = file_config.exclude_prompts_in_repositories {
-                    serde_json::to_value(repos).unwrap()
-                } else {
-                    Value::Array(vec![])
-                }
-            }
-            "allowed_repositories" | "allow_repositories" => {
-                if let Some(ref repos) = file_config.allowed_repositories {
-                    serde_json::to_value(repos).unwrap()
-                } else {
-                    Value::Array(vec![])
-                }
-            }
-            "exclude_repositories" => {
-                if let Some(ref repos) = file_config.exclude_repositories {
-                    serde_json::to_value(repos).unwrap()
-                } else {
-                    Value::Array(vec![])
-                }
-            }
-            "telemetry" => Value::String(if runtime_config.telemetry_enabled() {
-                "on".to_string()
-            } else {
-                "off".to_string()
-            }),
-            "telemetry_oss" => Value::Bool(runtime_config.is_telemetry_oss_disabled()),
-            "telemetry_enterprise_dsn" => {
-                if let Some(ref dsn) = file_config.telemetry_enterprise_dsn {
-                    Value::String(dsn.clone())
-                } else {
-                    Value::Null
-                }
-            }
-            "disable_version_checks" => Value::Bool(runtime_config.version_checks_disabled()),
-            "disable_auto_updates" => Value::Bool(runtime_config.auto_updates_disabled()),
-            "update_channel" => Value::String(runtime_config.update_channel().as_str().to_string()),
-            "feature_flags" => {
-                // Show effective flags with defaults applied
-                serde_json::to_value(runtime_config.get_feature_flags())
-                    .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
-            }
-            "api_base_url" => Value::String(runtime_config.api_base_url().to_string()),
-            "api_key" => {
-                if let Some(ref key) = file_config.api_key {
-                    Value::String(mask_api_key(key))
-                } else {
-                    Value::Null
-                }
-            }
-            "prompt_storage" => Value::String(runtime_config.prompt_storage().to_string()),
-            "include_prompts_in_repositories" => {
-                if let Some(ref repos) = file_config.include_prompts_in_repositories {
-                    serde_json::to_value(repos).unwrap()
-                } else {
-                    Value::Array(vec![])
-                }
-            }
-            "default_prompt_storage" => {
-                if let Some(ref storage) = file_config.default_prompt_storage {
-                    Value::String(storage.clone())
-                } else {
-                    Value::Null
-                }
-            }
-            "quiet" => Value::Bool(runtime_config.is_quiet()),
-            "author" => serde_json::to_value(runtime_config.author())
-                .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-            "git_ai_hooks" => serde_json::to_value(runtime_config.git_ai_hooks())
-                .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-            "codex_hooks_format" => {
-                Value::String(runtime_config.codex_hooks_format().as_str().to_string())
-            }
-            "allow_superuser" => Value::Bool(runtime_config.allow_superuser()),
-            "transcript_streaming_lookback_days" => Value::Number(
-                runtime_config
-                    .transcript_streaming_lookback_days()
-                    .unwrap_or(0)
-                    .into(),
-            ),
-            "max_checkpoint_file_size_bytes" => {
-                Value::Number(runtime_config.max_checkpoint_file_size_bytes().into())
-            }
-            "max_checkpoint_total_size_bytes" => {
-                Value::Number(runtime_config.max_checkpoint_total_size_bytes().into())
-            }
-            "max_checkpoint_total_lines" => {
-                Value::Number(runtime_config.max_checkpoint_total_lines().into())
-            }
-            "max_transcript_line_bytes" => {
-                Value::Number(runtime_config.max_transcript_line_bytes().into())
-            }
-            "max_transcript_batch_bytes" => {
-                Value::Number(runtime_config.max_transcript_batch_bytes().into())
-            }
-            "max_transcript_file_bytes" => {
-                Value::Number(runtime_config.max_transcript_file_bytes().into())
-            }
-            "max_metrics_flush_chunk_bytes" => {
-                Value::Number(runtime_config.max_metrics_flush_chunk_bytes().into())
-            }
-            "daemon_memory_limit_mb" => runtime_config
-                .daemon_memory_limit_mb()
-                .map(|limit| Value::Number(limit.into()))
-                .unwrap_or(Value::Null),
-            "custom_attributes" => serde_json::to_value(runtime_config.custom_attributes())
-                .unwrap_or_else(|_| Value::Object(serde_json::Map::new())),
-            "notes_backend" => {
-                let nb = runtime_config.notes_backend();
-                let mut map = serde_json::Map::new();
-                map.insert(
-                    "kind".to_string(),
-                    Value::String(nb.kind.as_str().to_string()),
-                );
-                if let Some(ref url) = nb.backend_url {
-                    map.insert("backend_url".to_string(), Value::String(url.clone()));
-                }
-                Value::Object(map)
-            }
-            _ => return Err(format!("Unknown config key: {}", key)),
-        };
-
-        let json = serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("Failed to serialize value: {}", e))?;
-        println!("{}", json);
-        return Ok(());
+        let value = top_level_value(resolved.spec.name, &file_config, runtime_config)
+            .ok_or_else(|| format!("Unknown config key: {}", key))?;
+        return print_json(&value);
     }
 
     // Handle nested keys (dot notation)
-    if resolved.root() == "feature_flags" || resolved.root() == "git_ai_hooks" {
-        let root = if resolved.root() == "feature_flags" {
-            serde_json::to_value(runtime_config.get_feature_flags())
-                .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
-        } else {
-            serde_json::to_value(runtime_config.git_ai_hooks())
-                .unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
-        };
-
+    if matches!(resolved.root(), "feature_flags" | "git_ai_hooks")
+        && let Some(root) = top_level_value(resolved.root(), &file_config, runtime_config)
+    {
         let mut current = &root;
         for segment in &key_path[1..] {
             current = current
                 .get(segment)
                 .ok_or_else(|| format!("Config key not found: {}", key))?;
         }
-
-        let json = serde_json::to_string_pretty(current)
-            .map_err(|e| format!("Failed to serialize value: {}", e))?;
-        println!("{}", json);
-        return Ok(());
+        return print_json(current);
     }
 
     if resolved.root() == "notes_backend" {
@@ -392,18 +130,11 @@ pub(super) fn get_config_value(key: &str) -> Result<(), String> {
         }
         let nb = runtime_config.notes_backend();
         let value = match key_path[1].as_str() {
-            "kind" => Value::String(nb.kind.as_str().to_string()),
-            "backend_url" => nb
-                .backend_url
-                .as_ref()
-                .map(|u| Value::String(u.clone()))
-                .unwrap_or(Value::Null),
+            "kind" => json!(nb.kind.as_str()),
+            "backend_url" => json!(nb.backend_url),
             other => return Err(format!("Unknown notes_backend field: {}", other)),
         };
-        let json = serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("Failed to serialize value: {}", e))?;
-        println!("{}", json);
-        return Ok(());
+        return print_json(&value);
     }
 
     if resolved.root() == "author" {
@@ -412,22 +143,11 @@ pub(super) fn get_config_value(key: &str) -> Result<(), String> {
         }
         let author = runtime_config.author();
         let value = match key_path[1].as_str() {
-            "name" => author
-                .name
-                .as_ref()
-                .map(|name| Value::String(name.clone()))
-                .unwrap_or(Value::Null),
-            "email" => author
-                .email
-                .as_ref()
-                .map(|email| Value::String(email.clone()))
-                .unwrap_or(Value::Null),
+            "name" => json!(author.name),
+            "email" => json!(author.email),
             other => return Err(format!("Unknown author field: {}", other)),
         };
-        let json = serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("Failed to serialize value: {}", e))?;
-        println!("{}", json);
-        return Ok(());
+        return print_json(&value);
     }
 
     if resolved.root() == "custom_attributes" {
@@ -438,15 +158,7 @@ pub(super) fn get_config_value(key: &str) -> Result<(), String> {
             );
         }
         let attr_key = key_path[1].trim();
-        let value = runtime_config
-            .custom_attributes()
-            .get(attr_key)
-            .map(|v| Value::String(v.clone()))
-            .unwrap_or(Value::Null);
-        let json = serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("Failed to serialize value: {}", e))?;
-        println!("{}", json);
-        return Ok(());
+        return print_json(&json!(runtime_config.custom_attributes().get(attr_key)));
     }
 
     Err(

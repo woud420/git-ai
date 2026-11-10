@@ -301,6 +301,7 @@ impl ActorDaemonCoordinator {
         let Some(worktree) = cmd.worktree.as_ref() else {
             return Ok(());
         };
+        let mut repo = None;
         for event in events {
             let crate::model::domain::SemanticEvent::RefUpdated {
                 reference,
@@ -317,8 +318,12 @@ impl ActorDaemonCoordinator {
             {
                 continue;
             }
-            let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-            if repo_is_ancestor(&repo, old, new) {
+            // Resolved once (a rev-parse spawn), and only if some ref qualifies.
+            let repo = match repo {
+                Some(ref repo) => repo,
+                None => &*repo.insert(find_repository_in_path(&worktree.to_string_lossy())?),
+            };
+            if repo_is_ancestor(repo, old, new) {
                 let affects_checked_out_branch = reference == "HEAD"
                     || cmd.ref_changes.iter().any(|change| {
                         change.reference == "HEAD" && change.old == *old && change.new == *new
@@ -327,7 +332,7 @@ impl ActorDaemonCoordinator {
                     if repo.storage.has_working_log(old) {
                         let author = repo.effective_author_identity().formatted_or_unknown();
                         crate::operations::authorship::post_commit::post_commit_from_working_log(
-                            &repo,
+                            repo,
                             Some(old.to_string()),
                             new.to_string(),
                             author,
@@ -338,7 +343,7 @@ impl ActorDaemonCoordinator {
                 }
             } else {
                 crate::operations::authorship::rewrite::handle_rewrite_event(
-                    &repo,
+                    repo,
                     RewriteEvent::NonFastForward {
                         old_tip: old.to_string(),
                         new_tip: new.to_string(),

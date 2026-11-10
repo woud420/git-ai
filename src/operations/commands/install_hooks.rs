@@ -508,7 +508,7 @@ async fn async_run_install(
     let installers = get_all_installers();
     let mut installed_tools: HashSet<String> = HashSet::new();
     // Track agents whose hooks were updated (name, process_names) for restart warnings
-    let mut updated_agents: Vec<(String, Vec<String>)> = Vec::new();
+    let mut updated_agents: Vec<(&str, Vec<&str>)> = Vec::new();
 
     for installer in &installers {
         let name = installer.name();
@@ -549,13 +549,9 @@ async fn async_run_install(
 
                             // Track this agent for restart detection (skip in dry-run)
                             if !options.dry_run {
-                                let pnames: Vec<String> = installer
-                                    .process_names()
-                                    .iter()
-                                    .map(|s| s.to_string())
-                                    .collect();
+                                let pnames = installer.process_names();
                                 if !pnames.is_empty() {
-                                    updated_agents.push((name.to_string(), pnames));
+                                    updated_agents.push((name, pnames));
                                 }
                             }
                         }
@@ -627,15 +623,11 @@ async fn async_run_install(
                         // Track restart detection for extras-only agents (e.g. JetBrains, VS Code)
                         if extras_changed
                             && !options.dry_run
-                            && !updated_agents.iter().any(|(n, _)| n == name)
+                            && !updated_agents.iter().any(|(n, _)| *n == name)
                         {
-                            let pnames: Vec<String> = installer
-                                .process_names()
-                                .iter()
-                                .map(|s| s.to_string())
-                                .collect();
+                            let pnames = installer.process_names();
                             if !pnames.is_empty() {
-                                updated_agents.push((name.to_string(), pnames));
+                                updated_agents.push((name, pnames));
                             }
                         }
                     }
@@ -691,8 +683,7 @@ async fn async_run_install(
         let process_list = process_list_snapshot();
 
         for (agent_name, pnames) in &updated_agents {
-            let refs: Vec<&str> = pnames.iter().map(|s| s.as_str()).collect();
-            let pids = find_running_pids(&process_list, &refs);
+            let pids = find_running_pids(&process_list, pnames);
             if !pids.is_empty() {
                 if !any_running {
                     println!(

@@ -2,8 +2,11 @@ use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::resolve_editor_cli;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::hooks_merge::{
-    MissingBehavior, edit_settings_json, is_git_ai_checkpoint_command,
+    MissingBehavior, edit_settings_json, is_git_ai_checkpoint_command, parse_json,
     upsert_singleton_command_hook,
+};
+use crate::operations::mdm::hooks_merge_flat::{
+    has_command, has_flat_hook, remove_command_hooks_flat,
 };
 use crate::operations::mdm::paths::home_dir;
 
@@ -47,7 +50,7 @@ impl WindsurfInstaller {
             hooks_path,
             dry_run,
             MissingBehavior::TreatAsEmpty,
-            |content| Ok(serde_json::from_str(content)?),
+            parse_json,
             |merged| {
                 let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
 
@@ -85,35 +88,8 @@ impl WindsurfInstaller {
             hooks_path,
             dry_run,
             MissingBehavior::NoOp,
-            |content| Ok(serde_json::from_str(content)?),
-            |merged| {
-                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
-                    return;
-                };
-
-                let mut changed = false;
-                for event in HOOK_EVENTS {
-                    if let Some(event_array) =
-                        hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut())
-                    {
-                        let original_len = event_array.len();
-                        event_array.retain(|item| {
-                            if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-                                !is_git_ai_checkpoint_command(cmd)
-                            } else {
-                                true
-                            }
-                        });
-                        if event_array.len() != original_len {
-                            changed = true;
-                        }
-                    }
-                }
-
-                if changed && let Some(root) = merged.as_object_mut() {
-                    root.insert("hooks".to_string(), hooks_obj);
-                }
-            },
+            parse_json,
+            |merged| remove_command_hooks_flat(merged, HOOK_EVENTS, is_git_ai_checkpoint_command),
         )
     }
 }
@@ -153,19 +129,9 @@ impl HookInstaller for WindsurfInstaller {
             let existing: Value = serde_json::from_str(&content).unwrap_or_else(|_| json!({}));
 
             let has_hooks = HOOK_EVENTS.iter().all(|event| {
-                existing
-                    .get("hooks")
-                    .and_then(|h| h.get(*event))
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter().any(|item| {
-                            item.get("command")
-                                .and_then(|c| c.as_str())
-                                .map(is_git_ai_checkpoint_command)
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
+                has_flat_hook(&existing, event, |item| {
+                    has_command(item, is_git_ai_checkpoint_command)
+                })
             });
 
             if has_hooks {

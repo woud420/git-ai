@@ -4,6 +4,7 @@ use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
 use crate::operations::mdm::hook_installer::{
     HookCheckResult, HookInstaller, HookInstallerParams, InstallResult,
 };
+use crate::operations::mdm::hooks_merge_flat::has_flat_hook;
 use crate::operations::mdm::paths::{home_dir, normalize_windows_path_for_shell};
 use crate::operations::mdm::version::{
     MIN_CODE_VERSION, get_editor_version, parse_version, version_meets_requirement,
@@ -145,43 +146,22 @@ impl HookInstaller for GitHubCopilotInstaller {
         let pre_desired = Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_PRE_TOOL_CMD);
         let post_desired = Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_POST_TOOL_CMD);
 
-        let has_pre_installed = existing
-            .get("hooks")
-            .and_then(|h| h.get("PreToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().any(Self::is_github_copilot_checkpoint_hook))
-            .unwrap_or(false);
-
-        let has_post_installed = existing
-            .get("hooks")
-            .and_then(|h| h.get("PostToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().any(Self::is_github_copilot_checkpoint_hook))
-            .unwrap_or(false);
-
-        let has_pre_up_to_date = existing
-            .get("hooks")
-            .and_then(|h| h.get("PreToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .any(|hook| Self::hook_has_desired_command(hook, &pre_desired))
+        let installed = |hook_name| {
+            has_flat_hook(
+                &existing,
+                hook_name,
+                Self::is_github_copilot_checkpoint_hook,
+            )
+        };
+        let up_to_date = |hook_name, desired: &Value| {
+            has_flat_hook(&existing, hook_name, |hook| {
+                Self::hook_has_desired_command(hook, desired)
             })
-            .unwrap_or(false);
-
-        let has_post_up_to_date = existing
-            .get("hooks")
-            .and_then(|h| h.get("PostToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .any(|hook| Self::hook_has_desired_command(hook, &post_desired))
-            })
-            .unwrap_or(false);
+        };
 
         Ok(HookCheckResult::installed(
-            has_pre_installed || has_post_installed,
-            has_pre_up_to_date && has_post_up_to_date,
+            installed("PreToolUse") || installed("PostToolUse"),
+            up_to_date("PreToolUse", &pre_desired) && up_to_date("PostToolUse", &post_desired),
         ))
     }
 

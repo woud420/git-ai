@@ -2003,3 +2003,43 @@ fn test_update_ref_stdin_head_with_new_content_preserves_attribution() {
 
     assert_note_has_ai_for_file(&repo, &commit_sha, "stdin.txt");
 }
+
+#[test]
+fn test_update_ref_stdin_resolves_the_repository_once_for_all_moved_branches() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut rev_parse_counts = Vec::new();
+    for branch_count in [1, 4] {
+        let log_path = temp.path().join(format!("spawns-{branch_count}.log"));
+        let repo =
+            TestRepo::new_with_daemon_env(&[("GIT_AI_SPAWN_LOG", log_path.to_str().unwrap())]);
+        setup_initial_commit(&repo);
+        let old = head_sha(&repo);
+        fs::write(repo.path().join("next.txt"), "next\n").unwrap();
+        repo.stage_all_and_commit("next commit").unwrap();
+        let new = head_sha(&repo);
+        let mut updates = String::new();
+        for index in 0..branch_count {
+            raw_untraced_git(&repo, &["branch", &format!("moved-{index}"), &old]);
+            updates.push_str(&format!("update refs/heads/moved-{index} {new} {old}\n"));
+        }
+
+        repo.sync_daemon();
+        fs::write(&log_path, "").unwrap();
+        let baseline = repo.daemon_total_completion_count();
+        raw_traced_git_stdin(&repo, &["update-ref", "--stdin"], &updates);
+        repo.wait_for_daemon_total_completion_count(baseline, baseline + 1);
+
+        let commands = fs::read_to_string(&log_path).unwrap();
+        println!("update-ref daemon Git processes for {branch_count} branches: {commands:?}");
+        rev_parse_counts.push(
+            commands
+                .lines()
+                .filter(|command| *command == "rev-parse")
+                .count(),
+        );
+    }
+    assert_eq!(
+        rev_parse_counts[0], rev_parse_counts[1],
+        "repository lookups must not repeat per moved branch"
+    );
+}

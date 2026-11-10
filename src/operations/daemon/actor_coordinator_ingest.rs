@@ -149,21 +149,14 @@ impl ActorDaemonCoordinator {
     ///
     /// Sequence numbers are allocated only after `enqueue_trace_payload` has
     /// reserved queue capacity, so the `processed_trace_ingest_seq` watermark
-    /// used by checkpoint drain waits advances without unqueued gaps.
+    /// used by checkpoint drain waits advances without unqueued gaps, and
+    /// read-only invocations never perturb the ingest sequence counter.
+    ///
+    /// Along the way this tracks the trace2 root metadata needed for ordering
+    /// and the read-only fast path. It deliberately does not read mutable
+    /// repository state or inject daemon-derived repository/ref snapshots
+    /// into the trace payload.
     pub(crate) fn prepare_trace_payload_for_ingest(&self, payload: &mut Value) -> bool {
-        // Check read-only status BEFORE allocating a sequence number so that
-        // read-only invocations never perturb the ingest sequence counter.
-        let is_read_only = self.track_trace_payload_for_ingest(payload);
-        if is_read_only {
-            return false;
-        }
-        true
-    }
-
-    /// Tracks trace2 root metadata needed for ordering and read-only fast paths.
-    /// This deliberately does not read mutable repository state or inject
-    /// daemon-derived repository/ref snapshots into the trace payload.
-    pub(crate) fn track_trace_payload_for_ingest(&self, payload: &mut Value) -> bool {
         let event = payload
             .get("event")
             .and_then(Value::as_str)
@@ -175,7 +168,7 @@ impl ActorDaemonCoordinator {
             .unwrap_or_default()
             .to_string();
         if sid.is_empty() {
-            return false;
+            return true;
         }
 
         let root = trace_root_sid(&sid).to_string();
@@ -203,10 +196,10 @@ impl ActorDaemonCoordinator {
 
         let mut ingress = match self.trace_ingress_state.lock() {
             Ok(guard) => guard,
-            Err(_) => return false,
+            Err(_) => return true,
         };
         if sid != root && ingress.completed_roots.contains(&root) {
-            return true;
+            return false;
         }
         let known_read_only_root = ingress.root_definitely_read_only.contains(&root);
         ingress
@@ -359,6 +352,6 @@ impl ActorDaemonCoordinator {
             }
         }
 
-        read_only_root
+        !read_only_root
     }
 }

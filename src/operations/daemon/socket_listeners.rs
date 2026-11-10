@@ -270,31 +270,12 @@ pub fn trace_listener_loop_actor(
                 coordinator.clone(),
                 &mut observed_roots,
             ) {
-                Ok(TraceConnectionBootstrap::Eof) => {
-                    if let Err(error) =
-                        finalize_trace_connection_roots(coordinator.clone(), observed_roots)
-                    {
-                        tracing::debug!(
-                            %error,
-                            "trace connection close bookkeeping error"
-                        );
-                    }
-                    continue;
-                }
-                Ok(TraceConnectionBootstrap::Stop) => {
-                    if let Err(error) =
-                        finalize_trace_connection_roots(coordinator.clone(), observed_roots)
-                    {
-                        tracing::debug!(
-                            %error,
-                            "trace connection close bookkeeping error"
-                        );
-                    }
-                    continue;
-                }
                 Ok(TraceConnectionBootstrap::Continue) => {}
-                Err(error) => {
-                    tracing::debug!(%error, "trace connection bootstrap error");
+                // Eof, Stop and a bootstrap error all end the connection here.
+                ended => {
+                    if let Err(error) = ended {
+                        tracing::debug!(%error, "trace connection bootstrap error");
+                    }
                     if let Err(error) =
                         finalize_trace_connection_roots(coordinator.clone(), observed_roots)
                     {

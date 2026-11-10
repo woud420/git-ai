@@ -131,6 +131,15 @@ fn link_skill_dir(target: &PathBuf, link_path: &PathBuf) -> Result<(), GitAiErro
                 .map(|m| m.file_type().is_symlink())
                 .unwrap_or(false)
         {
+            // Unix installs are symlinks, so a real directory is the user's
+            // own skill; only Windows installs are copies to be refreshed.
+            if cfg!(unix) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "a directory git-ai did not create already exists there",
+                )
+                .into());
+            }
             fs::remove_dir_all(link_path)?;
         } else {
             fs::remove_file(link_path)?;
@@ -164,6 +173,7 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), GitAiError> {
 }
 
 /// Remove a skill link (symlink on Unix, copied directory on Windows) if it exists.
+/// A real directory on Unix is the user's own skill and is left in place.
 fn remove_skill_link(link_path: &PathBuf) -> Result<(), GitAiError> {
     if link_path.symlink_metadata().is_ok() {
         let is_symlink = link_path
@@ -172,7 +182,7 @@ fn remove_skill_link(link_path: &PathBuf) -> Result<(), GitAiError> {
             .unwrap_or(false);
         if is_symlink {
             fs::remove_file(link_path)?;
-        } else if link_path.is_dir() {
+        } else if cfg!(windows) && link_path.is_dir() {
             fs::remove_dir_all(link_path)?;
         }
     }
@@ -378,8 +388,11 @@ mod tests {
         );
     }
 
+    /// Unix installs are symlinks, so a real directory at the link path is the
+    /// user's own skill and must survive. Windows installs are copies, which
+    /// are refreshed in place.
     #[test]
-    fn test_link_skill_dir_replaces_existing_directory() {
+    fn test_link_skill_dir_replaces_only_directories_git_ai_created() {
         let tmp = tempfile::tempdir().unwrap();
         let source = tmp.path().join("source-skill");
         fs::create_dir_all(&source).unwrap();
@@ -389,12 +402,15 @@ mod tests {
         fs::create_dir_all(&link).unwrap();
         fs::write(link.join("SKILL.md"), "old content").unwrap();
 
-        link_skill_dir(&source, &link).unwrap();
+        let result = link_skill_dir(&source, &link);
 
-        assert_eq!(
-            fs::read_to_string(link.join("SKILL.md")).unwrap(),
+        assert_eq!(result.is_err(), cfg!(unix));
+        let expected = if cfg!(unix) {
+            "old content"
+        } else {
             "new content"
-        );
+        };
+        assert_eq!(fs::read_to_string(link.join("SKILL.md")).unwrap(), expected);
     }
 
     #[test]
@@ -442,15 +458,16 @@ mod tests {
         assert_eq!(fs::read_link(&link).unwrap(), source);
     }
 
+    /// Only Windows installs are copied directories; see the link test above.
     #[test]
-    fn test_remove_skill_link_removes_directory() {
+    fn test_remove_skill_link_removes_only_directories_git_ai_created() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("skill-dir");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("SKILL.md"), "content").unwrap();
 
         remove_skill_link(&dir).unwrap();
-        assert!(!dir.exists());
+        assert_eq!(dir.exists(), cfg!(unix));
     }
 
     #[cfg(unix)]

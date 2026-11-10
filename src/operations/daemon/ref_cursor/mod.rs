@@ -59,6 +59,8 @@ mod tests_rebase_cherry_pick;
 mod tests_reflog_rebase;
 #[cfg(test)]
 mod tests_reset_update_ref;
+#[cfg(test)]
+mod tests_span_walk;
 
 #[cfg(test)]
 mod tests_continuation;

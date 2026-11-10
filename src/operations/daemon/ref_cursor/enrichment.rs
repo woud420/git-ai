@@ -442,26 +442,20 @@ impl RefCursor {
         let old = first.old.clone();
         let mut new = first.new.clone();
         let mut changes = vec![entry_to_ref_change(&first)];
-        let mut next_start = first.end_offset;
         self.mark_entry_consumed(&first);
 
+        let rest = if limit > 1 {
+            Self::entries_after(&first)?
+        } else {
+            Vec::new()
+        };
+        let mut rest = rest.iter();
         while changes.len() < limit
-            && let Some(next) = self.find_head_entry_after(
-                cmd.worktree.as_deref(),
-                next_start,
-                message_prefixes,
-                ExpectedTransition {
-                    old_oids: [new.clone()].into_iter().collect(),
-                    new_oid: None,
-                    messages: HashSet::new(),
-                    allow_identity: false,
-                },
-            )?
+            && let Some(next) = self.next_span_entry(&mut rest, &new, message_prefixes)
         {
             new = next.new.clone();
-            next_start = next.end_offset;
-            self.mark_entry_consumed(&next);
-            changes.push(entry_to_ref_change(&next));
+            self.mark_entry_consumed(next);
+            changes.push(entry_to_ref_change(next));
         }
         self.compact_consumed_entries(&first.key, &first.path, &first.reference)?;
 
@@ -572,29 +566,5 @@ impl RefCursor {
             message_prefixes,
             false,
         )
-    }
-
-    pub(super) fn find_head_entry_after(
-        &mut self,
-        worktree: Option<&Path>,
-        start_offset: u64,
-        message_prefixes: &[&str],
-        expected: ExpectedTransition,
-    ) -> Result<Option<CursorEntry>, GitAiError> {
-        let Some(worktree) = worktree else {
-            return Ok(None);
-        };
-        let Some(git_dir) = git_dir_for_worktree(worktree) else {
-            return Ok(None);
-        };
-        let key = head_key(&git_dir);
-        let path = git_dir.join("logs").join("HEAD");
-        Ok(read_reflog_entries(key, &path, "HEAD", Some(start_offset))?
-            .into_iter()
-            .find(|entry| {
-                !self.entry_consumed(entry)
-                    && expected.matches(entry)
-                    && message_matches(&entry.message, message_prefixes)
-            }))
     }
 }

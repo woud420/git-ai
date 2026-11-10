@@ -6,7 +6,7 @@ use super::parse::{
 };
 use super::pattern::{log_array_changes, resolve_repository_value, set_repository_array_field};
 use super::spec::resolve_key;
-use crate::config::mask_api_key;
+use crate::config::{UpdateChannel, mask_api_key};
 use serde_json::Value;
 
 pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String> {
@@ -83,15 +83,12 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                 println!("[disable_auto_updates]: {}", bool_value);
             }
             "update_channel" => {
-                // Validate update channel
-                if value != "latest" && value != "next" {
-                    return Err(
-                        "Invalid update_channel value. Expected 'latest' or 'next'".to_string()
-                    );
-                }
-                file_config.update_channel = Some(value.to_string());
+                let channel = UpdateChannel::from_str(value).ok_or_else(|| {
+                    "Invalid update_channel value. Expected 'latest', 'next', 'enterprise-latest', or 'enterprise-next'".to_string()
+                })?;
+                file_config.update_channel = Some(channel.as_str().to_string());
                 crate::config::save_file_config(&file_config)?;
-                println!("[update_channel]: {}", value);
+                println!("[update_channel]: {}", channel.as_str());
             }
             "feature_flags" => {
                 if add_mode {

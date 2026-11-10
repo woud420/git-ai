@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 mod git_path_environment;
+mod notes_backend;
 mod transcript_budgets;
 
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.

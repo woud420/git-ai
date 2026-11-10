@@ -167,10 +167,11 @@ pub(super) fn mask_api_key(key: &str) -> String {
 /// Parse notes backend kind from a string value
 pub(super) fn parse_notes_backend_kind(value: &str) -> Result<NotesBackendKind, String> {
     match value.trim().to_lowercase().as_str() {
+        "sqlite" => Ok(NotesBackendKind::Sqlite),
         "git_notes" | "git-notes" => Ok(NotesBackendKind::GitNotes),
         "http" => Ok(NotesBackendKind::Http),
         _ => Err(format!(
-            "Invalid notes_backend.kind '{}'. Expected 'git_notes' or 'http'",
+            "Invalid notes_backend.kind '{}'. Expected 'sqlite', 'git_notes', or 'http'",
             value
         )),
     }

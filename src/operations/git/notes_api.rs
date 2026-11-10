@@ -473,57 +473,14 @@ mod tests {
         }
     }
 
-    /// With kind=GitNotes (default), read_note_blob_oids delegates to git.
-    /// Verified by building with an empty repo — returns Ok(empty) with no panic.
+    /// The raw git-notes lookup returns Ok for an empty commit list.
     #[test]
-    fn git_notes_backend_read_note_blob_oids_delegates_to_git() {
+    fn note_blob_oids_for_commits_accepts_empty_commit_list() {
         use crate::operations::git::test_utils::TmpRepo;
-        // Default config is GitNotes — no override needed.
         let tmp = TmpRepo::new().expect("TmpRepo::new");
         let result =
             crate::operations::git::refs::note_blob_oids_for_commits(tmp.gitai_repo(), &[]);
         assert!(result.is_ok());
-    }
-
-    /// With kind=Http, the public read_note_blob_oids returns an empty map
-    /// because notes live in notes-db, not in git refs.
-    #[test]
-    #[serial_test::serial]
-    fn http_backend_read_note_blob_oids_returns_empty_map() {
-        use crate::operations::git::test_utils::TmpRepo;
-
-        let old = std::env::var("GIT_AI_NOTES_BACKEND_KIND").ok();
-        unsafe {
-            std::env::set_var("GIT_AI_NOTES_BACKEND_KIND", "http");
-        }
-
-        let tmp = TmpRepo::new().expect("TmpRepo::new");
-        // Use Config::fresh() so it picks up the env var, then call the refs function
-        // through the kind check inline.
-        let kind = crate::config::Config::fresh().notes_backend_kind();
-        let result: Result<HashMap<String, String>, _> = match kind {
-            crate::config::NotesBackendKind::Sqlite | crate::config::NotesBackendKind::Http => {
-                Ok(HashMap::new())
-            }
-            crate::config::NotesBackendKind::GitNotes => {
-                crate::operations::git::refs::note_blob_oids_for_commits(
-                    tmp.gitai_repo(),
-                    &["abc".to_string()],
-                )
-            }
-        };
-
-        // Restore env before asserting (so a panic doesn't leave the env dirty).
-        match old {
-            Some(v) => unsafe { std::env::set_var("GIT_AI_NOTES_BACKEND_KIND", v) },
-            None => unsafe { std::env::remove_var("GIT_AI_NOTES_BACKEND_KIND") },
-        }
-
-        assert!(result.is_ok());
-        assert!(
-            result.unwrap().is_empty(),
-            "Http backend should return empty map from read_note_blob_oids"
-        );
     }
 
     /// Integration test: with kind=Http, `write_note` upserts into `notes-db`

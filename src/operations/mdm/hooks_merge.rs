@@ -99,57 +99,44 @@ pub fn edit_settings_json(
     Ok(Some(diff_output))
 }
 
-/// Ensure exactly one git-ai checkpoint command (identified via
-/// `is_git_ai_checkpoint_command` on each entry's `"command"`) exists in
-/// `array`: replace a differing match with `desired_hook`, dedup any further
-/// matches down to one, or append `desired_hook` if none exist. Shared by the
-/// catch-all matcher installers' dedup step and by Windsurf's flat per-event
-/// hook arrays.
+/// Ensure exactly one entry matched by `is_ours` exists in `array`: the first
+/// match is kept and handed to `refresh` with `desired_hook` (to bring a stale
+/// entry up to date), any further matches are dropped, and `desired_hook` is
+/// appended if there is no match.
+pub fn upsert_singleton_hook(
+    array: &mut Vec<Value>,
+    desired_hook: Value,
+    is_ours: impl Fn(&Value) -> bool,
+    refresh: impl FnOnce(&mut Value, Value),
+) {
+    let Some(keep_idx) = array.iter().position(&is_ours) else {
+        array.push(desired_hook);
+        return;
+    };
+    refresh(&mut array[keep_idx], desired_hook);
+
+    let mut idx = 0;
+    array.retain(|item| {
+        let keep = idx == keep_idx || !is_ours(item);
+        idx += 1;
+        keep
+    });
+}
+
+/// [`upsert_singleton_hook`] for entries whose `"command"` is a git-ai
+/// checkpoint command: a match with a command other than `desired_cmd` is
+/// replaced by `desired_hook`. Shared by the catch-all matcher installers'
+/// dedup step and by Windsurf's flat per-event hook arrays.
 pub fn upsert_singleton_command_hook(
     array: &mut Vec<Value>,
     desired_cmd: &str,
     desired_hook: Value,
 ) {
-    let mut found_idx: Option<usize> = None;
-    let mut needs_update = false;
-
-    for (idx, item) in array.iter().enumerate() {
-        if let Some(cmd) = item.get("command").and_then(|c| c.as_str())
-            && is_git_ai_checkpoint_command(cmd)
-            && found_idx.is_none()
-        {
-            found_idx = Some(idx);
-            if cmd != desired_cmd {
-                needs_update = true;
-            }
+    upsert_singleton_hook(array, desired_hook, is_git_ai_hook, |existing, desired| {
+        if existing.get("command").and_then(|c| c.as_str()) != Some(desired_cmd) {
+            *existing = desired;
         }
-    }
-
-    match found_idx {
-        Some(idx) => {
-            if needs_update {
-                array[idx] = desired_hook;
-            }
-            let keep_idx = idx;
-            let mut current_idx = 0;
-            array.retain(|item| {
-                if current_idx == keep_idx {
-                    current_idx += 1;
-                    true
-                } else if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-                    let is_dup = is_git_ai_checkpoint_command(cmd);
-                    current_idx += 1;
-                    !is_dup
-                } else {
-                    current_idx += 1;
-                    true
-                }
-            });
-        }
-        None => {
-            array.push(desired_hook);
-        }
-    }
+    });
 }
 
 /// Ensure exactly one git-ai checkpoint command lives in the `"*"` catch-all

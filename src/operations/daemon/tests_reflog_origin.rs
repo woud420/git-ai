@@ -156,11 +156,17 @@ async fn read_only_roots_do_not_resolve_their_repository() {
     // An IDE-style status names its repository on both frames; neither is
     // queued and nothing reads a read-only root's repository context.
     for mut frame in frames("reader", "status") {
+        let received = frame.clone();
         assert!(!coord.prepare_trace_payload_for_ingest(&mut frame));
+        assert_eq!(frame, received, "a dropped frame is left as received");
     }
-    for mut frame in frames("writer", "commit") {
-        assert!(coord.prepare_trace_payload_for_ingest(&mut frame));
-    }
+    let [mut start, mut def_repo] = frames("writer", "commit");
+    assert!(coord.prepare_trace_payload_for_ingest(&mut start));
+    assert!(coord.prepare_trace_payload_for_ingest(&mut def_repo));
+    // A queued frame inherits the root's argv unless it carries its own.
+    assert!(start.get(TRACE_ROOT_ARGV_FIELD).is_none());
+    assert_eq!(def_repo[TRACE_ROOT_ARGV_FIELD], start["argv"]);
+    assert!(def_repo[TRACE_ROOT_STARTED_AT_NS_FIELD].is_u64());
     let ingress = coord.trace_ingress_state.lock().unwrap();
     assert!(ingress.root_definitely_read_only.contains("reader"));
     assert!(!ingress.root_families.contains_key("reader"));

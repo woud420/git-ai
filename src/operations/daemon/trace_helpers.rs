@@ -51,7 +51,6 @@ pub fn def_repo_is_secondary(payload: &Value) -> bool {
 
 pub fn trace_payload_worktree_hint(payload: &Value) -> Option<PathBuf> {
     let normalize = |path: PathBuf| worktree_root_for_path(&path).unwrap_or(path);
-    let argv = trace_payload_argv(payload);
     let event = payload
         .get("event")
         .and_then(Value::as_str)
@@ -83,6 +82,7 @@ pub fn trace_payload_worktree_hint(payload: &Value) -> Option<PathBuf> {
     {
         return Some(normalize(PathBuf::from(path)));
     }
+    let argv = trace_payload_argv(payload);
     if let Some(cwd) = payload.get("cwd").and_then(Value::as_str)
         && let Some(base_dir) = trace_payload_command_base_dir(payload, &argv, Path::new(cwd))
     {
@@ -110,9 +110,6 @@ pub fn trace_payload_worktree_hint(payload: &Value) -> Option<PathBuf> {
             return None;
         }
         idx += 1;
-    }
-    if argv.is_empty() {
-        return None;
     }
     None
 }

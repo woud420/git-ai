@@ -5,7 +5,7 @@ use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub struct DroidPreset;
 
@@ -168,21 +168,11 @@ impl AgentPreset for DroidPreset {
         _hook_input: &str,
         events: &mut [ParsedHookEvent],
     ) -> Result<(), GitAiError> {
-        for event in events {
-            let Some(context) = event.preset_context_mut() else {
-                continue;
-            };
-            let Some(path) = context.metadata.get("settings_path") else {
-                continue;
-            };
-            context.agent_id.model =
-                crate::operations::streams::model_extraction::extract_model_from_droid_settings(
-                    Path::new(path),
-                )
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "unknown".to_string());
-        }
+        super::enrich_model_from_metadata_path(
+            events,
+            "settings_path",
+            crate::operations::streams::model_extraction::extract_model_from_droid_settings,
+        );
 
         Ok(())
     }

@@ -26,7 +26,7 @@ use crate::error::GitAiError;
 use crate::model::working_log::AgentId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Re-export the checkpoint-wire stream types from model so that preset files
 // that import via `super::StreamFormat` / `super::StreamSource` keep working.
@@ -134,6 +134,27 @@ pub trait AgentPreset {
     ) -> Result<(), GitAiError> {
         let _ = (hook_input, events);
         Ok(())
+    }
+}
+
+/// Shared `enrich_authorized_events` body: set each event's model from the
+/// file its `metadata[path_key]` names, or `"unknown"` if `extract` finds none.
+fn enrich_model_from_metadata_path<E>(
+    events: &mut [ParsedHookEvent],
+    path_key: &str,
+    extract: impl Fn(&Path) -> Result<Option<String>, E>,
+) {
+    for event in events {
+        let Some(context) = event.preset_context_mut() else {
+            continue;
+        };
+        let Some(path) = context.metadata.get(path_key) else {
+            continue;
+        };
+        context.agent_id.model = extract(Path::new(path))
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "unknown".to_string());
     }
 }
 

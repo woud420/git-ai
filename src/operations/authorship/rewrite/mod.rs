@@ -227,24 +227,7 @@ pub(crate) fn handle_rewrite_event_with_metrics(
             new_commits,
         } => {
             let mappings: Vec<(String, String)> = sources.into_iter().zip(new_commits).collect();
-            if mappings.is_empty() {
-                return Ok(RewriteOutcome::empty());
-            }
-            let source_shas: Vec<String> = mappings.iter().map(|(src, _)| src.clone()).collect();
-            crate::operations::git::sync_authorship::fetch_missing_notes_for_commits_best_effort(
-                repo,
-                &source_shas,
-            );
-            let shifted_notes =
-                note_shift::shift_authorship_notes_merging_existing_with_notes(repo, &mappings)?;
-            if !rewrite_metrics_enabled() {
-                return Ok(RewriteOutcome::empty());
-            }
-            let metric_commits =
-                metric_commits_from_mappings(&mappings, RewriteMetricOperation::CherryPick);
-            Ok(RewriteOutcome::from_metric_commits(
-                attach_authorship_notes(metric_commits, shifted_notes),
-            ))
+            shift_notes_for_mappings(repo, &mappings, RewriteMetricOperation::CherryPick)
         }
     }
 }
@@ -259,6 +242,16 @@ pub(crate) fn handle_non_fast_forward_rewrite_with_operation(
 ) -> Result<RewriteOutcome, GitAiError> {
     let mappings =
         range_diff::derive_mappings_from_range_diff(repo, old_tip, new_tip, onto, rebase_range)?;
+    shift_notes_for_mappings(repo, &mappings, operation)
+}
+
+/// Migrate the notes of exact `(source, new)` commit pairs and report the
+/// rewritten commits for metrics.
+fn shift_notes_for_mappings(
+    repo: &Repository,
+    mappings: &[(String, String)],
+    operation: RewriteMetricOperation,
+) -> Result<RewriteOutcome, GitAiError> {
     if mappings.is_empty() {
         return Ok(RewriteOutcome::empty());
     }
@@ -268,11 +261,11 @@ pub(crate) fn handle_non_fast_forward_rewrite_with_operation(
         &source_shas,
     );
     let shifted_notes =
-        note_shift::shift_authorship_notes_merging_existing_with_notes(repo, &mappings)?;
+        note_shift::shift_authorship_notes_merging_existing_with_notes(repo, mappings)?;
     if !rewrite_metrics_enabled() {
         return Ok(RewriteOutcome::empty());
     }
-    let metric_commits = metric_commits_from_mappings(&mappings, operation);
+    let metric_commits = metric_commits_from_mappings(mappings, operation);
     Ok(RewriteOutcome::from_metric_commits(
         attach_authorship_notes(metric_commits, shifted_notes),
     ))

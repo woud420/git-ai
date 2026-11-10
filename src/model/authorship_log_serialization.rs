@@ -5,6 +5,8 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fmt};
 
 mod metadata_merge;
+#[cfg(test)]
+mod path_quoting_tests;
 
 /// Authorship log format version identifier
 pub const AUTHORSHIP_LOG_VERSION: &str = "authorship/3.0.0";
@@ -164,7 +166,6 @@ impl AuthorshipLog {
 
         // Write attestation section
         for file_attestation in &self.attestations {
-            // Quote file names that contain spaces or whitespace
             let file_path = if needs_quoting(&file_attestation.file_path) {
                 format!("\"{}\"", file_attestation.file_path)
             } else {
@@ -228,17 +229,7 @@ impl Default for AuthorshipLog {
 /// Sorts ranges first: Single ranges by their value, Range ones by their lowest bound
 fn format_line_ranges(ranges: &[LineRange]) -> String {
     let mut sorted_ranges = ranges.to_vec();
-    sorted_ranges.sort_by(|a, b| {
-        let a_start = match a {
-            LineRange::Single(line) => *line,
-            LineRange::Range(start, _) => *start,
-        };
-        let b_start = match b {
-            LineRange::Single(line) => *line,
-            LineRange::Range(start, _) => *start,
-        };
-        a_start.cmp(&b_start)
-    });
+    sorted_ranges.sort_by_key(|range| range.inclusive_bounds().0);
 
     sorted_ranges
         .iter()
@@ -320,8 +311,9 @@ fn parse_attestation_section(
             }
 
             // Parse file path, handling quoted paths
-            let file_path = if line.starts_with('"') && line.ends_with('"') {
-                // Quoted path - remove quotes (no unescaping needed since quotes aren't allowed in file names)
+            let file_path = if line.len() >= 2 && line.starts_with('"') && line.ends_with('"') {
+                // Quoted path - remove the outer quotes (a path that itself looks
+                // quoted is written with a second pair, so nothing is unescaped)
                 line[1..line.len() - 1].to_string()
             } else {
                 // Unquoted path
@@ -342,9 +334,12 @@ fn parse_attestation_section(
     Ok(attestations)
 }
 
-/// Check if a file path needs quoting (contains spaces or whitespace)
+/// Check if a file path needs quoting: it contains whitespace, or written bare
+/// it would be read back as a quoted path or as the `---` divider.
 fn needs_quoting(path: &str) -> bool {
-    path.contains(' ') || path.contains('\t') || path.contains('\n')
+    path.contains([' ', '\t', '\n'])
+        || path == "---"
+        || (path.starts_with('"') && path.ends_with('"'))
 }
 
 fn tool_agent_hash_hex(agent_id: &str, tool: &str) -> String {

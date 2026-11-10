@@ -39,7 +39,7 @@ pub fn handle_git_ai(args: &[String]) {
     // per-PID log files.
     //
     // Skip for commands that must work without a running background service
-    // (help, version, config, d management, debug, upgrade) so users can
+    // (help, version, config, d management, debug, upgrade, uninstall) so users can
     // always diagnose and recover from a broken state.
     let needs_daemon =
         crate::cli::daemon_preconnect::command_requires_daemon_preconnect(args[0].as_str());
@@ -54,9 +54,6 @@ pub fn handle_git_ai(args: &[String]) {
                     "error: failed to connect to git-ai background service: {}",
                     err
                 );
-                if args[0].as_str() == "checkpoint" {
-                    std::process::exit(0);
-                }
                 std::process::exit(1);
             }
         }

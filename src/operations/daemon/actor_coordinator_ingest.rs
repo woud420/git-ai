@@ -180,12 +180,20 @@ impl ActorDaemonCoordinator {
 
         let root = trace_root_sid(&sid).to_string();
         let argv = trace_payload_argv(payload);
-        let worktree_hint = trace_payload_worktree_hint(payload);
         let started_at_ns = trace_payload_time_ns(payload);
         let early_primary =
             trace_payload_primary_command(payload).or_else(|| trace_argv_primary_command(&argv));
         let event_is_read_only =
             trace_invocation_is_definitely_read_only(early_primary.as_deref(), &argv);
+        let root_start = event == "start" && sid == root;
+        // Nothing reads the repository of a read-only root: its frames are
+        // never queued and the family fences skip it. The root's own start
+        // frame settles that here; later frames learn it under the lock.
+        let worktree_hint = if root_start && !argv.is_empty() && event_is_read_only {
+            None
+        } else {
+            trace_payload_worktree_hint(payload)
+        };
 
         let mut ingress = match self.trace_ingress_state.lock() {
             Ok(guard) => guard,
@@ -194,11 +202,12 @@ impl ActorDaemonCoordinator {
         if sid != root && ingress.completed_roots.contains(&root) {
             return true;
         }
+        let known_read_only_root = ingress.root_definitely_read_only.contains(&root);
         ingress
             .root_last_activity_ns
             .insert(root.clone(), now_unix_nanos() as u64);
 
-        if event == "start" && sid == root {
+        if root_start {
             ingress.roots_seen_own_start.insert(root.clone());
             let started_at_ns = started_at_ns.unwrap_or_else(now_unix_nanos);
             ingress
@@ -207,7 +216,7 @@ impl ActorDaemonCoordinator {
                 .or_insert(started_at_ns);
         }
 
-        if let Some(worktree) = worktree_hint.clone() {
+        if !known_read_only_root && let Some(worktree) = worktree_hint.clone() {
             if let Some(common_dir) = common_dir_for_worktree(&worktree) {
                 let family =
                     crate::operations::git::canonicalize::canonicalize_or_self(&common_dir);
@@ -218,7 +227,7 @@ impl ActorDaemonCoordinator {
             ingress.root_worktrees.insert(root.clone(), worktree);
         }
 
-        if event == "start" && sid == root && !argv.is_empty() {
+        if root_start && !argv.is_empty() {
             ingress.root_argv.insert(root.clone(), argv.clone());
             if event_is_read_only {
                 ingress.root_definitely_read_only.insert(root.clone());
@@ -277,8 +286,7 @@ impl ActorDaemonCoordinator {
                 .insert(root.clone(), offsets);
         }
 
-        let read_only_root =
-            event_is_read_only || ingress.root_definitely_read_only.contains(&root);
+        let read_only_root = event_is_read_only || known_read_only_root;
         let inherited = (
             ingress.root_argv.get(&root).cloned(),
             ingress.root_started_at_ns.get(&root).copied(),

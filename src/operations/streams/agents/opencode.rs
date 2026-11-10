@@ -4,10 +4,9 @@ pub use super::opencode_checkpoint::open_sqlite_readonly;
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::{TimestampWatermark, WatermarkStrategy};
 use crate::operations::streams::agent::{Agent, StreamDescriptor};
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::file_time_fallback;
 use std::path::Path;
-use std::time::Duration;
 
 mod budget;
 mod reader;
@@ -66,10 +65,6 @@ impl Agent for OpenCodeAgent {
 
     fn batch_size_hint(&self) -> usize {
         self.batch_size
-    }
-
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
     }
 
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
@@ -157,15 +152,6 @@ mod tests {
         StreamAdapterContractCapabilities, StreamAdapterFixture, assert_stream_adapter_contract,
         drain_stream,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = OpenCodeAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     pub(super) fn create_test_db(path: &std::path::Path, message_count: usize) {
         if path.exists() {

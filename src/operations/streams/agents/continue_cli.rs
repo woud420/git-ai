@@ -7,10 +7,9 @@ use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_s
 use crate::operations::streams::reader::{
     JsonArrayStreamSpec, RecordIndexAdvancePolicy, read_json_array_stream,
 };
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::file_time_fallback;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Continue CLI agent that reads Continue JSON transcript files.
 ///
@@ -88,10 +87,6 @@ impl Agent for ContinueAgent {
         self.batch_size
     }
 
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-    }
-
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
         Ok(discover_path_sessions(
             "continue-cli",
@@ -149,15 +144,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, rewritten_file_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = ContinueAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_continue_json(count: usize) -> String {
         let items: Vec<String> = (0..count)

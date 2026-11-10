@@ -6,10 +6,9 @@ use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::mdm::paths::codex_home_dir;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Codex agent that reads Codex JSONL transcript files.
 pub struct CodexAgent {
@@ -184,10 +183,6 @@ impl Agent for CodexAgent {
         self.batch_size
     }
 
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-    }
-
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
         Ok(discover_path_sessions(
             "codex",
@@ -263,15 +258,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = CodexAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_jsonl_line(i: usize) -> String {
         format!(

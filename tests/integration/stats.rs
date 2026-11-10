@@ -750,6 +750,25 @@ fn test_stats_ignore_flag_is_additive_to_defaults() {
 }
 
 #[test]
+fn test_stats_ignore_accepts_a_long_pattern_before_any_revision() {
+    let repo = TestRepo::new();
+    repo.filename("README.md")
+        .set_contents(crate::lines!["# Repo"]);
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    repo.filename("src/main.rs")
+        .set_contents(crate::lines!["fn main() {}".ai()]);
+    repo.filename("docs/keep.txt")
+        .set_contents(crate::lines!["this line is human"]);
+    repo.stage_all_and_commit("Add docs and source").unwrap();
+
+    // A first pattern of seven or more characters used to be mistaken for a
+    // commit SHA, leaving `--ignore` without any pattern.
+    let ignored = stats_from_args(&repo, &["stats", "--json", "--ignore", "docs/keep.txt"]);
+    assert_eq!(ignored.git_diff_added_lines, 1);
+}
+
+#[test]
 fn test_stats_range_uses_default_ignores() {
     let repo = TestRepo::new();
     repo.filename("README.md")

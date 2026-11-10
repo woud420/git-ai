@@ -28,9 +28,8 @@ use daemon_log_upload::{
 };
 pub(crate) use daemon_log_upload::{EmergencyLogUploadStatus, upload_emergency_daemon_log};
 use metrics_flush::{
-    METRICS_UPLOAD_AVAILABLE, count_pending_metrics_for_await, flush_metrics,
-    flush_pending_metrics, metrics_store, spawn_metrics_metadata_backfill,
-    store_metrics_in_db_with,
+    METRICS_UPLOAD_AVAILABLE, count_pending_metrics_for_await, flush_pending_metrics,
+    metrics_store, spawn_metrics_metadata_backfill, store_metrics_in_db_with,
 };
 use notes_flush::{flush_notes_for_await, flush_notes_with};
 use sentry_posthog::flush_sentry_and_posthog;
@@ -53,7 +52,7 @@ type InternalDbHandle =
 /// Result of a telemetry flush cycle.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FlushStatus {
-    /// Approximate buffered + pending metrics still awaiting upload.
+    /// Approximate number of metrics still awaiting upload.
     pub metrics_remaining: usize,
     /// Approximate number of notes still eligible for upload.
     pub notes_remaining: usize,
@@ -177,31 +176,21 @@ impl DaemonTelemetryWorkerHandle {
     /// Returns the current number of metrics waiting for upload.
     ///
     /// Used by the transcript worker for backpressure: if SQLite pending rows
-    /// or the legacy in-memory buffer are above a threshold, the worker yields
-    /// to let the flush loop drain them. Returns `usize::MAX` when the buffer
-    /// lock is contended, so callers default to "wait" rather than "push more".
+    /// are above a threshold, the worker yields to let the flush loop drain
+    /// them. Returns `usize::MAX` when the metrics DB lock is contended, so
+    /// callers default to "wait" rather than "push more".
     pub fn metrics_buffer_len(&self) -> usize {
-        let buffered = self
-            .buffer
-            .try_lock()
-            .map(|buf| buf.metrics.len())
-            .unwrap_or(usize::MAX);
-        if buffered == usize::MAX {
-            return usize::MAX;
-        }
-
         if !METRICS_UPLOAD_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed) {
-            return buffered;
+            return 0;
         }
 
-        let pending = match metrics_store(self.stores) {
+        match metrics_store(self.stores) {
             Ok(db) => match db.try_lock() {
                 Ok(db) => db.count_retryable().unwrap_or(usize::MAX),
                 Err(_) => usize::MAX,
             },
             Err(_) => 0,
-        };
-        buffered.saturating_add(pending)
+        }
     }
 
     /// Flush pending notes synchronously (for the FlushNotes control-request arm).
@@ -474,11 +463,6 @@ fn flush_telemetry_batch(
 ) -> Vec<DaemonLogEvent> {
     let config = crate::config::Config::get();
     let distinct_id = get_or_create_distinct_id();
-
-    // Flush metrics (always processed — uploaded or stored in SQLite)
-    if !batch.metrics.is_empty() {
-        flush_metrics(&batch.metrics, stores);
-    }
 
     // Flush Sentry events (errors, performance, messages)
     let has_sentry_or_posthog =

@@ -589,14 +589,13 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     // Check if original commit has existing authorship data. Read through
     // notes_api so the HTTP notes backend is honored (the note may only exist
     // in the notes-db cache, not refs/notes/ai).
-    let has_existing_data =
-        crate::operations::git::notes_api::read_authorship_v3(repo, original_commit)
-            .map(|log| {
-                !log.metadata.prompts.is_empty()
-                    || !log.metadata.humans.is_empty()
-                    || !log.metadata.sessions.is_empty()
-            })
-            .unwrap_or(false);
+    let original_log =
+        crate::operations::git::notes_api::read_authorship_v3(repo, original_commit).ok();
+    let has_existing_data = original_log.as_ref().is_some_and(|log| {
+        !log.metadata.prompts.is_empty()
+            || !log.metadata.humans.is_empty()
+            || !log.metadata.sessions.is_empty()
+    });
 
     let working_va = crate::tokio_runtime::block_on(async {
         VirtualAttributions::from_working_log_for_commit_snapshot(
@@ -659,13 +658,11 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     )?;
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();
 
-    // Preserve human/session metadata from the original commit's note. Read
-    // through notes_api so the HTTP notes backend is honored — with refs-only
-    // reads the amended note keeps its s_/h_ attestation hashes but silently
-    // loses the sessions/humans records they resolve through.
-    if let Ok(original_log) =
-        crate::operations::git::notes_api::read_authorship_v3(repo, original_commit)
-    {
+    // Preserve human/session metadata from the original commit's note (read
+    // above through notes_api so the HTTP notes backend is honored — with
+    // refs-only reads the amended note keeps its s_/h_ attestation hashes but
+    // silently loses the sessions/humans records they resolve through).
+    if let Some(original_log) = original_log {
         for (id, record) in original_log.metadata.humans {
             authorship_log.metadata.humans.entry(id).or_insert(record);
         }

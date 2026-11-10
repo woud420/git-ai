@@ -430,6 +430,34 @@ impl RefCursor {
             .insert(entry.end_offset, ReflogAnchor::from(entry));
     }
 
+    /// Reflog rows recorded after `first`, read once so a span walk can follow
+    /// its chain in memory instead of re-reading the reflog for every row.
+    pub(super) fn entries_after(first: &CursorEntry) -> Result<Vec<CursorEntry>, GitAiError> {
+        read_reflog_entries(
+            first.key.clone(),
+            &first.path,
+            &first.reference,
+            Some(first.end_offset),
+        )
+    }
+
+    /// Advances `rest` to the next row of a span: the first unconsumed row
+    /// that continues from `tip` with one of `message_prefixes`. Rows passed
+    /// over are not revisited, as when each step searched the reflog from the
+    /// end of the previous row.
+    pub(super) fn next_span_entry<'a>(
+        &self,
+        rest: &mut std::slice::Iter<'a, CursorEntry>,
+        tip: &str,
+        message_prefixes: &[&str],
+    ) -> Option<&'a CursorEntry> {
+        rest.find(|entry| {
+            !self.entry_consumed(entry)
+                && entry.old == tip
+                && message_matches(&entry.message, message_prefixes)
+        })
+    }
+
     pub(super) fn advance_cursor_to_entry(&mut self, entry: &CursorEntry) {
         self.offsets.insert(entry.key.clone(), entry.end_offset);
         self.anchors

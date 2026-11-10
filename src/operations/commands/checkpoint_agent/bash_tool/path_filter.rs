@@ -6,6 +6,7 @@ use crate::operations::authorship::ignore::{
     default_ignore_patterns, load_git_ai_ignore_patterns_from_path,
     load_linguist_generated_patterns_from_path,
 };
+use crate::operations::git::repo_state::git_dir_for_worktree;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::collections::HashMap;
 use std::fs;
@@ -28,35 +29,13 @@ pub fn normalize_path(p: &Path) -> PathBuf {
 // Git-dir / index helpers
 // ---------------------------------------------------------------------------
 
-/// Resolve the `.git` directory path for a repo (handles worktrees).
-fn get_git_dir(repo_root: &Path) -> Result<PathBuf, GitAiError> {
-    let args = vec![
-        "-C".to_string(),
-        repo_root.to_string_lossy().into_owned(),
-        "rev-parse".to_string(),
-        "--git-dir".to_string(),
-    ];
-    let output = crate::clients::git_cli::exec_git_allow_nonzero(&args)?;
-    if !output.status.success() {
-        return Err(GitAiError::Generic(
-            "git rev-parse --git-dir failed".to_string(),
-        ));
-    }
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if Path::new(&s).is_absolute() {
-        Ok(PathBuf::from(s))
-    } else {
-        Ok(repo_root.join(s))
-    }
-}
-
 /// Return the mtime of `.git/index` as nanoseconds since the UNIX epoch.
 ///
 /// Used as a cold-start watermark proxy when the daemon has no worktree
 /// watermark yet.  Only called when `wm = Some(w)` with `w.worktree = None`,
 /// so passing `wm = None` (tests, non-daemon mode) always bypasses this.
 pub fn git_index_mtime_ns(repo_root: &Path) -> Option<u128> {
-    let git_dir = get_git_dir(repo_root).ok()?;
+    let git_dir = git_dir_for_worktree(repo_root)?;
     let index_path = git_dir.join("index");
     let mtime = fs::metadata(&index_path).ok()?.modified().ok()?;
     Some(system_time_to_nanos(mtime))
@@ -128,4 +107,64 @@ pub fn should_include_new_file(gitignore: &Gitignore, path: &Path, is_dir: bool)
     // exclude files nested inside that directory (e.g. `secrets/token.txt`).
     let matched = gitignore.matched_path_or_any_parents(path, is_dir);
     !matched.is_ignore()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operations::git::test_utils::TmpRepo;
+    use std::time::{Duration, SystemTime};
+
+    /// The index must be the one git itself uses, including where `.git` is a
+    /// `gitdir:` pointer file (linked worktree, submodule).
+    #[test]
+    fn git_index_mtime_ns_reads_the_index_git_uses() {
+        let repo = TmpRepo::new().unwrap();
+        repo.write_file("f", "x", true).unwrap();
+        repo.commit_all("init").unwrap();
+        let library = TmpRepo::new().unwrap();
+        library.commit_all("init").unwrap();
+
+        let linked = repo.path().join("linked");
+        let submodule = repo.path().join("sub");
+        repo.git_command(&["worktree", "add", linked.to_str().unwrap()])
+            .unwrap();
+        let library_url = library.path().to_str().unwrap();
+        repo.git_command(&[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            library_url,
+            "sub",
+        ])
+        .unwrap();
+
+        for (n, root) in [repo.path(), &linked, &submodule].into_iter().enumerate() {
+            let index = repo
+                .git_command(&[
+                    "-C",
+                    root.to_str().unwrap(),
+                    "rev-parse",
+                    "--git-path",
+                    "index",
+                ])
+                .unwrap();
+            // Distinct, known mtimes so reading a sibling's index cannot pass.
+            let stamp = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 * (n as u64 + 1));
+            fs::File::options()
+                .write(true)
+                .open(root.join(index.trim()))
+                .unwrap()
+                .set_modified(stamp)
+                .unwrap();
+
+            assert_eq!(
+                git_index_mtime_ns(root),
+                Some(system_time_to_nanos(stamp)),
+                "{}",
+                root.display()
+            );
+        }
+    }
 }

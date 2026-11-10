@@ -6,7 +6,8 @@
 //!  - `origin = 'queue'` — HTTP-backend rows: `synced = 0` pending upload,
 //!    `synced = 1` uploaded (kept as read cache)
 //!  - `origin = 'cache'` — read-cache rows imported from the remote backend or
-//!    from `refs/notes/ai`; evictable
+//!    from `refs/notes/ai`; evictable. Rewritten by an HTTP-backend write they
+//!    are pending upload (`synced = 0`) exactly like a queue row
 //!
 //! Rows are NEVER deleted on successful upload — they are retained as the local
 //! read cache so that subsequent reads can be served without git or a network call.
@@ -66,6 +67,13 @@ ON CONFLICT(commit_sha) DO UPDATE SET
     next_retry_at  = CASE WHEN notes.content = excluded.content THEN notes.next_retry_at ELSE excluded.next_retry_at END,
     updated_at     = excluded.updated_at
 "#;
+
+/// Rows `dequeue_pending` may take at time `?1`. `count_pending_uploadable`
+/// shares it so it never counts a row that would not be dequeued. Any
+/// non-local unsynced row qualifies: besides queue rows, that is a cache row
+/// whose content was rewritten through the queue path.
+const UPLOADABLE_ROWS: &str = "synced = 0 AND origin != 'local' \
+    AND processing_started_at IS NULL AND next_retry_at <= ?1 AND attempts < 6";
 
 /// Global singleton for the notes database.
 static NOTES_DB: OnceLock<Mutex<NotesDatabase>> = OnceLock::new();
@@ -296,16 +304,10 @@ impl NotesDatabase {
         // Select eligible rows first, then lock them. Two-step approach avoids
         // UPDATE ... RETURNING which requires SQLite 3.35+.
         let shas: Vec<String> = {
-            let mut stmt = self.conn.prepare(
-                r#"SELECT commit_sha FROM notes
-                   WHERE synced = 0
-                     AND origin = 'queue'
-                     AND processing_started_at IS NULL
-                     AND next_retry_at <= ?1
-                     AND attempts < 6
-                   ORDER BY next_retry_at
-                   LIMIT ?2"#,
-            )?;
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT commit_sha FROM notes WHERE {UPLOADABLE_ROWS} \
+                 ORDER BY next_retry_at LIMIT ?2"
+            ))?;
             let rows = stmt.query_map(params![now, batch_size as i64], |row| {
                 row.get::<_, String>(0)
             })?;
@@ -393,11 +395,7 @@ impl NotesDatabase {
     pub fn count_pending_uploadable(&self) -> Result<usize, GitAiError> {
         let now = unix_now();
         let count: i64 = self.conn.query_row(
-            r#"SELECT COUNT(*) FROM notes
-               WHERE synced = 0
-                 AND processing_started_at IS NULL
-                 AND next_retry_at <= ?1
-                 AND attempts < 6"#,
+            &format!("SELECT COUNT(*) FROM notes WHERE {UPLOADABLE_ROWS}"),
             params![now],
             |row| row.get(0),
         )?;
@@ -742,6 +740,32 @@ mod tests {
             .unwrap();
 
         assert_eq!(db.count_pending_uploadable().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_rewritten_cache_row_is_queued_for_upload() {
+        let (mut db, _tmp) = create_test_db();
+        db.cache_synced_notes(&[("sha".to_string(), "remote".to_string())])
+            .unwrap();
+
+        db.upsert_note("sha", "rewritten").unwrap();
+
+        assert_eq!(db.count_pending_uploadable().unwrap(), 1);
+        let pending = db.dequeue_pending(10).unwrap();
+        assert_eq!(pending.len(), 1, "a rewritten cache row must be uploaded");
+        assert_eq!(pending[0].content, "rewritten");
+    }
+
+    #[test]
+    fn test_count_pending_uploadable_ignores_rows_dequeue_never_takes() {
+        let (mut db, _tmp) = create_test_db();
+        db.upsert_local_note("sha", "local").unwrap();
+
+        // A queue-path rewrite leaves a local-primary row local: never uploaded.
+        db.upsert_note("sha", "rewritten").unwrap();
+
+        assert!(db.dequeue_pending(10).unwrap().is_empty());
+        assert_eq!(db.count_pending_uploadable().unwrap(), 0);
     }
 
     // --- cache_synced_notes ---

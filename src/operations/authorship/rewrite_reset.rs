@@ -2,8 +2,9 @@ use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::model::hunk_shift::{DiffHunk, apply_hunk_shifts_to_line_attributions};
-use crate::operations::authorship::rewrite::compute_diff_trees_batch;
+use crate::operations::authorship::rewrite::{
+    compute_diff_trees_batch, list_commits_in_range, shift_authorship_log,
+};
 use crate::operations::git::notes_api;
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 use std::collections::HashMap;
@@ -80,14 +81,14 @@ pub fn reconstruct_working_log_after_backward_reset(
     let mut humans: std::collections::BTreeMap<String, HumanRecord> =
         std::collections::BTreeMap::new();
 
-    for (commit_sha, log) in &commit_logs {
-        let hunks_by_file: Option<&HashMap<String, Vec<DiffHunk>>> = diff_idx_by_sha
-            .get(commit_sha.as_str())
-            .map(|&idx| &diff_results[idx].hunks_by_file);
+    for (commit_sha, mut log) in commit_logs {
+        // Renames first, then hunk shifts: the diff is keyed by old_tip's paths.
+        if let Some(&idx) = diff_idx_by_sha.get(commit_sha.as_str()) {
+            shift_authorship_log(&mut log, &diff_results[idx]);
+        }
 
-        extract_attributions_from_log_shifted(
-            log,
-            hunks_by_file,
+        merge_log_attributions(
+            &log,
             &mut file_attributions,
             &mut prompts,
             &mut sessions,
@@ -158,37 +159,25 @@ pub fn reconstruct_working_log_after_backward_reset(
     Ok(())
 }
 
-fn extract_attributions_from_log_shifted(
+/// Merge a log that is already in old_tip's coordinate space into the
+/// accumulated attributions. Later commits override earlier ones for
+/// overlapping line ranges.
+fn merge_log_attributions(
     log: &AuthorshipLog,
-    hunks_by_file: Option<&HashMap<String, Vec<DiffHunk>>>,
     file_attributions: &mut HashMap<String, Vec<LineAttribution>>,
     prompts: &mut HashMap<String, PromptRecord>,
     sessions: &mut std::collections::BTreeMap<String, SessionRecord>,
     humans: &mut std::collections::BTreeMap<String, HumanRecord>,
 ) {
     for fa in &log.attestations {
-        let mut raw_attrs: Vec<LineAttribution> = Vec::new();
-        for entry in &fa.entries {
-            for range in &entry.line_ranges {
-                let (start, end) = range.inclusive_bounds();
-                raw_attrs.push(LineAttribution::new(start, end, entry.hash.clone(), None));
-            }
-        }
-
-        // Shift line numbers to old_tip's coordinate space if we have hunks for this file
-        let shifted = if let Some(all_hunks) = hunks_by_file
-            && let Some(file_hunks) = all_hunks.get(&fa.file_path)
-            && !file_hunks.is_empty()
-        {
-            apply_hunk_shifts_to_line_attributions(&raw_attrs, file_hunks)
-        } else {
-            raw_attrs
-        };
-
-        // Merge into accumulated attributions. Later commits override earlier ones
-        // for overlapping line ranges.
         let existing = file_attributions.entry(fa.file_path.clone()).or_default();
-        for new_attr in shifted {
+        let new_attrs = fa.entries.iter().flat_map(|entry| {
+            entry.line_ranges.iter().map(|range| {
+                let (start, end) = range.inclusive_bounds();
+                LineAttribution::new(start, end, entry.hash.clone(), None)
+            })
+        });
+        for new_attr in new_attrs {
             // Remove any existing attributions that are fully covered by this new one
             existing.retain(|old| {
                 !(old.start_line >= new_attr.start_line && old.end_line <= new_attr.end_line)
@@ -249,10 +238,6 @@ fn extract_attributions_from_log_shifted(
     }
 }
 
-fn list_commits_in_range(repo: &Repository, base: &str, tip: &str) -> Vec<String> {
-    crate::operations::authorship::rewrite::list_commits_in_range(repo, base, tip)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,9 +270,8 @@ mod tests {
 
         // Oldest commit first: human owns lines 1..=10 of f.txt.
         let old_log = log_with_single_entry("f.txt", "h_old", 1, 10);
-        extract_attributions_from_log_shifted(
+        merge_log_attributions(
             &old_log,
-            None,
             &mut file_attributions,
             &mut prompts,
             &mut sessions,
@@ -296,9 +280,8 @@ mod tests {
 
         // Later commit: AI owns lines 4..=6 (strictly inside the human range).
         let new_log = log_with_single_entry("f.txt", "ai_new", 4, 6);
-        extract_attributions_from_log_shifted(
+        merge_log_attributions(
             &new_log,
-            None,
             &mut file_attributions,
             &mut prompts,
             &mut sessions,

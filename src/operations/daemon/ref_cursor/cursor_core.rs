@@ -109,12 +109,13 @@ impl RefCursor {
         message_prefixes: &[&str],
     ) -> Result<Option<CursorEntry>, GitAiError> {
         let path = self.common_dir().join("logs").join(reference);
-        self.find_entry_in_log(
+        self.find_entry_in_log_with_hint(
             common_key(reference),
             &path,
             reference,
             expected,
             message_prefixes,
+            true,
         )
     }
 
@@ -133,17 +134,6 @@ impl RefCursor {
             message_prefixes,
             false,
         )
-    }
-
-    pub(super) fn find_entry_in_log(
-        &mut self,
-        key: String,
-        path: &Path,
-        reference: &str,
-        expected: ExpectedTransition,
-        message_prefixes: &[&str],
-    ) -> Result<Option<CursorEntry>, GitAiError> {
-        self.find_entry_in_log_with_hint(key, path, reference, expected, message_prefixes, true)
     }
 
     pub(super) fn find_entry_in_log_with_hint(
@@ -394,13 +384,7 @@ impl RefCursor {
     }
 
     pub(super) fn reflog_path_for_key(&self, key: &str) -> Option<PathBuf> {
-        if let Some(reference) = key.strip_prefix("common:") {
-            return Some(self.common_dir().join("logs").join(reference));
-        }
-        let git_dir = key
-            .strip_prefix("worktree:")
-            .and_then(|value| value.strip_suffix(":HEAD"))?;
-        Some(PathBuf::from(git_dir).join("logs").join("HEAD"))
+        reflog_reference_and_path_for_key(&self.common_dir(), key).map(|(_, path)| path)
     }
 
     pub(super) fn ref_tip_at_cursor_start(&self, key: &str) -> Option<String> {

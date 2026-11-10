@@ -163,7 +163,8 @@ impl RefCursor {
         if offset == 0 {
             return Ok(0);
         }
-        let Some(path) = self.reflog_path_for_key(key) else {
+        let Some((reference, path)) = reflog_reference_and_path_for_key(&self.common_dir(), key)
+        else {
             return Ok(offset);
         };
         let Some(spec) = self.cold_seed_match_spec(cmd) else {
@@ -175,12 +176,7 @@ impl RefCursor {
         match spec {
             ColdSeedMatchSpec::SingleEntry { expected, prefixes } => {
                 let prefix_refs = prefixes.iter().map(String::as_str).collect::<Vec<_>>();
-                let reference = if let Some(reference) = key.strip_prefix("common:") {
-                    reference.to_string()
-                } else {
-                    "HEAD".to_string()
-                };
-                let entries = read_reflog_entries(key.to_string(), &path, &reference, None)?;
+                let entries = read_reflog_entries(key.to_string(), &path, reference, None)?;
                 let earliest_own = entries
                     .into_iter()
                     .filter(|entry| {
@@ -201,22 +197,16 @@ impl RefCursor {
                     return Ok(offset);
                 }
                 let prefix_refs = prefixes.iter().map(String::as_str).collect::<Vec<_>>();
-                let reference = if let Some(reference) = key.strip_prefix("common:") {
-                    reference.to_string()
-                } else {
-                    "HEAD".to_string()
-                };
-                let entries = read_reflog_entries(key.to_string(), &path, &reference, None)?;
+                let entries = read_reflog_entries(key.to_string(), &path, reference, None)?;
                 Ok(
                     head_span_start_near_offset(&entries, offset, &prefix_refs, expected, limit)
                         .unwrap_or(offset),
                 )
             }
-            ColdSeedMatchSpec::PullSpan { action, expected } => {
-                self.clamp_seed_to_pull_span_entry(key, &path, offset, &action, expected)
-            }
+            ColdSeedMatchSpec::PullSpan { action, expected } => self
+                .clamp_seed_to_pull_span_entry(key, &path, reference, offset, &action, expected),
             ColdSeedMatchSpec::RebaseSpan { expected } => {
-                self.clamp_seed_to_rebase_span_entry(key, &path, offset, expected)
+                self.clamp_seed_to_rebase_span_entry(key, &path, reference, offset, expected)
             }
         }
     }
@@ -225,16 +215,12 @@ impl RefCursor {
         &self,
         key: &str,
         path: &Path,
+        reference: &str,
         offset: u64,
         action: &str,
         expected: ExpectedTransition,
     ) -> Result<u64, GitAiError> {
-        let reference = if let Some(reference) = key.strip_prefix("common:") {
-            reference.to_string()
-        } else {
-            "HEAD".to_string()
-        };
-        let entries = read_reflog_entries_including_noops(key.to_string(), path, &reference, None)?;
+        let entries = read_reflog_entries_including_noops(key.to_string(), path, reference, None)?;
         let prefixes = pull_reflog_message_prefixes(action);
         let prefix_refs = prefixes.iter().map(String::as_str).collect::<Vec<_>>();
 
@@ -252,15 +238,11 @@ impl RefCursor {
         &self,
         key: &str,
         path: &Path,
+        reference: &str,
         offset: u64,
         expected: ExpectedTransition,
     ) -> Result<u64, GitAiError> {
-        let reference = if let Some(reference) = key.strip_prefix("common:") {
-            reference.to_string()
-        } else {
-            "HEAD".to_string()
-        };
-        let entries = read_reflog_entries_including_noops(key.to_string(), path, &reference, None)?;
+        let entries = read_reflog_entries_including_noops(key.to_string(), path, reference, None)?;
         if key.starts_with("common:") {
             return Ok(
                 clamp_seed_to_entry_containing_offset(&entries, offset, &["rebase"])
@@ -485,9 +467,9 @@ impl RefCursor {
         let path = git_dir.join("logs").join("HEAD");
         let key = head_key(&git_dir);
         let start = self.reflog_start_offset(&key, &path)?;
+        let hint = self.command_start_hints.get(&key).copied();
         let entries = read_reflog_entries(key, &path, "HEAD", start)?;
         let mut contiguous = VecDeque::<CursorEntry>::new();
-        let hint = self.command_start_hints.get(&head_key(&git_dir)).copied();
         let mut latest_before_hint: Option<CursorEntry> = None;
 
         for entry in entries {
@@ -536,12 +518,13 @@ impl RefCursor {
             return Ok(None);
         };
         let path = git_dir.join("logs").join("HEAD");
-        self.find_entry_in_log(
+        self.find_entry_in_log_with_hint(
             head_key(&git_dir),
             &path,
             "HEAD",
             expected,
             message_prefixes,
+            true,
         )
     }
 

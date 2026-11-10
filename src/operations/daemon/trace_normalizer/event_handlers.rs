@@ -109,14 +109,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
         Ok(None)
     }
 
-    pub(super) fn handle_def_param(
-        &mut self,
-        _payload: &Value,
-        _root_sid: &str,
-    ) -> Result<Option<NormalizedCommand>, GitAiError> {
-        Ok(None)
-    }
-
     pub(super) fn handle_def_repo(
         &mut self,
         payload: &Value,
@@ -211,7 +203,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
                 pending.family_key = Some(family.clone());
             }
         }
-        self.refresh_pending_mutation_capture(root_sid)?;
+        self.warm_pending_alias_resolution(root_sid)?;
         Ok(None)
     }
 
@@ -259,14 +251,14 @@ impl<B: GitBackend> TraceNormalizer<B> {
                     .insert(root_sid.to_string(), cmd);
                 return Ok(None);
             }
-            self.refresh_pending_mutation_capture(root_sid)?;
+            self.warm_pending_alias_resolution(root_sid)?;
             return Ok(None);
         }
 
         if let Some(pending) = self.state.pending.get_mut(root_sid) {
             pending.observed_child_commands.push(cmd);
         }
-        self.refresh_pending_mutation_capture(root_sid)?;
+        self.warm_pending_alias_resolution(root_sid)?;
         Ok(None)
     }
 
@@ -279,8 +271,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
         is_atexit: bool,
     ) -> Result<Option<NormalizedCommand>, GitAiError> {
         if sid != root_sid {
-            let _ = payload;
-            let _ = finished_at_ns;
             return Ok(None);
         }
         if self.is_completed_root(root_sid) {

@@ -130,16 +130,6 @@ pub(super) fn worktree_from_argv(argv: &[String]) -> Option<PathBuf> {
     None
 }
 
-pub(super) fn command_may_mutate_refs(primary_command: Option<&str>, raw_argv: &[String]) -> bool {
-    primary_command.is_some_and(|command| {
-        let (_invoked_command, invoked_args) = canonical_invocation(raw_argv, Some(command));
-        crate::operations::git::command_classification::git_invocation_may_mutate_repo_state(
-            command,
-            &invoked_args,
-        )
-    })
-}
-
 pub(super) fn select_primary_command(
     root_cmd_name: Option<&str>,
     observed_child_commands: &[String],

@@ -12,7 +12,7 @@ mod frame_helpers;
 mod index_write;
 mod transport_targets;
 
-use frame_helpers::{command_may_mutate_refs, payload_timestamp_ns, select_primary_command};
+use frame_helpers::{payload_timestamp_ns, select_primary_command};
 
 #[cfg(test)]
 mod tests_bisect;
@@ -150,38 +150,27 @@ impl<B: GitBackend> TraceNormalizer<B> {
         Ok(selected)
     }
 
-    pub(super) fn refresh_pending_mutation_capture(
-        &mut self,
-        root_sid: &str,
-    ) -> Result<(), GitAiError> {
-        let (primary_hint, raw_argv) = {
-            let pending = match self.state.pending.get(root_sid) {
-                Some(pending) => pending,
-                None => return Ok(()),
-            };
-
-            let (Some(worktree), Some(family)) =
-                (pending.worktree.as_deref(), pending.family_key.as_ref())
-            else {
-                return Ok(());
-            };
-
-            (
-                self.resolve_primary_hint(
-                    pending.root_cmd_name.as_deref(),
-                    &pending.observed_child_commands,
-                    &pending.raw_argv,
-                    Some(worktree),
-                    Some(family),
-                )?,
-                pending.raw_argv.clone(),
-            )
-        };
-        if !command_may_mutate_refs(primary_hint.as_deref(), &raw_argv) {
+    /// Resolves the root's alias hint once its repository is known and drops
+    /// the result; finalization resolves it again. The early lookup stays
+    /// because it is observable: an alias-config failure is reported on this
+    /// frame, and the backend's stale-while-revalidate alias cache is warmed
+    /// before finalization reads it.
+    pub(super) fn warm_pending_alias_resolution(&self, root_sid: &str) -> Result<(), GitAiError> {
+        let Some(pending) = self.state.pending.get(root_sid) else {
             return Ok(());
-        }
-        // Ref transitions are resolved by the family cursor after normalization.
-        // Avoid any live snapshotting here to keep normalization race-free.
+        };
+        let (Some(worktree), Some(family)) =
+            (pending.worktree.as_deref(), pending.family_key.as_ref())
+        else {
+            return Ok(());
+        };
+        self.resolve_primary_hint(
+            pending.root_cmd_name.as_deref(),
+            &pending.observed_child_commands,
+            &pending.raw_argv,
+            Some(worktree),
+            Some(family),
+        )?;
         Ok(())
     }
 
@@ -235,7 +224,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
                 self.capture_transport_target(payload, sid, &root_sid);
                 Ok(None)
             }
-            "def_param" => self.handle_def_param(payload, &root_sid),
             "exec" => Ok(None),
             "exit" => self.handle_exit(payload, sid, &root_sid, ts, false),
             "atexit" => self.handle_exit(payload, sid, &root_sid, ts, true),

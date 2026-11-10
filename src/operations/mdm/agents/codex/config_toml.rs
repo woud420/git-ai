@@ -191,6 +191,44 @@ impl CodexInstaller {
 // --- Config mutation ---
 
 impl CodexInstaller {
+    /// Strip git-ai commands from each block's `hooks`, returning the blocks
+    /// to keep and whether any command was removed. A block left without
+    /// hooks is dropped, unless `keep_empty_blocks` and it never had any.
+    fn strip_git_ai_hooks(
+        blocks: Vec<TomlValue>,
+        keep_empty_blocks: bool,
+    ) -> (Vec<TomlValue>, bool) {
+        let mut changed = false;
+        let mut cleaned_blocks = Vec::new();
+        for mut block in blocks {
+            let hooks = block
+                .get("hooks")
+                .and_then(|value| value.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let original_hook_count = hooks.len();
+            let cleaned_hooks = hooks
+                .into_iter()
+                .filter(|hook| {
+                    hook.get("command")
+                        .and_then(|value| value.as_str())
+                        .map(|cmd| !Self::is_git_ai_codex_command(cmd))
+                        .unwrap_or(true)
+                })
+                .collect::<Vec<_>>();
+            let remaining_hook_count = cleaned_hooks.len();
+            changed |= remaining_hook_count != original_hook_count;
+
+            if let Some(block_tbl) = block.as_table_mut() {
+                block_tbl.insert("hooks".to_string(), TomlValue::Array(cleaned_hooks));
+            }
+            if remaining_hook_count > 0 || (keep_empty_blocks && original_hook_count == 0) {
+                cleaned_blocks.push(block);
+            }
+        }
+        (cleaned_blocks, changed)
+    }
+
     pub(super) fn config_with_hooks_feature_enabled(
         config: &TomlValue,
     ) -> Result<TomlValue, GitAiError> {
@@ -245,43 +283,7 @@ impl CodexInstaller {
                 .and_then(|value| value.as_array())
                 .cloned()
                 .unwrap_or_default();
-            let mut cleaned_blocks = Vec::new();
-
-            for block in blocks {
-                let mut cleaned_block = block;
-                let original_hook_count = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .map(|hooks| hooks.len())
-                    .unwrap_or(0);
-
-                let cleaned_hooks = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|hook| {
-                        hook.get("command")
-                            .and_then(|value| value.as_str())
-                            .map(|cmd| !Self::is_git_ai_codex_command(cmd))
-                            .unwrap_or(true)
-                    })
-                    .collect::<Vec<_>>();
-
-                if let Some(block_tbl) = cleaned_block.as_table_mut() {
-                    block_tbl.insert("hooks".to_string(), TomlValue::Array(cleaned_hooks));
-                }
-
-                let remaining_hook_count = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .map(|hooks| hooks.len())
-                    .unwrap_or(0);
-                if remaining_hook_count > 0 || original_hook_count == 0 {
-                    cleaned_blocks.push(cleaned_block);
-                }
-            }
+            let (mut cleaned_blocks, _) = Self::strip_git_ai_hooks(blocks, true);
 
             let target_idx = cleaned_blocks
                 .iter()
@@ -384,44 +386,8 @@ impl CodexInstaller {
                 continue;
             };
 
-            let mut cleaned_blocks = Vec::new();
-            for block in blocks.clone() {
-                let mut cleaned_block = block;
-                let original_hook_count = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .map(|hooks| hooks.len())
-                    .unwrap_or(0);
-                let cleaned_hooks = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|hook| {
-                        hook.get("command")
-                            .and_then(|value| value.as_str())
-                            .map(|cmd| !Self::is_git_ai_codex_command(cmd))
-                            .unwrap_or(true)
-                    })
-                    .collect::<Vec<_>>();
-                if cleaned_hooks.len() != original_hook_count {
-                    changed = true;
-                }
-
-                if let Some(block_tbl) = cleaned_block.as_table_mut() {
-                    block_tbl.insert("hooks".to_string(), TomlValue::Array(cleaned_hooks));
-                }
-
-                let remaining_hook_count = cleaned_block
-                    .get("hooks")
-                    .and_then(|value| value.as_array())
-                    .map(|hooks| hooks.len())
-                    .unwrap_or(0);
-                if remaining_hook_count > 0 {
-                    cleaned_blocks.push(cleaned_block);
-                }
-            }
+            let (cleaned_blocks, stripped) = Self::strip_git_ai_hooks(blocks.clone(), false);
+            changed |= stripped;
 
             if cleaned_blocks.is_empty() {
                 hooks_obj.remove(event_name);

@@ -71,16 +71,6 @@ fn checkpoint_entry_requires_post_processing(
             .any(|attr| attr.author_id != CheckpointKind::Human.to_str())
 }
 
-pub fn post_commit(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    supress_output: bool,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log(repo, base_commit, commit_sha, human_author, supress_output)
-}
-
 pub fn post_commit_from_working_log(
     repo: &Repository,
     base_commit: Option<String>,
@@ -88,13 +78,14 @@ pub fn post_commit_from_working_log(
     human_author: String,
     supress_output: bool,
 ) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log_with_transform(
+    post_commit_from_working_log_with_recovery_timestamps(
         repo,
         base_commit,
         commit_sha,
         human_author,
         supress_output,
-        Ok,
+        None,
+        None,
     )
 }
 
@@ -107,7 +98,7 @@ pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
     recovery_file_timestamps: Option<&FileTimestampsByPath>,
     before_external_recovery: Option<&dyn Fn(&UnknownLinesByFile)>,
 ) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log_with_transform_context(
+    post_commit_from_working_log_with_transform_context_detailed(
         repo,
         base_commit,
         commit_sha,
@@ -125,6 +116,7 @@ pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
         },
         Ok,
     )
+    .map(|result| (result.commit_sha, result.authorship_log))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -143,140 +135,14 @@ pub(crate) struct PostCommitDetailedResult {
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct PostCommitContext<'a> {
+    /// Pre-computed parent→commit diff. A batched caller (the rebase
+    /// conflict-resolution driver) computes every qualifying commit's diff in
+    /// ONE `diff-tree` and threads each result here, so post-commit makes no
+    /// per-commit `git diff` / `git diff-tree` spawns. With `None` the diff is
+    /// computed for the single commit.
     pub(crate) precomputed_parent_diff: Option<&'a DiffTreeResult>,
     pub(crate) recovery_file_timestamps: Option<&'a FileTimestampsByPath>,
     pub(crate) before_external_recovery: Option<&'a dyn Fn(&UnknownLinesByFile)>,
-}
-
-pub fn post_commit_from_working_log_with_transform<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    supress_output: bool,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_and_options(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        PostCommitOptions {
-            supress_output,
-            compute_stats: true,
-            recover_attribution: true,
-            defer_note_write: false,
-        },
-        transform,
-    )
-}
-
-pub(crate) fn post_commit_from_working_log_with_transform_and_options<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_options_and_diff(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        None,
-        transform,
-    )
-}
-
-pub(crate) fn post_commit_from_working_log_with_transform_and_options_detailed<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    transform: F,
-) -> Result<PostCommitDetailedResult, GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_context_detailed(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        PostCommitContext {
-            precomputed_parent_diff: None,
-            recovery_file_timestamps: None,
-            before_external_recovery: None,
-        },
-        transform,
-    )
-}
-
-/// As [`post_commit_from_working_log_with_transform_and_options`], but accepts a
-/// pre-computed parent→commit `DiffTreeResult`. A batched caller (the rebase
-/// conflict-resolution driver) computes every qualifying commit's parent→commit
-/// diff in ONE `diff-tree` and threads each result here, so this function makes
-/// no per-commit `git diff` / `git diff-tree` spawns. With `None` the behavior
-/// is identical to the unbatched single-commit path.
-pub(crate) fn post_commit_from_working_log_with_transform_options_and_diff<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    precomputed_parent_diff: Option<&DiffTreeResult>,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_context(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        PostCommitContext {
-            precomputed_parent_diff,
-            recovery_file_timestamps: None,
-            before_external_recovery: None,
-        },
-        transform,
-    )
-}
-
-fn post_commit_from_working_log_with_transform_context<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    context: PostCommitContext<'_>,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_context_detailed(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        context,
-        transform,
-    )
-    .map(|result| (result.commit_sha, result.authorship_log))
 }
 
 pub(crate) fn post_commit_from_working_log_with_transform_context_detailed<F>(

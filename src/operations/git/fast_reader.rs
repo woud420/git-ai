@@ -32,10 +32,10 @@ impl<'a> FastRefReader<'a> {
         }
     }
 
-    /// Read HEAD and determine if it's symbolic or detached.
-    ///
-    /// Returns `Some(Symbolic(...))` for symbolic HEAD, `Some(Detached(...))` for
-    /// detached HEAD, or `None` if HEAD can't be read or has unexpected format.
+    /// Read HEAD: `Some(Symbolic(..))` for a symbolic HEAD, `Some(Detached(..))`
+    /// for a detached one, or `None` if HEAD can't be read, has an unexpected
+    /// format, or is the `refs/heads/.invalid` stub of a reftable repository
+    /// (the real HEAD lives in the reftable, so callers fall back to git).
     pub fn try_read_head(&self) -> Option<HeadKind> {
         let head_path = self.git_dir.join("HEAD");
         let content = fs::read_to_string(&head_path).ok()?;
@@ -43,7 +43,7 @@ impl<'a> FastRefReader<'a> {
 
         if let Some(refname) = trimmed.strip_prefix("ref: ") {
             let refname = refname.trim();
-            if !refname.is_empty() {
+            if !refname.is_empty() && refname != "refs/heads/.invalid" {
                 return Some(HeadKind::Symbolic(refname.to_string()));
             }
         }

@@ -15,6 +15,7 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::file_ops::{generate_diff, read_optional, write_atomic};
 use crate::operations::mdm::hook_installer::HookCheckResult;
+use crate::operations::mdm::hooks_merge_flat::has_command;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -26,6 +27,16 @@ const CATCH_ALL_MATCHER: &str = "*";
 pub fn is_git_ai_checkpoint_command(cmd: &str) -> bool {
     // Must contain "git-ai" and "checkpoint"
     cmd.contains("git-ai") && cmd.contains("checkpoint")
+}
+
+/// Whether `hook["command"]` is a git-ai checkpoint command.
+fn is_git_ai_hook(hook: &Value) -> bool {
+    has_command(hook, is_git_ai_checkpoint_command)
+}
+
+/// Whether `block` is the `"*"` catch-all matcher block.
+fn is_catch_all_block(block: &Value) -> bool {
+    block.get("matcher").and_then(|m| m.as_str()) == Some(CATCH_ALL_MATCHER)
 }
 
 /// `parse` argument for the helpers below when the settings file is strict JSON.
@@ -158,21 +169,11 @@ pub fn install_catch_all_hooks(hooks_obj: &mut Value, desired: &[(&str, &str)]) 
         // Step 1: strip git-ai from every non-catch-all matcher block (migration).
         let mut emptied_by_migration = vec![false; hook_type_array.len()];
         for (i, block) in hook_type_array.iter_mut().enumerate() {
-            let is_catch_all = block
-                .get("matcher")
-                .and_then(|m| m.as_str())
-                .map(|m| m == CATCH_ALL_MATCHER)
-                .unwrap_or(false);
-            if !is_catch_all
+            if !is_catch_all_block(block)
                 && let Some(hooks) = block.get_mut("hooks").and_then(|h| h.as_array_mut())
             {
                 let before = hooks.len();
-                hooks.retain(|hook| {
-                    hook.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(|cmd| !is_git_ai_checkpoint_command(cmd))
-                        .unwrap_or(true)
-                });
+                hooks.retain(|hook| !is_git_ai_hook(hook));
                 if hooks.is_empty() && before > 0 {
                     emptied_by_migration[i] = true;
                 }
@@ -188,12 +189,7 @@ pub fn install_catch_all_hooks(hooks_obj: &mut Value, desired: &[(&str, &str)]) 
         // Step 2: find or create the "*" catch-all matcher block.
         let catch_all_idx = hook_type_array
             .iter()
-            .position(|b| {
-                b.get("matcher")
-                    .and_then(|m| m.as_str())
-                    .map(|m| m == CATCH_ALL_MATCHER)
-                    .unwrap_or(false)
-            })
+            .position(is_catch_all_block)
             .unwrap_or_else(|| {
                 hook_type_array.push(json!({
                     "matcher": CATCH_ALL_MATCHER,
@@ -242,13 +238,7 @@ pub fn uninstall_catch_all_hooks(hooks_obj: &mut Value, hook_types: &[&str]) -> 
                     .and_then(|h| h.as_array_mut())
                 {
                     let original_len = hooks_array.len();
-                    hooks_array.retain(|hook| {
-                        if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                            !is_git_ai_checkpoint_command(cmd)
-                        } else {
-                            true
-                        }
-                    });
+                    hooks_array.retain(|hook| !is_git_ai_hook(hook));
                     if hooks_array.len() != original_len {
                         changed = true;
                     }
@@ -350,28 +340,14 @@ pub fn catch_all_hook_status(settings: &Value, pre_hook_type: &str) -> (bool, bo
     let mut hooks_up_to_date = false;
 
     for block in blocks {
-        let is_catch_all = block
-            .get("matcher")
-            .and_then(|m| m.as_str())
-            .map(|m| m == CATCH_ALL_MATCHER)
-            .unwrap_or(false);
-
         let has_git_ai = block
             .get("hooks")
             .and_then(|h| h.as_array())
-            .map(|hooks| {
-                hooks.iter().any(|hook| {
-                    hook.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(is_git_ai_checkpoint_command)
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
+            .is_some_and(|hooks| hooks.iter().any(is_git_ai_hook));
 
         if has_git_ai {
             hooks_installed = true;
-            if is_catch_all {
+            if is_catch_all_block(block) {
                 hooks_up_to_date = true;
             }
         }

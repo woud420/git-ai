@@ -203,8 +203,9 @@ impl RefCursor {
                         .unwrap_or(offset),
                 )
             }
-            ColdSeedMatchSpec::PullSpan { action, expected } => self
-                .clamp_seed_to_pull_span_entry(key, &path, reference, offset, &action, expected),
+            ColdSeedMatchSpec::PullSpan { action, expected } => {
+                self.clamp_seed_to_pull_span_entry(key, &path, reference, offset, &action, expected)
+            }
             ColdSeedMatchSpec::RebaseSpan { expected } => {
                 self.clamp_seed_to_rebase_span_entry(key, &path, reference, offset, expected)
             }

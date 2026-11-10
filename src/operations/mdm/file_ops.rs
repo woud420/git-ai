@@ -61,6 +61,21 @@ pub fn ensure_parent_dir(path: &Path) -> Result<(), GitAiError> {
     Ok(())
 }
 
+/// Read a file that may legitimately not exist yet (`None`).
+pub fn read_optional(path: &Path) -> Result<Option<String>, GitAiError> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Join the per-file diffs of one install/uninstall; `None` if nothing changed.
+pub fn join_diffs(diffs: impl IntoIterator<Item = String>) -> Option<String> {
+    let diffs: Vec<String> = diffs.into_iter().collect();
+    (!diffs.is_empty()).then(|| diffs.join("\n"))
+}
+
 /// Generate a diff between old and new content
 pub fn generate_diff(path: &Path, old_content: &str, new_content: &str) -> String {
     let changes = compute_line_changes(old_content, new_content);

@@ -1,6 +1,6 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::extension_manifests;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, join_diffs, write_atomic};
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::paths::{home_dir, normalize_windows_path_for_shell};
 use std::fs;
@@ -280,12 +280,7 @@ impl HookInstaller for ClineInstaller {
         let pre_diff = Self::install_hook_script(&pre_path, &script, dry_run)?;
         let post_diff = Self::install_hook_script(&post_path, &script, dry_run)?;
 
-        match (pre_diff, post_diff) {
-            (None, None) => Ok(None),
-            (Some(a), None) => Ok(Some(a)),
-            (None, Some(b)) => Ok(Some(b)),
-            (Some(a), Some(b)) => Ok(Some(format!("{}\n{}", a, b))),
-        }
+        Ok(join_diffs([pre_diff, post_diff].into_iter().flatten()))
     }
 
     fn uninstall_hooks(
@@ -303,12 +298,7 @@ impl HookInstaller for ClineInstaller {
         let pre_diff = Self::uninstall_hook_script(&pre_path, dry_run)?;
         let post_diff = Self::uninstall_hook_script(&post_path, dry_run)?;
 
-        match (pre_diff, post_diff) {
-            (None, None) => Ok(None),
-            (Some(a), None) => Ok(Some(a)),
-            (None, Some(b)) => Ok(Some(b)),
-            (Some(a), Some(b)) => Ok(Some(format!("{}\n{}", a, b))),
-        }
+        Ok(join_diffs([pre_diff, post_diff].into_iter().flatten()))
     }
 }
 

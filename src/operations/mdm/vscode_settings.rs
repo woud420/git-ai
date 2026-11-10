@@ -1,9 +1,8 @@
 use crate::error::GitAiError;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, read_optional, write_atomic};
 use crate::operations::mdm::paths::home_dir;
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::CstRootNode;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Check if a settings target path should be processed
@@ -82,11 +81,7 @@ pub fn update_vscode_chat_hook_settings(
     settings_path: &Path,
     dry_run: bool,
 ) -> Result<Option<String>, GitAiError> {
-    let original = if settings_path.exists() {
-        fs::read_to_string(settings_path)?
-    } else {
-        String::new()
-    };
+    let original = read_optional(settings_path)?.unwrap_or_default();
 
     let parse_input = if original.trim().is_empty() {
         "{}".to_string()

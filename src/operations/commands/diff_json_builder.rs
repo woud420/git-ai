@@ -3,11 +3,11 @@
 //! This module takes [`DiffBuildArtifacts`] (from `diff_attribution`) and
 //! produces the serialisable [`DiffJson`] and related types.
 
-use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
+use crate::clients::git_cli::{InternalGitProfile, exec_git_stdin_with_profile};
 use crate::error::GitAiError;
 use crate::model::authorship_log::{LineRange, PromptRecord, SessionRecord};
 use crate::model::diff_json::FileDiffJson;
-use crate::operations::git::notes_api::{read_authorship, read_note};
+use crate::operations::git::notes_api::{read_authorship, read_note, read_notes_batch};
 use crate::operations::git::repository::Repository;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -164,7 +164,6 @@ pub fn build_json_hunks(
 
     for diff_hunk in diff_hunks {
         hunks.extend(build_json_hunk_segments(
-            repo,
             diff_hunk,
             LineSide::New,
             "addition",
@@ -174,7 +173,6 @@ pub fn build_json_hunks(
             commits,
         )?);
         hunks.extend(build_json_hunk_segments(
-            repo,
             diff_hunk,
             LineSide::Old,
             "deletion",
@@ -184,13 +182,12 @@ pub fn build_json_hunks(
             commits,
         )?);
     }
+    load_commit_metadata(repo, commits);
 
     Ok(hunks)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_json_hunk_segments(
-    repo: &Repository,
     diff_hunk: &DiffHunk,
     side: LineSide,
     kind: &str,
@@ -279,9 +276,9 @@ fn build_json_hunk_segments(
         };
 
         if let Some(ref original_sha) = original_commit_sha {
-            ensure_commit_metadata(repo, original_sha, commits);
+            reference_commit(original_sha, commits);
         }
-        ensure_commit_metadata(repo, &commit_sha, commits);
+        reference_commit(&commit_sha, commits);
 
         let can_extend = current_start != 0
             && *line == current_end + 1
@@ -335,50 +332,76 @@ fn hash_hunk_content(lines: &[String]) -> String {
     crate::hex::encode(&hasher.finalize())
 }
 
-pub(crate) fn ensure_commit_metadata(
-    repo: &Repository,
+/// Note that `commit_sha` is referenced by the diff. Its metadata is filled in
+/// by [`load_commit_metadata`] once every referenced commit is known.
+pub(crate) fn reference_commit(
     commit_sha: &str,
     commits: &mut BTreeMap<String, DiffCommitMetadata>,
 ) {
-    if commits.contains_key(commit_sha) {
-        return;
-    }
-    if let Ok(metadata) = load_commit_metadata(repo, commit_sha) {
-        commits.insert(commit_sha.to_string(), metadata);
+    if !commits.contains_key(commit_sha) {
+        commits.insert(commit_sha.to_string(), DiffCommitMetadata::default());
     }
 }
 
-fn load_commit_metadata(
-    repo: &Repository,
-    commit_sha: &str,
-) -> Result<DiffCommitMetadata, GitAiError> {
+/// Fill in metadata for every referenced commit with one `git log` and one
+/// batched note read. Commits git cannot resolve (such as the all-zero commit
+/// of uncommitted lines) are dropped from the map.
+fn load_commit_metadata(repo: &Repository, commits: &mut BTreeMap<String, DiffCommitMetadata>) {
+    let commit_shas: Vec<String> = std::mem::take(commits).into_keys().collect();
+    if commit_shas.is_empty() {
+        return;
+    }
     let mut args = repo.global_args_for_exec();
-    args.push("show".to_string());
-    args.push("-s".to_string());
-    args.push("--no-notes".to_string());
-    args.push("--encoding=UTF-8".to_string());
-    args.push("--format=%an%x00%ae%x00%aI%x00%s%x00%B".to_string());
-    args.push(commit_sha.to_string());
+    args.extend(
+        [
+            "log",
+            "--no-walk=unsorted",
+            "--ignore-missing",
+            "--stdin",
+            "-z",
+            "--no-notes",
+            "--encoding=UTF-8",
+            "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%B",
+        ]
+        .map(String::from),
+    );
+    let Ok(stdout) = exec_git_stdin_with_profile(
+        &args,
+        commit_shas.join("\n").as_bytes(),
+        InternalGitProfile::General,
+    )
+    .map_err(|e| e.to_string())
+    .and_then(|output| String::from_utf8(output.stdout).map_err(|e| e.to_string())) else {
+        return;
+    };
+    // A batch read fails as a whole on one unreadable note; fall back to
+    // per-commit reads so the remaining commits keep theirs.
+    let notes = read_notes_batch(repo, &commit_shas);
 
-    let output = exec_git_with_profile(&args, InternalGitProfile::General)?;
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|e| GitAiError::Generic(format!("Failed to parse commit metadata: {}", e)))?;
-    let mut parts = stdout.splitn(5, '\0');
-    let author_name = parts.next().unwrap_or("").trim();
-    let author_email = parts.next().unwrap_or("").trim();
-    let authored_time = parts.next().unwrap_or("").trim().to_string();
-    let msg = parts.next().unwrap_or("").trim().to_string();
-    let full_msg = parts.next().unwrap_or("").trim_end().to_string();
-    let author = format_git_ident(author_name, author_email);
-    let authorship_note = read_note(repo, commit_sha);
-
-    Ok(DiffCommitMetadata {
-        authored_time,
-        msg,
-        full_msg,
-        author,
-        authorship_note,
-    })
+    let mut fields = stdout.split('\0');
+    while let (Some(sha), Some(name), Some(email), Some(time), Some(subject), Some(body)) = (
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+        fields.next(),
+    ) {
+        let authorship_note = match &notes {
+            Ok(notes) => notes.get(sha).cloned(),
+            Err(_) => read_note(repo, sha),
+        };
+        commits.insert(
+            sha.to_string(),
+            DiffCommitMetadata {
+                authored_time: time.trim().to_string(),
+                msg: subject.trim().to_string(),
+                full_msg: body.trim_end().to_string(),
+                author: format_git_ident(name.trim(), email.trim()),
+                authorship_note,
+            },
+        );
+    }
 }
 
 fn format_git_ident(name: &str, email: &str) -> String {

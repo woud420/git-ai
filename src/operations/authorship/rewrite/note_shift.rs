@@ -44,19 +44,12 @@ pub(super) fn write_authorship_log(
         .unwrap_or_default())
 }
 
-/// Like [`shift_authorship_notes_merging_existing`] but also returns the
-/// written `(commit_sha, serialized_note)` pairs for the metrics path.
+/// Shift each source commit's note onto its new commit, merging into any
+/// attestations the target already has (conflict-resolution checkpoints).
+/// Returns the written `(commit_sha, serialized_note)` pairs for the metrics path.
 pub(crate) fn shift_authorship_notes_merging_existing_with_notes(
     repo: &Repository,
     mappings: &[(String, String)],
-) -> Result<Vec<(String, String)>, GitAiError> {
-    shift_authorship_notes_with_existing_mode(repo, mappings, true)
-}
-
-fn shift_authorship_notes_with_existing_mode(
-    repo: &Repository,
-    mappings: &[(String, String)],
-    merge_existing_targets: bool,
 ) -> Result<Vec<(String, String)>, GitAiError> {
     tracing::debug!("shift_authorship_notes: {} mappings", mappings.len());
 
@@ -69,7 +62,6 @@ fn shift_authorship_notes_with_existing_mode(
     let notes_map = notes_api::read_notes_batch(repo, &all_shas)?;
 
     let mut pending: Vec<PendingShift> = Vec::new();
-    let mut verbatim_writes: Vec<(String, String)> = Vec::new();
     let mut diff_pairs: Vec<(String, String)> = Vec::new();
     let mut existing_by_target: HashMap<String, AuthorshipLog> = HashMap::new();
 
@@ -82,11 +74,7 @@ fn shift_authorship_notes_with_existing_mode(
         if let Some(existing_raw) = notes_map.get(new_sha) {
             match AuthorshipLog::deserialize_from_string(existing_raw) {
                 Ok(log) if !log.attestations.is_empty() => {
-                    if merge_existing_targets {
-                        existing_by_target.insert(new_sha.clone(), log);
-                    } else {
-                        blocked_targets.insert(new_sha);
-                    }
+                    existing_by_target.insert(new_sha.clone(), log);
                 }
                 Ok(_) => {}
                 Err(_) => {
@@ -107,9 +95,6 @@ fn shift_authorship_notes_with_existing_mode(
         // Validate one source at a time; retain only borrowed raw text while
         // diff-tree runs, rather than every expanded authorship log.
         if AuthorshipLog::deserialize_from_string(raw_note).is_err() {
-            if !merge_existing_targets {
-                verbatim_writes.push((new_sha.clone(), raw_note.clone()));
-            }
             continue;
         }
 
@@ -120,7 +105,7 @@ fn shift_authorship_notes_with_existing_mode(
         });
     }
 
-    if pending.is_empty() && verbatim_writes.is_empty() {
+    if pending.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -133,7 +118,7 @@ fn shift_authorship_notes_with_existing_mode(
         apply_chunk_shifts(&mut merged_by_target, chunk, &mut pending_iter);
     })?;
 
-    let mut all_writes = verbatim_writes;
+    let mut all_writes = Vec::with_capacity(merged_by_target.len());
     for (sha, log) in merged_by_target {
         let serialized = log
             .serialize_to_string()

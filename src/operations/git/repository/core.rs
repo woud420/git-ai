@@ -28,12 +28,6 @@ pub struct Repository {
     pub(super) git_dir: PathBuf,
     pub(super) git_common_dir: PathBuf,
     pub storage: RepoStorage,
-    pub pre_command_base_commit: Option<String>,
-    pub pre_command_refname: Option<String>,
-    pub pre_reset_target_commit: Option<String>,
-    pub pre_update_ref_refname: Option<String>,
-    pub pre_update_ref_old_target: Option<String>,
-    pub pre_update_ref_affects_checked_out_branch: Option<bool>,
     pub(super) workdir: PathBuf,
     /// Canonical (absolute, resolved) version of workdir for reliable path comparisons
     /// On Windows, this uses the \\?\ UNC prefix format

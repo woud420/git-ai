@@ -1,9 +1,8 @@
 //! JSON DTO for per-file diff output (`git-ai diff --json`).
 //!
-//! This is a pure serialization shape shared between the diff command
-//! (which produces it) and the API layer (which converts it to
-//! [`crate::model::api_types::ApiFileRecord`]). It lives in `model` so the
-//! domain does not have to reach up into `operations::commands::diff`.
+//! This is a pure serialization shape produced by the diff command. It lives
+//! in `model` so the domain does not have to reach up into
+//! `operations::commands::diff`.
 
 use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
 use serde::{Deserialize, Serialize, Serializer};

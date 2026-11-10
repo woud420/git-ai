@@ -189,6 +189,78 @@ async fn trace_cherry_pick_retries_without_initial_reflog_evidence() {
     );
 }
 
+#[tokio::test]
+async fn cherry_pick_continue_retry_keeps_its_pending_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().to_path_buf();
+    let head_log = worktree.join(".git/logs/HEAD");
+    fs::create_dir_all(head_log.parent().unwrap()).unwrap();
+    crate::operations::git::test_utils::seed_valid_git_dir(&worktree.join(".git"));
+    fs::write(&head_log, "").unwrap();
+
+    let family = FamilyKey::new(worktree.to_string_lossy().to_string());
+    let state = FamilyState {
+        family_key: family.clone(),
+        refs: HashMap::new(),
+        worktrees: HashMap::new(),
+        last_error: None,
+        applied_seq: 0,
+        watermarks: WatermarkState::default(),
+    };
+    let [head, source_one, source_two, picked_one, picked_two] =
+        ["1", "2", "3", "4", "5"].map(|digit| digit.repeat(40));
+    let cherry_pick = |args: &[&str], exit_code: i32| {
+        let mut cmd = sample_normalized_cmd(&family.0, 1);
+        cmd.worktree = Some(worktree.clone());
+        cmd.trace_derived = true;
+        cmd.primary_command = Some("cherry-pick".to_string());
+        cmd.invoked_command = Some("cherry-pick".to_string());
+        cmd.raw_argv = ["git", "cherry-pick"]
+            .iter()
+            .chain(args)
+            .map(|arg| arg.to_string())
+            .collect();
+        cmd.exit_code = exit_code;
+        cmd
+    };
+    let mut ref_cursor = RefCursor::new(family.clone());
+
+    // The conflicted pick leaves both sources pending in the cursor.
+    let mut conflicted = cherry_pick(&[&source_one, &source_two], 1);
+    enrich_command_with_retries(&mut ref_cursor, &mut conflicted, &state)
+        .await
+        .unwrap();
+    assert!(conflicted.ref_changes.is_empty());
+
+    // The first enrichment pass runs before this task, so it sees no rows.
+    let rows = format!(
+        "{head} {picked_one} Test User <test@example.com> 0 +0000\tcommit (cherry-pick): one\n\
+         {picked_one} {picked_two} Test User <test@example.com> 0 +0000\tcherry-pick: two\n"
+    );
+    tokio::spawn(async move { fs::write(head_log, rows).unwrap() });
+    let mut resumed = cherry_pick(&["--continue"], 0);
+    enrich_command_with_retries(&mut ref_cursor, &mut resumed, &state)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resumed.cherry_pick_source_oids,
+        vec![source_one, source_two]
+    );
+    let head_change = |old: &str, new: &str| RefChange {
+        reference: "HEAD".to_string(),
+        old: old.to_string(),
+        new: new.to_string(),
+    };
+    assert_eq!(
+        resumed.ref_changes,
+        vec![
+            head_change(&head, &picked_one),
+            head_change(&picked_one, &picked_two)
+        ]
+    );
+}
+
 #[test]
 fn ref_enrichment_retry_requires_successful_unenriched_commit_like_command() {
     let mut cmd = sample_normalized_cmd("family-1", 1);

@@ -1,6 +1,17 @@
 use super::*;
 
 impl RefCursor {
+    /// Sources carried over from a conflicted cherry-pick. An enrichment pass
+    /// consumes them even when it finds no reflog row, so a caller that
+    /// enriches the same command again must restore them first.
+    pub(crate) fn pending_cherry_pick_sources(&self) -> Vec<String> {
+        self.pending_cherry_pick_source_oids.clone()
+    }
+
+    pub(crate) fn restore_pending_cherry_pick_sources(&mut self, sources: &[String]) {
+        self.pending_cherry_pick_source_oids = sources.to_vec();
+    }
+
     pub(super) fn enrich_cherry_pick(
         &mut self,
         cmd: &mut NormalizedCommand,

@@ -58,6 +58,7 @@ async fn enrich_command_with_retries(
     cmd: &mut NormalizedCommand,
     state: &FamilyState,
 ) -> Result<HashMap<String, String>, GitAiError> {
+    let pending_cherry_pick_sources = ref_cursor.pending_cherry_pick_sources();
     let mut command_start_refs = ref_cursor.enrich_command(cmd, state)?;
 
     // Git emits trace2 asynchronously, and the daemon can reach this actor
@@ -70,6 +71,11 @@ async fn enrich_command_with_retries(
     if should_retry_ref_enrichment(cmd) {
         for delay in COMMIT_REF_ENRICHMENT_RETRY_DELAYS {
             tokio::time::sleep(*delay).await;
+            // Every pass must start from the sources the command started
+            // with: the previous pass already consumed them, which would
+            // leave `--continue`/`--skip` without sources and cut their HEAD
+            // span down to a single row.
+            ref_cursor.restore_pending_cherry_pick_sources(&pending_cherry_pick_sources);
             command_start_refs = ref_cursor.enrich_command(cmd, state)?;
             if has_head_ref_change(cmd) {
                 break;

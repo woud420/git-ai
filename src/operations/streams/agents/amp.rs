@@ -7,7 +7,7 @@ use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_s
 use crate::operations::streams::reader::{
     JsonArrayStreamSpec, RecordIndexAdvancePolicy, read_json_array_stream,
 };
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -103,10 +103,6 @@ impl Agent for AmpAgent {
         self.batch_size
     }
 
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-    }
-
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
         let threads_dir = match Self::amp_threads_path() {
             Ok(p) => p,
@@ -178,15 +174,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, rewritten_file_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = AmpAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_amp_json(message_count: usize) -> String {
         let messages: Vec<String> = (0..message_count)

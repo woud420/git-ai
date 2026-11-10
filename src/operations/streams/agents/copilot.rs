@@ -9,11 +9,10 @@ use crate::operations::streams::agent::{
 use crate::operations::streams::reader::{
     JsonArrayStreamSpec, RecordIndexAdvancePolicy, read_json_array_stream, read_jsonl_byte_stream,
 };
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// GitHub Copilot agent that discovers conversations from Copilot storage.
 pub struct CopilotAgent {
@@ -273,11 +272,6 @@ impl Agent for CopilotAgent {
         self.batch_size
     }
 
-    fn sweep_strategy(&self) -> SweepStrategy {
-        // Poll every 30 minutes for new Copilot transcripts
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-    }
-
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
         Ok(discover_path_sessions(
             "github-copilot",
@@ -470,15 +464,6 @@ mod tests {
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
         rewritten_file_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = CopilotAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     #[test]
     fn test_determine_format() {

@@ -67,13 +67,6 @@ pub struct DeferredRootExit {
     pub is_atexit: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct OrphanTraceRoot {
-    pub root_sid: String,
-    pub raw_argv: Vec<String>,
-    pub deferred_exit_only: bool,
-}
-
 pub struct TraceNormalizer<B: GitBackend> {
     pub(super) backend: Arc<B>,
     pub(super) state: TraceNormalizerState,
@@ -115,45 +108,19 @@ impl<B: GitBackend> TraceNormalizer<B> {
         self.mark_completed_root_with_limit(root_sid, COMPLETED_ROOT_RETENTION_LIMIT);
     }
 
-    pub fn remove_pending_root(&mut self, root_sid: &str) -> Option<PendingTraceCommand> {
-        let removed = self.state.pending.remove(root_sid);
-        if removed.is_some() {
-            let _ = self.state.sid_to_worktree.remove(root_sid);
-            let _ = self.state.sid_to_family.remove(root_sid);
-            let _ = self.state.prestart_root_cmd_names.remove(root_sid);
-        }
-        removed
-    }
-
-    pub fn sweep_orphans_for_roots(&mut self, roots: &[String]) -> Vec<OrphanTraceRoot> {
-        let mut removed = Vec::new();
-
+    /// Drops the state of roots whose connection closed before `atexit`.
+    pub fn sweep_orphans_for_roots(&mut self, roots: &[String]) {
         for root_sid in roots {
-            if let Some(pending) = self.remove_pending_root(root_sid) {
-                // A non-atexit `exit` seen after `start` is deferred while the
-                // command stays pending, so a pending root can own both.
-                self.state.deferred_exits.remove(root_sid);
-                removed.push(OrphanTraceRoot {
-                    root_sid: root_sid.clone(),
-                    raw_argv: pending.raw_argv,
-                    deferred_exit_only: false,
-                });
-                continue;
-            }
-
-            if self.state.deferred_exits.remove(root_sid).is_some() {
-                let _ = self.state.sid_to_worktree.remove(root_sid);
-                let _ = self.state.sid_to_family.remove(root_sid);
-                let _ = self.state.prestart_root_cmd_names.remove(root_sid);
-                removed.push(OrphanTraceRoot {
-                    root_sid: root_sid.clone(),
-                    raw_argv: Vec::new(),
-                    deferred_exit_only: true,
-                });
+            let pending = self.state.pending.remove(root_sid).is_some();
+            // A non-atexit `exit` seen after `start` is deferred while the
+            // command stays pending, so one root can own both entries.
+            let deferred_exit = self.state.deferred_exits.remove(root_sid).is_some();
+            if pending || deferred_exit {
+                self.state.sid_to_worktree.remove(root_sid);
+                self.state.sid_to_family.remove(root_sid);
+                self.state.prestart_root_cmd_names.remove(root_sid);
             }
         }
-
-        removed
     }
 
     pub(super) fn resolve_primary_hint(

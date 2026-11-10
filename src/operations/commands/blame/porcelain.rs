@@ -1,13 +1,53 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::error::GitAiError;
+use crate::operations::authorship::agent_detection::match_email_to_agent;
 use crate::operations::git::repository::Repository;
 
-use super::GitAiBlameOptions;
+use super::{BlameHunk, GitAiBlameOptions};
+
+/// Author shown for a hunk. Commits without an authorship note whose author
+/// email belongs to a known agent show the tool name; all others show git's
+/// original author.
+fn display_author<'a>(hunk: &'a BlameHunk, commits_with_notes: &HashSet<String>) -> &'a str {
+    if commits_with_notes.contains(&hunk.commit_sha) {
+        return &hunk.original_author;
+    }
+    match_email_to_agent(&hunk.author_email).unwrap_or(&hunk.original_author)
+}
+
+/// `<sha> <orig line> <final line>`, plus the group size on a hunk's first line.
+fn print_header(hunk: &BlameHunk, line_num: u32, first_in_hunk: bool) {
+    let orig_line = hunk.orig_range.0 + (line_num - hunk.range.0);
+    if first_in_hunk {
+        let group_size = hunk.range.1 - hunk.range.0 + 1;
+        println!("{} {orig_line} {line_num} {group_size}", hunk.commit_sha);
+    } else {
+        println!("{} {orig_line} {line_num}", hunk.commit_sha);
+    }
+}
+
+/// The commit block git prints between a header and the `filename` line.
+fn print_commit_metadata(hunk: &BlameHunk, commits_with_notes: &HashSet<String>) {
+    println!("author {}", display_author(hunk, commits_with_notes));
+    println!("author-mail <{}>", hunk.author_email);
+    println!("author-time {}", hunk.author_time);
+    println!("author-tz {}", hunk.author_tz);
+    println!("committer {}", hunk.committer);
+    println!("committer-mail <{}>", hunk.committer_email);
+    println!("committer-time {}", hunk.committer_time);
+    println!("committer-tz {}", hunk.committer_tz);
+    println!("summary {}", hunk.summary);
+    if hunk.is_boundary {
+        println!("boundary");
+    }
+    if let Some(previous) = &hunk.previous {
+        println!("previous {previous}");
+    }
+}
 
 pub(super) fn output_porcelain_format(
     repo: &Repository,
-    _line_authors: &HashMap<u32, String>,
     file_path: &str,
     lines: &[&str],
     line_ranges: &[(u32, u32)],
@@ -16,218 +56,47 @@ pub(super) fn output_porcelain_format(
 ) -> Result<(), GitAiError> {
     let prepared = repo.prepare_blame_render(file_path, line_ranges, options)?;
 
-    let mut last_hunk_id = None;
-    let mut commit_summaries: HashMap<String, String> = HashMap::new();
-    let mut seen_commits: HashSet<String> = HashSet::new();
+    let mut seen_commits: HashSet<&str> = HashSet::new();
     for line_num in prepared.requested_lines {
-        let line_index = (line_num - 1) as usize;
-        let line_content = if line_index < lines.len() {
-            lines[line_index]
-        } else {
-            ""
+        let Some(hunk) = prepared.line_to_hunk.get(&line_num) else {
+            continue;
         };
-
-        if let Some(hunk) = prepared.line_to_hunk.get(&line_num) {
-            // For agent-detected commits (email matches known agent, no authorship note),
-            // override the author name with the tool name. Otherwise use git's original author.
-            // Only apply agent detection when no real authorship note exists for this commit.
-            let author_name = if !commits_with_notes.contains(&hunk.commit_sha) {
-                crate::operations::authorship::agent_detection::match_email_to_agent(
-                    &hunk.author_email,
-                )
-                .map(|t| t.to_string())
-            } else {
-                None
-            };
-            let author_name = author_name.as_deref().unwrap_or(&hunk.original_author);
-            let commit_sha = &hunk.commit_sha;
-            let author_email = &hunk.author_email;
-            let author_time = hunk.author_time;
-            let author_tz = &hunk.author_tz;
-            let committer_name = &hunk.committer;
-            let committer_email = &hunk.committer_email;
-            let committer_time = hunk.committer_time;
-            let committer_tz = &hunk.committer_tz;
-            let boundary = hunk.is_boundary;
-            let filename = file_path;
-
-            let hunk_id = (commit_sha.clone(), hunk.range.0);
-            if options.line_porcelain {
-                let summary = if let Some(summary) = commit_summaries.get(commit_sha) {
-                    summary.clone()
-                } else {
-                    let commit = repo.find_commit(commit_sha.clone())?;
-                    let summary = commit.summary()?;
-                    commit_summaries.insert(commit_sha.clone(), summary.clone());
-                    summary
-                };
-                if last_hunk_id.as_ref() != Some(&hunk_id) {
-                    // First line of hunk: 4-field header
-                    println!(
-                        "{} {} {} {}",
-                        commit_sha,
-                        line_num,
-                        line_num,
-                        hunk.range.1 - hunk.range.0 + 1
-                    );
-                    last_hunk_id = Some(hunk_id);
-                } else {
-                    // Subsequent lines: 3-field header
-                    println!("{} {} {}", commit_sha, line_num, line_num);
-                }
-                println!("author {}", author_name);
-                println!("author-mail <{}>", author_email);
-                println!("author-time {}", author_time);
-                println!("author-tz {}", author_tz);
-                println!("committer {}", committer_name);
-                println!("committer-mail <{}>", committer_email);
-                println!("committer-time {}", committer_time);
-                println!("committer-tz {}", committer_tz);
-                println!("summary {}", summary);
-                if boundary {
-                    println!("boundary");
-                }
-                println!("filename {}", filename);
-                println!("\t{}", line_content);
-            } else if options.porcelain {
-                if last_hunk_id.as_ref() != Some(&hunk_id) {
-                    // First line of hunk.
-                    println!(
-                        "{} {} {} {}",
-                        commit_sha,
-                        line_num,
-                        line_num,
-                        hunk.range.1 - hunk.range.0 + 1
-                    );
-                    if !seen_commits.contains(commit_sha) {
-                        let summary = if let Some(summary) = commit_summaries.get(commit_sha) {
-                            summary.clone()
-                        } else {
-                            let commit = repo.find_commit(commit_sha.clone())?;
-                            let summary = commit.summary()?;
-                            commit_summaries.insert(commit_sha.clone(), summary.clone());
-                            summary
-                        };
-                        println!("author {}", author_name);
-                        println!("author-mail <{}>", author_email);
-                        println!("author-time {}", author_time);
-                        println!("author-tz {}", author_tz);
-                        println!("committer {}", committer_name);
-                        println!("committer-mail <{}>", committer_email);
-                        println!("committer-time {}", committer_time);
-                        println!("committer-tz {}", committer_tz);
-                        println!("summary {}", summary);
-                        if boundary {
-                            println!("boundary");
-                        }
-                        println!("filename {}", filename);
-                        seen_commits.insert(commit_sha.clone());
-                    }
-                    println!("\t{}", line_content);
-                    last_hunk_id = Some(hunk_id);
-                } else {
-                    // For subsequent lines, print only the header and content (no metadata block)
-                    println!("{} {} {}", commit_sha, line_num, line_num);
-                    println!("\t{}", line_content);
-                }
-            }
+        let first_in_hunk = line_num == hunk.range.0;
+        print_header(hunk, line_num, first_in_hunk);
+        // --line-porcelain repeats the commit block on every line; --porcelain
+        // prints it once, with the first hunk of each commit.
+        if options.line_porcelain || (first_in_hunk && seen_commits.insert(&hunk.commit_sha)) {
+            print_commit_metadata(hunk, commits_with_notes);
+            println!("filename {}", hunk.git_filename);
         }
+        println!("\t{}", lines.get((line_num - 1) as usize).unwrap_or(&""));
     }
     Ok(())
 }
 
 pub(super) fn output_incremental_format(
     repo: &Repository,
-    _line_authors: &HashMap<u32, String>,
     file_path: &str,
-    _lines: &[&str],
     line_ranges: &[(u32, u32)],
     options: &GitAiBlameOptions,
     commits_with_notes: &HashSet<String>,
 ) -> Result<(), GitAiError> {
     let prepared = repo.prepare_blame_render(file_path, line_ranges, options)?;
 
-    let mut last_hunk_id = None;
-    let mut commit_summaries: HashMap<String, String> = HashMap::new();
-    let mut seen_commits: HashSet<String> = HashSet::new();
+    // One entry per hunk, and no content lines.
+    let mut seen_commits: HashSet<&str> = HashSet::new();
     for line_num in prepared.requested_lines {
-        if let Some(hunk) = prepared.line_to_hunk.get(&line_num) {
-            // For agent-detected commits (email matches known agent, no authorship note),
-            // override the author name with the tool name. Otherwise use git's original author.
-            // Only apply agent detection when no real authorship note exists for this commit.
-            let author_name = if !commits_with_notes.contains(&hunk.commit_sha) {
-                crate::operations::authorship::agent_detection::match_email_to_agent(
-                    &hunk.author_email,
-                )
-                .map(|t| t.to_string())
-            } else {
-                None
-            };
-            let author_name = author_name.as_deref().unwrap_or(&hunk.original_author);
-            let commit_sha = &hunk.commit_sha;
-            let author_email = &hunk.author_email;
-            let author_time = hunk.author_time;
-            let author_tz = &hunk.author_tz;
-            let committer_name = &hunk.committer;
-            let committer_email = &hunk.committer_email;
-            let committer_time = hunk.committer_time;
-            let committer_tz = &hunk.committer_tz;
-
-            // Only print the full block for the first line of a hunk
-            let hunk_id = (hunk.commit_sha.clone(), hunk.range.0);
-            if last_hunk_id.as_ref() != Some(&hunk_id) {
-                // Print first line for this hunk.
-                println!(
-                    "{} {} {} {}",
-                    commit_sha,
-                    line_num,
-                    line_num,
-                    hunk.range.1 - hunk.range.0 + 1
-                );
-                if !seen_commits.contains(commit_sha) {
-                    let summary = if let Some(summary) = commit_summaries.get(commit_sha) {
-                        summary.clone()
-                    } else {
-                        let commit = repo.find_commit(commit_sha.clone())?;
-                        let summary = commit.summary()?;
-                        commit_summaries.insert(commit_sha.clone(), summary.clone());
-                        summary
-                    };
-                    println!("author {}", author_name);
-                    println!("author-mail <{}>", author_email);
-                    println!("author-time {}", author_time);
-                    println!("author-tz {}", author_tz);
-                    println!("committer {}", committer_name);
-                    println!("committer-mail <{}>", committer_email);
-                    println!("committer-time {}", committer_time);
-                    println!("committer-tz {}", committer_tz);
-                    println!("summary {}", summary);
-                    if hunk.is_boundary {
-                        println!("boundary");
-                    }
-                    seen_commits.insert(commit_sha.clone());
-                }
-                println!("filename {}", file_path);
-                last_hunk_id = Some(hunk_id);
-            }
-            // For incremental, no content lines (no \tLine)
-        } else {
-            // Fallback for lines without blame info
-            println!(
-                "0000000000000000000000000000000000000000 {} {} 1",
-                line_num, line_num
-            );
-            println!("author unknown");
-            println!("author-mail <unknown@example.com>");
-            println!("author-time 0");
-            println!("author-tz +0000");
-            println!("committer unknown");
-            println!("committer-mail <unknown@example.com>");
-            println!("committer-time 0");
-            println!("committer-tz +0000");
-            println!("summary unknown");
-            println!("filename {}", file_path);
+        let Some(hunk) = prepared.line_to_hunk.get(&line_num) else {
+            continue;
+        };
+        if line_num != hunk.range.0 {
+            continue;
         }
+        print_header(hunk, line_num, true);
+        if seen_commits.insert(&hunk.commit_sha) {
+            print_commit_metadata(hunk, commits_with_notes);
+        }
+        println!("filename {}", hunk.git_filename);
     }
     Ok(())
 }

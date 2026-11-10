@@ -289,6 +289,84 @@ fn test_blame_machine_format_output_matches_git_byte_for_byte() {
 }
 
 #[test]
+fn test_blame_porcelain_matches_git_for_lines_shifted_by_a_later_commit() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("test.txt");
+    file.set_contents(crate::lines!["a", "b"]);
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    // "a" and "b" now sit one line lower than in the commit that wrote them,
+    // and the new commit has a `previous` version of the file.
+    file.set_contents(crate::lines!["x", "a", "b"]);
+    repo.stage_all_and_commit("Insert a line at the top")
+        .unwrap();
+
+    for format in ["--porcelain", "--line-porcelain"] {
+        let args = ["blame", format, "test.txt"];
+        assert_eq!(
+            repo.git(&args).unwrap(),
+            repo.git_ai(&args).unwrap(),
+            "{format} output should match git byte for byte"
+        );
+    }
+}
+
+#[test]
+fn test_blame_porcelain_reports_the_filename_at_the_blamed_commit() {
+    let repo = TestRepo::new();
+    repo.filename("old.txt")
+        .set_contents(crate::lines!["a", "b"]);
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    repo.git(&["mv", "old.txt", "new.txt"]).unwrap();
+    repo.stage_all_and_commit("Rename the file").unwrap();
+
+    for format in ["--porcelain", "--line-porcelain", "--incremental"] {
+        let args = ["blame", format, "new.txt"];
+        let git_output = repo.git(&args).unwrap();
+        assert!(git_output.contains("filename old.txt"), "{git_output}");
+        assert_eq!(
+            git_output,
+            repo.git_ai(&args).unwrap(),
+            "{format} output should match git byte for byte"
+        );
+    }
+}
+
+#[test]
+fn test_blame_machine_formats_handle_uncommitted_lines() {
+    let repo = TestRepo::new();
+    repo.filename("test.txt")
+        .set_contents(crate::lines!["a", "b"]);
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    // Git blames a line that is not committed yet to the all-zero commit.
+    std::fs::write(repo.path().join("test.txt"), "a\nb\nc\n").unwrap();
+
+    // The synthetic commit is stamped with the current time, and incremental
+    // entries are unordered, so compare without timestamps and line order.
+    let comparable = |output: String| {
+        let mut lines: Vec<String> = output
+            .lines()
+            .filter(|line| {
+                !line.starts_with("author-time ") && !line.starts_with("committer-time ")
+            })
+            .map(str::to_string)
+            .collect();
+        lines.sort();
+        lines
+    };
+    for format in ["--porcelain", "--line-porcelain", "--incremental"] {
+        let args = ["blame", format, "test.txt"];
+        assert_eq!(
+            comparable(repo.git(&args).unwrap()),
+            comparable(
+                repo.git_ai(&args)
+                    .expect("blame should not fail on uncommitted lines")
+            ),
+            "{format} output should match git"
+        );
+    }
+}
+
+#[test]
 fn test_blame_porcelain_multiple_hunks_same_commit_matches_git_filename_behavior() {
     let repo = TestRepo::new();
     let mut file = repo.filename("test.txt");

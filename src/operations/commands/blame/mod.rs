@@ -64,6 +64,14 @@ pub struct BlameHunk {
     /// The filename at the blamed commit (may differ from current if file was renamed)
     #[serde(default)]
     pub orig_filename: Option<String>,
+    /// `summary`, `previous` and `filename` values exactly as `git blame`
+    /// printed them, for the machine-readable output formats.
+    #[serde(skip)]
+    pub summary: String,
+    #[serde(skip)]
+    pub previous: Option<String>,
+    #[serde(skip)]
+    pub git_filename: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

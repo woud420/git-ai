@@ -14,6 +14,7 @@
 //!   `hooks_merge_flat` module.
 use crate::error::GitAiError;
 use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::hook_installer::HookCheckResult;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -25,6 +26,11 @@ const CATCH_ALL_MATCHER: &str = "*";
 pub fn is_git_ai_checkpoint_command(cmd: &str) -> bool {
     // Must contain "git-ai" and "checkpoint"
     cmd.contains("git-ai") && cmd.contains("checkpoint")
+}
+
+/// `parse` argument for the helpers below when the settings file is strict JSON.
+pub fn parse_json(content: &str) -> Result<Value, GitAiError> {
+    Ok(serde_json::from_str(content)?)
 }
 
 /// Controls how [`edit_settings_json`] treats a settings file that doesn't exist.
@@ -257,6 +263,79 @@ pub fn uninstall_catch_all_hooks(hooks_obj: &mut Value, hook_types: &[&str]) -> 
     changed
 }
 
+/// [`edit_settings_json`] envelope around [`install_catch_all_hooks`] for the
+/// `"hooks"` object of `settings_path`; `extra` then applies whatever else the
+/// tool needs in the same settings value.
+pub fn install_catch_all_hooks_at(
+    settings_path: &Path,
+    dry_run: bool,
+    parse: impl Fn(&str) -> Result<Value, GitAiError>,
+    desired: &[(&str, &str)],
+    extra: impl FnOnce(&mut Value),
+) -> Result<Option<String>, GitAiError> {
+    edit_settings_json(
+        settings_path,
+        dry_run,
+        MissingBehavior::TreatAsEmpty,
+        parse,
+        |merged| {
+            let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
+            install_catch_all_hooks(&mut hooks_obj, desired);
+            if let Some(root) = merged.as_object_mut() {
+                root.insert("hooks".to_string(), hooks_obj);
+            }
+            extra(merged);
+        },
+    )
+}
+
+/// [`edit_settings_json`] envelope around [`uninstall_catch_all_hooks`] for
+/// the `"hooks"` object of `settings_path`.
+pub fn uninstall_catch_all_hooks_at(
+    settings_path: &Path,
+    dry_run: bool,
+    parse: impl Fn(&str) -> Result<Value, GitAiError>,
+    hook_types: &[&str],
+) -> Result<Option<String>, GitAiError> {
+    edit_settings_json(
+        settings_path,
+        dry_run,
+        MissingBehavior::NoOp,
+        parse,
+        |merged| {
+            let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
+                return;
+            };
+            if uninstall_catch_all_hooks(&mut hooks_obj, hook_types)
+                && let Some(root) = merged.as_object_mut()
+            {
+                root.insert("hooks".to_string(), hooks_obj);
+            }
+        },
+    )
+}
+
+/// Shared tail of `HookInstaller::check_hooks` for a detected tool whose hooks
+/// live in one settings file: a missing file has no hooks, an unparseable one
+/// is read as `{}`, and `status` maps the settings to
+/// `(hooks_installed, hooks_up_to_date)`.
+pub fn check_settings_hooks(
+    settings_path: &Path,
+    parse: impl Fn(&str) -> Result<Value, GitAiError>,
+    status: impl Fn(&Value) -> (bool, bool),
+) -> Result<HookCheckResult, GitAiError> {
+    if !settings_path.exists() {
+        return Ok(HookCheckResult::installed_without_hooks());
+    }
+    let content = fs::read_to_string(settings_path)?;
+    let existing = parse(&content).unwrap_or_else(|_| json!({}));
+    let (hooks_installed, hooks_up_to_date) = status(&existing);
+    Ok(HookCheckResult::installed(
+        hooks_installed,
+        hooks_up_to_date,
+    ))
+}
+
 /// Returns `(hooks_installed, hooks_up_to_date)` for a catch-all-matcher-style
 /// settings value, inspecting only `pre_hook_type` (matches every pre-existing
 /// agent's `hook_status`, which never inspected the "post" key).
@@ -309,10 +388,6 @@ pub fn catch_all_hook_status(settings: &Value, pre_hook_type: &str) -> (bool, bo
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    fn parse_json(content: &str) -> Result<Value, GitAiError> {
-        Ok(serde_json::from_str(content)?)
-    }
 
     #[test]
     fn test_is_git_ai_checkpoint_command() {

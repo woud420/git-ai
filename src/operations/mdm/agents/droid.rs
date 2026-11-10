@@ -4,13 +4,12 @@ use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, Hoo
 #[cfg(test)]
 use crate::operations::mdm::hooks_merge::is_git_ai_checkpoint_command;
 use crate::operations::mdm::hooks_merge::{
-    MissingBehavior, catch_all_hook_status, edit_settings_json, install_catch_all_hooks,
-    uninstall_catch_all_hooks,
+    catch_all_hook_status, check_settings_hooks, install_catch_all_hooks_at,
+    uninstall_catch_all_hooks_at,
 };
 use crate::operations::mdm::paths::home_dir;
 use jsonc_parser::ParseOptions;
 use serde_json::{Value, json};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Droid's settings.json uses JSONC (JSON with `//` line comments, `/* */` block
@@ -75,24 +74,15 @@ impl DroidInstaller {
         let pre_tool_cmd = format!("{} {}", binary_path, DROID_PRE_TOOL_CMD);
         let post_tool_cmd = format!("{} {}", binary_path, DROID_POST_TOOL_CMD);
 
-        edit_settings_json(
+        install_catch_all_hooks_at(
             settings_path,
             dry_run,
-            MissingBehavior::TreatAsEmpty,
             parse_jsonc_settings,
+            &[
+                ("PreToolUse", pre_tool_cmd.as_str()),
+                ("PostToolUse", post_tool_cmd.as_str()),
+            ],
             |merged| {
-                let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
-                install_catch_all_hooks(
-                    &mut hooks_obj,
-                    &[
-                        ("PreToolUse", pre_tool_cmd.as_str()),
-                        ("PostToolUse", post_tool_cmd.as_str()),
-                    ],
-                );
-                if let Some(root) = merged.as_object_mut() {
-                    root.insert("hooks".to_string(), hooks_obj);
-                }
-
                 // Add claudeHooksImported flag if it doesn't exist.
                 if let Some(hooks) = merged.get_mut("hooks").and_then(|h| h.as_object_mut())
                     && !hooks.contains_key("claudeHooksImported")
@@ -107,21 +97,11 @@ impl DroidInstaller {
         settings_path: &Path,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        edit_settings_json(
+        uninstall_catch_all_hooks_at(
             settings_path,
             dry_run,
-            MissingBehavior::NoOp,
             parse_jsonc_settings,
-            |merged| {
-                let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
-                    return;
-                };
-                if uninstall_catch_all_hooks(&mut hooks_obj, &["PreToolUse", "PostToolUse"])
-                    && let Some(root) = merged.as_object_mut()
-                {
-                    root.insert("hooks".to_string(), hooks_obj);
-                }
-            },
+            &["PreToolUse", "PostToolUse"],
         )
     }
 }
@@ -147,19 +127,11 @@ impl HookInstaller for DroidInstaller {
             return Ok(HookCheckResult::tool_not_installed());
         }
 
-        let settings_path = Self::settings_path();
-        if !settings_path.exists() {
-            return Ok(HookCheckResult::installed_without_hooks());
-        }
-
-        let content = fs::read_to_string(&settings_path)?;
-        let existing: Value = parse_jsonc_settings(&content).unwrap_or_else(|_| json!({}));
-        let (hooks_installed, hooks_up_to_date) = Self::hook_status(&existing);
-
-        Ok(HookCheckResult::installed(
-            hooks_installed,
-            hooks_up_to_date,
-        ))
+        check_settings_hooks(
+            &Self::settings_path(),
+            parse_jsonc_settings,
+            Self::hook_status,
+        )
     }
 
     fn install_hooks(

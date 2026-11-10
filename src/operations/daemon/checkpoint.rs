@@ -69,14 +69,30 @@ pub fn build_agent_usage_attrs(
     repo: Option<&Repository>,
     agent_id: &AgentId,
 ) -> crate::metrics::EventAttributes {
-    let session_id = generate_session_id(&agent_id.id, &agent_id.tool);
+    build_event_attrs(repo, Some(agent_id))
+}
 
+/// Attributes shared by AgentUsage and Checkpoint events. A checkpoint without
+/// an agent still reports an (empty) session_id.
+fn build_event_attrs(
+    repo: Option<&Repository>,
+    agent_id: Option<&AgentId>,
+) -> crate::metrics::EventAttributes {
+    let session_id = agent_id
+        .map(|aid| generate_session_id(&aid.id, &aid.tool))
+        .unwrap_or_default();
+
+    // Config::fresh() so custom attributes follow runtime config updates.
     let mut attrs = crate::metrics::EventAttributes::with_version(env!("CARGO_PKG_VERSION"))
         .session_id(session_id)
-        .tool(&agent_id.tool)
-        .model(&agent_id.model)
-        .external_session_id(&agent_id.id)
         .custom_attributes_map(crate::config::Config::fresh().custom_attributes());
+
+    if let Some(agent_id) = agent_id {
+        attrs = attrs
+            .tool(&agent_id.tool)
+            .model(&agent_id.model)
+            .external_session_id(&agent_id.id);
+    }
 
     if let Some(repo) = repo {
         if let Some(url) = crate::operations::git::remote_url::resolve_repo_url_from_repo(repo) {
@@ -93,79 +109,15 @@ pub fn build_agent_usage_attrs(
     attrs
 }
 
-/// Build EventAttributes with repo metadata.
-/// Reused for both AgentUsage and Checkpoint events.
-fn build_checkpoint_attrs(
-    repo: &Repository,
-    base_commit: &str,
-    agent_id: Option<&AgentId>,
-) -> crate::metrics::EventAttributes {
-    // Extract session_id from agent_id if available
-    let session_id = agent_id
-        .as_ref()
-        .map(|aid| generate_session_id(&aid.id, &aid.tool))
-        .unwrap_or_default();
-
-    let mut attrs = crate::metrics::EventAttributes::with_version(env!("CARGO_PKG_VERSION"))
-        .session_id(session_id)
-        .base_commit_sha(base_commit);
-
-    // Add AI-specific attributes
-    if let Some(agent_id) = agent_id {
-        attrs = attrs
-            .tool(&agent_id.tool)
-            .model(&agent_id.model)
-            .external_session_id(&agent_id.id);
-    }
-
-    // Attach custom attributes using Config::fresh() to support runtime config updates
-    attrs = attrs.custom_attributes_map(crate::config::Config::fresh().custom_attributes());
-
-    // Add repo URL
-    if let Some(url) = crate::operations::git::remote_url::resolve_repo_url_from_repo(repo) {
-        attrs = attrs.repo_url(url);
-    }
-
-    // Add branch
-    if let Ok(head_ref) = repo.head()
-        && let Ok(short_branch) = head_ref.shorthand()
-    {
-        attrs = attrs.branch(short_branch);
-    }
-
-    attrs
-}
-
 pub fn execute_resolved_checkpoint_from_daemon(
     repo: &Repository,
     author: &str,
     kind: CheckpointKind,
     checkpoint_request: CheckpointRequest,
-    resolved: ResolvedCheckpointExecution,
+    mut resolved: ResolvedCheckpointExecution,
 ) -> Result<(), GitAiError> {
     let checkpoint_start = Instant::now();
     tracing::debug!("[BENCHMARK] Starting daemon replay checkpoint");
-    execute_resolved_checkpoint(
-        repo,
-        author,
-        kind,
-        true,
-        checkpoint_request,
-        resolved,
-        checkpoint_start,
-    )
-    .map(|_| ())
-}
-
-fn execute_resolved_checkpoint(
-    repo: &Repository,
-    author: &str,
-    kind: CheckpointKind,
-    quiet: bool,
-    checkpoint_request: CheckpointRequest,
-    mut resolved: ResolvedCheckpointExecution,
-    checkpoint_start: Instant,
-) -> Result<(usize, usize, usize), GitAiError> {
     if kind.is_ai() && checkpoint_request.agent_id.is_none() {
         return Err(checkpoint_error(
             std::io::ErrorKind::InvalidData,
@@ -203,7 +155,7 @@ fn execute_resolved_checkpoint(
         working_log
             .ensure_cached_checkpoint_record_durable(&mut checkpoints, applied_checkpoint_index)?;
         tracing::debug!(delivery_id, "skipping already-applied checkpoint delivery");
-        return Ok((0, resolved.files.len(), checkpoints.len()));
+        return Ok(());
     }
 
     let save_states_start = Instant::now();
@@ -221,7 +173,7 @@ fn execute_resolved_checkpoint(
             );
         }
         if resolved.files.is_empty() {
-            return Ok((0, filtered_files, checkpoints.len()));
+            return Ok(());
         }
     }
     tracing::debug!(
@@ -258,7 +210,7 @@ fn execute_resolved_checkpoint(
         &checkpoints,
         &checkpoint_request,
         resolved.ts,
-        Some(resolved.base_commit.as_str()),
+        &resolved.base_commit,
         trace_id.clone(),
     ))?;
     tracing::debug!(
@@ -267,7 +219,6 @@ fn execute_resolved_checkpoint(
         entries_start.elapsed()
     );
 
-    let entry_count = entries.len();
     if !entries.is_empty() {
         let checkpoint_create_start = Instant::now();
         let mut checkpoint = Checkpoint::new(kind, combined_hash, author.to_string(), entries);
@@ -325,8 +276,8 @@ fn execute_resolved_checkpoint(
             .last()
             .expect("checkpoint was appended to the collection above");
 
-        let mut attrs =
-            build_checkpoint_attrs(repo, &resolved.base_commit, checkpoint.agent_id.as_ref());
+        let mut attrs = build_event_attrs(Some(repo), checkpoint.agent_id.as_ref())
+            .base_commit_sha(&resolved.base_commit);
 
         // Add trace_id to attributes - links all checkpoint events together
         if let Some(ref tid) = checkpoint.trace_id {
@@ -368,52 +319,11 @@ fn execute_resolved_checkpoint(
         }
     }
 
-    let agent_tool = if kind.is_ai() {
-        checkpoint_request
-            .agent_id
-            .as_ref()
-            .map(|aid| aid.tool.as_str())
-    } else {
-        None
-    };
-
-    let label = if entry_count > 1 {
-        "checkpoint"
-    } else {
-        "commit"
-    };
-
-    if !quiet {
-        let log_author = agent_tool.unwrap_or(author);
-        let files_with_entries = entry_count;
-        let total_uncommitted_files = resolved.files.len();
-
-        if files_with_entries == total_uncommitted_files {
-            eprintln!(
-                "{} {} changed {} file(s) that have changed since the last {}",
-                kind.to_str(),
-                log_author,
-                files_with_entries,
-                label
-            );
-        } else {
-            eprintln!(
-                "{} {} changed {} of the {} file(s) that have changed since the last {} ({} already checkpointed)",
-                kind.to_str(),
-                log_author,
-                files_with_entries,
-                total_uncommitted_files,
-                label,
-                total_uncommitted_files - files_with_entries
-            );
-        }
-    }
-
     tracing::debug!(
         "[BENCHMARK] Total checkpoint run took {:?}",
         checkpoint_start.elapsed()
     );
-    Ok((entry_count, resolved.files.len(), checkpoints.len()))
+    Ok(())
 }
 
 fn save_current_file_states(
@@ -557,7 +467,6 @@ fn get_checkpoint_entry_for_file(
     head_tree_id: Arc<Option<String>>,
     initial_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
     initial_snapshot_contents: Arc<HashMap<String, Arc<str>>>,
-    parent_note_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
     ts: u128,
 ) -> Result<Option<(WorkingLogEntry, FileLineStats)>, GitAiError> {
     // Deterministic blocking work for the TestRepo throughput guard; release builds omit it.
@@ -634,11 +543,9 @@ fn get_checkpoint_entry_for_file(
             return Ok(None);
         }
 
-        // Start with INITIAL attributions (they win), augmented by parent note
+        // Start with INITIAL attributions (they win). Parent notes are not
+        // seeded here; post-commit inherits them.
         let mut prev_line_attributions = initial_attrs_for_file.clone();
-
-        // Parent note seeding removed — handled at post-commit via inheritance.
-        let _ = &parent_note_attributions;
 
         // For AI checkpoints, attribute any lines NOT in INITIAL and NOT returned by ai_blame
         if kind.is_ai() {
@@ -777,7 +684,7 @@ async fn get_checkpoint_entries(
     previous_checkpoints: &[Checkpoint],
     checkpoint_request: &CheckpointRequest,
     ts: u128,
-    head_commit_override: Option<&str>,
+    base_commit: &str,
     trace_id: String,
 ) -> Result<(Vec<WorkingLogEntry>, Vec<FileLineStats>), GitAiError> {
     let entries_fn_start = Instant::now();
@@ -830,8 +737,7 @@ async fn get_checkpoint_entries(
     };
 
     // Get HEAD commit info for git operations
-    let head_commit = head_commit_override
-        .map(str::trim)
+    let head_commit = Some(base_commit.trim())
         .filter(|sha| !sha.is_empty() && *sha != "initial")
         .and_then(|sha| repo.find_commit(sha.to_string()).ok())
         .or_else(|| {
@@ -845,8 +751,6 @@ async fn get_checkpoint_entries(
         .and_then(|c| c.tree().ok())
         .map(|t| t.id().to_string());
 
-    let parent_note_attributions: HashMap<String, Vec<LineAttribution>> = HashMap::new();
-
     const MAX_CONCURRENT: usize = 30;
 
     // Create a semaphore to limit concurrent tasks
@@ -859,7 +763,6 @@ async fn get_checkpoint_entries(
     let head_tree_id = Arc::new(head_tree_id);
     let initial_attributions = Arc::new(initial_attributions);
     let initial_snapshot_contents = Arc::new(initial_snapshot_contents);
-    let parent_note_attributions = Arc::new(parent_note_attributions);
 
     // Spawn tasks for each file
     let spawn_start = Instant::now();
@@ -879,7 +782,6 @@ async fn get_checkpoint_entries(
             .unwrap_or_default();
         let initial_attributions = Arc::clone(&initial_attributions);
         let initial_snapshot_contents = Arc::clone(&initial_snapshot_contents);
-        let parent_note_attributions = Arc::clone(&parent_note_attributions);
         let semaphore = Arc::clone(&semaphore);
 
         let task = async move {
@@ -901,7 +803,6 @@ async fn get_checkpoint_entries(
                     head_tree_id.clone(),
                     initial_attributions.clone(),
                     initial_snapshot_contents.clone(),
-                    parent_note_attributions.clone(),
                     ts,
                 )
             })

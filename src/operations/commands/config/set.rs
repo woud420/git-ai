@@ -1,11 +1,12 @@
 use super::parse::{
-    mask_api_key, parse_author_config_object, parse_bool, parse_codex_hooks_format,
+    parse_author_config_object, parse_bool, parse_codex_hooks_format,
     parse_custom_attributes_object, parse_git_ai_hooks_object, parse_hook_command_values,
     parse_key_path, parse_notes_backend_kind, parse_value, validate_feature_flags,
     validate_prompt_storage_value,
 };
 use super::pattern::{log_array_changes, resolve_repository_value, set_repository_array_field};
 use super::spec::resolve_key;
+use crate::config::mask_api_key;
 use serde_json::Value;
 
 pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String> {

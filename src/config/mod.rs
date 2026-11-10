@@ -400,22 +400,25 @@ impl Config {
     }
 }
 
+/// Mask an API key for display: the first and last four characters of a key
+/// longer than eight characters, `****` otherwise.
+pub(crate) fn mask_api_key(key: &str) -> String {
+    let chars: Vec<char> = key.chars().collect();
+    if chars.len() > 8 {
+        let prefix: String = chars[..4].iter().collect();
+        let suffix: String = chars[chars.len() - 4..].iter().collect();
+        format!("{}...{}", prefix, suffix)
+    } else {
+        "****".to_string()
+    }
+}
+
 fn serialize_masked_api_key<S>(api_key: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
     use serde::Serialize;
-    let masked = api_key.as_ref().map(|key| {
-        let chars: Vec<char> = key.chars().collect();
-        if chars.len() > 8 {
-            let prefix: String = chars[..4].iter().collect();
-            let suffix: String = chars[chars.len() - 4..].iter().collect();
-            format!("{}...{}", prefix, suffix)
-        } else {
-            "****".to_string()
-        }
-    });
-    masked.serialize(serializer)
+    api_key.as_deref().map(mask_api_key).serialize(serializer)
 }
 
 fn author_config_cache_key() -> AuthorConfigCacheKey {

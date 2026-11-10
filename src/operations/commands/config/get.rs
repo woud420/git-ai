@@ -1,5 +1,6 @@
-use super::parse::{mask_api_key, parse_key_path};
+use super::parse::parse_key_path;
 use super::spec::resolve_key;
+use crate::config::mask_api_key;
 use serde_json::Value;
 
 pub(super) fn show_all_config() -> Result<(), String> {

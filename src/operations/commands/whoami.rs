@@ -262,14 +262,13 @@ fn optional_or_unavailable(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("<unavailable>")
 }
 
+/// Like `config::mask_api_key`, except that a short key shows its length.
 fn mask_api_key(key: &str) -> String {
-    let chars: Vec<char> = key.chars().collect();
-    if chars.len() <= 8 {
-        return "*".repeat(chars.len());
+    let len = key.chars().count();
+    if len <= 8 {
+        return "*".repeat(len);
     }
-    let prefix: String = chars[..4].iter().collect();
-    let suffix: String = chars[chars.len() - 4..].iter().collect();
-    format!("{}...{}", prefix, suffix)
+    config::mask_api_key(key)
 }
 
 fn print_help() {
@@ -404,6 +403,16 @@ mod tests {
 
         assert!(output.contains("API key: unset"));
         assert!(output.contains("Login: not logged in"));
+    }
+
+    #[test]
+    fn api_key_status_masks_short_keys_per_character() {
+        assert_eq!(api_key_status(Some("abc")), "configured (***)");
+        assert_eq!(api_key_status(Some("12345678")), "configured (********)");
+        assert_eq!(
+            api_key_status(Some("123456789")),
+            "configured (1234...6789)"
+        );
     }
 
     #[test]

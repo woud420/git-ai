@@ -3,7 +3,7 @@ use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::domain::RewriteEvent;
 use crate::operations::authorship::rewrite::handle_rewrite_event;
-use crate::operations::git::notes_api::{read_authorship_v3, read_note};
+use crate::operations::git::notes_api::{commits_with_notes, read_authorship_v3, read_note};
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::refs::{
     AI_AUTHORSHIP_FORK_TRACKING_REF, copy_missing_notes_for_commits_from_ref, ref_exists,
@@ -683,10 +683,7 @@ impl CiContext {
     fn has_notes_for_any_commit(&self, commit_shas: &[String]) -> Result<bool, GitAiError> {
         // Backend-aware: on the HTTP backend notes live in the notes-db cache,
         // so a refs/notes/ai-only check would always report "no notes".
-        Ok(
-            !crate::operations::git::notes_api::commits_with_notes(&self.repo, commit_shas)?
-                .is_empty(),
-        )
+        Ok(!commits_with_notes(&self.repo, commit_shas)?.is_empty())
     }
 
     fn original_pr_commits(
@@ -773,31 +770,34 @@ impl CiContext {
         merge_commit_sha: &str,
         expected_count: usize,
     ) -> Vec<String> {
+        if expected_count == 0 {
+            return Vec::new();
+        }
+        // One first-parent walk printing `<sha> <parents...>` per commit. The
+        // SHAs are full even when a caller like `git-ai ci local merge` passes
+        // an abbreviated `merge_commit_sha`, so they stay comparable to the
+        // 40-char SHAs produced by `git rev-list` elsewhere.
+        let mut args = self.repo.global_args_for_exec();
+        args.extend([
+            "rev-list".to_string(),
+            "--first-parent".to_string(),
+            "--parents".to_string(),
+            format!("--max-count={expected_count}"),
+            merge_commit_sha.to_string(),
+            "--".to_string(),
+        ]);
+        let Ok(output) = exec_git(&args) else {
+            return vec![merge_commit_sha.to_string()];
+        };
+
         let mut commits = Vec::new();
-        // Resolve to a full SHA up front so the entries are comparable to the
-        // full 40-char SHAs produced by `git rev-list`. Callers like
-        // `git-ai ci local merge` may pass an abbreviated `merge_commit_sha`; the
-        // remaining entries already come from parent ids, which are full.
-        let mut current_sha = self
-            .repo
-            .revparse_single(merge_commit_sha)
-            .map(|obj| obj.id())
-            .unwrap_or_else(|_| merge_commit_sha.to_string());
-
-        for _ in 0..expected_count {
-            commits.push(current_sha.clone());
-
-            // Get the parent of current commit
-            match self.repo.find_commit(current_sha.clone()) {
-                Ok(commit) => {
-                    let parents: Vec<_> = commit.parents().collect();
-                    if parents.len() != 1 {
-                        // Not a linear chain (merge commit or root), stop here
-                        break;
-                    }
-                    current_sha = parents[0].id().to_string();
-                }
-                Err(_) => break,
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let mut shas = line.split_whitespace();
+            let Some(commit) = shas.next() else { break };
+            commits.push(commit.to_string());
+            if shas.count() != 1 {
+                // Not a linear chain (merge commit or root), stop here
+                break;
             }
         }
 
@@ -832,10 +832,8 @@ fn commits_in_range_oldest_first(
 }
 
 fn count_commits_with_authorship_notes(repo: &Repository, commits: &[String]) -> usize {
-    commits
-        .iter()
-        .filter(|sha| read_note(repo, sha).is_some())
-        .count()
+    // Batched and backend-aware; a failed lookup counts as no notes, as before.
+    commits_with_notes(repo, commits).map_or(0, |noted| noted.len())
 }
 
 fn ensure_commit_available_for_sync(

@@ -159,6 +159,65 @@ fn test_get_rebased_commits_more_than_available() {
 }
 
 #[test]
+fn test_get_rebased_commits_stops_at_merge_and_resolves_full_shas() {
+    let repo = TestRepo::new();
+    let commit = |name: &str| {
+        fs::write(repo.path().join(name), name).unwrap();
+        repo.git_og(&["add", name]).unwrap();
+        repo.git_og(&["commit", "-m", name]).unwrap();
+        let sha = repo.git_og(&["rev-parse", "HEAD"]).unwrap();
+        sha.trim().to_string()
+    };
+
+    // base -- on-main -- merge -- after1 -- after2
+    //     \-- on-side --/
+    commit("base");
+    repo.git_og(&["checkout", "-b", "side"]).unwrap();
+    commit("on-side");
+    repo.git_og(&["checkout", "-"]).unwrap();
+    commit("on-main");
+    repo.git_og(&["merge", "--no-ff", "side", "-m", "merge"])
+        .unwrap();
+    let merge = repo.git_og(&["rev-parse", "HEAD"]).unwrap();
+    let merge = merge.trim().to_string();
+    let after1 = commit("after1");
+    let after2 = commit("after2");
+
+    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
+    let event = CiEvent::Merge {
+        merge_commit_sha: after2.clone(),
+        head_ref: "HEAD".to_string(),
+        head_sha: after2.clone(),
+        base_ref: "main".to_string(),
+        base_sha: merge.clone(),
+        fork_clone_url: None,
+    };
+    let context = CiContext::with_repository(gitai_repo, event);
+
+    // The walk includes the first non-linear commit and stops there.
+    assert_eq!(
+        context.get_rebased_commits(&after2, 10),
+        vec![merge, after1.clone(), after2.clone()]
+    );
+    // The expected count caps the walk.
+    assert_eq!(
+        context.get_rebased_commits(&after2, 2),
+        vec![after1, after2.clone()]
+    );
+    assert!(context.get_rebased_commits(&after2, 0).is_empty());
+    // An abbreviated revision comes back as a full SHA.
+    assert_eq!(
+        context.get_rebased_commits(&after2[..8], 1),
+        vec![after2.clone()]
+    );
+    // An unresolvable revision is returned as given.
+    assert_eq!(
+        context.get_rebased_commits("not-a-revision", 3),
+        vec!["not-a-revision".to_string()]
+    );
+}
+
+#[test]
 fn test_ci_context_debug() {
     let repo = TestRepo::new();
     let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();

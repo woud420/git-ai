@@ -1604,6 +1604,67 @@ fn test_blame_ignore_revs_with_multiple_commits() {
 }
 
 #[test]
+fn test_blame_ai_human_author_follows_renames() {
+    let repo = TestRepo::new();
+    repo.filename("old.txt")
+        .set_contents(crate::lines!["first line", "second line"]);
+    let initial_sha = repo
+        .stage_all_and_commit("Initial commit")
+        .unwrap()
+        .commit_sha;
+
+    // The note of the commit that wrote the lines knows the file by its old name.
+    let mut authorship_log = AuthorshipLog::new();
+    authorship_log.metadata.base_commit_sha = initial_sha.clone();
+    let prompt_hash = "abc12345".to_string();
+    authorship_log.metadata.prompts.insert(
+        prompt_hash.clone(),
+        PromptRecord {
+            agent_id: AgentId {
+                tool: "cursor".to_string(),
+                id: "session_line1".to_string(),
+                model: "claude-3-sonnet".to_string(),
+            },
+            human_author: Some("First <first@example.com>".to_string()),
+            total_additions: 1,
+            total_deletions: 0,
+            accepted_lines: 1,
+            overriden_lines: 0,
+            custom_attributes: None,
+            messages_url: None,
+        },
+    );
+    let mut file_attestation = FileAttestation::new("old.txt".to_string());
+    file_attestation.add_entry(AttestationEntry::new(
+        prompt_hash,
+        vec![LineRange::Single(1)],
+    ));
+    authorship_log.attestations.push(file_attestation);
+    let gitai_repo = GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap())
+        .expect("Failed to find repository");
+    write_note(
+        &gitai_repo,
+        &initial_sha,
+        &authorship_log.serialize_to_string().unwrap(),
+    )
+    .unwrap();
+
+    repo.git(&["mv", "old.txt", "new.txt"]).unwrap();
+    repo.stage_all_and_commit("Rename the file").unwrap();
+
+    let hunks = gitai_repo
+        .blame_hunks("new.txt", 1, 2, &GitAiBlameOptions::default())
+        .expect("Failed to get blame hunks");
+    assert_eq!(
+        hunks
+            .iter()
+            .map(|hunk| hunk.ai_human_author.clone())
+            .collect::<Vec<_>>(),
+        vec![Some("First <first@example.com>".to_string()), None]
+    );
+}
+
+#[test]
 fn test_blame_ai_human_author() {
     let repo = TestRepo::new();
 

@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::operations::commands::checkpoint_agent::presets::*;
 use serde_json::json;

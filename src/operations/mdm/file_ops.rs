@@ -33,6 +33,12 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
     {
         let mut file = fs::File::create(&tmp_path)
             .map_err(|e| atomic_write_io_error("create temp file", tmp_path.display(), e))?;
+        // The rename swaps in a new inode: keep the mode of the file being
+        // replaced so a private (0600) config stays private.
+        #[cfg(unix)]
+        if let Ok(existing) = fs::metadata(&target_path) {
+            file.set_permissions(existing.permissions())?;
+        }
         file.write_all(data)?;
         file.sync_all()?;
     }
@@ -169,6 +175,25 @@ mod tests {
         // The target file should have the new content
         let target_content = fs::read_to_string(&target_file).unwrap();
         assert_eq!(target_content, "relative symlink content");
+    }
+
+    /// The rename replaces the target's inode, so the mode has to be carried
+    /// over or a private config (API keys) becomes world-readable.
+    #[test]
+    #[cfg(unix)]
+    fn test_write_atomic_preserves_existing_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("config.toml");
+        fs::write(&file_path, "api_key = \"secret\"").unwrap();
+        fs::set_permissions(&file_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        write_atomic(&file_path, b"updated").unwrap();
+
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "updated");
+        let mode = fs::metadata(&file_path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     /// write_atomic should create parent directories

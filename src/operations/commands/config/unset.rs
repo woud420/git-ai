@@ -97,41 +97,22 @@ pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
             return Err("feature_flags must be a JSON object".to_string());
         }
 
-        // Navigate to the parent of the key to remove
-        let flags_obj = flags.as_object_mut().unwrap();
+        // Navigate to the parent of the key to remove. A single-level key
+        // (feature_flags.key) has no intermediate segments.
         let nested_key = key_path[1..].join(".");
-
-        if key_path.len() == 2 {
-            // Simple nested key: feature_flags.key
-            let old_value = flags_obj.remove(&key_path[1]);
-            if old_value.is_none() {
-                return Err(format!("Config key not found: {}", key));
-            }
-            file_config.feature_flags = Some(flags);
-            crate::config::save_file_config(&file_config)?;
-            if let Some(v) = old_value {
-                println!("- [{}]: {}", nested_key, v);
-            }
-        } else {
-            // Deep nested key: feature_flags.parent.child...
-            let mut current = flags_obj;
-            for segment in &key_path[1..key_path.len() - 1] {
-                current = current
-                    .get_mut(segment)
-                    .and_then(|v| v.as_object_mut())
-                    .ok_or_else(|| format!("Config key not found: {}", key))?;
-            }
-            let old_value = current.remove(key_path.last().unwrap());
-            if old_value.is_none() {
-                return Err(format!("Config key not found: {}", key));
-            }
-            file_config.feature_flags = Some(flags);
-            crate::config::save_file_config(&file_config)?;
-            if let Some(v) = old_value {
-                println!("- [{}]: {}", nested_key, v);
-            }
+        let mut current = flags.as_object_mut().unwrap();
+        for segment in &key_path[1..key_path.len() - 1] {
+            current = current
+                .get_mut(segment)
+                .and_then(|v| v.as_object_mut())
+                .ok_or_else(|| format!("Config key not found: {}", key))?;
         }
-
+        let old_value = current
+            .remove(key_path.last().unwrap())
+            .ok_or_else(|| format!("Config key not found: {}", key))?;
+        file_config.feature_flags = Some(flags);
+        crate::config::save_file_config(&file_config)?;
+        println!("- [{}]: {}", nested_key, old_value);
         return Ok(());
     }
 
@@ -147,18 +128,15 @@ pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
         let mut hooks = file_config
             .git_ai_hooks
             .ok_or_else(|| format!("Config key not found: {}", key))?;
-        let old_value = hooks.remove(hook_name);
-        if old_value.is_none() {
-            return Err(format!("Config key not found: {}", key));
-        }
+        let commands = hooks
+            .remove(hook_name)
+            .ok_or_else(|| format!("Config key not found: {}", key))?;
 
         file_config.git_ai_hooks = if hooks.is_empty() { None } else { Some(hooks) };
         crate::config::save_file_config(&file_config)?;
 
-        if let Some(commands) = old_value {
-            for command in commands {
-                println!("- [{}]: {}", key, command);
-            }
+        for command in commands {
+            println!("- [{}]: {}", key, command);
         }
         return Ok(());
     }
@@ -233,16 +211,13 @@ pub(super) fn unset_config_value(key: &str) -> Result<(), String> {
         let mut attrs = file_config
             .custom_attributes
             .ok_or_else(|| format!("Config key not found: {}", key))?;
-        let old_value = attrs.remove(attr_name);
-        if old_value.is_none() {
-            return Err(format!("Config key not found: {}", key));
-        }
+        let old_value = attrs
+            .remove(attr_name)
+            .ok_or_else(|| format!("Config key not found: {}", key))?;
 
         file_config.custom_attributes = if attrs.is_empty() { None } else { Some(attrs) };
         crate::config::save_file_config(&file_config)?;
-        if let Some(v) = old_value {
-            println!("- [custom_attributes.{}]: {}", attr_name, v);
-        }
+        println!("- [custom_attributes.{}]: {}", attr_name, old_value);
         return Ok(());
     }
 

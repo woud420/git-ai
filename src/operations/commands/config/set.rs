@@ -243,32 +243,19 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
             return Err("feature_flags must be a JSON object".to_string());
         }
 
-        // Navigate to the nested location
-        let flags_obj = flags.as_object_mut().unwrap();
-
+        // Navigate to the parent of the key, creating objects on the way. A
+        // single-level key (feature_flags.key) has no intermediate segments.
         let nested_key = key_path[1..].join(".");
-        if key_path.len() == 2 {
-            // Simple nested key: feature_flags.key
-            let parsed_value = parse_value(value)?;
-            if add_mode {
-                // For add mode on objects, this is an upsert
-                flags_obj.insert(key_path[1].clone(), parsed_value);
-            } else {
-                flags_obj.insert(key_path[1].clone(), parsed_value);
-            }
-        } else {
-            // Deep nested key: feature_flags.parent.child...
-            let mut current = flags_obj;
-            for segment in &key_path[1..key_path.len() - 1] {
-                current = current
-                    .entry(segment.clone())
-                    .or_insert_with(|| Value::Object(serde_json::Map::new()))
-                    .as_object_mut()
-                    .ok_or_else(|| format!("Cannot navigate through non-object at {}", segment))?;
-            }
-            let parsed_value = parse_value(value)?;
-            current.insert(key_path.last().unwrap().clone(), parsed_value);
+        let mut current = flags.as_object_mut().unwrap();
+        for segment in &key_path[1..key_path.len() - 1] {
+            current = current
+                .entry(segment.clone())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| format!("Cannot navigate through non-object at {}", segment))?;
         }
+        // On an object, --add is an upsert: the same as a plain set.
+        current.insert(key_path.last().unwrap().clone(), parse_value(value)?);
 
         validate_feature_flags(&flags)?;
         file_config.feature_flags = Some(flags);
@@ -287,27 +274,18 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
 
         let hook_name = key_path[1].clone();
         let mut hooks = file_config.git_ai_hooks.unwrap_or_default();
-
-        if add_mode {
-            let mut existing_commands = hooks.get(&hook_name).cloned().unwrap_or_default();
-            let commands_to_add = parse_hook_command_values(value)?;
-            existing_commands.extend(commands_to_add.clone());
-            hooks.insert(hook_name.clone(), existing_commands);
-            file_config.git_ai_hooks = Some(hooks);
-            crate::config::save_file_config(&file_config)?;
-            for command in commands_to_add {
-                println!("+ [{}.{}]: {}", key_path[0], hook_name, command);
-            }
-        } else {
-            let commands = parse_hook_command_values(value)?;
-            hooks.insert(hook_name.clone(), commands.clone());
-            file_config.git_ai_hooks = Some(hooks);
-            crate::config::save_file_config(&file_config)?;
-            for command in commands {
-                println!("[{}.{}]: {}", key_path[0], hook_name, command);
-            }
+        let commands = parse_hook_command_values(value)?;
+        let hook_commands = hooks.entry(hook_name.clone()).or_default();
+        if !add_mode {
+            hook_commands.clear();
         }
-
+        hook_commands.extend(commands.iter().cloned());
+        file_config.git_ai_hooks = Some(hooks);
+        crate::config::save_file_config(&file_config)?;
+        let prefix = if add_mode { "+ " } else { "" };
+        for command in commands {
+            println!("{}[{}.{}]: {}", prefix, key_path[0], hook_name, command);
+        }
         return Ok(());
     }
 

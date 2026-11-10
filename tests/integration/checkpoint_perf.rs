@@ -1,3 +1,4 @@
+use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use crate::test_utils::DurationStatistics;
 use git_ai::model::working_log::CheckpointKind;
@@ -160,6 +161,46 @@ fn bench_checkpoint_correctness_after_optimization() {
         "Correctness verified: checkpoint took {:.1}ms, {} entries",
         checkpoint_dur.as_secs_f64() * 1000.0,
         last.entries.len()
+    );
+}
+
+/// A file's first checkpoint on a base commit diffs against HEAD. Reading HEAD
+/// must not cost Git processes per file once its objects are packed.
+#[test]
+fn first_touch_checkpoint_git_process_count_does_not_grow_with_packed_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut counts = Vec::new();
+    for file_count in [2, 8] {
+        let log_path = temp.path().join(format!("spawns-{file_count}.log"));
+        let repo =
+            TestRepo::new_with_daemon_env(&[("GIT_AI_SPAWN_LOG", log_path.to_str().unwrap())]);
+        let files: Vec<_> = (0..file_count).map(|i| format!("file-{i}.txt")).collect();
+        for file in &files {
+            fs::write(repo.path().join(file), "base\n").unwrap();
+        }
+        repo.stage_all_and_commit("base files").unwrap();
+        // Loose objects are read without Git; pack them all.
+        repo.git_og(&["repack", "-a", "-d", "-q"]).unwrap();
+        repo.sync_daemon();
+        for file in &files {
+            fs::write(repo.path().join(file), "base\nAI line\n").unwrap();
+        }
+        fs::write(&log_path, "").unwrap();
+        repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
+        repo.sync_daemon();
+        let commands = fs::read_to_string(&log_path).unwrap();
+        println!("checkpoint daemon Git processes for {file_count} files: {commands:?}");
+        counts.push(commands.lines().count());
+
+        repo.stage_all_and_commit("AI edits").unwrap();
+        for file in &files {
+            repo.filename(file)
+                .assert_committed_lines(crate::lines!["base".unattributed_human(), "AI line".ai()]);
+        }
+    }
+    assert_eq!(
+        counts[0], counts[1],
+        "checkpoint Git process count must be independent of file count"
     );
 }
 

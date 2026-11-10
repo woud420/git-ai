@@ -38,7 +38,9 @@ struct PreviousFileState {
 }
 
 use super::state_error::state_error as checkpoint_error;
+mod head_contents;
 mod known_human_checkpoint_filter;
+use head_contents::read_head_contents;
 use known_human_checkpoint_filter::filter_same_content_known_human_files;
 
 use crate::model::working_log::AgentId;
@@ -394,23 +396,6 @@ fn save_current_file_states(
     Ok(file_content_hashes)
 }
 
-fn get_previous_content_from_head(
-    repo: &Repository,
-    file_path: &str,
-    head_tree_id: &Option<String>,
-) -> Arc<str> {
-    let Some(tree_id) = head_tree_id.as_ref() else {
-        return Arc::from("");
-    };
-    match repo.read_file_blob_at_tree(tree_id, std::path::Path::new(file_path)) {
-        Ok(content) => {
-            let text = String::from_utf8_lossy(&content);
-            Arc::from(text.into_owned())
-        }
-        Err(_) => Arc::from(""),
-    }
-}
-
 #[doc(hidden)]
 pub fn is_ai_author_id(author_id: &str) -> bool {
     author_id != "human" && !author_id.starts_with("h_")
@@ -458,13 +443,14 @@ fn build_previous_file_state_maps(
 fn get_checkpoint_entry_for_file(
     file_path: String,
     kind: CheckpointKind,
-    repo: Repository,
     working_log: PersistedWorkingLog,
     previous_file_state_by_file: Arc<HashMap<String, PreviousFileState>>,
     ai_touched_files: Arc<HashSet<String>>,
     file_content_hash: String,
     author_id: Arc<String>,
-    head_tree_id: Arc<Option<String>>,
+    // HEAD's version of the file when no earlier checkpoint recorded one;
+    // empty when HEAD lacks the file.
+    head_content: Arc<str>,
     initial_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
     initial_snapshot_contents: Arc<HashMap<String, Arc<str>>>,
     ts: u128,
@@ -504,7 +490,7 @@ fn get_checkpoint_entry_for_file(
                     .unwrap_or_default(),
             )
         } else {
-            get_previous_content_from_head(&repo, &file_path, head_tree_id.as_ref())
+            head_content
         };
 
         if content_eq_ignoring_line_endings(&current_content, &previous_content) {
@@ -532,8 +518,7 @@ fn get_checkpoint_entry_for_file(
         (content, attrs)
     } else {
         // File doesn't exist in any previous checkpoint - need to initialize from git + INITIAL
-        let previous_content =
-            get_previous_content_from_head(&repo, &file_path, head_tree_id.as_ref());
+        let previous_content = head_content;
 
         // Skip if no changes, UNLESS we have INITIAL attributions for this file
         // (in which case we need to create an entry to record those attributions)
@@ -751,6 +736,15 @@ async fn get_checkpoint_entries(
         .and_then(|c| c.tree().ok())
         .map(|t| t.id().to_string());
 
+    // Files with no earlier checkpoint state are diffed against HEAD.
+    let head_contents = read_head_contents(
+        repo,
+        head_tree_id.as_deref(),
+        files
+            .iter()
+            .filter(|file| !previous_file_state_by_file.contains_key(*file)),
+    );
+
     const MAX_CONCURRENT: usize = 30;
 
     // Create a semaphore to limit concurrent tasks
@@ -760,7 +754,6 @@ async fn get_checkpoint_entries(
     let previous_file_state_by_file = Arc::new(previous_file_state_by_file);
     let ai_touched_files = Arc::new(ai_touched_files);
     let author_id = Arc::new(author_id);
-    let head_tree_id = Arc::new(head_tree_id);
     let initial_attributions = Arc::new(initial_attributions);
     let initial_snapshot_contents = Arc::new(initial_snapshot_contents);
 
@@ -770,12 +763,14 @@ async fn get_checkpoint_entries(
 
     for file_path in files {
         let file_path = file_path.clone();
-        let repo = repo.clone();
         let working_log = working_log.clone();
         let previous_file_state_by_file = Arc::clone(&previous_file_state_by_file);
         let ai_touched_files = Arc::clone(&ai_touched_files);
         let author_id = Arc::clone(&author_id);
-        let head_tree_id = Arc::clone(&head_tree_id);
+        let head_content = head_contents
+            .get(&file_path)
+            .cloned()
+            .unwrap_or_else(|| Arc::from(""));
         let blob_sha = file_content_hashes
             .get(&file_path)
             .cloned()
@@ -794,13 +789,12 @@ async fn get_checkpoint_entries(
                 get_checkpoint_entry_for_file(
                     file_path,
                     kind,
-                    repo,
                     working_log,
                     previous_file_state_by_file,
                     ai_touched_files,
                     blob_sha,
                     author_id.clone(),
-                    head_tree_id.clone(),
+                    head_content,
                     initial_attributions.clone(),
                     initial_snapshot_contents.clone(),
                     ts,
@@ -811,6 +805,8 @@ async fn get_checkpoint_entries(
 
         tasks.push(task);
     }
+    // Each task now owns the HEAD content it needs and frees it when done.
+    drop(head_contents);
     tracing::debug!(
         "[BENCHMARK] Spawning {} tasks took {:?}",
         tasks.len(),

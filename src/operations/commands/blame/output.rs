@@ -5,8 +5,8 @@ use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 
 use crate::model::authorship_log::PromptRecord;
 
-use super::GitAiBlameOptions;
 use super::hunk_parser::BlameRenderPreparation;
+use super::{BlameHunk, GitAiBlameOptions};
 
 pub(super) fn format_blame_date(
     author_time: i64,
@@ -57,25 +57,33 @@ pub(super) fn output_default_format(
     let max_line_num = lines.len() as u32;
     let line_num_width = max_line_num.to_string().len();
 
-    // Calculate the maximum author name width for proper padding
-    let mut max_author_width = 0;
-    for hunk in &prepared.hunks {
-        let author = line_authors
-            .get(&hunk.range.0)
-            .unwrap_or(&hunk.original_author);
-        let author_display = if options.suppress_author {
-            "".to_string()
-        } else if options.show_prompt && prompt_records.contains_key(author) {
-            let prompt = &prompt_records[author];
+    // The author shown for a line: its AI authorship if any, else git's author.
+    let author_display = |line_num: u32, hunk: &BlameHunk| {
+        let author = line_authors.get(&line_num).unwrap_or(&hunk.original_author);
+        if options.suppress_author {
+            String::new()
+        } else if options.show_prompt
+            && let Some(prompt) = prompt_records.get(author)
+        {
             let short_hash = &author[..7.min(author.len())];
             format!("{} [{}]", prompt.agent_id.tool, short_hash)
         } else if options.show_email {
             format!("{} <{}>", author, hunk.author_email)
         } else {
             author.to_string()
-        };
-        max_author_width = max_author_width.max(author_display.len());
-    }
+        }
+    };
+    // Pad every author to the widest one displayed. Lines within one hunk can
+    // have different authors.
+    let max_author_width = prepared
+        .requested_lines
+        .iter()
+        .filter_map(|line_num| {
+            let hunk = prepared.line_to_hunk.get(line_num)?;
+            Some(author_display(*line_num, hunk).len())
+        })
+        .max()
+        .unwrap_or(0);
 
     let blank_boundary_hash_width = prepared
         .hunks
@@ -109,31 +117,15 @@ pub(super) fn output_default_format(
                 format!("{}{}", boundary_marker, sha)
             };
 
-            // Get the author for this line (AI authorship or original)
-            let author = line_authors.get(&line_num).unwrap_or(&hunk.original_author);
-
             // Format date according to options
             let date_str = format_blame_date(hunk.author_time, &hunk.author_tz, options);
 
-            // Handle different output formats based on flags
-            let author_display = if options.suppress_author {
-                "".to_string()
-            } else if options.show_prompt && prompt_records.contains_key(author) {
-                let prompt = &prompt_records[author];
-                let short_hash = &author[..7.min(author.len())];
-                format!("{} [{}]", prompt.agent_id.tool, short_hash)
-            } else if options.show_email {
-                format!("{} <{}>", author, hunk.author_email)
-            } else {
-                author.to_string()
-            };
-
             // Pad author name to consistent width
-            let padded_author = if max_author_width > 0 {
-                format!("{:<width$}", author_display, width = max_author_width)
-            } else {
-                author_display
-            };
+            let padded_author = format!(
+                "{:<width$}",
+                author_display(line_num, hunk),
+                width = max_author_width
+            );
 
             // Format exactly like git blame: sha (author date line) code
             if options.suppress_author {

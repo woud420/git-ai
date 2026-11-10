@@ -289,6 +289,36 @@ fn test_blame_machine_format_output_matches_git_byte_for_byte() {
 }
 
 #[test]
+fn test_blame_default_format_pads_authors_to_the_widest_line_in_a_hunk() {
+    let repo = TestRepo::new();
+    // One commit, so one hunk: its first line has a shorter author than the
+    // lines that follow.
+    repo.filename("test.txt").set_contents(crate::lines![
+        "ai line".ai(),
+        "human line one",
+        "human line two"
+    ]);
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let output = repo.git_ai(&["blame", "test.txt"]).unwrap();
+    let authors = extract_authors(&output);
+    assert!(
+        authors
+            .windows(2)
+            .any(|pair| pair[0].len() != pair[1].len()),
+        "test needs authors of different lengths: {authors:?}"
+    );
+    let date_columns: Vec<usize> = output
+        .lines()
+        .map(|line| line.find(" 20").expect("line should contain a date"))
+        .collect();
+    assert!(
+        date_columns.windows(2).all(|pair| pair[0] == pair[1]),
+        "date column should line up on every line:\n{output}"
+    );
+}
+
+#[test]
 fn test_blame_porcelain_matches_git_for_lines_shifted_by_a_later_commit() {
     let repo = TestRepo::new();
     let mut file = repo.filename("test.txt");

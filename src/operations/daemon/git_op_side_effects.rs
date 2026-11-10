@@ -159,16 +159,6 @@ pub fn apply_clone_notes_sync_side_effect(
     Ok(())
 }
 
-pub fn apply_pull_fast_forward_working_log_side_effect(
-    worktree: &str,
-    old_head: &str,
-    new_head: &str,
-) -> Result<(), GitAiError> {
-    let repo = find_repository_in_path(worktree)?;
-    repo.storage.rename_working_log(old_head, new_head)?;
-    Ok(())
-}
-
 pub fn apply_checkout_switch_working_log_side_effect(
     cmd: &crate::model::domain::NormalizedCommand,
 ) -> Result<(), GitAiError> {

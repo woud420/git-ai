@@ -1,5 +1,6 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::resolve_editor_cli;
+use crate::operations::mdm::file_ops::join_diffs;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::hooks_merge::{
     MissingBehavior, edit_settings_json, is_git_ai_checkpoint_command, parse_json,
@@ -158,16 +159,10 @@ impl HookInstaller for WindsurfInstaller {
         let mut all_diffs = Vec::new();
 
         for hooks_path in Self::hooks_paths() {
-            if let Some(diff) = Self::install_hooks_at(&hooks_path, &desired_cmd, dry_run)? {
-                all_diffs.push(diff);
-            }
+            all_diffs.extend(Self::install_hooks_at(&hooks_path, &desired_cmd, dry_run)?);
         }
 
-        if all_diffs.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(all_diffs.join("\n")))
-        }
+        Ok(join_diffs(all_diffs))
     }
 
     fn uninstall_hooks(
@@ -178,16 +173,10 @@ impl HookInstaller for WindsurfInstaller {
         let mut all_diffs = Vec::new();
 
         for hooks_path in Self::hooks_paths() {
-            if let Some(diff) = Self::uninstall_hooks_at(&hooks_path, dry_run)? {
-                all_diffs.push(diff);
-            }
+            all_diffs.extend(Self::uninstall_hooks_at(&hooks_path, dry_run)?);
         }
 
-        if all_diffs.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(all_diffs.join("\n")))
-        }
+        Ok(join_diffs(all_diffs))
     }
 }
 

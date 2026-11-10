@@ -1,14 +1,13 @@
 use crate::config::{CodexHooksFormat, Config};
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::binary_exists;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, join_diffs, read_optional, write_atomic};
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::paths::codex_home_dir;
-use serde_json::{Value as JsonValue, json};
+use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
-use toml::map::Map;
 
 use super::CodexInstaller;
 
@@ -111,18 +110,11 @@ impl HookInstaller for CodexInstaller {
             return Ok(HookCheckResult::tool_not_installed());
         }
 
-        let config_path = Self::config_path();
-        let config = if config_path.exists() {
-            Self::parse_config_toml(&fs::read_to_string(&config_path)?)?
-        } else {
-            TomlValue::Table(Map::new())
-        };
-        let hooks_json_path = Self::hooks_json_path();
-        let hooks_json = if hooks_json_path.exists() {
-            Self::parse_hooks_json(&fs::read_to_string(&hooks_json_path)?)?
-        } else {
-            json!({})
-        };
+        // Both parsers read a missing (empty) file as an empty document.
+        let config =
+            Self::parse_config_toml(&read_optional(&Self::config_path())?.unwrap_or_default())?;
+        let hooks_json =
+            Self::parse_hooks_json(&read_optional(&Self::hooks_json_path())?.unwrap_or_default())?;
 
         if Config::fresh().codex_hooks_format() == CodexHooksFormat::HooksJson {
             let (desired_config, desired_hooks_json) =
@@ -155,22 +147,12 @@ impl HookInstaller for CodexInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let config_path = Self::config_path();
         let hooks_json_path = Self::hooks_json_path();
 
-        let existing_config_content = if config_path.exists() {
-            fs::read_to_string(&config_path)?
-        } else {
-            String::new()
-        };
-
+        let existing_config_content = read_optional(&Self::config_path())?.unwrap_or_default();
         let existing_config = Self::parse_config_toml(&existing_config_content)?;
 
-        let existing_hooks_content = if hooks_json_path.exists() {
-            fs::read_to_string(&hooks_json_path)?
-        } else {
-            String::new()
-        };
+        let existing_hooks_content = read_optional(&hooks_json_path)?.unwrap_or_default();
         let existing_hooks = Self::parse_hooks_json(&existing_hooks_content)?;
 
         let mut diff_output = Vec::new();
@@ -222,7 +204,7 @@ impl HookInstaller for CodexInstaller {
             }
         }
 
-        Ok((!diff_output.is_empty()).then(|| diff_output.join("\n")))
+        Ok(join_diffs(diff_output))
     }
 
     fn uninstall_hooks(
@@ -236,11 +218,7 @@ impl HookInstaller for CodexInstaller {
             return Ok(None);
         }
 
-        let existing_config_content = if config_path.exists() {
-            fs::read_to_string(&config_path)?
-        } else {
-            String::new()
-        };
+        let existing_config_content = read_optional(&config_path)?.unwrap_or_default();
         let existing_config = Self::parse_config_toml(&existing_config_content)?;
 
         // Remove inline hooks from config.toml
@@ -251,11 +229,7 @@ impl HookInstaller for CodexInstaller {
         let merged_config = Self::remove_feature_flags(&config_without_hooks)?;
 
         // Check if legacy hooks.json needs cleanup
-        let existing_hooks_content = if hooks_json_path.exists() {
-            fs::read_to_string(&hooks_json_path)?
-        } else {
-            String::new()
-        };
+        let existing_hooks_content = read_optional(&hooks_json_path)?.unwrap_or_default();
         let (cleaned_hooks, hooks_json_changed) =
             Self::remove_codex_hooks_from_json(&Self::parse_hooks_json(&existing_hooks_content)?)?;
 
@@ -278,6 +252,6 @@ impl HookInstaller for CodexInstaller {
             )?);
         }
 
-        Ok((!diff_output.is_empty()).then(|| diff_output.join("\n")))
+        Ok(join_diffs(diff_output))
     }
 }

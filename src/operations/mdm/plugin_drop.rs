@@ -9,7 +9,7 @@
 //! `agents/opencode.rs` for the legacy-path migration it layers on top).
 
 use crate::error::GitAiError;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, read_optional, write_atomic};
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstallerParams};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -82,11 +82,7 @@ pub fn file_drop_install(
 ) -> Result<Option<String>, GitAiError> {
     let dest_path = (spec.dest_path)();
 
-    let existing_content = if dest_path.exists() {
-        fs::read_to_string(&dest_path)?
-    } else {
-        String::new()
-    };
+    let existing_content = read_optional(&dest_path)?.unwrap_or_default();
 
     let new_content = generate_content(spec, &params.binary_path);
     if existing_content.trim() == new_content.trim() {

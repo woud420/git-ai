@@ -13,7 +13,7 @@
 //! - **Flat command-hooks** (Cursor, Firebender): see the sibling
 //!   `hooks_merge_flat` module.
 use crate::error::GitAiError;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, read_optional, write_atomic};
 use crate::operations::mdm::hook_installer::HookCheckResult;
 use serde_json::{Value, json};
 use std::fs;
@@ -60,14 +60,10 @@ pub fn edit_settings_json(
     parse: impl Fn(&str) -> Result<Value, GitAiError>,
     mutate: impl FnOnce(&mut Value),
 ) -> Result<Option<String>, GitAiError> {
-    if !settings_path.exists() && matches!(on_missing, MissingBehavior::NoOp) {
-        return Ok(None);
-    }
-
-    let existing_content = if settings_path.exists() {
-        fs::read_to_string(settings_path)?
-    } else {
-        String::new()
+    let existing_content = match read_optional(settings_path)? {
+        Some(content) => content,
+        None if matches!(on_missing, MissingBehavior::NoOp) => return Ok(None),
+        None => String::new(),
     };
 
     let existing: Value = match on_missing {

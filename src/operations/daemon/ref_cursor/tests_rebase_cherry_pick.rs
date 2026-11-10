@@ -362,8 +362,11 @@ fn span_walk_does_not_reclaim_a_row_an_earlier_command_consumed() {
 
     // The ingress hint lands after the untraced row, so the traced pick owns
     // only the second row and the cursor stays before the first one.
-    let untraced_row_len =
-        format!("{B} {C} Test User <test@example.com> 0 +0000\t{}\n", rows[0].2).len();
+    let untraced_row_len = format!(
+        "{B} {C} Test User <test@example.com> 0 +0000\t{}\n",
+        rows[0].2
+    )
+    .len();
     let mut traced = command_with_worktree(&family, Some(worktree.clone()), &["cherry-pick", E]);
     traced
         .reflog_start_offsets

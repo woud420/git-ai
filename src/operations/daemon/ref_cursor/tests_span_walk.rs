@@ -81,7 +81,13 @@ fn rebase_span_walks_every_pick_and_stops_at_the_next_rebase() {
     );
     let state = family_state(&repo.family);
     let mut cursor = RefCursor::new(repo.family.clone());
-    let rebase = || command_with_worktree(&repo.family, Some(repo.worktree.clone()), &["rebase", "main"]);
+    let rebase = || {
+        command_with_worktree(
+            &repo.family,
+            Some(repo.worktree.clone()),
+            &["rebase", "main"],
+        )
+    };
 
     let mut first = rebase();
     cursor.enrich_command(&mut first, &state).unwrap();
@@ -120,11 +126,21 @@ fn pull_rebase_span_walks_every_pick_and_stops_at_the_next_pull() {
     write_reflog(
         &repo.git_dir,
         "refs/heads/main",
-        &[(0, 4, "pull --rebase (finish): refs/heads/main onto upstream")],
+        &[(
+            0,
+            4,
+            "pull --rebase (finish): refs/heads/main onto upstream",
+        )],
     );
     let state = family_state(&repo.family);
     let mut cursor = RefCursor::new(repo.family.clone());
-    let pull = || command_with_worktree(&repo.family, Some(repo.worktree.clone()), &["pull", "--rebase"]);
+    let pull = || {
+        command_with_worktree(
+            &repo.family,
+            Some(repo.worktree.clone()),
+            &["pull", "--rebase"],
+        )
+    };
 
     let mut first = pull();
     cursor.enrich_command(&mut first, &state).unwrap();

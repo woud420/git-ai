@@ -12,6 +12,8 @@ mod tracker;
 mod transform;
 
 #[cfg(test)]
+mod tests_move;
+#[cfg(test)]
 mod tests_tracker;
 
 // `Attribution` / `LineAttribution` are pure value types owned by `model`.

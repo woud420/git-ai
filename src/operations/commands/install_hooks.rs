@@ -126,13 +126,9 @@ fn print_amp_plugins_note(installer_id: &str) {
     }
 }
 
-/// Find PIDs of running processes that match any of the given process names.
-/// Returns a list of (pid, process_name) tuples for each match found.
-fn find_running_pids(process_names: &[&str]) -> Vec<(u32, String)> {
-    if process_names.is_empty() {
-        return vec![];
-    }
-
+/// Capture the system process list (`ps` / `tasklist` output) for
+/// [`find_running_pids`]; empty when it cannot be listed.
+fn process_list_snapshot() -> String {
     let output = {
         #[cfg(unix)]
         {
@@ -152,14 +148,17 @@ fn find_running_pids(process_names: &[&str]) -> Vec<(u32, String)> {
         }
     };
 
-    let Ok(output) = output else {
-        return vec![];
-    };
+    output
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .unwrap_or_default()
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+/// Find PIDs in `process_list` that match any of the given process names.
+/// Returns a list of (pid, process_name) tuples for each match found.
+fn find_running_pids(process_list: &str, process_names: &[&str]) -> Vec<(u32, String)> {
     let mut results: Vec<(u32, String)> = Vec::new();
 
-    for line in stdout.lines() {
+    for line in process_list.lines() {
         #[cfg(unix)]
         {
             let trimmed = line.trim();
@@ -689,10 +688,11 @@ async fn async_run_install(
     // Check for running agents that had hooks updated and warn about restart
     if !options.dry_run && !updated_agents.is_empty() {
         let mut any_running = false;
+        let process_list = process_list_snapshot();
 
         for (agent_name, pnames) in &updated_agents {
             let refs: Vec<&str> = pnames.iter().map(|s| s.as_str()).collect();
-            let pids = find_running_pids(&refs);
+            let pids = find_running_pids(&process_list, &refs);
             if !pids.is_empty() {
                 if !any_running {
                     println!(
@@ -888,6 +888,18 @@ mod tests {
         {
             std::os::unix::fs::symlink(git_path, install_dir.join("git-og")).unwrap();
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn one_process_list_snapshot_serves_every_agent() {
+        let ps = "  PID COMMAND\n   10 /usr/bin/codex\n   11 bash\n   12 Cursor\n";
+        assert_eq!(find_running_pids(ps, &["codex"]), [(10, "codex".into())]);
+        assert_eq!(
+            find_running_pids(ps, &["Cursor", "cursor"]),
+            [(12, "Cursor".into())]
+        );
+        assert!(find_running_pids(ps, &["claude"]).is_empty());
     }
 
     #[test]

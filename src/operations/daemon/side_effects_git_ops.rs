@@ -282,7 +282,7 @@ impl ActorDaemonCoordinator {
             return Ok(());
         }
         let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-        if repo_is_ancestor(&repo, &old_head, &new_head) {
+        if is_ancestor_commit(&repo, &old_head, &new_head) {
             apply_pull_fast_forward_working_log_side_effect(
                 &worktree.to_string_lossy(),
                 &old_head,
@@ -323,7 +323,7 @@ impl ActorDaemonCoordinator {
                 Some(ref repo) => repo,
                 None => &*repo.insert(find_repository_in_path(&worktree.to_string_lossy())?),
             };
-            if repo_is_ancestor(repo, old, new) {
+            if is_ancestor_commit(repo, old, new) {
                 let affects_checked_out_branch = reference == "HEAD"
                     || cmd.ref_changes.iter().any(|change| {
                         change.reference == "HEAD" && change.old == *old && change.new == *new

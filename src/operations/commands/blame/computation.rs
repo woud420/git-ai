@@ -266,7 +266,6 @@ impl Repository {
         } else if request.options.porcelain || request.options.line_porcelain {
             output_porcelain_format(
                 self,
-                &line_authors,
                 &request.relative_file_path,
                 &lines,
                 &request.line_ranges,
@@ -276,9 +275,7 @@ impl Repository {
         } else if request.options.incremental {
             output_incremental_format(
                 self,
-                &line_authors,
                 &request.relative_file_path,
-                &lines,
                 &request.line_ranges,
                 &request.options,
                 &commits_with_notes,

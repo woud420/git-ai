@@ -284,205 +284,131 @@ impl Repository {
     }
 }
 
+/// Metadata lines `git blame --line-porcelain` prints for a hunk.
+#[derive(Default)]
+struct HunkMeta {
+    author: String,
+    author_mail: String,
+    author_time: i64,
+    author_tz: String,
+    committer: String,
+    committer_mail: String,
+    committer_time: i64,
+    committer_tz: String,
+    summary: String,
+    previous: Option<String>,
+    boundary: bool,
+    filename: String,
+}
+
+/// The hunk being read: its commit, first lines, and line count.
+struct OpenHunk {
+    sha: String,
+    orig_start: u32,
+    final_start: u32,
+    group_size: u32,
+}
+
+impl OpenHunk {
+    fn finish(self, meta: HunkMeta, file_path: &str) -> BlameHunk {
+        let last_offset = self.group_size.saturating_sub(1);
+        let filename = crate::operations::git::path_format::unescape_git_path(&meta.filename);
+        BlameHunk {
+            range: (self.final_start, self.final_start + last_offset),
+            orig_range: (self.orig_start, self.orig_start + last_offset),
+            commit_sha: self.sha,
+            abbrev_sha: String::new(),
+            original_author: meta.author,
+            author_email: meta.author_mail,
+            author_time: meta.author_time,
+            author_tz: meta.author_tz,
+            ai_human_author: None,
+            committer: meta.committer,
+            committer_email: meta.committer_mail,
+            committer_time: meta.committer_time,
+            committer_tz: meta.committer_tz,
+            is_boundary: meta.boundary,
+            orig_filename: (!meta.filename.is_empty() && filename != file_path).then_some(filename),
+            summary: meta.summary,
+            previous: meta.previous,
+            git_filename: meta.filename,
+        }
+    }
+}
+
+/// `<mail>` as printed by git, without the angle brackets.
+fn bare_mail(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_string()
+}
+
 /// Parse git blame --line-porcelain output into a list of hunks.
 fn parse_porcelain_blame_output(stdout: &str, file_path: &str) -> Vec<BlameHunk> {
-    // Parser state for current hunk
-    #[derive(Default)]
-    struct CurMeta {
-        author: String,
-        author_mail: String,
-        author_time: i64,
-        author_tz: String,
-        committer: String,
-        committer_mail: String,
-        committer_time: i64,
-        committer_tz: String,
-        boundary: bool,
-        filename: Option<String>,
-    }
-
     let mut hunks: Vec<BlameHunk> = Vec::new();
-    let mut cur_commit: Option<String> = None;
-    let mut cur_final_start: u32 = 0;
-    let mut cur_orig_start: u32 = 0;
-    let mut cur_group_size: u32 = 0;
-    let mut cur_meta = CurMeta::default();
+    let mut open: Option<OpenHunk> = None;
+    let mut meta = HunkMeta::default();
 
     for line in stdout.lines() {
-        if line.is_empty() {
-            continue;
-        }
-
-        if line.starts_with('\t') {
-            // Content line; nothing to do, boundaries are driven by headers
-            continue;
-        }
-
-        // Metadata lines
-        if let Some(rest) = line.strip_prefix("author ") {
-            cur_meta.author = rest.to_string();
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("author-mail ") {
-            // Usually in form: <mail>
-            cur_meta.author_mail = rest
-                .trim()
-                .trim_start_matches('<')
-                .trim_end_matches('>')
-                .to_string();
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("author-time ") {
-            if let Ok(t) = rest.trim().parse::<i64>() {
-                cur_meta.author_time = t;
-            }
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("author-tz ") {
-            cur_meta.author_tz = rest.trim().to_string();
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("committer ") {
-            cur_meta.committer = rest.to_string();
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("committer-mail ") {
-            cur_meta.committer_mail = rest
-                .trim()
-                .trim_start_matches('<')
-                .trim_end_matches('>')
-                .to_string();
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("committer-time ") {
-            if let Ok(t) = rest.trim().parse::<i64>() {
-                cur_meta.committer_time = t;
-            }
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("committer-tz ") {
-            cur_meta.committer_tz = rest.trim().to_string();
+        // Content lines start with a tab; hunk boundaries are driven by headers.
+        if line.is_empty() || line.starts_with('\t') {
             continue;
         }
         if line == "boundary" {
-            cur_meta.boundary = true;
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("filename ") {
-            cur_meta.filename = Some(crate::operations::git::path_format::unescape_git_path(rest));
+            meta.boundary = true;
             continue;
         }
 
-        // Header line: either 4 fields (new hunk) or 3 fields (continuation)
-        let mut parts = line.split_whitespace();
-        let sha = parts.next().unwrap_or("");
-        let p2 = parts.next().unwrap_or("");
-        let p3 = parts.next().unwrap_or("");
-        let p4 = parts.next();
-
-        let is_header = !sha.is_empty()
-            && sha.chars().all(|c| c.is_ascii_hexdigit())
-            && !p2.is_empty()
-            && !p3.is_empty();
-        if !is_header {
-            continue;
-        }
-
-        // If we encounter a new hunk header (4 fields), flush previous hunk first
-        if p4.is_some() {
-            if let Some(prev_sha) = cur_commit.take() {
-                // Push the previous hunk
-                let start = cur_final_start;
-                let end = if cur_group_size > 0 {
-                    start + cur_group_size - 1
-                } else {
-                    start
-                };
-                let orig_start = cur_orig_start;
-                let orig_end = if cur_group_size > 0 {
-                    orig_start + cur_group_size - 1
-                } else {
-                    orig_start
-                };
-
-                let orig_filename = cur_meta.filename.take().filter(|f| f != file_path);
-                hunks.push(BlameHunk {
-                    range: (start, end),
-                    orig_range: (orig_start, orig_end),
-                    commit_sha: prev_sha,
-                    abbrev_sha: String::new(),
-                    original_author: cur_meta.author.clone(),
-                    author_email: cur_meta.author_mail.clone(),
-                    author_time: cur_meta.author_time,
-                    author_tz: cur_meta.author_tz.clone(),
-                    ai_human_author: None,
-                    committer: cur_meta.committer.clone(),
-                    committer_email: cur_meta.committer_mail.clone(),
-                    committer_time: cur_meta.committer_time,
-                    committer_tz: cur_meta.committer_tz.clone(),
-                    is_boundary: cur_meta.boundary,
-                    orig_filename,
-                });
+        let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+        match key {
+            "author" => meta.author = value.to_string(),
+            "author-mail" => meta.author_mail = bare_mail(value),
+            "author-time" => meta.author_time = value.trim().parse().unwrap_or(meta.author_time),
+            "author-tz" => meta.author_tz = value.trim().to_string(),
+            "committer" => meta.committer = value.to_string(),
+            "committer-mail" => meta.committer_mail = bare_mail(value),
+            "committer-time" => {
+                meta.committer_time = value.trim().parse().unwrap_or(meta.committer_time)
             }
-
-            // Start new hunk
-            cur_commit = Some(sha.to_string());
-            // According to docs: fields are orig_lineno, final_lineno, group_size
-            let orig_start = p2.parse::<u32>().unwrap_or(0);
-            let final_start = p3.parse::<u32>().unwrap_or(0);
-            let group = p4.unwrap_or("1").parse::<u32>().unwrap_or(1);
-            cur_orig_start = orig_start;
-            cur_final_start = final_start;
-            cur_group_size = group;
-            // Reset metadata for the new hunk
-            cur_meta = CurMeta::default();
-        } else {
-            // 3-field header: continuation line within current hunk
-            // Nothing to do for grouping since we use recorded group_size
-            // Metadata remains from the first line of the hunk
-            if cur_commit.is_none() {
-                // Defensive: if no current hunk, start one with size 1
-                cur_commit = Some(sha.to_string());
-                cur_orig_start = p2.parse::<u32>().unwrap_or(0);
-                cur_final_start = p3.parse::<u32>().unwrap_or(0);
-                cur_group_size = 1;
+            "committer-tz" => meta.committer_tz = value.trim().to_string(),
+            "summary" => meta.summary = value.to_string(),
+            "previous" => meta.previous = Some(value.to_string()),
+            "filename" => meta.filename = value.to_string(),
+            sha => {
+                // Header: `<sha> <orig line> <final line> [<group size>]`. The
+                // group size is only present on a hunk's first line.
+                let mut fields = value.split_whitespace();
+                let (Some(orig_start), Some(final_start)) = (fields.next(), fields.next()) else {
+                    continue;
+                };
+                if !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                    continue;
+                }
+                let start_hunk = |group_size| OpenHunk {
+                    sha: sha.to_string(),
+                    orig_start: orig_start.parse().unwrap_or(0),
+                    final_start: final_start.parse().unwrap_or(0),
+                    group_size,
+                };
+                if let Some(group_size) = fields.next() {
+                    // A new hunk: flush the previous one along with its metadata.
+                    if let Some(previous) = open.take() {
+                        hunks.push(previous.finish(meta, file_path));
+                    }
+                    meta = HunkMeta::default();
+                    open = Some(start_hunk(group_size.parse().unwrap_or(1)));
+                } else if open.is_none() {
+                    // Defensive: a continuation line with no hunk open starts one of size 1.
+                    open = Some(start_hunk(1));
+                }
             }
         }
     }
 
-    // Flush the final hunk if present
-    if let Some(prev_sha) = cur_commit.take() {
-        let start = cur_final_start;
-        let end = if cur_group_size > 0 {
-            start + cur_group_size - 1
-        } else {
-            start
-        };
-        let orig_start = cur_orig_start;
-        let orig_end = if cur_group_size > 0 {
-            orig_start + cur_group_size - 1
-        } else {
-            orig_start
-        };
-
-        let orig_filename = cur_meta.filename.take().filter(|f| f != file_path);
-        hunks.push(BlameHunk {
-            range: (start, end),
-            orig_range: (orig_start, orig_end),
-            commit_sha: prev_sha,
-            abbrev_sha: String::new(),
-            original_author: cur_meta.author.clone(),
-            author_email: cur_meta.author_mail.clone(),
-            author_time: cur_meta.author_time,
-            author_tz: cur_meta.author_tz.clone(),
-            ai_human_author: None,
-            committer: cur_meta.committer.clone(),
-            committer_email: cur_meta.committer_mail.clone(),
-            committer_time: cur_meta.committer_time,
-            committer_tz: cur_meta.committer_tz.clone(),
-            is_boundary: cur_meta.boundary,
-            orig_filename,
-        });
+    if let Some(last) = open {
+        hunks.push(last.finish(meta, file_path));
     }
 
     hunks

@@ -137,11 +137,6 @@ pub fn update_vscode_chat_hook_settings(
     let diff_output = generate_diff(settings_path, &original, &new_content);
 
     if !dry_run {
-        if let Some(parent) = settings_path.parent()
-            && !parent.exists()
-        {
-            fs::create_dir_all(parent)?;
-        }
         write_atomic(settings_path, new_content.as_bytes())?;
     }
 

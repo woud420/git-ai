@@ -192,10 +192,6 @@ impl HookInstaller for GitHubCopilotInstaller {
     ) -> Result<Option<String>, GitAiError> {
         let hooks_path = Self::hooks_path();
 
-        if !dry_run && let Some(dir) = hooks_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
-
         let existing_content = if hooks_path.exists() {
             fs::read_to_string(&hooks_path)?
         } else {

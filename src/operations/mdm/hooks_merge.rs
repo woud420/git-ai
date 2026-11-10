@@ -29,8 +29,8 @@ pub fn is_git_ai_checkpoint_command(cmd: &str) -> bool {
 
 /// Controls how [`edit_settings_json`] treats a settings file that doesn't exist.
 pub enum MissingBehavior {
-    /// Install-style: proceed as if the file contained `{}`, and ensure the
-    /// parent directory exists so a write can land there.
+    /// Install-style: proceed as if the file contained `{}`; the write
+    /// creates the parent directory.
     TreatAsEmpty,
     /// Uninstall-style: nothing to remove from a missing file, so return
     /// `Ok(None)` immediately without touching the filesystem.
@@ -56,12 +56,6 @@ pub fn edit_settings_json(
 ) -> Result<Option<String>, GitAiError> {
     if !settings_path.exists() && matches!(on_missing, MissingBehavior::NoOp) {
         return Ok(None);
-    }
-
-    if matches!(on_missing, MissingBehavior::TreatAsEmpty)
-        && let Some(dir) = settings_path.parent()
-    {
-        fs::create_dir_all(dir)?;
     }
 
     let existing_content = if settings_path.exists() {
@@ -413,7 +407,7 @@ mod tests {
     #[test]
     fn envelope_dry_run_computes_diff_without_writing() {
         let temp = TempDir::new().unwrap();
-        let path = temp.path().join("settings.json");
+        let path = temp.path().join("nested").join("settings.json");
 
         let result = edit_settings_json(
             &path,
@@ -429,7 +423,7 @@ mod tests {
         .unwrap();
 
         assert!(result.is_some(), "dry run should still report a diff");
-        assert!(!path.exists(), "dry run must not write");
+        assert!(!path.parent().unwrap().exists(), "dry run must not write");
     }
 
     // ---- upsert_singleton_command_hook ----

@@ -446,6 +446,10 @@ fn test_install_hooks_creates_missing_codex_dir() {
             binary_path: test_binary_path(),
         };
 
+        let preview = installer.install_hooks(&params, true).unwrap();
+        assert!(preview.is_some(), "dry-run should report the pending install");
+        assert!(!codex_dir.exists(), "dry-run must not create ~/.codex");
+
         let result = installer.install_hooks(&params, false).unwrap();
         assert!(result.is_some(), "should report changes for fresh install");
 

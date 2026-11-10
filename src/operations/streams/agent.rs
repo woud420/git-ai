@@ -98,15 +98,6 @@ impl StreamDescriptor {
 /// Combines sweep discovery and incremental reading in one interface.
 /// Agents that don't support sweeping return `SweepStrategy::None`.
 pub trait Agent: Send + Sync {
-    /// Daemon-owned roots used for sweep discovery and bounded checkpoint validation.
-    ///
-    /// Checkpoint IPC must never turn an arbitrary caller-supplied path into a
-    /// host read. Checkpoint validation resolves one claimed candidate beneath
-    /// these roots; it must not require a full `discover_sessions` sweep.
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
     /// Validate one checkpoint-provided stream candidate without sweeping agent storage.
     ///
     /// Implementations must bind the external session ID to a host-visible candidate

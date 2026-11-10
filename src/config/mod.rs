@@ -9,7 +9,6 @@ use glob::Pattern;
 use serde::Serialize;
 
 use crate::feature_flags::FeatureFlags;
-use crate::operations::git::repository::Repository;
 use crate::operations::mdm::paths::home_dir;
 
 mod author;
@@ -17,7 +16,6 @@ mod budgets;
 mod file;
 mod notes_backend;
 mod patterns;
-mod prompt_storage;
 #[cfg(any(test, feature = "test-support"))]
 mod test_support;
 
@@ -38,7 +36,6 @@ pub use file::{
     load_file_config_public, save_file_config,
 };
 pub use notes_backend::{NotesBackendConfig, NotesBackendKind};
-pub use prompt_storage::PromptStorageMode;
 
 // Internal re-exports used by submodules or tests
 pub(crate) use file::build_config;
@@ -235,60 +232,6 @@ impl Config {
                 .is_some_and(|root| repo_root_matches_patterns(&self.allowed_repositories, root))
     }
 
-    /// Returns true if prompts should be excluded (not shared) for the given repository.
-    /// This uses a blacklist model: empty list = share everywhere, patterns = repos to exclude.
-    /// Local repositories (no remotes) are only excluded if wildcard "*" pattern is present.
-    pub fn should_exclude_prompts(&self, repository: &Option<Repository>) -> bool {
-        let remotes = repository
-            .as_ref()
-            .and_then(|repo| repo.remotes_with_urls().ok());
-
-        self.should_exclude_prompts_with_remotes(remotes.as_ref())
-    }
-
-    #[cfg_attr(test, allow(dead_code))]
-    pub(crate) fn should_exclude_prompts_with_remotes(
-        &self,
-        remotes: Option<&Vec<(String, String)>>,
-    ) -> bool {
-        // Empty exclusion list = never exclude
-        if self.exclude_prompts_in_repositories.is_empty() {
-            return false;
-        }
-
-        if remotes.is_some_and(|remotes| {
-            remotes.iter().any(|(_, remote_url)| {
-                crate::diagnostic_sentinels::is_debug_self_check_remote_url(remote_url)
-            })
-        }) {
-            return false;
-        }
-
-        // Check for wildcard "*" pattern - excludes ALL repos including local
-        let has_wildcard = self
-            .exclude_prompts_in_repositories
-            .iter()
-            .any(|pattern| pattern.as_str() == "*");
-        if has_wildcard {
-            return true;
-        }
-
-        match remotes {
-            Some(remotes) => {
-                if remotes.is_empty() {
-                    // No remotes = local-only repo, not excluded (unless wildcard, handled above)
-                    false
-                } else {
-                    // Has remotes - check if any match exclusion patterns
-                    remotes.iter().any(|remote| {
-                        remote_matches_patterns(&self.exclude_prompts_in_repositories, &remote.1)
-                    })
-                }
-            }
-            None => false, // Can't get remotes = don't exclude
-        }
-    }
-
     /// Returns true if OSS telemetry is disabled.
     /// Master telemetry switch. Telemetry is off by default; egress
     /// (Sentry/PostHog, metrics upload, daemon log upload, heartbeats) only
@@ -335,67 +278,6 @@ impl Config {
     /// - "local": Messages only stored in sqlite (not in notes, not uploaded)
     pub fn prompt_storage(&self) -> &str {
         &self.prompt_storage
-    }
-
-    /// Returns the effective prompt storage mode for a given repository.
-    ///
-    /// The resolution order is:
-    /// 1. If repo matches exclude_prompts_in_repositories → always "local" (exclusion wins)
-    /// 2. If include_prompts_in_repositories is empty → use prompt_storage (legacy behavior)
-    /// 3. If repo matches include_prompts_in_repositories → use prompt_storage
-    /// 4. If repo doesn't match include list → use default_prompt_storage, or "local" if not set
-    ///
-    /// This enables two use cases:
-    /// - User A: git-ai everywhere, CAS for work repos, notes for others
-    ///   (prompt_storage="default", include_prompts=["positron-ai/*"], default_prompt_storage="notes")
-    /// - User B: git-ai only in work repos (via allowed_repositories), CAS there
-    ///   (prompt_storage="default", no include list needed)
-    pub fn effective_prompt_storage(&self, repository: &Option<Repository>) -> PromptStorageMode {
-        // Step 1: Check exclusion list first (deny always wins)
-        if self.should_exclude_prompts(repository) {
-            return PromptStorageMode::Local;
-        }
-
-        // Step 2: If no include list, use the global prompt_storage (legacy behavior)
-        if self.include_prompts_in_repositories.is_empty() {
-            return self
-                .prompt_storage
-                .parse::<PromptStorageMode>()
-                .unwrap_or(PromptStorageMode::Local);
-        }
-
-        // Step 3: Check if repo matches include list
-        let remotes = repository
-            .as_ref()
-            .and_then(|repo| repo.remotes_with_urls().ok());
-
-        let matches_include = match &remotes {
-            Some(remotes) if !remotes.is_empty() => {
-                // Has remotes - check if any match inclusion patterns
-                remotes.iter().any(|remote| {
-                    remote_matches_patterns(&self.include_prompts_in_repositories, &remote.1)
-                })
-            }
-            _ => {
-                // No remotes or no repository - check for wildcard "*" in include patterns
-                self.include_prompts_in_repositories
-                    .iter()
-                    .any(|pattern| pattern.as_str() == "*")
-            }
-        };
-
-        if matches_include {
-            // Step 3a: Repo is in include list → use primary prompt_storage
-            self.prompt_storage
-                .parse::<PromptStorageMode>()
-                .unwrap_or(PromptStorageMode::Local)
-        } else {
-            // Step 4: Repo not in include list → use fallback
-            self.default_prompt_storage
-                .as_ref()
-                .and_then(|s| s.parse::<PromptStorageMode>().ok())
-                .unwrap_or(PromptStorageMode::Local) // Safe default
-        }
     }
 
     /// Returns the API key if configured

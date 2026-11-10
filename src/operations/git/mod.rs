@@ -18,8 +18,6 @@ pub mod repo_state;
 pub mod repository;
 pub(crate) mod sequencer_args;
 
-pub mod authorship_traversal;
-
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_utils;
 
@@ -29,6 +27,5 @@ pub use repository::{
     from_bare_repository, group_files_by_repository,
 };
 pub mod repo_storage;
-pub mod status;
 pub mod sync_authorship;
 pub(crate) mod trace2_validation;

@@ -256,24 +256,6 @@ pub fn config_get_str_for_path_no_git_exec(
         .map(|cfg| cfg.string(key).map(|cow| cow.to_string()))
 }
 
-pub(super) fn repository_object_hash_kind_for_path_no_git_exec(
-    path: &Path,
-) -> Result<gix_index::hash::Kind, GitAiError> {
-    match config_get_str_for_path_no_git_exec(path, "extensions.objectformat")?
-        .as_deref()
-        .map(str::trim)
-    {
-        None | Some("") | Some("sha1") => Ok(gix_index::hash::Kind::Sha1),
-        Some("sha256") => Err(GitAiError::Generic(
-            "SHA-256 repositories are not supported while reading the git index".to_string(),
-        )),
-        Some(other) => Err(GitAiError::Generic(format!(
-            "Unsupported git object format '{}' while reading index",
-            other
-        ))),
-    }
-}
-
 #[allow(dead_code)]
 pub fn from_bare_repository(git_dir: &Path) -> Result<Repository, GitAiError> {
     let workdir = git_dir

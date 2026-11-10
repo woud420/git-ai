@@ -65,10 +65,6 @@ impl Default for ContinueAgent {
 }
 
 impl Agent for ContinueAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::session_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,

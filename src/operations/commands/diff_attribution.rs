@@ -27,26 +27,6 @@ use crate::operations::commands::diff_parsing::{
 // Public API
 // ============================================================================
 
-/// Overlay attribution on diff hunks, returning a per-line attribution map.
-///
-/// This is a convenience wrapper around [`build_diff_artifacts`] for callers
-/// that only need the attribution map.
-pub fn overlay_diff_attributions(
-    repo: &Repository,
-    from_commit: &str,
-    to_commit: &str,
-    hunks: &[DiffHunk],
-) -> Result<HashMap<DiffLineKey, Attribution>, GitAiError> {
-    let (_, attributions, _, _, _, _, _) = build_line_attribution_data(
-        repo,
-        from_commit,
-        to_commit,
-        hunks,
-        &DiffCommandOptions::default(),
-    )?;
-    Ok(attributions)
-}
-
 /// Build [`DiffBuildArtifacts`] for the diff between `from_commit` and `to_commit`.
 pub fn build_diff_artifacts(
     repo: &Repository,

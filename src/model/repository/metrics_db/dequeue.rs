@@ -13,6 +13,7 @@ pub(crate) const RETRYABLE_METRIC_IDS_SQL: &str = "SELECT id, LENGTH(CAST(event_
 
 impl MetricsDatabase {
     /// Atomically claim a due batch of pending metrics for upload.
+    #[cfg(test)]
     pub fn dequeue_pending_batch(&mut self, limit: usize) -> Result<Vec<MetricRecord>, GitAiError> {
         self.dequeue_pending_batch_with_byte_limit(limit, usize::MAX)
     }

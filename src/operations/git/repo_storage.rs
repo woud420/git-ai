@@ -378,16 +378,6 @@ impl PersistedWorkingLog {
         persist_file_version_to_blob_dir(&blobs_dir, content)
     }
 
-    pub fn to_repo_absolute_path(&self, file_path: &str) -> String {
-        if Path::new(file_path).is_absolute() {
-            return file_path.to_string();
-        }
-        self.repo_workdir
-            .join(file_path)
-            .to_string_lossy()
-            .to_string()
-    }
-
     pub fn to_repo_relative_path(&self, file_path: &str) -> String {
         if !Path::new(file_path).is_absolute() {
             return file_path.to_string();
@@ -559,11 +549,6 @@ impl PersistedWorkingLog {
     ) -> Result<Vec<Checkpoint>, GitAiError> {
         self.load_checkpoint_journal_with_size_limit(max_bytes)
             .map(LoadedJournal::into_checkpoints)
-    }
-
-    pub fn ensure_checkpoints_file_size_limit(&self) -> Result<(), GitAiError> {
-        self.read_all_checkpoints()?;
-        Ok(())
     }
 
     fn load_checkpoint_journal_with_size_limit(
@@ -747,28 +732,6 @@ impl PersistedWorkingLog {
             return self.get_file_version(blob_sha).ok();
         }
         None
-    }
-
-    pub fn latest_checkpoint_file_content(&self, file_path: &str) -> Option<String> {
-        let checkpoints = self.read_all_checkpoints().ok()?;
-        let entry = checkpoints.iter().rev().find_map(|checkpoint| {
-            checkpoint
-                .entries
-                .iter()
-                .find(|entry| entry.file == file_path)
-        })?;
-        self.get_file_version(&entry.blob_sha).ok()
-    }
-
-    pub fn effective_tracked_file_content(
-        &self,
-        initial: &InitialAttributions,
-        file_path: &str,
-    ) -> Result<Option<String>, GitAiError> {
-        if let Some(content) = self.latest_checkpoint_file_content(file_path) {
-            return Ok(Some(content));
-        }
-        self.initial_file_content_from(initial, file_path)
     }
 
     /// Read initial attributions from the INITIAL file.

@@ -44,6 +44,7 @@ impl MetricsDatabase {
     }
 
     /// Backfill cached event metadata for one bounded batch of legacy rows.
+    #[cfg(test)]
     pub fn backfill_event_metadata_batch(
         &mut self,
         limit: usize,

@@ -125,41 +125,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
         removed
     }
 
-    pub fn sweep_orphans(&mut self) -> Vec<OrphanTraceRoot> {
-        let mut removed = Vec::new();
-
-        let pending_roots = self.state.pending.keys().cloned().collect::<Vec<_>>();
-        for root_sid in pending_roots {
-            if let Some(pending) = self.remove_pending_root(&root_sid) {
-                removed.push(OrphanTraceRoot {
-                    root_sid,
-                    raw_argv: pending.raw_argv,
-                    deferred_exit_only: false,
-                });
-            }
-        }
-
-        let deferred_roots = self
-            .state
-            .deferred_exits
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        for root_sid in deferred_roots {
-            self.state.deferred_exits.remove(&root_sid);
-            let _ = self.state.sid_to_worktree.remove(&root_sid);
-            let _ = self.state.sid_to_family.remove(&root_sid);
-            let _ = self.state.prestart_root_cmd_names.remove(&root_sid);
-            removed.push(OrphanTraceRoot {
-                root_sid,
-                raw_argv: Vec::new(),
-                deferred_exit_only: true,
-            });
-        }
-
-        removed
-    }
-
     pub fn sweep_orphans_for_roots(&mut self, roots: &[String]) -> Vec<OrphanTraceRoot> {
         let mut removed = Vec::new();
 

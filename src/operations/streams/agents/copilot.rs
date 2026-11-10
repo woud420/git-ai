@@ -231,10 +231,6 @@ impl Default for CopilotAgent {
 }
 
 impl Agent for CopilotAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::transcript_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,

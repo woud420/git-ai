@@ -54,10 +54,6 @@ impl Default for DroidAgent {
 }
 
 impl Agent for DroidAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::conversation_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,

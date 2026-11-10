@@ -157,10 +157,6 @@ impl Default for CodexAgent {
 }
 
 impl Agent for CodexAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::session_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,

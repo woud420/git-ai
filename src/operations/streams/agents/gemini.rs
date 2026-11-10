@@ -80,10 +80,6 @@ impl Default for GeminiAgent {
 }
 
 impl Agent for GeminiAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::session_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,

@@ -602,48 +602,9 @@ where
     })
 }
 
-/// Amend-specific post-commit that merges blame-sourced attributions from the
-/// original commit with persisted working-log checkpoint data.
-pub fn post_commit_amend(
-    repo: &Repository,
-    original_commit: &str,
-    amended_commit: &str,
-    human_author: String,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_amend_with_recovery_timestamps(
-        repo,
-        original_commit,
-        amended_commit,
-        human_author,
-        None,
-        None,
-    )
-}
-
 pub(crate) struct PostCommitAmendResult {
-    pub commit_sha: String,
-    pub authorship_log: AuthorshipLog,
     pub authorship_note: String,
     pub parent_sha: String,
-}
-
-pub(crate) fn post_commit_amend_with_recovery_timestamps(
-    repo: &Repository,
-    original_commit: &str,
-    amended_commit: &str,
-    human_author: String,
-    recovery_file_timestamps: Option<&FileTimestampsByPath>,
-    before_external_recovery: Option<&dyn Fn(&UnknownLinesByFile)>,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_amend_with_recovery_timestamps_detailed(
-        repo,
-        original_commit,
-        amended_commit,
-        human_author,
-        recovery_file_timestamps,
-        before_external_recovery,
-    )
-    .map(|result| (result.commit_sha, result.authorship_log))
 }
 
 pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
@@ -838,8 +799,6 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     repo_storage.delete_working_log_for_base_commit(original_commit)?;
 
     Ok(PostCommitAmendResult {
-        commit_sha: amended_commit.to_string(),
-        authorship_log,
         authorship_note: authorship_note_str,
         parent_sha,
     })

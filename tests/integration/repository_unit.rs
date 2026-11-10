@@ -474,34 +474,3 @@ fn path_is_in_workdir_returns_false_for_nested_linked_worktree_file() {
         "main repo file should be in main repo workdir"
     );
 }
-
-#[test]
-fn get_all_staged_file_blob_oids_reads_stage_zero_entries_without_git2() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let repo_dir = temp.path().join("repo");
-    fs::create_dir_all(&repo_dir).expect("create repo dir");
-
-    run_git(&repo_dir, &["init"]);
-    run_git(&repo_dir, &["config", "user.name", "Test User"]);
-    run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
-
-    fs::write(repo_dir.join("a.txt"), "alpha\n").expect("write a.txt");
-    fs::create_dir_all(repo_dir.join("dir")).expect("create dir");
-    fs::write(repo_dir.join("dir").join("b.txt"), "beta\n").expect("write b.txt");
-
-    run_git(&repo_dir, &["add", "."]);
-
-    let repo = find_repository_in_path(repo_dir.to_str().expect("repo path")).expect("repo");
-    let staged = repo
-        .get_all_staged_file_blob_oids()
-        .expect("read staged blobs");
-
-    assert_eq!(
-        staged.get("a.txt"),
-        Some(&run_git_stdout(&repo_dir, &["rev-parse", ":0:a.txt"]))
-    );
-    assert_eq!(
-        staged.get("dir/b.txt"),
-        Some(&run_git_stdout(&repo_dir, &["rev-parse", ":0:dir/b.txt"]))
-    );
-}

@@ -156,25 +156,6 @@ pub fn read_authorship(repo: &Repository, commit_sha: &str) -> Option<Authorship
     }
 }
 
-/// Return a map of commit SHA → note-blob OID for the given commits.
-///
-/// Callers use the returned OIDs as git object IDs with the batched `cat-file` reader
-/// (not purely presence checks). On Http/Sqlite backends notes live in notes-db, not in
-/// git refs, so an empty map is returned and callers fall back to `read_note`.
-pub fn read_note_blob_oids(
-    repo: &Repository,
-    commit_shas: &[String],
-) -> Result<HashMap<String, String>, GitAiError> {
-    match Config::fresh().notes_backend_kind() {
-        // For Sqlite/Http, notes are in notes-db not in git — no blob OIDs exist.
-        // Return an empty map; callers handle this as "no notes in git".
-        NotesBackendKind::Sqlite | NotesBackendKind::Http => Ok(HashMap::new()),
-        NotesBackendKind::GitNotes => {
-            crate::operations::git::refs::note_blob_oids_for_commits(repo, commit_shas)
-        }
-    }
-}
-
 pub fn commits_with_notes(
     repo: &Repository,
     commit_shas: &[String],
@@ -282,79 +263,6 @@ pub fn search_notes(repo: &Repository, pattern: &str) -> Result<Vec<String>, Git
 }
 
 // --- Materialization (for git ai log) ---
-
-/// Materialize notes from the local cache into a one-off git ref
-/// `refs/notes/ai-display` so that `git log --notes=ai-display` can render
-/// them without requiring them to be in `refs/notes/ai`.
-///
-/// Only the most recent `limit` commits reachable from HEAD are considered.
-///
-/// The ref is left in place after the call; callers use it with `--notes=ai-display`.
-/// It is safe to call repeatedly — each call starts from an empty tree via
-/// `from 0000...` so stale notes from prior calls are discarded.
-///
-/// Returns the number of notes that were written into `refs/notes/ai-display`.
-pub fn materialize_notes_for_display(repo: &Repository, limit: usize) -> Result<usize, GitAiError> {
-    use crate::clients::git_cli::exec_git;
-    use crate::clients::git_cli::exec_git_with_stdin_writer;
-
-    // 1. Get recent commits via rev-list.
-    let rev_list_args: Vec<String> = repo
-        .global_args_for_exec()
-        .into_iter()
-        .chain([
-            "rev-list".to_string(),
-            format!("--max-count={}", limit),
-            "HEAD".to_string(),
-        ])
-        .collect();
-
-    let output = exec_git(&rev_list_args)?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let commit_shas: Vec<String> = stdout
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
-
-    if commit_shas.is_empty() {
-        return Ok(0);
-    }
-
-    // 2. Look up which commits are in the local notes-db cache.
-    let cached_map = db_read_notes(&commit_shas);
-    if cached_map.is_empty() {
-        return Ok(0);
-    }
-
-    // 3. Stream a git fast-import script directly to the child's stdin.
-    //    Structure:
-    //      - One `blob` stanza per note (each gets a mark ID).
-    //      - One `commit` stanza with `from 0000...` (empty tree) that attaches all blobs.
-    let fast_import_args = crate::operations::git::refs::fast_import_args(repo);
-
-    exec_git_with_stdin_writer(&fast_import_args, |writer| {
-        for (idx, (_commit_sha, content)) in cached_map.iter().enumerate() {
-            crate::operations::git::refs::write_blob_stanza(writer, idx + 1, content)?;
-        }
-
-        // Use `from` with an all-zeros SHA to start from an empty tree, ensuring
-        // stale notes from prior materializations are removed.
-        crate::operations::git::refs::write_notes_commit_header(
-            writer,
-            "refs/notes/ai-display",
-            format_args!("git-ai <git-ai@localhost> 1000000000 +0000"),
-            Some("0000000000000000000000000000000000000000"),
-        )?;
-
-        for (idx, (commit_sha, _content)) in cached_map.iter().enumerate() {
-            writeln!(writer, "M 100644 :{} {}", idx + 1, commit_sha)?;
-        }
-        writer.write_all(b"\n")
-    })?;
-
-    Ok(cached_map.len())
-}
 
 // --- Backend bypass ---
 
@@ -672,59 +580,6 @@ mod tests {
         assert!(
             result.is_err(),
             "git notes --ref=ai show should fail (note not in git) for Http backend"
-        );
-
-        unsafe {
-            env::remove_var("GIT_AI_TEST_NOTES_DB_PATH");
-        }
-    }
-
-    /// Integration test: `materialize_notes_for_display` writes notes from the
-    /// notes-db cache into `refs/notes/ai-display` so that `git log --notes=ai-display`
-    /// can show them.
-    #[test]
-    #[serial_test::serial(notes_db_env)]
-    fn integration_materialize_notes_for_display() {
-        use crate::clients::git_cli::exec_git;
-        use crate::operations::git::test_utils::TmpRepo;
-        use std::env;
-
-        // Isolated notes-db.
-        let tmp_db = tempfile::NamedTempFile::new().expect("tmp db file");
-        unsafe {
-            env::set_var("GIT_AI_TEST_NOTES_DB_PATH", tmp_db.path().to_str().unwrap());
-        }
-
-        let repo = TmpRepo::new().expect("TmpRepo::new");
-
-        // Create a real commit.
-        repo.write_file("b.txt", "world", false)
-            .expect("write file");
-        let sha = repo.commit_all("test commit").expect("commit");
-
-        // Put a note in the cache for this commit.
-        HttpNoteStore::new()
-            .write_note(&sha, "display-note-content")
-            .expect("write note");
-
-        // Materialize the cache into refs/notes/ai-display.
-        let count = materialize_notes_for_display(repo.gitai_repo(), 50).expect("materialize");
-        assert_eq!(count, 1, "should have materialized 1 note");
-
-        // Confirm git can read the note from refs/notes/ai-display.
-        let mut args = repo.gitai_repo().global_args_for_exec();
-        args.extend([
-            "notes".to_string(),
-            "--ref=ai-display".to_string(),
-            "show".to_string(),
-            sha.clone(),
-        ]);
-        let output = exec_git(&args).expect("git notes show ai-display");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.trim() == "display-note-content",
-            "refs/notes/ai-display should contain the materialized note, got: {:?}",
-            stdout
         );
 
         unsafe {

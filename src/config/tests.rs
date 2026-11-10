@@ -14,7 +14,6 @@ use super::file::{
 };
 use super::notes_backend::{NotesBackendConfig, NotesBackendKind};
 use super::patterns::remote_matches_patterns;
-use super::prompt_storage::PromptStorageMode;
 use super::{
     Config, DEFAULT_API_BASE_URL, DEFAULT_MAX_CHECKPOINT_FILE_SIZE_BYTES,
     DEFAULT_MAX_CHECKPOINT_TOTAL_LINES, DEFAULT_MAX_CHECKPOINT_TOTAL_SIZE_BYTES,
@@ -336,22 +335,6 @@ fn create_test_config_with_exclude_prompts(exclude_prompts_patterns: Vec<String>
 }
 
 #[test]
-fn test_should_exclude_prompts_empty_patterns_returns_false() {
-    let config = create_test_config_with_exclude_prompts(vec![]);
-
-    // Empty patterns = share everywhere (blacklist model)
-    assert!(!config.should_exclude_prompts(&None));
-}
-
-#[test]
-fn test_should_exclude_prompts_no_repository_returns_false() {
-    let config = create_test_config_with_exclude_prompts(vec!["https://github.com/*".to_string()]);
-
-    // Even with patterns, no repository provided = don't exclude (can't verify)
-    assert!(!config.should_exclude_prompts(&None));
-}
-
-#[test]
 fn test_should_exclude_prompts_pattern_matching() {
     let config =
         create_test_config_with_exclude_prompts(vec!["https://github.com/myorg/*".to_string()]);
@@ -361,48 +344,6 @@ fn test_should_exclude_prompts_pattern_matching() {
     assert!(config.exclude_prompts_in_repositories[0].matches("https://github.com/myorg/repo1"));
     assert!(config.exclude_prompts_in_repositories[0].matches("https://github.com/myorg/repo2"));
     assert!(!config.exclude_prompts_in_repositories[0].matches("https://github.com/other/repo"));
-}
-
-#[test]
-fn test_should_exclude_prompts_wildcard_all() {
-    let config = create_test_config_with_exclude_prompts(vec!["*".to_string()]);
-
-    // Wildcard * should match any remote URL pattern (exclude all)
-    assert!(!config.exclude_prompts_in_repositories.is_empty());
-    assert!(config.exclude_prompts_in_repositories[0].matches("https://github.com/any/repo"));
-    assert!(config.exclude_prompts_in_repositories[0].matches("git@gitlab.com:any/project"));
-
-    // Wildcard * should also exclude repos without remotes (None case)
-    assert!(config.should_exclude_prompts(&None));
-}
-
-#[test]
-fn test_debug_self_check_remote_bypasses_prompt_exclusion_wildcard() {
-    let config = create_test_config_with_exclude_prompts(vec!["*".to_string()]);
-    let remotes = vec![(
-        "origin".to_string(),
-        crate::diagnostic_sentinels::DEBUG_SELF_CHECK_REMOTE_URL.to_string(),
-    )];
-
-    assert!(!config.should_exclude_prompts_with_remotes(Some(&remotes)));
-}
-
-#[test]
-fn test_should_exclude_prompts_local_repo_not_excluded_without_wildcard() {
-    // Test 1: Local repo with no patterns configured - never excluded
-    let config_no_patterns = create_test_config_with_exclude_prompts(vec![]);
-    assert!(!config_no_patterns.should_exclude_prompts(&None));
-
-    // Test 2: Local repo with non-wildcard patterns - not excluded
-    // (patterns only match against remotes, local repos have none)
-    let config_with_patterns =
-        create_test_config_with_exclude_prompts(vec!["https://github.com/*".to_string()]);
-    assert!(
-        config_with_patterns.exclude_prompts_in_repositories[0]
-            .matches("https://github.com/myorg/repo")
-    );
-    // Non-wildcard patterns should NOT exclude repos without remotes
-    assert!(!config_with_patterns.should_exclude_prompts(&None));
 }
 
 #[test]
@@ -451,91 +392,6 @@ fn create_test_config_with_include_prompts(
 }
 
 #[test]
-fn test_effective_prompt_storage_no_include_list_uses_global() {
-    // No include list = legacy behavior, use global prompt_storage
-    let config = create_test_config_with_include_prompts(vec![], vec![], "notes", None);
-    assert_eq!(
-        config.effective_prompt_storage(&None),
-        PromptStorageMode::Notes
-    );
-
-    let config = create_test_config_with_include_prompts(vec![], vec![], "local", None);
-    assert_eq!(
-        config.effective_prompt_storage(&None),
-        PromptStorageMode::Local
-    );
-
-    let config = create_test_config_with_include_prompts(vec![], vec![], "default", None);
-    assert_eq!(
-        config.effective_prompt_storage(&None),
-        PromptStorageMode::Default
-    );
-}
-
-#[test]
-fn test_effective_prompt_storage_exclude_always_wins() {
-    // Exclusion with wildcard should always return Local, regardless of include list
-    let config = create_test_config_with_include_prompts(
-        vec!["https://github.com/work/*".to_string()],
-        vec!["*".to_string()], // Exclude everything
-        "default",
-        Some("notes"),
-    );
-    assert_eq!(
-        config.effective_prompt_storage(&None),
-        PromptStorageMode::Local
-    );
-}
-
-#[test]
-fn test_effective_prompt_storage_wildcard_include_matches_no_repo() {
-    // Wildcard include should match repos without remotes (None case)
-    let config = create_test_config_with_include_prompts(
-        vec!["*".to_string()],
-        vec![],
-        "default",
-        Some("notes"),
-    );
-    // With wildcard include and None repo, should use prompt_storage (not fallback)
-    assert_eq!(
-        config.effective_prompt_storage(&None),
-        PromptStorageMode::Default
-    );
-}
-
-#[test]
-fn test_effective_prompt_storage_non_wildcard_include_no_match_uses_fallback() {
-    // Non-wildcard include with None repo = no match, use fallback
-    let config = create_test_config_with_include_prompts(
-        vec!["https://github.com/work/*".to_string()],
-        vec![],
-        "default",
-        Some("notes"),
-    );
-    // None repo can't match non-wildcard pattern, should use default_prompt_storage
-    assert_eq!(
-        config.effective_prompt_storage(&None),
-        PromptStorageMode::Notes
-    );
-}
-
-#[test]
-fn test_effective_prompt_storage_no_fallback_defaults_to_local() {
-    // Non-wildcard include with None repo and no fallback = Local
-    let config = create_test_config_with_include_prompts(
-        vec!["https://github.com/work/*".to_string()],
-        vec![],
-        "default",
-        None, // No fallback configured
-    );
-    // None repo can't match, and no fallback, should default to Local
-    assert_eq!(
-        config.effective_prompt_storage(&None),
-        PromptStorageMode::Local
-    );
-}
-
-#[test]
 fn test_effective_prompt_storage_include_pattern_matching() {
     let config = create_test_config_with_include_prompts(
         vec!["https://github.com/positron-ai/*".to_string()],
@@ -570,43 +426,6 @@ fn test_include_prompt_patterns_match_ssh_equivalent_remotes() {
         &config.include_prompts_in_repositories,
         "git@github.com:positron-ai/repo"
     ));
-}
-
-#[test]
-fn test_prompt_storage_mode_from_str() {
-    assert_eq!(
-        "default".parse::<PromptStorageMode>().ok(),
-        Some(PromptStorageMode::Default)
-    );
-    assert_eq!(
-        "DEFAULT".parse::<PromptStorageMode>().ok(),
-        Some(PromptStorageMode::Default)
-    );
-    assert_eq!(
-        "notes".parse::<PromptStorageMode>().ok(),
-        Some(PromptStorageMode::Notes)
-    );
-    assert_eq!(
-        "NOTES".parse::<PromptStorageMode>().ok(),
-        Some(PromptStorageMode::Notes)
-    );
-    assert_eq!(
-        "local".parse::<PromptStorageMode>().ok(),
-        Some(PromptStorageMode::Local)
-    );
-    assert_eq!(
-        "LOCAL".parse::<PromptStorageMode>().ok(),
-        Some(PromptStorageMode::Local)
-    );
-    assert_eq!("invalid".parse::<PromptStorageMode>().ok(), None);
-    assert_eq!("".parse::<PromptStorageMode>().ok(), None);
-}
-
-#[test]
-fn test_prompt_storage_mode_as_str() {
-    assert_eq!(PromptStorageMode::Default.as_str(), "default");
-    assert_eq!(PromptStorageMode::Notes.as_str(), "notes");
-    assert_eq!(PromptStorageMode::Local.as_str(), "local");
 }
 
 #[test]

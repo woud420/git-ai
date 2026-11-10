@@ -1,4 +1,3 @@
-use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 
 /// Represents a single message in an AI transcript
@@ -132,26 +131,6 @@ impl AiTranscript {
         Self {
             messages: filtered_messages,
         }
-    }
-
-    /// Get first message timestamp as Unix i64 (for created_at)
-    /// Returns None if no messages or first message has no timestamp
-    pub fn first_message_timestamp_unix(&self) -> Option<i64> {
-        self.messages
-            .first()
-            .and_then(|msg| msg.timestamp())
-            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-            .map(|dt| dt.timestamp())
-    }
-
-    /// Get last message timestamp as Unix i64 (for updated_at)
-    /// Returns None if no messages or last message has no timestamp
-    pub fn last_message_timestamp_unix(&self) -> Option<i64> {
-        self.messages
-            .last()
-            .and_then(|msg| msg.timestamp())
-            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-            .map(|dt| dt.timestamp())
     }
 }
 
@@ -318,70 +297,6 @@ mod tests {
         let filtered = transcript.without_tool_use();
         assert_eq!(filtered.messages.len(), 2);
         assert!(filtered.messages.iter().all(|msg| !msg.is_tool_use()));
-    }
-
-    #[test]
-    fn test_ai_transcript_first_message_timestamp_unix() {
-        let mut transcript = AiTranscript::new();
-        transcript.add_message(Message::user(
-            "first".to_string(),
-            Some("2024-01-01T12:00:00+00:00".to_string()),
-        ));
-        transcript.add_message(Message::assistant(
-            "second".to_string(),
-            Some("2024-01-01T12:30:00+00:00".to_string()),
-        ));
-
-        let first_ts = transcript.first_message_timestamp_unix();
-        assert!(first_ts.is_some());
-        // 2024-01-01T12:00:00Z is 1704110400
-        assert_eq!(first_ts.unwrap(), 1704110400);
-    }
-
-    #[test]
-    fn test_ai_transcript_last_message_timestamp_unix() {
-        let mut transcript = AiTranscript::new();
-        transcript.add_message(Message::user(
-            "first".to_string(),
-            Some("2024-01-01T12:00:00+00:00".to_string()),
-        ));
-        transcript.add_message(Message::assistant(
-            "second".to_string(),
-            Some("2024-01-01T12:30:00+00:00".to_string()),
-        ));
-
-        let last_ts = transcript.last_message_timestamp_unix();
-        assert!(last_ts.is_some());
-        // 2024-01-01T12:30:00Z is 1704112200
-        assert_eq!(last_ts.unwrap(), 1704112200);
-    }
-
-    #[test]
-    fn test_ai_transcript_timestamp_unix_no_messages() {
-        let transcript = AiTranscript::new();
-        assert_eq!(transcript.first_message_timestamp_unix(), None);
-        assert_eq!(transcript.last_message_timestamp_unix(), None);
-    }
-
-    #[test]
-    fn test_ai_transcript_timestamp_unix_no_timestamps() {
-        let mut transcript = AiTranscript::new();
-        transcript.add_message(Message::user("text".to_string(), None));
-
-        assert_eq!(transcript.first_message_timestamp_unix(), None);
-        assert_eq!(transcript.last_message_timestamp_unix(), None);
-    }
-
-    #[test]
-    fn test_ai_transcript_timestamp_unix_invalid_format() {
-        let mut transcript = AiTranscript::new();
-        transcript.add_message(Message::user(
-            "text".to_string(),
-            Some("invalid-timestamp".to_string()),
-        ));
-
-        assert_eq!(transcript.first_message_timestamp_unix(), None);
-        assert_eq!(transcript.last_message_timestamp_unix(), None);
     }
 
     #[test]

@@ -444,33 +444,6 @@ impl StreamsDatabase {
         Ok(())
     }
 
-    /// Delete a stream and its associated data.
-    pub fn delete_stream(
-        &self,
-        session_id: &str,
-        stream_kind: &str,
-        stream_path: &str,
-    ) -> Result<(), StreamError> {
-        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
-
-        let rows_changed = conn
-            .execute(
-                "DELETE FROM tracked_streams WHERE session_id = ?1 AND stream_kind = ?2 AND stream_path = ?3",
-                params![session_id, stream_kind, stream_path],
-            )
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to delete stream: {}", e),
-            })?;
-
-        if rows_changed == 0 {
-            return Err(StreamError::Fatal {
-                message: format!("Stream not found: {}", session_id),
-            });
-        }
-
-        Ok(())
-    }
-
     /// Get all stream records.
     pub fn all_streams(&self) -> Result<Vec<StreamRecord>, StreamError> {
         let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);

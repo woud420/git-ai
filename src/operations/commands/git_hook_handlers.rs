@@ -3,8 +3,7 @@
 //! The git core-hooks feature has been sunset.  This module now contains only:
 //! - detection of hook-style binary invocations (`is_git_hook_binary_name`)
 //! - the `remove_repo_hooks` command (so users can clean up old symlinks)
-//! - helpers consumed by the git wrapper to resolve a previous non-managed
-//!   hooks path and to set `ENV_SKIP_MANAGED_HOOKS` on child git processes
+//! - the `ENV_SKIP_*_HOOKS` names the git wrapper sets on child git processes
 //!   during the transition period.
 
 use crate::error::GitAiError;
@@ -141,7 +140,7 @@ pub fn remove_repo_hooks(
         .map(PathBuf::from)
         .filter(|path| {
             normalize_path(path) != normalize_path(&managed_hooks_dir)
-                && !is_disallowed_forward_hooks_path(path, Some(repo), Some(&managed_hooks_dir))
+                && !is_disallowed_forward_hooks_path(path, repo)
         });
 
     let mut changed = false;
@@ -207,29 +206,8 @@ fn managed_git_hooks_dir_for_repo(repo: &Repository) -> PathBuf {
     repo_ai_dir(repo).join(GIT_HOOKS_DIR_NAME)
 }
 
-fn managed_git_hooks_dir_from_context() -> Option<PathBuf> {
-    if let Some(repo) = find_hook_repository_from_context() {
-        return Some(managed_git_hooks_dir_for_repo(&repo));
-    }
-    git_dir_from_context().map(|git_dir| git_dir.join("ai").join(GIT_HOOKS_DIR_NAME))
-}
-
 fn normalize_path(path: &Path) -> PathBuf {
     crate::operations::git::canonicalize::canonicalize_or_self(path)
-}
-
-fn canonicalize_if_possible(path: PathBuf) -> PathBuf {
-    crate::operations::git::canonicalize::canonicalize_or_self(&path)
-}
-
-fn is_managed_hooks_path(path: &Path, repo: Option<&Repository>) -> bool {
-    if let Some(repo) = repo {
-        return normalize_path(path) == normalize_path(&managed_git_hooks_dir_for_repo(repo));
-    }
-    if let Some(managed_from_context) = managed_git_hooks_dir_from_context() {
-        return normalize_path(path) == normalize_path(&managed_from_context);
-    }
-    false
 }
 
 // ---------------------------------------------------------------------------
@@ -371,141 +349,8 @@ fn is_path_inside_any_git_ai_dir(path: &Path) -> bool {
     false
 }
 
-fn is_disallowed_forward_hooks_path(
-    path: &Path,
-    repo: Option<&Repository>,
-    managed_hooks_path: Option<&Path>,
-) -> bool {
-    if is_path_inside_component(path, ".git-ai") {
-        return true;
-    }
-    if is_path_inside_any_git_ai_dir(path) {
-        return true;
-    }
-
-    if let Some(repo) = repo {
-        let repo_ai_dir = repo_ai_dir(repo);
-        if normalize_path(path).starts_with(normalize_path(&repo_ai_dir)) {
-            return true;
-        }
-    }
-
-    if let Some(managed_hooks_path) = managed_hooks_path
-        && normalize_path(path) == normalize_path(managed_hooks_path)
-    {
-        return true;
-    }
-
-    is_managed_hooks_path(path, repo)
+fn is_disallowed_forward_hooks_path(path: &Path, repo: &Repository) -> bool {
+    is_path_inside_component(path, ".git-ai")
+        || is_path_inside_any_git_ai_dir(path)
+        || normalize_path(path).starts_with(normalize_path(&repo_ai_dir(repo)))
 }
-
-// ---------------------------------------------------------------------------
-// Internal helpers - repository / git-dir context discovery
-// ---------------------------------------------------------------------------
-
-fn git_dir_from_env() -> Option<PathBuf> {
-    let git_dir = std::env::var("GIT_DIR").ok()?;
-    let git_dir = git_dir.trim();
-    if git_dir.is_empty() {
-        return None;
-    }
-
-    let git_dir = PathBuf::from(git_dir);
-    if git_dir.is_absolute() {
-        Some(git_dir)
-    } else {
-        std::env::current_dir().ok().map(|cwd| cwd.join(git_dir))
-    }
-}
-
-fn git_dir_from_context() -> Option<PathBuf> {
-    if let Some(from_env) = git_dir_from_env() {
-        return Some(from_env);
-    }
-
-    // In some wrapper-internal invocations Git may not export GIT_DIR to hooks.
-    // For normal non-bare hooks, the working directory is the repo root.
-    let cwd = std::env::current_dir().ok()?;
-    let candidate = cwd.join(".git");
-    if candidate.is_dir() {
-        Some(candidate)
-    } else {
-        None
-    }
-}
-
-fn worktree_root_from_git_dir(git_dir: &Path) -> Option<PathBuf> {
-    let gitdir_file = git_dir.join("gitdir");
-    let gitdir_target = fs::read_to_string(gitdir_file).ok()?;
-    let gitdir_target = gitdir_target.trim();
-    if gitdir_target.is_empty() {
-        return None;
-    }
-
-    let gitdir_path = PathBuf::from(gitdir_target);
-    let gitdir_path = if gitdir_path.is_absolute() {
-        gitdir_path
-    } else {
-        git_dir.join(gitdir_path)
-    };
-
-    let gitdir_path = canonicalize_if_possible(gitdir_path);
-    gitdir_path.parent().map(Path::to_path_buf)
-}
-
-fn hook_repository_lookup_paths() -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = Vec::new();
-
-    if let Some(git_dir) = git_dir_from_context() {
-        if let Some(worktree_root) = worktree_root_from_git_dir(&git_dir)
-            && !paths
-                .iter()
-                .any(|existing| normalize_path(existing) == normalize_path(&worktree_root))
-        {
-            paths.push(worktree_root);
-        }
-
-        if !paths
-            .iter()
-            .any(|existing| normalize_path(existing) == normalize_path(&git_dir))
-        {
-            paths.push(git_dir.clone());
-        }
-
-        if git_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name.eq_ignore_ascii_case(".git"))
-            .unwrap_or(false)
-            && let Some(parent) = git_dir.parent()
-        {
-            let parent = parent.to_path_buf();
-            if !paths
-                .iter()
-                .any(|existing| normalize_path(existing) == normalize_path(&parent))
-            {
-                paths.push(parent);
-            }
-        }
-    }
-
-    if let Ok(current_dir) = std::env::current_dir()
-        && !paths
-            .iter()
-            .any(|existing| normalize_path(existing) == normalize_path(&current_dir))
-    {
-        paths.push(current_dir);
-    }
-
-    paths
-}
-
-fn find_hook_repository_from_context() -> Option<Repository> {
-    hook_repository_lookup_paths().into_iter().find_map(|path| {
-        crate::operations::git::find_repository_in_path(&path.to_string_lossy()).ok()
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers - forward resolution (used by wrapper during transition)
-// ---------------------------------------------------------------------------

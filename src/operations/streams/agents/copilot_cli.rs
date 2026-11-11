@@ -3,7 +3,6 @@ use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -111,15 +110,6 @@ impl Agent for CopilotCliAgent {
             .and_then(|v| v.as_str())
             .map(String::from);
         (id, parent_id, None)
-    }
-
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {

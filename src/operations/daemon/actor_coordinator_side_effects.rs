@@ -309,11 +309,13 @@ impl ActorDaemonCoordinator {
         let is_skip = cherry_pick_command_has_flag(cmd, "--skip");
         let mut source_oids = cmd.cherry_pick_source_oids.clone();
         let mut source_oids_from_daemon_pending = false;
+        // Discovered at most once (a rev-parse spawn), and only when needed.
+        let mut repo = None;
         if source_oids.is_empty()
             && (!new_commits.is_empty() || cherry_pick_state_exists_for_worktree(worktree))
         {
-            let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-            source_oids = resolve_explicit_cherry_pick_sources_for_side_effect(&repo, cmd)?;
+            let repo = repo.insert(find_repository_in_path(&worktree.to_string_lossy())?);
+            source_oids = resolve_explicit_cherry_pick_sources_for_side_effect(repo, cmd)?;
         }
         if source_oids.is_empty() && (is_continue || is_skip) {
             source_oids = self.pending_cherry_pick_sources_for_worktree(worktree)?;
@@ -326,7 +328,10 @@ impl ActorDaemonCoordinator {
             .cloned()
             .collect::<Vec<_>>();
         if !new_commits.is_empty() && !applied_source_oids.is_empty() {
-            let repo = find_repository_in_path(&worktree.to_string_lossy())?;
+            let repo = match repo {
+                Some(repo) => repo,
+                None => find_repository_in_path(&worktree.to_string_lossy())?,
+            };
             let original_head = cherry_pick_original_head(cmd).ok_or_else(|| {
                 super::state_error::state_error(
                     std::io::ErrorKind::InvalidData,

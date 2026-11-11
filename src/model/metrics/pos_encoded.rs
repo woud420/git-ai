@@ -89,17 +89,6 @@ pub fn sparse_get_u64(arr: &SparseArray, pos: usize) -> PosField<u64> {
     }
 }
 
-/// Get a f64 field from a sparse array at a position.
-#[allow(dead_code)]
-pub fn sparse_get_f64(arr: &SparseArray, pos: usize) -> PosField<f64> {
-    match arr.get(&pos.to_string()) {
-        None => None,
-        Some(Value::Null) => Some(None),
-        Some(Value::Number(n)) => n.as_f64().map(Some),
-        Some(_) => None,
-    }
-}
-
 /// Convert a `PosField<Vec<String>>` to JSON array.
 pub fn vec_string_to_json(field: &PosField<Vec<String>>) -> Option<Value> {
     match field {
@@ -158,20 +147,6 @@ pub fn sparse_get_vec_u32(arr: &SparseArray, pos: usize) -> PosField<Vec<u32>> {
                     })
                 })
                 .collect();
-            Some(Some(nums))
-        }
-        Some(_) => None,
-    }
-}
-
-/// Get a `Vec<u64>` field from a sparse array at a position.
-#[allow(dead_code)]
-pub fn sparse_get_vec_u64(arr: &SparseArray, pos: usize) -> PosField<Vec<u64>> {
-    match arr.get(&pos.to_string()) {
-        None => None,
-        Some(Value::Null) => Some(None),
-        Some(Value::Array(arr)) => {
-            let nums: Vec<u64> = arr.iter().filter_map(|v| v.as_u64()).collect();
             Some(Some(nums))
         }
         Some(_) => None,
@@ -344,27 +319,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sparse_get_vec_u64() {
-        let mut arr = SparseArray::new();
-        assert_eq!(sparse_get_vec_u64(&arr, 0), None);
-
-        arr.insert("0".to_string(), Value::Null);
-        assert_eq!(sparse_get_vec_u64(&arr, 0), Some(None));
-
-        arr.insert(
-            "1".to_string(),
-            Value::Array(vec![
-                Value::Number(1000000000000u64.into()),
-                Value::Number(2000000000000u64.into()),
-            ]),
-        );
-        assert_eq!(
-            sparse_get_vec_u64(&arr, 1),
-            Some(Some(vec![1000000000000u64, 2000000000000u64]))
-        );
-    }
-
-    #[test]
     fn test_sparse_set() {
         let mut arr = SparseArray::new();
 
@@ -414,6 +368,5 @@ mod tests {
         arr.insert("0".to_string(), Value::String("not an array".to_string()));
         assert_eq!(sparse_get_vec_string(&arr, 0), None);
         assert_eq!(sparse_get_vec_u32(&arr, 0), None);
-        assert_eq!(sparse_get_vec_u64(&arr, 0), None);
     }
 }

@@ -186,24 +186,11 @@ impl ApiContext {
     /// Create a new API context explicitly without authentication
     /// Use this when you need to ensure no auth token is sent
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
-    #[allow(dead_code)]
     pub fn without_auth(
         base_url: Option<String>,
         identity_resolver: AuthorIdentityResolver,
     ) -> Self {
         Self::from_auth_token_resolver(base_url, identity_resolver, || None)
-    }
-
-    /// Create a new API context with authentication
-    /// If base_url is None, uses api_base_url from config (which can be set via config file, env var, or defaults)
-    /// Uses Config::fresh() to support runtime config updates (daemon mode)
-    #[allow(dead_code)]
-    pub fn with_auth(
-        base_url: Option<String>,
-        auth_token: String,
-        identity_resolver: AuthorIdentityResolver,
-    ) -> Self {
-        Self::from_auth_token_resolver(base_url, identity_resolver, || Some(auth_token))
     }
 
     /// Set a custom timeout
@@ -307,12 +294,6 @@ impl ApiClient {
         &self.context
     }
 
-    /// Get a mutable reference to the API context
-    #[allow(dead_code)]
-    pub fn context_mut(&mut self) -> &mut ApiContext {
-        &mut self.context
-    }
-
     /// Check if user is logged in (has an auth token)
     pub fn is_logged_in(&self) -> bool {
         self.context.auth_token.is_some()
@@ -339,17 +320,6 @@ mod tests {
     fn test_api_context_without_auth() {
         let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         assert!(ctx.auth_token.is_none());
-        assert_eq!(ctx.base_url, "https://example.com");
-    }
-
-    #[test]
-    fn test_api_context_with_auth() {
-        let ctx = ApiContext::with_auth(
-            Some("https://example.com".to_string()),
-            "test_token".to_string(),
-            || None,
-        );
-        assert_eq!(ctx.auth_token, Some("test_token".to_string()));
         assert_eq!(ctx.base_url, "https://example.com");
     }
 
@@ -432,11 +402,8 @@ mod tests {
 
     #[test]
     fn test_api_client_is_logged_in_true() {
-        let ctx = ApiContext::with_auth(
-            Some("https://example.com".to_string()),
-            "token".to_string(),
-            || None,
-        );
+        let mut ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
+        ctx.auth_token = Some("token".to_string());
         let client = ApiClient::new(ctx);
         assert!(client.is_logged_in());
     }
@@ -450,11 +417,8 @@ mod tests {
 
     #[test]
     fn test_api_client_context_access() {
-        let ctx = ApiContext::with_auth(
-            Some("https://example.com".to_string()),
-            "token".to_string(),
-            || None,
-        );
+        let mut ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
+        ctx.auth_token = Some("token".to_string());
         let client = ApiClient::new(ctx);
         assert_eq!(client.context().base_url, "https://example.com");
     }

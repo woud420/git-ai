@@ -9,8 +9,7 @@ fn test_event_attributes_builder() {
         .commit_sha("commit-123")
         .base_commit_sha("base-commit-123")
         .branch("main")
-        .tool("claude-code")
-        .model_null();
+        .tool("claude-code");
 
     assert_eq!(attrs.git_ai_version, Some(Some("1.0.0".to_string())));
     assert_eq!(
@@ -25,15 +24,13 @@ fn test_event_attributes_builder() {
     );
     assert_eq!(attrs.branch, Some(Some("main".to_string())));
     assert_eq!(attrs.tool, Some(Some("claude-code".to_string())));
-    assert_eq!(attrs.model, Some(None)); // explicitly null
     assert_eq!(attrs.prompt_id, None); // tombstoned - never written
 }
 
 #[test]
 fn test_event_attributes_to_sparse() {
-    let attrs = EventAttributes::with_version("1.0.0")
-        .tool("test-tool")
-        .model_null();
+    let mut attrs = EventAttributes::with_version("1.0.0").tool("test-tool");
+    attrs.model = Some(None);
 
     let sparse = attrs.to_sparse();
 
@@ -97,31 +94,6 @@ fn test_event_attributes_all_fields() {
 }
 
 #[test]
-fn test_event_attributes_all_nulls() {
-    let attrs = EventAttributes::new()
-        .git_ai_version_null()
-        .repo_url_null()
-        .author_null()
-        .commit_sha_null()
-        .base_commit_sha_null()
-        .branch_null()
-        .tool_null()
-        .model_null()
-        .external_session_id_null();
-
-    assert_eq!(attrs.git_ai_version, Some(None));
-    assert_eq!(attrs.repo_url, Some(None));
-    assert_eq!(attrs.author, Some(None));
-    assert_eq!(attrs.commit_sha, Some(None));
-    assert_eq!(attrs.base_commit_sha, Some(None));
-    assert_eq!(attrs.branch, Some(None));
-    assert_eq!(attrs.tool, Some(None));
-    assert_eq!(attrs.model, Some(None));
-    assert_eq!(attrs.prompt_id, None); // tombstoned - no setter available
-    assert_eq!(attrs.external_session_id, Some(None));
-}
-
-#[test]
 fn test_event_attributes_to_sparse_all_fields() {
     let attrs = EventAttributes::with_version("1.0.0")
         .repo_url("https://github.com/test/repo")
@@ -167,11 +139,11 @@ fn test_event_attributes_to_sparse_all_fields() {
 
 #[test]
 fn test_event_attributes_roundtrip() {
-    let original = EventAttributes::with_version("2.5.0")
+    let mut original = EventAttributes::with_version("2.5.0")
         .repo_url("https://gitlab.com/org/repo")
-        .author_null()
         .commit_sha("sha123")
         .tool("copilot");
+    original.author = Some(None);
 
     let sparse = original.to_sparse();
     let restored = EventAttributes::from_sparse(&sparse);
@@ -220,12 +192,6 @@ fn test_event_attributes_default() {
 }
 
 #[test]
-fn test_event_attributes_git_ai_version_builder() {
-    let attrs = EventAttributes::new().git_ai_version("4.0.0");
-    assert_eq!(attrs.git_ai_version, Some(Some("4.0.0".to_string())));
-}
-
-#[test]
 fn test_event_attributes_sparse_positions() {
     // Verify the position constants match expected values
     use super::attr_pos::*;
@@ -252,16 +218,6 @@ fn test_event_attributes_session_id_builder() {
 
     assert_eq!(attrs.session_id, Some(Some("session-123".to_string())));
     assert_eq!(attrs.trace_id, Some(Some("trace-456".to_string())));
-}
-
-#[test]
-fn test_event_attributes_session_id_null() {
-    let attrs = EventAttributes::with_version("1.0.0")
-        .session_id_null()
-        .trace_id_null();
-
-    assert_eq!(attrs.session_id, Some(None));
-    assert_eq!(attrs.trace_id, Some(None));
 }
 
 #[test]
@@ -304,10 +260,10 @@ fn test_event_attributes_from_sparse_with_session_fields() {
 
 #[test]
 fn test_event_attributes_roundtrip_with_session_fields() {
-    let original = EventAttributes::with_version("2.5.0")
+    let mut original = EventAttributes::with_version("2.5.0")
         .session_id("session-roundtrip")
-        .trace_id_null()
         .tool("copilot");
+    original.trace_id = Some(None);
 
     let sparse = original.to_sparse();
     let restored = EventAttributes::from_sparse(&sparse);

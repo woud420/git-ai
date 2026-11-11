@@ -62,11 +62,6 @@ pub struct EventAttributes {
 }
 
 impl EventAttributes {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Create with required git_ai_version field set.
     pub fn with_version(version: impl Into<String>) -> Self {
         Self {
@@ -75,28 +70,9 @@ impl EventAttributes {
         }
     }
 
-    // Builder methods for git_ai_version
-    #[allow(dead_code)]
-    pub fn git_ai_version(mut self, value: impl Into<String>) -> Self {
-        self.git_ai_version = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn git_ai_version_null(mut self) -> Self {
-        self.git_ai_version = Some(None);
-        self
-    }
-
     // Builder methods for repo_url
     pub fn repo_url(mut self, value: impl Into<String>) -> Self {
         self.repo_url = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn repo_url_null(mut self) -> Self {
-        self.repo_url = Some(None);
         self
     }
 
@@ -106,21 +82,9 @@ impl EventAttributes {
         self
     }
 
-    #[allow(dead_code)]
-    pub fn author_null(mut self) -> Self {
-        self.author = Some(None);
-        self
-    }
-
     // Builder methods for commit_sha
     pub fn commit_sha(mut self, value: impl Into<String>) -> Self {
         self.commit_sha = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn commit_sha_null(mut self) -> Self {
-        self.commit_sha = Some(None);
         self
     }
 
@@ -130,21 +94,9 @@ impl EventAttributes {
         self
     }
 
-    #[allow(dead_code)]
-    pub fn base_commit_sha_null(mut self) -> Self {
-        self.base_commit_sha = Some(None);
-        self
-    }
-
     // Builder methods for branch
     pub fn branch(mut self, value: impl Into<String>) -> Self {
         self.branch = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn branch_null(mut self) -> Self {
-        self.branch = Some(None);
         self
     }
 
@@ -154,21 +106,9 @@ impl EventAttributes {
         self
     }
 
-    #[allow(dead_code)]
-    pub fn tool_null(mut self) -> Self {
-        self.tool = Some(None);
-        self
-    }
-
     // Builder methods for model
     pub fn model(mut self, value: impl Into<String>) -> Self {
         self.model = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn model_null(mut self) -> Self {
-        self.model = Some(None);
         self
     }
 
@@ -180,21 +120,9 @@ impl EventAttributes {
         self
     }
 
-    #[allow(dead_code)]
-    pub fn session_id_null(mut self) -> Self {
-        self.session_id = Some(None);
-        self
-    }
-
     // Builder methods for trace_id
     pub fn trace_id(mut self, value: impl Into<String>) -> Self {
         self.trace_id = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn trace_id_null(mut self) -> Self {
-        self.trace_id = Some(None);
         self
     }
 
@@ -217,21 +145,9 @@ impl EventAttributes {
         self
     }
 
-    #[allow(dead_code)]
-    pub fn external_session_id_null(mut self) -> Self {
-        self.external_session_id = Some(None);
-        self
-    }
-
     // Builder methods for external_parent_session_id
     pub fn external_parent_session_id(mut self, value: impl Into<String>) -> Self {
         self.external_parent_session_id = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn external_parent_session_id_null(mut self) -> Self {
-        self.external_parent_session_id = Some(None);
         self
     }
 
@@ -245,12 +161,6 @@ impl EventAttributes {
     // Builder methods for custom_attributes
     pub fn custom_attributes(mut self, value: impl Into<String>) -> Self {
         self.custom_attributes = Some(Some(value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn custom_attributes_null(mut self) -> Self {
-        self.custom_attributes = Some(None);
         self
     }
 

@@ -42,13 +42,31 @@ pub fn read_authorship_v3_batch(
     read_batch_for_backend(repo, commit_shas, Config::fresh().notes_backend_kind())
 }
 
-fn read_batch_for_backend(
+/// Batched [`read_note`]: the same local-only reads, with the same omissions.
+/// A note that cannot be read is left out; a failed batch transport is
+/// returned instead of retrying once per commit.
+pub fn read_local_notes_batch(
+    repo: &Repository,
+    commit_shas: &[String],
+) -> Result<HashMap<String, String>, GitAiError> {
+    let backend = Config::fresh().notes_backend_kind();
+    let (mut notes, refs) = read_local_notes(repo, commit_shas, backend)?;
+    notes.extend(refs);
+    Ok(notes)
+}
+
+/// Note content by commit SHA.
+type Notes = HashMap<String, String>;
+
+/// Note contents from the notes database, and from `refs/notes/ai` for the
+/// commits the database lacks (always, on the GitNotes backend).
+fn read_local_notes(
     repo: &Repository,
     commit_shas: &[String],
     backend: NotesBackendKind,
-) -> Result<HashMap<String, AuthorshipLog>, GitAiError> {
+) -> Result<(Notes, Notes), GitAiError> {
     if commit_shas.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(Default::default());
     }
     let commit_shas: Vec<String> = commit_shas
         .iter()
@@ -81,6 +99,15 @@ fn read_batch_for_backend(
     if backend == NotesBackendKind::Sqlite {
         SqliteNoteStore::backfill_cache(&refs);
     }
+    Ok((cached, refs))
+}
+
+fn read_batch_for_backend(
+    repo: &Repository,
+    commit_shas: &[String],
+    backend: NotesBackendKind,
+) -> Result<HashMap<String, AuthorshipLog>, GitAiError> {
+    let (cached, refs) = read_local_notes(repo, commit_shas, backend)?;
     let mut logs: HashMap<String, AuthorshipLog> = cached
         .into_iter()
         .filter_map(|(sha, content)| {

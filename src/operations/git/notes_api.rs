@@ -16,7 +16,7 @@ mod authorship;
 mod cache_warming;
 pub use cache_warming::{warm_cache_for_remote, warm_cache_for_revisions};
 mod primary_backend;
-pub use authorship::{read_authorship_v3, read_authorship_v3_batch};
+pub use authorship::{read_authorship_v3, read_authorship_v3_batch, read_local_notes_batch};
 
 use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;

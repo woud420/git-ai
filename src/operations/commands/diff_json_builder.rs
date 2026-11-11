@@ -7,7 +7,7 @@ use crate::clients::git_cli::{InternalGitProfile, exec_git_stdin_with_profile};
 use crate::error::GitAiError;
 use crate::model::authorship_log::{LineRange, PromptRecord, SessionRecord};
 use crate::model::diff_json::FileDiffJson;
-use crate::operations::git::notes_api::{read_authorship, read_note, read_notes_batch};
+use crate::operations::git::notes_api::{read_authorship, read_local_notes_batch};
 use crate::operations::git::repository::Repository;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -374,9 +374,9 @@ fn load_commit_metadata(repo: &Repository, commits: &mut BTreeMap<String, DiffCo
     .and_then(|output| String::from_utf8(output.stdout).map_err(|e| e.to_string())) else {
         return;
     };
-    // A batch read fails as a whole on one unreadable note; fall back to
-    // per-commit reads so the remaining commits keep theirs.
-    let notes = read_notes_batch(repo, &commit_shas);
+    // Leaves out a note that cannot be read. If the read itself fails, no
+    // commit gets a note: there is no per-commit retry.
+    let mut notes = read_local_notes_batch(repo, &commit_shas).unwrap_or_default();
 
     let mut fields = stdout.split('\0');
     while let (Some(sha), Some(name), Some(email), Some(time), Some(subject), Some(body)) = (
@@ -387,10 +387,6 @@ fn load_commit_metadata(repo: &Repository, commits: &mut BTreeMap<String, DiffCo
         fields.next(),
         fields.next(),
     ) {
-        let authorship_note = match &notes {
-            Ok(notes) => notes.get(sha).cloned(),
-            Err(_) => read_note(repo, sha),
-        };
         commits.insert(
             sha.to_string(),
             DiffCommitMetadata {
@@ -398,7 +394,7 @@ fn load_commit_metadata(repo: &Repository, commits: &mut BTreeMap<String, DiffCo
                 msg: subject.trim().to_string(),
                 full_msg: body.trim_end().to_string(),
                 author: format_git_ident(name.trim(), email.trim()),
-                authorship_note,
+                authorship_note: notes.remove(sha),
             },
         );
     }

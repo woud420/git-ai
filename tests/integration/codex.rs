@@ -1350,6 +1350,60 @@ fn test_codex_e2e_apply_patch_preserves_human_lines() {
 }
 
 #[test]
+fn test_codex_e2e_apply_patch_does_not_claim_uncheckpointed_human_lines() {
+    use crate::repos::test_repo::TestRepo;
+
+    let mut repo = TestRepo::new();
+    repo.patch_git_ai_config(|patch| {
+        patch.exclude_prompts_in_repositories = Some(vec![]);
+    });
+
+    let repo_root = repo.canonical_path();
+    let file_path = repo_root.join("notes.txt");
+    fs::write(&file_path, "first\nmiddle\nlast\n").unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    // A human edit with no checkpoint, away from the AI edit (adjacent dirty
+    // lines are deliberately recovered as AI): only Codex's pre-edit
+    // checkpoint keeps it out of the AI delta.
+    fs::write(&file_path, "human line\nmiddle\nlast\n").unwrap();
+
+    let transcript_path = repo_root.join("codex-uncheckpointed-human.jsonl");
+    fs::copy(fixture_path("codex-session-simple.jsonl"), &transcript_path).unwrap();
+    let hook_input = |event: &str| {
+        json!({
+            "session_id": "codex-uncheckpointed-human-session",
+            "cwd": repo_root.to_string_lossy().to_string(),
+            "hook_event_name": event,
+            "tool_name": "apply_patch",
+            "tool_use_id": "patch-uncheckpointed-1",
+            "tool_input": {
+                "patch": format!("*** Update File: {}\n@@ last\n+ai line\n", file_path.to_string_lossy())
+            },
+            "transcript_path": transcript_path.to_string_lossy().to_string()
+        })
+        .to_string()
+    };
+
+    repo.checkpoint_with_hook_input("codex", &hook_input("PreToolUse"))
+        .expect("pre-hook should succeed");
+    fs::write(&file_path, "human line\nmiddle\nlast\nai line\n").unwrap();
+    repo.checkpoint_with_hook_input("codex", &hook_input("PostToolUse"))
+        .expect("post-hook should succeed");
+
+    repo.stage_all_and_commit("Codex appends after human edit")
+        .expect("commit should succeed");
+
+    let mut notes = repo.filename("notes.txt");
+    notes.assert_committed_lines(crate::lines![
+        "human line".unattributed_human(),
+        "middle".unattributed_human(),
+        "last".unattributed_human(),
+        "ai line".ai(),
+    ]);
+}
+
+#[test]
 fn test_codex_e2e_namespaced_apply_patch_file_edit_full_cycle() {
     use crate::repos::test_repo::TestRepo;
 
@@ -1606,6 +1660,7 @@ crate::reuse_tests_in_worktree!(
     test_codex_e2e_bash_then_apply_patch_in_same_session,
     test_codex_e2e_bash_modifies_multiple_files_all_attributed,
     test_codex_e2e_apply_patch_preserves_human_lines,
+    test_codex_e2e_apply_patch_does_not_claim_uncheckpointed_human_lines,
     test_codex_e2e_namespaced_apply_patch_file_edit_full_cycle,
     test_codex_e2e_namespaced_exec_command_bash_full_cycle,
     test_codex_e2e_multi_tool_use_parallel_wrapper,

@@ -348,7 +348,7 @@ fn explicit_rebase_branch_change(cmd: &NormalizedCommand) -> Option<(String, Str
     let args = command_args(cmd);
     let branch = explicit_rebase_branch_arg(&args)?;
     let branch_ref = if branch.starts_with("refs/") {
-        branch.to_string()
+        branch
     } else {
         format!("refs/heads/{}", branch)
     };

@@ -135,8 +135,8 @@ impl RefCursor {
                 cmd.worktree.as_deref(),
                 &[],
                 ExpectedTransition {
-                    old_oids: [old.clone()].into_iter().collect(),
-                    new_oid: Some(new.clone()),
+                    old_oids: [old].into_iter().collect(),
+                    new_oid: Some(new),
                     messages: HashSet::new(),
                     allow_identity: false,
                 },

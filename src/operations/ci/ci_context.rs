@@ -499,7 +499,7 @@ impl CiContext {
                     RewriteEvent::NonFastForward {
                         old_tip: previous_head_sha.to_string(),
                         new_tip: head_sha.to_string(),
-                        onto: Some(resolved_base_sha.clone()),
+                        onto: Some(resolved_base_sha),
                     },
                 )?;
                 println!("Rewrote authorship.");

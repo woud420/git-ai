@@ -267,7 +267,7 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
     // (which is what we want to rewrite authorship TO)
     let effective_merge_sha = if mr.squash_commit_sha.as_ref() == Some(&commit_sha) {
         println!("[GitLab CI] CI_COMMIT_SHA matches squash_commit_sha - this is a squash merge");
-        commit_sha.clone()
+        commit_sha
     } else {
         println!(
             "[GitLab CI] CI_COMMIT_SHA matches merge_commit_sha - checking if this is a squash+merge"
@@ -281,7 +281,7 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
             );
             squash_sha.clone()
         } else {
-            commit_sha.clone()
+            commit_sha
         }
     };
 
@@ -465,7 +465,7 @@ pub fn get_gitlab_ci_context() -> Result<Option<CiContext>, GitAiError> {
             merge_commit_sha: effective_merge_sha,
             head_ref: mr.source_branch.clone(),
             head_sha: mr.sha.clone(),
-            base_ref: mr.target_branch.clone(),
+            base_ref: mr.target_branch,
             base_sha,
             fork_clone_url: authenticated_fork_url,
         },

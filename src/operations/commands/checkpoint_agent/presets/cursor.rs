@@ -116,7 +116,7 @@ impl AgentPreset for CursorPreset {
             agent_id: AgentId {
                 tool: "cursor".to_string(),
                 id: conversation_id.clone(),
-                model: model.clone(),
+                model,
             },
             external_session_id: conversation_id.clone(),
             trace_id: trace_id.to_string(),

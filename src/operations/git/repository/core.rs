@@ -362,8 +362,8 @@ impl Repository {
     pub fn merge_base(&self, one: String, two: String) -> Result<String, GitAiError> {
         let mut args = self.global_args_for_exec();
         args.push("merge-base".to_string());
-        args.push(one.to_string());
-        args.push(two.to_string());
+        args.push(one);
+        args.push(two);
         let output = exec_git(&args)?;
         Ok(String::from_utf8(output.stdout)?.trim().to_string())
     }

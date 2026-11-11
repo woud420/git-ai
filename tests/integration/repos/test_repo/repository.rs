@@ -358,9 +358,6 @@ pub struct NewCommit {
 }
 
 impl NewCommit {
-    pub fn assert_authorship_snapshot(&self) {
-        assert_debug_snapshot!(self.authorship_log);
-    }
     pub fn print_authorship(&self) {
         // Debug method to print authorship log
         println!("{}", self.authorship_log.serialize_to_string().unwrap());

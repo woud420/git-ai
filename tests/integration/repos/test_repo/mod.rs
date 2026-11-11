@@ -58,7 +58,7 @@ pub struct BenchmarkResult {
     pub post_command_duration: Duration,
     pub pre_command_duration: Duration,
 }
-use insta::{Settings, assert_debug_snapshot};
+use insta::Settings;
 use rand::RngExt;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};

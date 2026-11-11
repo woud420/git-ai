@@ -1348,6 +1348,56 @@ fn test_rebase_edit_todo_mid_conflict_keeps_attribution() {
     other.assert_committed_lines(crate::lines!["fn ai_other() {}".ai()]);
 }
 
+/// Runs a rebase of a detached HEAD that stops on a conflict, runs `mid_conflict`
+/// while it is stopped, then resolves and continues.
+fn detached_rebase_keeps_attribution_across(mid_conflict: Option<&[&str]>) {
+    let repo = TestRepo::new();
+    repo.commit_untracked_file("shared.rs", "fn original() {}", "Initial commit");
+    let default_branch = repo.current_branch();
+    repo.commit_untracked_file("shared.rs", "fn upstream() {}", "Upstream rewrite");
+    let base_sha = repo
+        .git(&["rev-parse", "HEAD~1"])
+        .unwrap()
+        .trim()
+        .to_string();
+    repo.git(&["checkout", "--detach", &base_sha]).unwrap();
+
+    let mut shared = repo.filename("shared.rs");
+    shared.set_contents(crate::lines!["fn ai_version() {}".ai()]);
+    repo.stage_all_and_commit("AI rewrites shared.rs").unwrap();
+    let mut other = repo.filename("other.rs");
+    other.set_contents(crate::lines!["fn ai_other() {}".ai()]);
+    repo.stage_all_and_commit("AI adds other.rs").unwrap();
+
+    assert!(repo.git(&["rebase", &default_branch]).is_err());
+    if let Some(args) = mid_conflict {
+        repo.git_with_env(args, &[("GIT_SEQUENCE_EDITOR", "true")], None)
+            .expect("mid-conflict rebase command should succeed");
+    }
+    repo.git(&["checkout", "--theirs", "shared.rs"]).unwrap();
+    repo.git(&["add", "shared.rs"]).unwrap();
+    repo.git_with_env(&["rebase", "--continue"], &[("GIT_EDITOR", "true")], None)
+        .expect("rebase --continue should succeed");
+
+    shared.assert_committed_lines(crate::lines!["fn ai_version() {}".ai()]);
+    other.assert_committed_lines(crate::lines!["fn ai_other() {}".ai()]);
+}
+
+#[test]
+fn test_detached_rebase_conflict_keeps_attribution() {
+    detached_rebase_keeps_attribution_across(None);
+}
+
+#[test]
+fn test_detached_rebase_edit_todo_mid_conflict_keeps_attribution() {
+    detached_rebase_keeps_attribution_across(Some(&["rebase", "--edit-todo"]));
+}
+
+#[test]
+fn test_detached_rebase_show_current_patch_mid_conflict_keeps_attribution() {
+    detached_rebase_keeps_attribution_across(Some(&["rebase", "--show-current-patch"]));
+}
+
 crate::reuse_tests_in_worktree!(
     test_rebase_future_file_does_not_leak_into_earlier_commit_note,
     test_rebase_intermediate_commit_accepted_lines_not_inflated,

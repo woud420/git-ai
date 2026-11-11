@@ -261,6 +261,13 @@ pub fn rebase_is_control_mode(cmd: &crate::model::domain::NormalizedCommand) -> 
     summarize_rebase_args(&cmd.invoked_args).is_control_mode
 }
 
+/// True for the rebase actions that act on a stopped rebase and leave it stopped.
+pub fn rebase_stays_stopped(cmd: &crate::model::domain::NormalizedCommand) -> bool {
+    cmd.invoked_args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--edit-todo" | "--show-current-patch"))
+}
+
 pub fn rebase_onto_from_command(
     cmd: &crate::model::domain::NormalizedCommand,
     repository: &Repository,

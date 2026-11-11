@@ -99,26 +99,7 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
     if pull_request.merged
         && let Some(merge_commit_sha) = pull_request.merge_commit_sha
     {
-        // Clone the repo
-        exec_git(&[
-            "clone".to_string(),
-            "--branch".to_string(),
-            base_ref.clone(),
-            authenticated_url.clone(),
-            clone_dir.clone(),
-        ])?;
-
-        // Fetch PR commits using GitHub's special PR refs
-        // This is necessary because the PR branch may be deleted after merge
-        // but GitHub keeps the commits accessible via pull/{number}/head
-        // We store the fetched commits in a local ref to ensure they're kept
-        exec_git(&[
-            "-C".to_string(),
-            clone_dir.clone(),
-            "fetch".to_string(),
-            authenticated_url.clone(),
-            format!("pull/{}/head:refs/github/pr/{}", pr_number, pr_number),
-        ])?;
+        clone_base_with_pr_head(&base_ref, &authenticated_url, &clone_dir, pr_number)?;
 
         let repo = find_repository_in_path(&clone_dir.clone())?;
 
@@ -159,21 +140,7 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
     // push, the previous head is already reachable from the current PR ref. For
     // a non-fast-forward UI rebase, fetching by SHA keeps the old commits
     // available long enough for the local rebase rewrite command.
-    exec_git(&[
-        "clone".to_string(),
-        "--branch".to_string(),
-        base_ref.clone(),
-        authenticated_url.clone(),
-        clone_dir.clone(),
-    ])?;
-
-    exec_git(&[
-        "-C".to_string(),
-        clone_dir.clone(),
-        "fetch".to_string(),
-        authenticated_url.clone(),
-        format!("pull/{}/head:refs/github/pr/{}", pr_number, pr_number),
-    ])?;
+    clone_base_with_pr_head(&base_ref, &authenticated_url, &clone_dir, pr_number)?;
 
     let previous_head_is_local = exec_git(&[
         "-C".to_string(),
@@ -224,6 +191,32 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
         },
         temp_dir: PathBuf::from(clone_dir),
     }))
+}
+
+/// Clone `base_ref` into `clone_dir` and fetch the PR head into
+/// `refs/github/pr/<n>`. GitHub keeps `pull/<n>/head` even after the PR branch
+/// is deleted, and the local ref keeps those commits reachable.
+fn clone_base_with_pr_head(
+    base_ref: &str,
+    url: &str,
+    clone_dir: &str,
+    pr_number: u32,
+) -> Result<(), GitAiError> {
+    exec_git(&[
+        "clone".to_string(),
+        "--branch".to_string(),
+        base_ref.to_string(),
+        url.to_string(),
+        clone_dir.to_string(),
+    ])?;
+    exec_git(&[
+        "-C".to_string(),
+        clone_dir.to_string(),
+        "fetch".to_string(),
+        url.to_string(),
+        format!("pull/{}/head:refs/github/pr/{}", pr_number, pr_number),
+    ])?;
+    Ok(())
 }
 
 fn authenticate_clone_url(clone_url: &str, token: &str) -> String {

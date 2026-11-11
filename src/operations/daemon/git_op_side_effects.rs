@@ -1,6 +1,6 @@
 pub use super::working_log_discard::remove_working_log_attributions_for_pathspecs;
 use crate::error::GitAiError;
-use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
+use crate::operations::daemon::actor_types::ActorDaemonCoordinator;
 use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
 use crate::operations::git::cli_parser::{ParsedGitInvocation, summarize_rebase_args};
 use crate::operations::git::find_repository_in_path;
@@ -222,31 +222,6 @@ pub fn apply_checkout_switch_working_log_side_effect(
 
     repo.storage.rename_working_log(&old_head, &new_head)?;
     Ok(())
-}
-
-pub fn recent_checkout_switch_prerequisite_from_command(
-    cmd: &crate::model::domain::NormalizedCommand,
-) -> Option<RecentReplayPrerequisite> {
-    let parsed = parsed_invocation_for_normalized_command(cmd);
-    let (old_head, new_head) = ActorDaemonCoordinator::resolve_heads_for_command(cmd);
-
-    if old_head.is_empty() || new_head.is_empty() || old_head == new_head {
-        return None;
-    }
-
-    if cmd.primary_command.as_deref() == Some("checkout") && !parsed.pathspecs().is_empty() {
-        return None;
-    }
-
-    let (is_force, is_merge) = checkout_switch_force_and_merge(cmd, &parsed);
-    if is_force || is_merge {
-        return None;
-    }
-
-    Some(RecentReplayPrerequisite::CheckoutSwitchRename {
-        target_head: new_head,
-        old_head,
-    })
 }
 
 /// Whether a checkout/switch invocation discards local changes (`force`) or

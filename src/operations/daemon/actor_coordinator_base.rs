@@ -51,7 +51,6 @@ impl ActorDaemonCoordinator {
             family_sequencers_by_family: Mutex::new(HashMap::new()),
             pending_root_slots_by_root: Mutex::new(HashMap::new()),
             commit_file_timestamp_snapshots_by_root: Mutex::new(HashMap::new()),
-            recent_replay_prerequisites_by_family: Mutex::new(HashMap::new()),
             side_effect_errors_by_family: Mutex::new(HashMap::new()),
             error_log_policy: Mutex::new(Default::default()),
             side_effect_exec_locks: Mutex::new(HashMap::new()),
@@ -405,9 +404,6 @@ impl ActorDaemonCoordinator {
         // NOTE: Do NOT call normalizer.sweep_orphans() here — it removes ALL
         // pending/deferred roots unconditionally which destroys in-flight trace
         // state.  sweep_orphans() is only safe at daemon shutdown.
-        if let Ok(mut map) = self.recent_replay_prerequisites_by_family.lock() {
-            map.retain(|_, entries| !entries.is_empty());
-        }
         if let Ok(mut map) = self.side_effect_errors_by_family.lock() {
             map.retain(|_, errors| !errors.is_empty());
         }

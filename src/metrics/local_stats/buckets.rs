@@ -24,24 +24,17 @@ fn bucket_label(date: NaiveDate, granularity: BucketGranularity) -> String {
     }
 }
 
-pub(super) fn bucket_key(dt: &DateTime<Local>, granularity: BucketGranularity) -> (String, i64) {
+/// Sort key of the bucket containing `dt`; `fill_buckets` derives labels.
+pub(super) fn bucket_key(dt: &DateTime<Local>, granularity: BucketGranularity) -> i64 {
     match granularity {
-        BucketGranularity::Daily => {
-            let date = dt.date_naive();
-            let order = date.num_days_from_ce() as i64;
-            (bucket_label(date, granularity), order)
-        }
+        BucketGranularity::Daily => dt.date_naive().num_days_from_ce() as i64,
         BucketGranularity::Weekly => {
             // ISO week: key on Monday of the week.
             let weekday = dt.weekday().num_days_from_monday() as i64;
             let monday = dt.date_naive() - chrono::Duration::days(weekday);
-            let order = monday.num_days_from_ce() as i64;
-            (bucket_label(monday, granularity), order)
+            monday.num_days_from_ce() as i64
         }
-        BucketGranularity::Monthly => {
-            let order = dt.year() as i64 * 12 + dt.month0() as i64;
-            (bucket_label(dt.date_naive(), granularity), order)
-        }
+        BucketGranularity::Monthly => dt.year() as i64 * 12 + dt.month0() as i64,
     }
 }
 

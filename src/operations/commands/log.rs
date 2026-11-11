@@ -2,9 +2,6 @@ use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::authorship::ignore::effective_ignore_patterns;
-use crate::operations::authorship::stats::{
-    stats_for_commit_stats_with_parent_and_authorship, write_stats_to_terminal,
-};
 use crate::operations::git::repository::Repository;
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -21,6 +18,10 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::process::{Child, ExitStatus};
+
+#[path = "log_stats.rs"]
+mod stats;
+use stats::render_stats;
 
 const LOG_BATCH_SIZE: usize = 24;
 const GIT_LOG_FIELD_COUNT: usize = 8;
@@ -639,48 +640,6 @@ fn render_commit(
 
     out.push('\n');
     out
-}
-
-fn render_stats(
-    repo: &Repository,
-    commit_sha: &str,
-    parents: &[String],
-    authorship_log: Option<&AuthorshipLog>,
-    ignore_patterns: &[String],
-) -> Result<String, String> {
-    if parents.len() > 1 {
-        return Err("stats skipped for merge commit".to_string());
-    }
-
-    let parent_sha = parents
-        .first()
-        .map(String::as_str)
-        .unwrap_or("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
-
-    if let Ok(estimate) =
-        crate::operations::authorship::post_commit::estimate_stats_cost_for_commit_range(
-            repo,
-            parent_sha,
-            commit_sha,
-            ignore_patterns,
-        )
-        && estimate.should_skip()
-    {
-        return Err(format!(
-            "stats skipped for large commit; run `git-ai stats {}` to compute on demand",
-            commit_sha
-        ));
-    }
-
-    let stats = stats_for_commit_stats_with_parent_and_authorship(
-        repo,
-        commit_sha,
-        parents.first().map(String::as_str),
-        ignore_patterns,
-        authorship_log,
-    )
-    .map_err(|e| format!("stats unavailable: {}", e))?;
-    Ok(write_stats_to_terminal(&stats, false))
 }
 
 fn append_indented_line(out: &mut String, line: &str, spaces: usize) {

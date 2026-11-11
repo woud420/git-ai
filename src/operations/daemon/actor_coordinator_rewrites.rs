@@ -18,18 +18,6 @@ impl ActorDaemonCoordinator {
             None => return Ok(()),
         };
 
-        let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-
-        // For rebase --skip/--continue that completes successfully, the trace2 data only shows
-        // HEAD moving from onto → new_tip (a fast-forward). The real old_tip (original branch tip
-        // before rebase started) was stored when the initial rebase failed. Use it here.
-        let is_rebase_cmd = cmd.primary_command.as_deref() == Some("rebase");
-        let pending_original_head = if is_rebase_cmd {
-            self.take_pending_rebase_original_head_for_worktree(worktree)?
-        } else {
-            None
-        };
-
         // Collect branch ref changes (skip notes, tags, etc.)
         let mut branch_changes: Vec<_> = cmd
             .ref_changes
@@ -54,6 +42,24 @@ impl ActorDaemonCoordinator {
                 branch_changes = head_changes;
             }
         }
+
+        let is_rebase_cmd = cmd.primary_command.as_deref() == Some("rebase");
+        // Nothing to rewrite: skip repository discovery (a git spawn) for commands
+        // such as fetch, push or tag. Rebase still consults its pending state below.
+        if branch_changes.is_empty() && !is_rebase_cmd {
+            return Ok(());
+        }
+
+        let repo = find_repository_in_path(&worktree.to_string_lossy())?;
+
+        // For rebase --skip/--continue that completes successfully, the trace2 data only shows
+        // HEAD moving from onto → new_tip (a fast-forward). The real old_tip (original branch tip
+        // before rebase started) was stored when the initial rebase failed. Use it here.
+        let pending_original_head = if is_rebase_cmd {
+            self.take_pending_rebase_original_head_for_worktree(worktree)?
+        } else {
+            None
+        };
 
         if branch_changes.is_empty() && pending_original_head.is_none() {
             return Ok(());

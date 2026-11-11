@@ -3,7 +3,6 @@
 //! [`CommitRange`], [`Commit`], [`Parents`]) live in the sibling `commits`
 //! module.
 
-use super::commits::Commit;
 use super::core::Repository;
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
@@ -219,21 +218,6 @@ impl<'a> Reference<'a> {
         args.push(self.ref_name.clone());
         let output = exec_git(&args)?;
         Ok(String::from_utf8(output.stdout)?.trim().to_string())
-    }
-
-    // Peel a reference to a commit This method recursively peels the reference until it reaches a commit.
-    #[allow(dead_code)]
-    pub fn peel_to_commit(&self) -> Result<Commit<'a>, GitAiError> {
-        let mut args = self.repo.global_args_for_exec();
-        args.push("rev-parse".to_string());
-        // args.push("-q".to_string());
-        args.push("--verify".to_string());
-        args.push(format!("{}^{}", self.ref_name, "{commit}"));
-        let output = exec_git(&args)?;
-        Ok(super::commits::make_commit(
-            self.repo,
-            String::from_utf8(output.stdout)?.trim().to_string(),
-        ))
     }
 }
 

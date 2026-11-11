@@ -5,7 +5,7 @@
 
 use super::commits::{Commit, Object};
 use super::discovery_no_exec::git_config_file_for_repo_paths;
-use super::git_objects::{Blob, Reference, Tree};
+use super::git_objects::{Blob, Reference};
 use super::identity::{
     GitAuthorIdentity, GitIdentityResolution, git_config_identity_resolution_from_config,
     resolve_git_var_identity_with_args,
@@ -15,8 +15,6 @@ use crate::config;
 use crate::error::GitAiError;
 use crate::operations::git::repo_storage::RepoStorage;
 use crate::operations::git::sync_authorship::push_authorship_notes;
-use regex::Regex;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -324,46 +322,6 @@ impl Repository {
         })
     }
 
-    /// Get all config values matching a regex pattern.
-    ///
-    /// Regular expression matching is currently case-sensitive
-    /// and done against a canonicalized version of the key
-    /// in which section and variable names are lowercased, but subsection names are not.
-    ///
-    /// Returns a HashMap of key -> value for all matching config entries.
-    pub fn config_get_regexp(
-        &self,
-        pattern: &str,
-    ) -> Result<std::collections::HashMap<String, String>, GitAiError> {
-        let re = Regex::new(pattern)
-            .map_err(|e| GitAiError::Generic(format!("Invalid regex pattern: {}", e)))?;
-
-        let config = self.get_git_config_file()?;
-        let mut matches: HashMap<String, String> = HashMap::new();
-
-        for section in config.sections() {
-            let section_name = section.header().name().to_string().to_lowercase();
-            let subsection = section.header().subsection_name();
-
-            for value_name in section.body().value_names() {
-                let value_name_str = value_name.to_string().to_lowercase();
-                let full_key = if let Some(sub) = subsection {
-                    format!("{}.{}.{}", section_name, sub, value_name_str)
-                } else {
-                    format!("{}.{}", section_name, value_name_str)
-                };
-
-                if re.is_match(&full_key)
-                    && let Some(value) = section.body().value(value_name).map(|c| c.to_string())
-                {
-                    matches.insert(full_key, value);
-                }
-            }
-        }
-
-        Ok(matches)
-    }
-
     /// Get the git version as a tuple (major, minor, patch).
     /// Returns None if the version cannot be parsed.
     pub fn git_version(&self) -> Option<(u32, u32, u32)> {
@@ -454,42 +412,6 @@ impl Repository {
         self.config_get_str(&config_key)
     }
 
-    pub fn resolve_author_spec(&self, author_spec: &str) -> Result<Option<String>, GitAiError> {
-        // Use git rev-list to find the first commit by this author pattern
-        let mut args = self.global_args_for_exec();
-        args.push("rev-list".to_string());
-        args.push("--all".to_string());
-        args.push("-i".to_string());
-        args.push("--max-count=1".to_string());
-        args.push(format!("--author={}", author_spec));
-        let output = match exec_git(&args) {
-            Ok(output) => output,
-            Err(GitAiError::GitCliError { code: Some(1), .. }) => {
-                // No commit found
-                return Ok(None);
-            }
-            Err(e) => return Err(e),
-        };
-        let commit_oid = String::from_utf8(output.stdout)?.trim().to_string();
-        if commit_oid.is_empty() {
-            return Ok(None);
-        }
-
-        // Now get the author name/email from that commit
-        let mut show_args = self.global_args_for_exec();
-        show_args.push("show".to_string());
-        show_args.push("-s".to_string());
-        show_args.push("--format=%an <%ae>".to_string());
-        show_args.push(commit_oid);
-        let show_output = exec_git(&show_args)?;
-        let author_line = String::from_utf8(show_output.stdout)?.trim().to_string();
-        if author_line.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(author_line))
-        }
-    }
-
     // Lookup a reference to one of the commits in a repository.
     pub fn find_commit(&self, oid: String) -> Result<Commit<'_>, GitAiError> {
         let typ = self.object_type(&oid)?;
@@ -512,17 +434,5 @@ impl Repository {
             )));
         }
         Ok(Blob { repo: self, oid })
-    }
-
-    // Lookup a reference to one of the objects in a repository.
-    pub fn find_tree(&self, oid: String) -> Result<Tree<'_>, GitAiError> {
-        let typ = self.object_type(&oid)?;
-        if typ != "tree" {
-            return Err(GitAiError::Generic(format!(
-                "Object is not a tree: {} (type: {})",
-                oid, typ
-            )));
-        }
-        Ok(Tree { repo: self, oid })
     }
 }

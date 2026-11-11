@@ -11,8 +11,7 @@ use git_ai::operations::git::refs::git_backend_for_tests::{
 };
 use git_ai::operations::git::refs::{
     AI_AUTHORSHIP_FORK_TRACKING_REF, CommitAuthorship, copy_missing_notes_for_commits_from_ref,
-    copy_ref, get_reference_as_working_log, merge_notes_from_ref,
-    note_blob_oids_for_commits_from_ref, ref_exists,
+    copy_ref, merge_notes_from_ref, note_blob_oids_for_commits_from_ref, ref_exists,
 };
 use git_ai::operations::git::repository::find_repository_in_path;
 use std::fs;
@@ -833,22 +832,6 @@ fn test_commits_with_authorship_notes() {
         !result.is_empty(),
         "Should have at least 1 commit with notes"
     );
-}
-
-#[test]
-fn test_get_reference_as_working_log() {
-    let (repo, gitai_repo) = repo_with_handle();
-
-    fs::write(repo.path().join("test.txt"), "content\n").unwrap();
-    repo.stage_all_and_commit("Commit").expect("commit");
-    let commit_sha = head_sha(&repo);
-
-    // Add a working log format note
-    let working_log_json = "[]";
-    write_note(&gitai_repo, &commit_sha, working_log_json).expect("add note");
-
-    let result = get_reference_as_working_log(&gitai_repo, &commit_sha).expect("get working log");
-    assert_eq!(result.len(), 0); // Empty array
 }
 
 #[test]

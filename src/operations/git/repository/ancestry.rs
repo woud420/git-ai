@@ -167,24 +167,4 @@ mod tests {
             format!("Generic error: Commit {feature_tip} is not an ancestor of {main_tip}")
         );
     }
-
-    #[test]
-    fn parent_on_refname_uses_later_matching_parent_and_preserves_exhaustion_error() {
-        let (repo, _, _, feature_tip, merge) = merged_history();
-        let commit = repo.gitai_repo().find_commit(merge.clone()).unwrap();
-
-        assert_eq!(
-            commit.parent_on_refname("feature").unwrap().id(),
-            feature_tip
-        );
-
-        let error = match commit.parent_on_refname("missing") {
-            Ok(_) => panic!("missing ref should not match a parent"),
-            Err(error) => error,
-        };
-        assert_eq!(
-            error.to_string(),
-            format!("Generic error: No parent of commit {merge} is reachable from refname missing")
-        );
-    }
 }

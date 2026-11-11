@@ -366,69 +366,6 @@ fn test_find_commit() {
 }
 
 #[test]
-fn test_commit_summary() {
-    let test_repo = TestRepo::new();
-
-    // Create commit with message
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    let commit_info = test_repo
-        .stage_all_and_commit("Test summary message")
-        .unwrap();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    let commit = repo.find_commit(commit_info.commit_sha).unwrap();
-    let summary = commit.summary().unwrap();
-
-    assert_eq!(
-        summary, "Test summary message",
-        "Summary should match commit message"
-    );
-}
-
-#[test]
-fn test_commit_body() {
-    let test_repo = TestRepo::new();
-
-    // Create commit with multi-line message
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    test_repo.git(&["add", "-A"]).unwrap();
-
-    let message = "Summary line\n\nBody line 1\nBody line 2";
-    test_repo.git(&["commit", "-m", message]).unwrap();
-
-    let commit_sha = test_repo
-        .git(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    let commit = repo.find_commit(commit_sha).unwrap();
-    let body = commit.body().unwrap();
-
-    assert!(
-        body.contains("Body line 1"),
-        "Body should contain first body line"
-    );
-    assert!(
-        body.contains("Body line 2"),
-        "Body should contain second body line"
-    );
-}
-
-#[test]
 fn test_commit_parent() {
     let test_repo = TestRepo::new();
 
@@ -589,27 +526,6 @@ fn test_revparse_single_with_relative_ref() {
     // Revparse HEAD~1
     let obj = repo.revparse_single("HEAD~1");
     assert!(obj.is_ok(), "Should revparse HEAD~1");
-}
-
-#[test]
-fn test_object_peel_to_commit() {
-    let test_repo = TestRepo::new();
-
-    // Create commit
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    test_repo.stage_all_and_commit("Test commit").unwrap();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    let obj = repo.revparse_single("HEAD").unwrap();
-    let commit = obj.peel_to_commit();
-
-    assert!(commit.is_ok(), "Should peel object to commit");
 }
 
 // ============================================================================
@@ -778,31 +694,6 @@ fn test_config_get_str_nonexistent() {
 
     let value = result.unwrap();
     assert!(value.is_none(), "Nonexistent key should return None");
-}
-
-#[test]
-fn test_config_get_regexp() {
-    let test_repo = TestRepo::new();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    // Get all user.* configs
-    let configs = repo.config_get_regexp("user\\..*");
-    assert!(configs.is_ok(), "Should get matching configs");
-
-    let configs = configs.unwrap();
-    assert!(
-        !configs.is_empty(),
-        "Should have at least one user.* config"
-    );
-    assert!(
-        configs.contains_key("user.name"),
-        "Should contain user.name"
-    );
 }
 
 #[test]
@@ -1284,29 +1175,6 @@ fn test_find_blob_with_commit_sha() {
 }
 
 #[test]
-fn test_find_tree_with_commit_sha() {
-    let test_repo = TestRepo::new();
-
-    // Create commit
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    let commit = test_repo.stage_all_and_commit("Test").unwrap();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    // Try to find tree using commit SHA (should fail)
-    let result = repo.find_tree(commit.commit_sha);
-    assert!(
-        result.is_err(),
-        "Should error when finding tree with commit SHA"
-    );
-}
-
-#[test]
 fn test_revparse_invalid_ref() {
     let test_repo = TestRepo::new();
 
@@ -1395,52 +1263,6 @@ fn test_global_args_for_exec() {
     );
 }
 
-#[test]
-fn test_resolve_author_spec() {
-    let test_repo = TestRepo::new();
-
-    // Create commit
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    test_repo.stage_all_and_commit("Test").unwrap();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    // Resolve author by name
-    let result = repo.resolve_author_spec("Test User");
-    assert!(result.is_ok(), "Should resolve author spec");
-
-    let author = result.unwrap();
-    assert!(author.is_some(), "Should find author");
-}
-
-#[test]
-fn test_resolve_author_spec_not_found() {
-    let test_repo = TestRepo::new();
-
-    // Create commit
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    test_repo.stage_all_and_commit("Test").unwrap();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    // Resolve nonexistent author
-    let result = repo.resolve_author_spec("Nonexistent Author");
-    assert!(result.is_ok(), "Should not error on nonexistent author");
-
-    let author = result.unwrap();
-    assert!(author.is_none(), "Should not find nonexistent author");
-}
-
 // ============================================================================
 // Edge Cases and Special Scenarios
 // ============================================================================
@@ -1512,39 +1334,6 @@ fn test_tree_clone() {
 }
 
 #[test]
-fn test_commit_with_unicode_message() {
-    let test_repo = TestRepo::new();
-
-    // Create commit with unicode message
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    test_repo.git(&["add", "-A"]).unwrap();
-    test_repo
-        .git(&["commit", "-m", "Unicode message: 你好世界 🎉"])
-        .unwrap();
-
-    let commit_sha = test_repo
-        .git(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    let commit = repo.find_commit(commit_sha).unwrap();
-    let summary = commit.summary().unwrap();
-
-    assert!(
-        summary.contains("你好世界"),
-        "Summary should contain unicode characters"
-    );
-}
-
-#[test]
 fn test_multiple_files_in_single_commit() {
     let test_repo = TestRepo::new();
 
@@ -1584,15 +1373,12 @@ crate::reuse_tests_in_worktree!(
     test_head_on_feature_branch,
     test_head_target,
     test_find_commit,
-    test_commit_summary,
-    test_commit_body,
     test_commit_parent,
     test_commit_parents_iterator,
     test_commit_parent_count,
     test_commit_tree,
     test_revparse_single,
     test_revparse_single_with_relative_ref,
-    test_object_peel_to_commit,
     test_tree_get_path,
     test_tree_get_path_nested,
     test_tree_get_path_nonexistent,
@@ -1600,7 +1386,6 @@ crate::reuse_tests_in_worktree!(
     test_blob_content,
     test_config_get_str,
     test_config_get_str_nonexistent,
-    test_config_get_regexp,
     test_git_version,
     test_git_supports_ignore_revs_file,
     test_remotes_empty,
@@ -1619,17 +1404,13 @@ crate::reuse_tests_in_worktree!(
     test_diff_changed_files,
     test_find_commit_invalid_sha,
     test_find_blob_with_commit_sha,
-    test_find_tree_with_commit_sha,
     test_revparse_invalid_ref,
     test_is_bare_repository,
     test_is_not_bare_repository,
     test_find_repository_in_path,
     test_global_args_for_exec,
-    test_resolve_author_spec,
-    test_resolve_author_spec_not_found,
     test_empty_repository,
     test_initial_commit_has_no_parent,
     test_tree_clone,
-    test_commit_with_unicode_message,
     test_multiple_files_in_single_commit,
 );

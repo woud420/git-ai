@@ -114,6 +114,29 @@ fn log_multiple_commits_parse_record_boundaries() {
 }
 
 #[test]
+fn log_oneline_header_matches_git_decorations() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("oneline.txt");
+    file.set_contents(lines!["AI oneline".ai()]);
+    repo.stage_all_and_commit("feat: oneline").unwrap();
+    repo.git(&["tag", "v1"]).unwrap();
+
+    for decorate in ["--decorate=short", "--decorate=full"] {
+        let expected = repo
+            .git(&["log", "--no-color", "--oneline", decorate, "-n", "1"])
+            .unwrap();
+        let output = repo
+            .git_ai(&["log", "--no-pager", "--oneline", decorate, "-n", "1"])
+            .unwrap();
+        assert_eq!(
+            output.lines().next(),
+            expected.lines().next(),
+            "{decorate} header should match git log:\n{output}"
+        );
+    }
+}
+
+#[test]
 fn log_commit_body_is_separated_from_subject() {
     let repo = TestRepo::new();
     let mut file = repo.filename("body.txt");

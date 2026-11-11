@@ -85,6 +85,9 @@ pub struct ApiContext {
     pub author_identity: Option<String>,
     /// Request timeout in seconds
     pub timeout_secs: Option<u64>,
+    /// HTTP agent built for `timeout_secs`, shared by every request (and
+    /// clone) of this context so connections are pooled.
+    pub(crate) agent: ureq::Agent,
 }
 
 impl std::fmt::Debug for ApiContext {
@@ -127,6 +130,7 @@ impl ApiContext {
             api_key,
             author_identity,
             timeout_secs: Some(30),
+            agent: http::build_agent(Some(30)),
         }
     }
 
@@ -205,6 +209,7 @@ impl ApiContext {
     /// Set a custom timeout
     pub fn with_timeout(mut self, timeout_secs: u64) -> Self {
         self.timeout_secs = Some(timeout_secs);
+        self.agent = http::build_agent(self.timeout_secs);
         self
     }
 
@@ -254,7 +259,7 @@ impl ApiContext {
         &self,
         url: &str,
     ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-        let (_agent, request) = Self::http_post(url, self.timeout_secs);
+        let request = Self::with_common_headers(self.agent.post(url));
         self.apply_auth_headers(request.header("Content-Type", "application/json"))
     }
 
@@ -262,8 +267,7 @@ impl ApiContext {
         &self,
         url: &str,
     ) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
-        let (_agent, request) = Self::http_get(url, self.timeout_secs);
-        self.apply_auth_headers(request)
+        self.apply_auth_headers(Self::with_common_headers(self.agent.get(url)))
     }
 
     /// Make a POST request with JSON body
@@ -354,12 +358,20 @@ mod tests {
         let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None)
             .with_timeout(60);
         assert_eq!(ctx.timeout_secs, Some(60));
+        assert_eq!(
+            ctx.agent.config().timeouts().global,
+            Some(std::time::Duration::from_secs(60))
+        );
     }
 
     #[test]
     fn test_api_context_default_timeout() {
         let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         assert_eq!(ctx.timeout_secs, Some(30));
+        assert_eq!(
+            ctx.agent.config().timeouts().global,
+            Some(std::time::Duration::from_secs(30))
+        );
     }
 
     #[test]
@@ -370,6 +382,7 @@ mod tests {
             api_key: Some("api-key".to_string()),
             author_identity: Some("Test User <test@example.com>".to_string()),
             timeout_secs: Some(30),
+            agent: http::build_agent(Some(30)),
         };
 
         let get = ctx.authenticated_get_request("https://example.com/get");
@@ -396,6 +409,7 @@ mod tests {
             api_key: None,
             author_identity: Some("Test User <test@example.com>".to_string()),
             timeout_secs: Some(30),
+            agent: http::build_agent(Some(30)),
         };
 
         let request = ctx.apply_auth_headers(ureq::get("https://example.com"));

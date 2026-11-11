@@ -145,7 +145,7 @@ impl CopilotAgent {
         let json: serde_json::Value = serde_json::from_str(&content).ok()?;
         let folder_uri = json.get("folder")?.as_str()?;
         let path_str = folder_uri.strip_prefix("file://")?;
-        let decoded = percent_decode_path(path_str);
+        let decoded = crate::hex::percent_decode(path_str);
         // On Windows, file URIs are file:///C:/... which leaves /C:/... after stripping.
         // Strip the leading slash if followed by a drive letter.
         let normalized =
@@ -201,26 +201,6 @@ impl CopilotAgent {
             None
         }
     }
-}
-
-/// Decode percent-encoded characters in a URI path (e.g., %20 -> space).
-fn percent_decode_path(input: &str) -> String {
-    let mut decoded_bytes = Vec::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&input[i + 1..i + 3], 16)
-        {
-            decoded_bytes.push(byte);
-            i += 3;
-            continue;
-        }
-        decoded_bytes.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8(decoded_bytes).unwrap_or_else(|_| input.to_string())
 }
 
 impl Default for CopilotAgent {

@@ -153,15 +153,16 @@ fn parent_shas_for_commits(
     }
 
     let mut args = repo.global_args_for_exec();
+    // The list goes over stdin: a large rebase does not fit on a command line.
     args.extend([
-        "show".to_string(),
-        "-s".to_string(),
+        "log".to_string(),
         "--format=%H %P".to_string(),
         "--no-walk".to_string(),
+        "--stdin".to_string(),
     ]);
-    args.extend(commit_shas.iter().cloned());
 
-    let output = crate::clients::git_cli::exec_git(&args).ok()?;
+    let output =
+        crate::clients::git_cli::exec_git_stdin(&args, commit_shas.join("\n").as_bytes()).ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut parent_by_commit = HashMap::new();
     for line in stdout.lines() {

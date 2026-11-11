@@ -137,6 +137,31 @@ fn log_oneline_header_matches_git_decorations() {
 }
 
 #[test]
+fn log_skips_stats_for_large_additions_and_deletions() {
+    let repo = TestRepo::new();
+    let big: String = (0..6000).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(repo.path().join("big.txt"), &big).unwrap();
+    repo.stage_all_and_commit("feat: big add").unwrap();
+    std::fs::write(repo.path().join("big.txt"), "").unwrap();
+    repo.stage_all_and_commit("feat: big delete").unwrap();
+    std::fs::write(repo.path().join("small.txt"), "small\n").unwrap();
+    repo.stage_all_and_commit("feat: small").unwrap();
+
+    let output = repo
+        .git_ai(&["log", "--no-pager", "--oneline", "-n", "3"])
+        .unwrap();
+    assert_eq!(
+        output.matches("stats skipped for large commit").count(),
+        2,
+        "both large commits should skip stats:\n{output}"
+    );
+    assert!(
+        !output.contains("stats unavailable"),
+        "small commit should have stats:\n{output}"
+    );
+}
+
+#[test]
 fn log_commit_body_is_separated_from_subject() {
     let repo = TestRepo::new();
     let mut file = repo.filename("body.txt");

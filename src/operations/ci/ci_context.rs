@@ -62,10 +62,7 @@ pub enum CiRunResult {
     /// Skipped: one or more current PR commits already have authorship notes
     SkippedExistingSyncNotes,
     /// Authorship already exists for this commit
-    AlreadyExists {
-        #[allow(dead_code)]
-        authorship_log: AuthorshipLog,
-    },
+    AlreadyExists,
     /// Fork notes were fetched and preserved for a merge commit from a fork
     ForkNotesPreserved,
     /// No AI authorship to track (pre-git-ai commits or human-only code)
@@ -119,11 +116,9 @@ impl CiContext {
 
                 // Check if authorship already exists for this commit
                 match read_authorship_v3(&self.repo, merge_commit_sha) {
-                    Ok(existing_log) => {
+                    Ok(_) => {
                         println!("{} already has authorship", merge_commit_sha);
-                        return Ok(CiRunResult::AlreadyExists {
-                            authorship_log: existing_log,
-                        });
+                        return Ok(CiRunResult::AlreadyExists);
                     }
                     Err(e) => {
                         if read_note(&self.repo, merge_commit_sha).is_some() {

@@ -10,7 +10,7 @@ fn print_ci_result(result: &CiRunResult, prefix: &str) {
         CiRunResult::AuthorshipRewritten { .. } => {
             println!("{}: authorship rewritten successfully", prefix);
         }
-        CiRunResult::AlreadyExists { .. } => {
+        CiRunResult::AlreadyExists => {
             println!("{}: authorship already exists", prefix);
         }
         CiRunResult::SkippedSimpleMerge => {

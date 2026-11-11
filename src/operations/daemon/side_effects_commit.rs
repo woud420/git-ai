@@ -1,4 +1,3 @@
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::model::domain::RewriteEvent;

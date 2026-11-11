@@ -433,14 +433,3 @@ pub fn handle_windows_trace_pipe_connection(
         tracing::debug!(%e, "trace connection error");
     }
 }
-
-#[cfg(not(windows))]
-#[allow(dead_code)]
-pub fn handle_trace_connection_actor(
-    stream: LocalSocketStream,
-    coordinator: Arc<ActorDaemonCoordinator>,
-) -> Result<(), GitAiError> {
-    coordinator.trace_unidentified_connection_opened()?;
-    let reader = TraceReader::new(stream);
-    handle_trace_connection_actor_reader(reader, coordinator, std::collections::BTreeMap::new())
-}

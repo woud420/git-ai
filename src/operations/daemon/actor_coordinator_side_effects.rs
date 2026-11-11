@@ -1,6 +1,5 @@
 // Existing Generic diagnostics are persisted through FamilyStatus.last_error;
 // keep their Display text byte-stable across side-effect changes.
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::operations::daemon::cherry_pick_helpers::{

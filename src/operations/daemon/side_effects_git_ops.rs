@@ -1,6 +1,5 @@
 // Existing Generic diagnostics reach persisted daemon errors; their Display
 // text remains byte-stable when changing reset handling.
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::model::domain::RewriteEvent;

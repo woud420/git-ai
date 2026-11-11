@@ -50,7 +50,11 @@ impl CodexAgent {
                 continue;
             }
 
-            let pattern = format!("{}/**/rollout-*{}*.jsonl", search_dir.display(), session_id);
+            let pattern = format!(
+                "{}/**/rollout-*{}*.jsonl",
+                glob::Pattern::escape(&search_dir.to_string_lossy()),
+                glob::Pattern::escape(session_id)
+            );
 
             let entries = glob::glob(&pattern).map_err(|e| StreamError::Fatal {
                 message: format!("Invalid glob pattern for Codex session search: {}", e),
@@ -282,6 +286,22 @@ mod tests {
             "test",
             StreamAdapterContractCapabilities::APPEND_ALL,
         );
+    }
+
+    #[test]
+    fn test_find_rollout_path_treats_home_and_session_id_literally() {
+        let temp = tempfile::tempdir().unwrap();
+        let codex_home = temp.path().join("home[1]");
+        let rollout_dir = codex_home.join("sessions/2026/02/11");
+        std::fs::create_dir_all(&rollout_dir).unwrap();
+        let rollout = rollout_dir.join("rollout-2026-02-11-sess[a].jsonl");
+        std::fs::write(&rollout, "{}\n").unwrap();
+        std::fs::write(rollout_dir.join("rollout-2026-02-11-sessa.jsonl"), "{}\n").unwrap();
+
+        let found = CodexAgent::find_rollout_path_for_session_in_home("sess[a]", &codex_home)
+            .unwrap()
+            .expect("rollout should be found");
+        assert_eq!(found, rollout);
     }
 
     #[test]

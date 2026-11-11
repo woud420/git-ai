@@ -137,7 +137,9 @@ impl OAuthClient {
         expires_in: u32,
     ) -> Result<StoredCredentials, String> {
         let mut elapsed = 0u32;
-        let mut current_interval = interval;
+        // A zero interval would poll without pause and never reach
+        // `expires_in`, because `elapsed` advances by the interval.
+        let mut current_interval = interval.max(1);
 
         while elapsed < expires_in {
             // Wait before polling
@@ -370,6 +372,28 @@ mod tests {
     }
 
     // ============= Device Auth Response Parsing Tests =============
+
+    /// A server that answers with `interval: 0` must not turn the poll into
+    /// a loop that never sleeps and never reaches `expires_in`.
+    #[test]
+    fn poll_for_token_with_zero_interval_still_paces_and_expires() {
+        let mut server = mockito::Server::new();
+        let pending = server
+            .mock("POST", "/worker/oauth/token")
+            .with_status(400)
+            .with_body(r#"{"error":"authorization_pending"}"#)
+            .expect(1)
+            .create();
+        let client = OAuthClient::with_base_url(&server.url()).unwrap();
+
+        let result = client.poll_for_token("device-code", 0, 1);
+
+        assert_eq!(
+            result.unwrap_err(),
+            "Device code expired. Please try again."
+        );
+        pending.assert();
+    }
 
     #[test]
     fn test_parse_device_auth_response_valid() {

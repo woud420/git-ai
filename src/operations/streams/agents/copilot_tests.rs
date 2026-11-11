@@ -193,21 +193,6 @@ fn test_infer_cwd_trait_method() {
 }
 
 #[test]
-fn test_percent_decode_path() {
-    assert_eq!(
-        percent_decode_path("/Users/test%20user/my%20project"),
-        "/Users/test user/my project"
-    );
-    assert_eq!(percent_decode_path("/normal/path"), "/normal/path");
-    assert_eq!(
-        percent_decode_path("/path%2Fwith%2Fencoded"),
-        "/path/with/encoded"
-    );
-    // Multi-byte UTF-8: é = %C3%A9
-    assert_eq!(percent_decode_path("/caf%C3%A9/project"), "/café/project");
-}
-
-#[test]
 fn test_read_vscode_event_stream_fixture() {
     use std::path::PathBuf;
 

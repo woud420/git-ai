@@ -360,16 +360,7 @@ pub fn exec_git_stdin_streaming(
     let effective_args = effective_git_args(args, InternalGitProfile::General);
     let (mut child, stdin_handle) = spawn_git_stdin_piped(&effective_args, stdin_data)?;
 
-    // Drain stderr concurrently so the child can never block on a full stderr
-    // pipe while we are still reading stdout.
-    let stderr_handle = child.stderr.take().map(|mut stderr| {
-        std::thread::spawn(move || {
-            use std::io::Read;
-            let mut buf = Vec::new();
-            let _ = stderr.read_to_end(&mut buf);
-            buf
-        })
-    });
+    let stderr_handle = drain_stderr(&mut child);
 
     let stdout = child.stdout.take().expect("child stdout is piped");
     let mut reader = std::io::BufReader::new(stdout);
@@ -413,6 +404,52 @@ pub fn exec_git_stdin_streaming(
     }
 
     Ok(())
+}
+
+/// Drain stderr concurrently so the child can never block on a full stderr
+/// pipe while we are still reading stdout.
+fn drain_stderr(child: &mut Child) -> Option<std::thread::JoinHandle<Vec<u8>>> {
+    child.stderr.take().map(|mut stderr| {
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf);
+            buf
+        })
+    })
+}
+
+/// Run a git command as a dialogue on its stdin and stdout: `converse` writes
+/// a request, reads the answer, and may base its next request on it. This is
+/// one git process however many exchanges are made. Only for commands that
+/// answer each request as it arrives, such as `cat-file --batch`.
+pub fn exec_git_dialogue<T>(
+    args: &[String],
+    converse: impl FnOnce(&mut dyn std::io::Write, &mut dyn std::io::BufRead) -> Result<T, GitAiError>,
+) -> Result<T, GitAiError> {
+    let effective_args = effective_git_args(args, InternalGitProfile::General);
+    let mut child = spawn_git_piped(&effective_args)?;
+    let stderr_handle = drain_stderr(&mut child);
+    let mut stdin = child.stdin.take().expect("git child stdin is piped");
+    let stdout = child.stdout.take().expect("git child stdout is piped");
+    let mut stdout = std::io::BufReader::new(stdout);
+
+    let result = converse(&mut stdin, &mut stdout);
+    // Closing stdin ends the child. Closing stdout keeps it from blocking on
+    // an answer that was not read.
+    drop(stdin);
+    drop(stdout);
+    let status = child.wait().map_err(GitAiError::IoError)?;
+    let value = result?;
+
+    if !status.success() {
+        let stderr_bytes = stderr_handle
+            .map(|h| h.join().unwrap_or_default())
+            .unwrap_or_default();
+        return Err(git_cli_error(status.code(), &stderr_bytes, effective_args));
+    }
+
+    Ok(value)
 }
 
 /// Helper to execute a git command with data provided on stdin and an explicit profile.

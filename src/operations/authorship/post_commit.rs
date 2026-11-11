@@ -15,7 +15,7 @@ use crate::operations::authorship::ignore::{
 use crate::operations::authorship::recovery_stores::RecoveryStores;
 use crate::operations::authorship::rewrite::DiffTreeResult;
 use crate::operations::authorship::stats::{
-    stats_for_commit_stats_from_hunks, write_stats_to_terminal,
+    stats_for_commit_stats_from_hunks_with_merge_flag, write_stats_to_terminal,
 };
 use crate::operations::authorship::virtual_attribution::{
     AuthorshipLogDiffContext, VirtualAttributions,
@@ -488,13 +488,13 @@ where
                 .filter(|hunk| !should_ignore_file_with_matcher(&hunk.file_path, &ignore_matcher))
                 .collect();
 
-            let computed = stats_for_commit_stats_from_hunks(
-                repo,
-                &commit_sha,
+            // Stats only run when skip_reason is None, so this is not a merge commit.
+            let computed = stats_for_commit_stats_from_hunks_with_merge_flag(
                 &ignore_patterns,
                 &diff_hunks,
                 Some(&authorship_log),
-            )?;
+                false,
+            );
 
             let hunks_json = crate::operations::commands::diff::build_diff_artifacts_from_hunks(
                 repo,

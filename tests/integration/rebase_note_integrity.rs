@@ -1310,6 +1310,44 @@ fn test_rebase_mixed_ai_and_human_commits_all_retain_notes_after_slow_path() {
     module_b.assert_lines_and_blame(crate::lines!["fn b() {}".ai()]);
 }
 
+/// `git rebase --edit-todo` while a rebase is stopped succeeds without moving
+/// refs. It must not lose the attribution of the rebase it interrupts.
+#[test]
+fn test_rebase_edit_todo_mid_conflict_keeps_attribution() {
+    let repo = TestRepo::new();
+    repo.commit_untracked_file("shared.rs", "fn original() {}", "Initial commit");
+    let default_branch = repo.current_branch();
+    repo.commit_untracked_file("shared.rs", "fn upstream() {}", "Upstream rewrite");
+    let base_sha = repo
+        .git(&["rev-parse", "HEAD~1"])
+        .unwrap()
+        .trim()
+        .to_string();
+    repo.git(&["checkout", "-b", "feature", &base_sha]).unwrap();
+
+    let mut shared = repo.filename("shared.rs");
+    shared.set_contents(crate::lines!["fn ai_version() {}".ai()]);
+    repo.stage_all_and_commit("AI rewrites shared.rs").unwrap();
+    let mut other = repo.filename("other.rs");
+    other.set_contents(crate::lines!["fn ai_other() {}".ai()]);
+    repo.stage_all_and_commit("AI adds other.rs").unwrap();
+
+    assert!(repo.git(&["rebase", &default_branch]).is_err());
+    repo.git_with_env(
+        &["rebase", "--edit-todo"],
+        &[("GIT_SEQUENCE_EDITOR", "true")],
+        None,
+    )
+    .expect("edit-todo should succeed");
+    repo.git(&["checkout", "--theirs", "shared.rs"]).unwrap();
+    repo.git(&["add", "shared.rs"]).unwrap();
+    repo.git_with_env(&["rebase", "--continue"], &[("GIT_EDITOR", "true")], None)
+        .expect("rebase --continue should succeed");
+
+    shared.assert_committed_lines(crate::lines!["fn ai_version() {}".ai()]);
+    other.assert_committed_lines(crate::lines!["fn ai_other() {}".ai()]);
+}
+
 crate::reuse_tests_in_worktree!(
     test_rebase_future_file_does_not_leak_into_earlier_commit_note,
     test_rebase_intermediate_commit_accepted_lines_not_inflated,

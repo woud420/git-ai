@@ -1,3 +1,4 @@
+use crate::clients::auth::types::StoredCredentials;
 use crate::clients::auth::{CredentialStore, OAuthClient};
 use crate::clients::http;
 use crate::config;
@@ -47,16 +48,21 @@ fn try_load_auth_token() -> Option<String> {
     }
 
     // Still expired - we need to refresh
-    let client = OAuthClient::new();
-    match client.refresh_access_token(&creds.refresh_token) {
-        Ok(new_creds) => {
-            // Store refreshed credentials (ignore errors - we still have the token)
-            let _ = store.store(&new_creds);
-            Some(new_creds.access_token)
-        }
-        Err(_) => None,
-    }
+    let new_creds =
+        refresh_credentials(config::Config::fresh().api_base_url(), &creds.refresh_token)?;
+    // Store refreshed credentials (ignore errors - we still have the token)
+    let _ = store.store(&new_creds);
+    Some(new_creds.access_token)
     // Mutex guard is automatically released when _guard is dropped
+}
+
+/// Refresh against `base_url`; `None` when the URL fails OAuth's HTTPS check
+/// (instead of `OAuthClient::new`'s panic) or the refresh fails.
+fn refresh_credentials(base_url: &str, refresh_token: &str) -> Option<StoredCredentials> {
+    OAuthClient::with_base_url(base_url)
+        .ok()?
+        .refresh_access_token(refresh_token)
+        .ok()
 }
 
 /// Resolver for the git-ai author identity sent as the `X-Author-Identity`
@@ -319,6 +325,11 @@ mod tests {
     use super::*;
 
     // ============= ApiContext Tests =============
+
+    #[test]
+    fn test_refresh_credentials_rejects_insecure_base_url_without_panicking() {
+        assert!(refresh_credentials("ftp://example.com", "refresh").is_none());
+    }
 
     #[test]
     fn test_api_context_without_auth() {

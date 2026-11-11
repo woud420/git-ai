@@ -42,6 +42,31 @@ fn test_redact_git_config_line_two_field_format_keeps_non_sensitive() {
 }
 
 #[test]
+fn test_redact_git_config_line_strips_remote_url_credentials() {
+    let line =
+        "local\tfile:.git/config\tremote.origin.url=https://bot:ghp_abc123@github.com/o/r.git";
+    assert_eq!(
+        redact_git_config_line(line),
+        "local\tfile:.git/config\tremote.origin.url=https://[REDACTED]@github.com/o/r.git"
+    );
+}
+
+#[test]
+fn test_redact_url_userinfo_keeps_urls_without_credentials() {
+    assert_eq!(
+        redact_url_userinfo("https://x-access-token:abc@host/p a://b@c"),
+        "https://[REDACTED]@host/p a://[REDACTED]@c"
+    );
+    for url in [
+        "https://github.com/o/r.git",
+        "git@github.com:o/r.git",
+        "file:///tmp/a@b/repo",
+    ] {
+        assert_eq!(redact_url_userinfo(url), url);
+    }
+}
+
+#[test]
 fn test_format_bytes() {
     assert_eq!(format_bytes(1024), "1.00 KB (1024 bytes)");
 }

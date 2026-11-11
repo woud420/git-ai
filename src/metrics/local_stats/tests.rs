@@ -136,6 +136,42 @@ fn compute_activity_aggregates_commits_checkpoints_sessions_and_tokens() {
     assert!(stats.buckets.iter().any(|bucket| bucket.ai_lines == 10));
 }
 
+#[test]
+fn daily_buckets_keep_the_same_day_of_different_years_apart() {
+    use chrono::{Datelike, Local, TimeZone};
+    let noon = |date: chrono::NaiveDate| {
+        Local
+            .from_local_datetime(&date.and_hms_opt(12, 0, 0).unwrap())
+            .unwrap()
+            .timestamp() as u32
+    };
+    let recent = Local::now().date_naive() - chrono::Duration::days(1);
+    let year_ago = recent
+        .with_year(recent.year() - 1)
+        .unwrap_or(recent - chrono::Duration::days(365));
+    let records = [
+        committed(noon(year_ago), "github.com/acme/project", 3, 0, 3),
+        committed(noon(recent), "github.com/acme/project", 5, 0, 5),
+    ];
+    let refs: Vec<&MetricHistoryRecord> = records.iter().collect();
+
+    let stats = compute_activity_from_records(
+        &refs,
+        noon(year_ago) - 3600,
+        "last year".to_string(),
+        BucketGranularity::Daily,
+    )
+    .unwrap();
+
+    let active: Vec<u32> = stats
+        .buckets
+        .iter()
+        .map(|bucket| bucket.ai_lines)
+        .filter(|&lines| lines > 0)
+        .collect();
+    assert_eq!(active, vec![3, 5]);
+}
+
 fn day(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
     chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
 }

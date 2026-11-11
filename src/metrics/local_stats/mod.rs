@@ -92,10 +92,8 @@ fn compute_activity_from_records(
     // the per-session max rather than summing.
     let mut codex_sessions: HashMap<String, CodexSessionAccum> = HashMap::new();
 
-    // bucket_key -> accumulated stats
-    let mut bucket_map: HashMap<String, BucketAccum> = HashMap::new();
-    // bucket_key -> sort key (for ordering)
-    let mut bucket_order: HashMap<String, i64> = HashMap::new();
+    // bucket_key (sort order) -> accumulated stats
+    let mut bucket_map: HashMap<i64, BucketAccum> = HashMap::new();
 
     let mut hourly: Vec<u32> = vec![0u32; 24];
     let mut daily: Vec<u32> = vec![0u32; 7];
@@ -137,8 +135,9 @@ fn compute_activity_from_records(
                         *ai_lines_by_day.entry(local_dt.date_naive()).or_insert(0) += c.ai_lines;
                     }
 
-                    let (key, order_key) = bucket_key(&local_dt, granularity);
-                    let entry = bucket_map.entry(key.clone()).or_default();
+                    let entry = bucket_map
+                        .entry(bucket_key(&local_dt, granularity))
+                        .or_default();
                     entry.ai_lines += c.ai_lines;
                     // Count AI commits only, to match the AI-lines bar.
                     if c.ai_lines > 0 {
@@ -146,7 +145,6 @@ fn compute_activity_from_records(
                     }
                     entry.diff_added += c.diff_added;
                     entry.attributed += c.ai_lines + c.human_lines;
-                    bucket_order.entry(key).or_insert(order_key);
                 }
             }
             4 => aggregate_checkpoint(
@@ -234,14 +232,8 @@ fn compute_activity_from_records(
     let (tokens, cost_by_day) =
         build_token_summary(message_usage, codex_sessions, now_ts, since_ts);
 
-    // Map by order key for fill_buckets to look up real data.
-    let bucket_by_order: HashMap<i64, BucketAccum> = bucket_map
-        .into_iter()
-        .map(|(label, accum)| (bucket_order[&label], accum))
-        .collect();
-
     // Fill in empty buckets between since_ts and now so the chart has no gaps.
-    let filled = fill_buckets(bucket_by_order, since_ts, granularity);
+    let filled = fill_buckets(bucket_map, since_ts, granularity);
 
     // ── Derived calendar + summary stats ──
     let calendar_end = Local::now().date_naive();

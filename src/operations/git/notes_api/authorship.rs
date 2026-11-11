@@ -76,11 +76,7 @@ fn read_local_notes(
         .collect();
     let cached = match backend {
         NotesBackendKind::GitNotes => HashMap::new(),
-        NotesBackendKind::Sqlite | NotesBackendKind::Http => {
-            // Bound SQL bindings even for histories larger than SQLite's variable
-            // limit. All refs misses still share one constant-process Git batch.
-            commit_shas.chunks(500).flat_map(db_read_notes).collect()
-        }
+        NotesBackendKind::Sqlite | NotesBackendKind::Http => db_read_notes(&commit_shas),
     };
     let missing: Vec<String> = commit_shas
         .iter()

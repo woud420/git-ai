@@ -374,6 +374,25 @@ fn test_get_notes_batch() {
     );
 }
 
+#[test]
+fn test_batch_reads_accept_more_shas_than_sqlite_bind_limit() {
+    let (mut db, _tmp) = create_test_db();
+    let shas: Vec<String> = (0..40_000).map(|i| format!("sha{i}")).collect();
+    let refs: Vec<&str> = shas.iter().map(String::as_str).collect();
+    db.upsert_local_note("sha0", "first").unwrap();
+    db.upsert_local_note("sha39999", "last").unwrap();
+
+    let notes = db.get_notes(&refs).unwrap();
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes.get("sha39999"), Some(&"last".to_string()));
+
+    let synced = db.get_synced_shas(&refs).unwrap();
+    assert_eq!(
+        synced,
+        HashSet::from(["sha0".to_string(), "sha39999".to_string()])
+    );
+}
+
 // --- database_path ---
 
 #[test]

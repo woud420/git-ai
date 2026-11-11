@@ -12,15 +12,14 @@ use std::path::PathBuf;
 pub struct ClinePreset;
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 #[serde(rename_all = "camelCase")]
 struct ClineHookInput {
     hook_name: String,
+    // Never read, but required: payloads without it are rejected.
+    #[allow(dead_code)]
     cline_version: String,
-    timestamp: Option<String>,
     task_id: String,
     workspace_roots: Vec<String>,
-    user_id: Option<String>,
     #[serde(default)]
     model: Option<ClineModel>,
     #[serde(rename = "preToolUse")]
@@ -39,18 +38,11 @@ struct ClineModel {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 #[serde(rename_all = "camelCase")]
 struct ClineToolInvocation {
     tool_name: String,
     #[serde(default)]
     parameters: Value,
-    #[serde(default)]
-    result: Option<String>,
-    #[serde(default)]
-    success: Option<bool>,
-    #[serde(default)]
-    execution_time_ms: Option<u64>,
 }
 
 impl ClinePreset {

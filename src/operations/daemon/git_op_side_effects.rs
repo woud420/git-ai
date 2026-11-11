@@ -95,13 +95,8 @@ fn explicit_clone_remote(cmd: &crate::model::domain::NormalizedCommand) -> Optio
     if parsed.command.as_deref() != Some("clone") {
         return None;
     }
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        match arg.as_str() {
-            "-C" if globals.next().is_some() => {}
-            value if value.starts_with("-C") && value.len() > 2 => {}
-            _ => return None,
-        }
+    if !crate::operations::daemon::analyzers::has_only_worktree_globals(&parsed) {
+        return None;
     }
     // Require both operands and a single explicit option so another option's
     // value cannot be mistaken for the remote. Other forms keep the old path.

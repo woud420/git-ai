@@ -24,13 +24,8 @@ pub(super) fn has_explicit_fast_forward_transition(cmd: &NormalizedCommand) -> b
 
     // The worktree identity already accounts for -C. Other globals can change
     // the object view and are not replayed by the existing migration helper.
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        match arg.as_str() {
-            "-C" if globals.next().is_some() => {}
-            value if value.starts_with("-C") && value.len() > 2 => {}
-            _ => return false,
-        }
+    if !crate::operations::daemon::analyzers::has_only_worktree_globals(&parsed) {
+        return false;
     }
 
     // An ancestry check alone also accepts newly created merge commits. Require

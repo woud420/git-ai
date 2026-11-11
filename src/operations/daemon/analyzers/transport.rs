@@ -73,13 +73,8 @@ fn send_pack_destination(cmd: &NormalizedCommand) -> Option<String> {
     }
     // Normalization resolves -C. Other globals can change repository selection
     // or transport semantics that this separate notes operation cannot replay.
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        match arg.as_str() {
-            "-C" if globals.next().is_some() => {}
-            value if value.starts_with("-C") && value.len() > 2 => {}
-            _ => return None,
-        }
+    if !super::has_only_worktree_globals(&parsed) {
+        return None;
     }
     Some(repository.clone())
 }

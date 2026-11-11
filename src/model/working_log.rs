@@ -102,12 +102,12 @@ impl fmt::Display for CheckpointKind {
 
 impl CheckpointKind {
     #[allow(clippy::wrong_self_convention)]
-    pub fn to_str(&self) -> String {
+    pub fn to_str(&self) -> &'static str {
         match self {
-            CheckpointKind::Human => "human".to_string(),
-            CheckpointKind::AiAgent => "ai_agent".to_string(),
-            CheckpointKind::AiTab => "ai_tab".to_string(),
-            CheckpointKind::KnownHuman => "known_human".to_string(),
+            CheckpointKind::Human => "human",
+            CheckpointKind::AiAgent => "ai_agent",
+            CheckpointKind::AiTab => "ai_tab",
+            CheckpointKind::KnownHuman => "known_human",
         }
     }
 

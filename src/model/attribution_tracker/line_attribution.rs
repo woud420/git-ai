@@ -211,7 +211,7 @@ fn find_dominant_author_for_line_candidates(
     }
 
     if candidate_attrs.is_empty() {
-        return (CheckpointKind::Human.to_str(), None);
+        return (CheckpointKind::Human.to_str().to_string(), None);
     }
 
     // Choose the author with the latest timestamp (keep first match on ties).

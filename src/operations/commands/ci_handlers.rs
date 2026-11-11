@@ -1,3 +1,4 @@
+use crate::error::GitAiError;
 use crate::operations::ci::ci_context::{CiContext, CiEvent, CiRunOptions, CiRunResult};
 use crate::operations::ci::github::{get_github_ci_context, install_github_ci_workflow};
 use crate::operations::ci::gitlab::{get_gitlab_ci_context, print_gitlab_ci_yaml};
@@ -70,46 +71,15 @@ fn handle_ci_github(args: &[String]) {
     }
     // Subcommands: install | (default: run in CI context)
     match args[0].as_str() {
-        "run" => {
-            let no_cleanup = args[1..].iter().any(|a| a == "--no-cleanup");
-            let ci_context = get_github_ci_context();
-            match ci_context {
-                Ok(Some(ci_context)) => {
-                    tracing::debug!("GitHub CI context: {:?}", ci_context);
-                    match ci_context.run() {
-                        Ok(result) => {
-                            tracing::debug!("GitHub CI result: {:?}", result);
-                            print_ci_result(&result, "GitHub CI");
-                        }
-                        Err(e) => {
-                            eprintln!("Error running GitHub CI context: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    if !no_cleanup {
-                        if let Err(e) = ci_context.teardown() {
-                            eprintln!("Error tearing down GitHub CI context: {}", e);
-                            std::process::exit(1);
-                        }
-                        tracing::debug!("GitHub CI context teared down");
-                    } else {
-                        tracing::debug!("Skipping teardown (--no-cleanup)");
-                    }
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    eprintln!("Failed to get GitHub CI context: {}", e);
-                    std::process::exit(1);
-                }
-                Ok(None) => {
-                    // Not an actionable event (e.g. a `synchronize` that is not a
-                    // rebased-PR-head sync). With the workflow now firing on every
-                    // `synchronize`, this must be a graceful no-op, not a failure.
-                    println!("No GitHub CI context found; nothing to do");
-                    std::process::exit(0);
-                }
-            }
-        }
+        "run" => run_ci_context(
+            "GitHub CI",
+            get_github_ci_context(),
+            &args[1..],
+            // Not an actionable event (e.g. a `synchronize` that is not a
+            // rebased-PR-head sync). With the workflow now firing on every
+            // `synchronize`, this must be a graceful no-op, not a failure.
+            Some("No GitHub CI context found; nothing to do"),
+        ),
         "install" => match install_github_ci_workflow() {
             Ok(path) => {
                 println!("Installed GitHub Actions workflow to {}", path.display());
@@ -133,43 +103,8 @@ fn handle_ci_gitlab(args: &[String]) {
     }
     // Subcommands: install | run
     match args[0].as_str() {
-        "run" => {
-            let no_cleanup = args[1..].iter().any(|a| a == "--no-cleanup");
-            let ci_context = get_gitlab_ci_context();
-            match ci_context {
-                Ok(Some(ci_context)) => {
-                    tracing::debug!("GitLab CI context: {:?}", ci_context);
-                    match ci_context.run() {
-                        Ok(result) => {
-                            tracing::debug!("GitLab CI result: {:?}", result);
-                            print_ci_result(&result, "GitLab CI");
-                        }
-                        Err(e) => {
-                            eprintln!("Error running GitLab CI context: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    if !no_cleanup {
-                        if let Err(e) = ci_context.teardown() {
-                            eprintln!("Error tearing down GitLab CI context: {}", e);
-                            std::process::exit(1);
-                        }
-                        tracing::debug!("GitLab CI context teared down");
-                    } else {
-                        tracing::debug!("Skipping teardown (--no-cleanup)");
-                    }
-                    std::process::exit(0);
-                }
-                Err(e) => {
-                    eprintln!("Failed to get GitLab CI context: {}", e);
-                    std::process::exit(1);
-                }
-                Ok(None) => {
-                    // No matching MR found - this is not an error, just nothing to do
-                    std::process::exit(0);
-                }
-            }
-        }
+        // No matching MR found - this is not an error, just nothing to do
+        "run" => run_ci_context("GitLab CI", get_gitlab_ci_context(), &args[1..], None),
         "install" => {
             print_gitlab_ci_yaml();
             std::process::exit(0);
@@ -179,6 +114,50 @@ fn handle_ci_gitlab(args: &[String]) {
             print_ci_help_and_exit();
         }
     }
+}
+
+/// Run a provider CI context, print its result, tear it down unless
+/// `--no-cleanup`, and exit. `Ok(None)` means there is nothing to do.
+fn run_ci_context(
+    label: &str,
+    ci_context: Result<Option<CiContext>, GitAiError>,
+    args: &[String],
+    nothing_to_do_message: Option<&str>,
+) -> ! {
+    let ci_context = match ci_context {
+        Ok(Some(ci_context)) => ci_context,
+        Ok(None) => {
+            if let Some(message) = nothing_to_do_message {
+                println!("{}", message);
+            }
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("Failed to get {} context: {}", label, e);
+            std::process::exit(1);
+        }
+    };
+    tracing::debug!("{} context: {:?}", label, ci_context);
+    match ci_context.run() {
+        Ok(result) => {
+            tracing::debug!("{} result: {:?}", label, result);
+            print_ci_result(&result, label);
+        }
+        Err(e) => {
+            eprintln!("Error running {} context: {}", label, e);
+            std::process::exit(1);
+        }
+    }
+    if args.iter().any(|a| a == "--no-cleanup") {
+        tracing::debug!("Skipping teardown (--no-cleanup)");
+    } else {
+        if let Err(e) = ci_context.teardown() {
+            eprintln!("Error tearing down {} context: {}", label, e);
+            std::process::exit(1);
+        }
+        tracing::debug!("{} context teared down", label);
+    }
+    std::process::exit(0);
 }
 
 fn handle_ci_local(args: &[String]) {
@@ -206,6 +185,12 @@ fn handle_ci_local(args: &[String]) {
         }
         None
     };
+    let required = |name: &str, message: &str| -> String {
+        flag(name).unwrap_or_else(|| {
+            eprintln!("{}", message);
+            std::process::exit(1);
+        })
+    };
 
     // Open current repo
     let repo = match find_repository_in_path(".") {
@@ -225,46 +210,16 @@ fn handle_ci_local(args: &[String]) {
             let skip_push = has_bool_flag("--skip-push");
 
             // Required inputs for merge
-            let merge_commit_sha = match flag("--merge-commit-sha") {
-                Some(v) => v,
-                None => {
-                    eprintln!("--merge-commit-sha is required");
-                    std::process::exit(1);
-                }
-            };
+            let merge_commit_sha = required("--merge-commit-sha", "--merge-commit-sha is required");
 
-            let base_ref = match flag("--base-ref") {
-                Some(v) => v,
-                None => {
-                    eprintln!("--base-ref is required (e.g., main)");
-                    std::process::exit(1);
-                }
-            };
+            let base_ref = required("--base-ref", "--base-ref is required (e.g., main)");
 
             // All flags required for merge
-            let head_ref = match flag("--head-ref") {
-                Some(v) => v,
-                None => {
-                    eprintln!("--head-ref is required");
-                    std::process::exit(1);
-                }
-            };
+            let head_ref = required("--head-ref", "--head-ref is required");
 
-            let head_sha = match flag("--head-sha") {
-                Some(v) => v,
-                None => {
-                    eprintln!("--head-sha is required");
-                    std::process::exit(1);
-                }
-            };
+            let head_sha = required("--head-sha", "--head-sha is required");
 
-            let base_sha = match flag("--base-sha") {
-                Some(v) => v,
-                None => {
-                    eprintln!("--base-sha is required");
-                    std::process::exit(1);
-                }
-            };
+            let base_sha = required("--base-sha", "--base-sha is required");
             let fork_clone_url = flag("--fork-clone-url");
 
             let ctx = CiContext {
@@ -306,23 +261,12 @@ fn handle_ci_local(args: &[String]) {
             let skip_fetch_sync_refs = skip_fetch_all || has_bool_flag("--skip-fetch-sync-refs");
             let skip_push = has_bool_flag("--skip-push");
 
-            let previous_head_sha = match flag("--previous-head-sha") {
-                Some(v) => v,
-                None => {
-                    eprintln!("--previous-head-sha is required");
-                    std::process::exit(1);
-                }
-            };
+            let previous_head_sha =
+                required("--previous-head-sha", "--previous-head-sha is required");
 
             let previous_base_sha = flag("--previous-base-sha");
 
-            let head_sha = match flag("--head-sha") {
-                Some(v) => v,
-                None => {
-                    eprintln!("--head-sha is required");
-                    std::process::exit(1);
-                }
-            };
+            let head_sha = required("--head-sha", "--head-sha is required");
 
             let base_sha = flag("--base-sha").unwrap_or_default();
 

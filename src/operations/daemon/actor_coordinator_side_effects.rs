@@ -81,11 +81,11 @@ impl ActorDaemonCoordinator {
             .await?;
 
         if matches!(cmd.primary_command.as_deref(), Some("checkout" | "switch")) {
-            self.handle_checkout_switch(family, cmd)?;
+            apply_checkout_switch_working_log_side_effect(cmd)?;
         }
 
         if primary == "bisect" {
-            self.handle_bisect(family, cmd)?;
+            Self::handle_bisect(cmd)?;
         }
 
         if saw_pull_event || super::merge_fast_forward::has_explicit_fast_forward_transition(cmd) {
@@ -168,7 +168,7 @@ impl ActorDaemonCoordinator {
         // `checkout/switch --merge` exits with code 1 when it produces
         // conflict markers but HEAD still moves to the target branch.  We must not
         // return early here — fall through so apply_checkout_switch_working_log_side_effect
-        // and recent_checkout_switch_prerequisite_from_command can migrate the working log.
+        // can migrate the working log.
         let is_merge_checkout =
             matches!(cmd.primary_command.as_deref(), Some("checkout" | "switch")) && {
                 let p = parsed_invocation_for_normalized_command(cmd);

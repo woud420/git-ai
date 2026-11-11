@@ -117,7 +117,7 @@ pub(super) fn collect_unstaged_hunks(
             .iter()
             .filter(|pathspec| !unstaged_hunks.contains_key(*pathspec))
             .collect();
-        let committed = files_in_commit(repo, commit_sha, &candidates);
+        let committed = files_in_commit(repo, commit_sha, &candidates)?;
 
         for pathspec in candidates {
             // Check if file exists in the commit - if it does, it's tracked and git diff should handle it
@@ -151,12 +151,12 @@ pub(super) fn collect_unstaged_hunks(
 /// The subset of `paths` that are files in `commit_sha`'s tree, from one
 /// batched read instead of a tree lookup per path. The caller's path may be
 /// NFC or NFD while the tree stores the opposite form, so both normalisations
-/// are tried. A failed read reports no file as committed.
+/// are tried.
 fn files_in_commit<'a>(
     repo: &Repository,
     commit_sha: &str,
     paths: &[&'a String],
-) -> HashSet<&'a String> {
+) -> Result<HashSet<&'a String>, GitAiError> {
     use unicode_normalization::UnicodeNormalization;
 
     let spellings = |path: &str| -> Vec<(String, String)> {
@@ -171,8 +171,8 @@ fn files_in_commit<'a>(
     };
 
     let requests: Vec<(String, String)> = paths.iter().flat_map(|path| spellings(path)).collect();
-    let found = batch_read_paths_at_treeishes(repo, &requests).unwrap_or_default();
-    paths
+    let found = batch_read_paths_at_treeishes(repo, &requests)?;
+    Ok(paths
         .iter()
         .copied()
         .filter(|path| {
@@ -180,7 +180,7 @@ fn files_in_commit<'a>(
                 .iter()
                 .any(|request| found.contains_key(request))
         })
-        .collect()
+        .collect())
 }
 
 #[allow(clippy::type_complexity)]
@@ -294,4 +294,32 @@ pub(super) fn batch_file_contents(
         map.entry(req.clone()).or_default();
     }
     Ok(map)
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+    use crate::operations::git::test_utils::TmpRepo;
+
+    /// A checkpointed path that `git diff` does not report is untracked only
+    /// if HEAD lacks it. A file named with a newline must not make the lookup
+    /// fail and turn its unchanged, committed neighbours into untracked files.
+    #[test]
+    fn committed_file_named_with_a_newline_does_not_make_its_batch_untracked() {
+        let tmp = TmpRepo::new().unwrap();
+        tmp.write_file("new\nline.txt", "one\ntwo\n", false)
+            .unwrap();
+        tmp.write_file("plain.txt", "plain\n", false).unwrap();
+        let commit = tmp.commit_all("base").unwrap();
+        tmp.write_file("untracked.txt", "new\n", false).unwrap();
+        let paths = ["new\nline.txt", "plain.txt", "untracked.txt"].map(String::from);
+
+        let (unstaged, insertions) =
+            collect_unstaged_hunks(tmp.gitai_repo(), &commit, Some(&HashSet::from(paths))).unwrap();
+
+        let untracked =
+            HashMap::from([("untracked.txt".to_string(), vec![LineRange::Range(1, 1)])]);
+        assert_eq!(unstaged, untracked);
+        assert_eq!(insertions, untracked);
+    }
 }

@@ -72,7 +72,6 @@ impl AttestationEntry {
         Self { hash, line_ranges }
     }
 
-    #[allow(dead_code)]
     pub fn remove_line_ranges(&mut self, to_remove: &[LineRange]) {
         let mut current_ranges = self.line_ranges.clone();
 
@@ -85,18 +84,6 @@ impl AttestationEntry {
         }
 
         self.line_ranges = current_ranges;
-    }
-
-    /// Shift line ranges by a given offset starting at insertion_point
-    #[allow(dead_code)]
-    pub fn shift_line_ranges(&mut self, insertion_point: u32, offset: i32) {
-        let mut shifted_ranges = Vec::new();
-        for range in &self.line_ranges {
-            if let Some(shifted) = range.shift(insertion_point, offset) {
-                shifted_ranges.push(shifted);
-            }
-        }
-        self.line_ranges = shifted_ranges;
     }
 }
 

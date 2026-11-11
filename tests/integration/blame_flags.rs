@@ -821,45 +821,6 @@ fn test_blame_hash_column_matches_git() {
         }
     }
 }
-
-// #[test]
-// fn test_blame_show_stats() {
-//     let tmp_dir = tempdir().unwrap();
-//     let repo_path = tmp_dir.path().to_path_buf();
-
-//     let tmp_repo = TmpRepo::new().unwrap();
-//     let mut file = tmp_repo.write_file("test.txt", "Line 1\n", true).unwrap();
-
-//     tmp_repo
-//         .trigger_checkpoint_with_author("test_user")
-//         .unwrap();
-//     file.append("Line 2\n").unwrap();
-//     tmp_repo.trigger_checkpoint_with_ai("Claude", Some("claude-3-sonnet"), Some("cursor")).unwrap();
-//     tmp_repo.commit_with_message("Initial commit").unwrap();
-
-//     let git_output = run_git_blame(tmp_repo.path(), "test.txt", &["--show-stats"]);
-//     let git_ai_output = run_git_ai_blame(tmp_repo.path(), "test.txt", &["--show-stats"]);
-
-//     let _comparison = create_blame_comparison(&git_output, &git_ai_output, "show_stats");
-//     let git_norm = normalize_for_snapshot(&git_output);
-//     let git_ai_norm = normalize_for_snapshot(&git_ai_output);
-//     println!("\n[DEBUG] Normalized git blame output:\n{}", git_norm);
-//     println!("\n[DEBUG] Normalized git-ai blame output:\n{}", git_ai_norm);
-//     assert_eq!(
-//         git_norm, git_ai_norm,
-//         "Normalized blame outputs should match exactly"
-//     );
-
-//     // Verify both show statistics
-//     assert!(
-//         git_output.contains("%"),
-//         "Git output should contain statistics"
-//     );
-//     assert!(
-//         git_ai_output.contains("%"),
-//         "Git-ai output should contain statistics"
-//     );
-// }
 #[test]
 fn test_blame_date_format() {
     let repo = TestRepo::new();

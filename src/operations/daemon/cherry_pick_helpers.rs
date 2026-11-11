@@ -171,7 +171,9 @@ fn resolve_sequencer_source_args_with_git(
                 .map(|head| rewrite_head_source_arg_for_side_effect(source, head))
                 .unwrap_or_else(|| source.clone())
         })
-        .filter(|source| !cherry_pick_range_has_omitted_side(source))
+        // An argument starting with `-` (possible after `--`) is not a commit,
+        // range or `^rev`, and rev-list would read it as an option.
+        .filter(|source| !source.starts_with('-') && !cherry_pick_range_has_omitted_side(source))
         .collect();
     if sources.is_empty() {
         return Ok(Vec::new());
@@ -194,7 +196,6 @@ fn resolve_sequencer_source_args_with_git(
             "--ignore-missing".to_string(),
         ]);
     }
-    args.push("--end-of-options".to_string());
     args.extend(sources);
     let output = exec_git(&args)?;
     Ok(String::from_utf8_lossy(&output.stdout)

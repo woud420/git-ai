@@ -5,7 +5,6 @@ use crate::model::domain::{
 use crate::operations::daemon::analyzers::{
     AnalysisView, CommandAnalyzer, command_args, normalized_args,
 };
-use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct TransportAnalyzer;
@@ -36,11 +35,7 @@ impl CommandAnalyzer for TransportAnalyzer {
                     events.push(SemanticEvent::SendPackCompleted { repository });
                 }
             }
-            "clone" => events.push(SemanticEvent::CloneCompleted {
-                target: infer_clone_target(&args)
-                    .or_else(|| cmd.worktree.clone())
-                    .unwrap_or_else(|| PathBuf::from(".")),
-            }),
+            "clone" => events.push(SemanticEvent::CloneCompleted),
             "ls-remote" => events.push(SemanticEvent::LsRemoteCompleted),
             _ => unreachable!("registry should not route '{}' to TransportAnalyzer", name),
         }
@@ -134,29 +129,6 @@ fn infer_pull_strategy_from_args(args: &[String]) -> Option<PullStrategy> {
         return Some(PullStrategy::Rebase);
     }
     None
-}
-
-fn infer_clone_target(args: &[String]) -> Option<PathBuf> {
-    if args.is_empty() {
-        return None;
-    }
-    let mut filtered = Vec::new();
-    let mut skip_next = false;
-    for arg in args {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if arg == "-C" || arg == "--origin" || arg == "--template" {
-            skip_next = true;
-            continue;
-        }
-        if arg.starts_with('-') {
-            continue;
-        }
-        filtered.push(arg.clone());
-    }
-    filtered.last().map(PathBuf::from)
 }
 
 #[cfg(test)]

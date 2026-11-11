@@ -403,7 +403,7 @@ impl ActorDaemonCoordinator {
                         &cmd.index_write,
                     )?;
                 }
-                crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
+                crate::model::domain::SemanticEvent::CloneCompleted => {
                     apply_clone_notes_sync_side_effect(&worktree, cmd)?;
                 }
                 crate::model::domain::SemanticEvent::PushCompleted { .. } => {

@@ -147,6 +147,8 @@ impl AgentPreset for CodexPreset {
         });
 
         let bash_command = parse::bash_command_from_hook_input(&data);
+        let tool_input = data.get("tool_input").or_else(|| data.get("toolInput"));
+        let mut file_paths = parse::nested_tool_file_paths(tool_input, cwd);
         let event = match hook_event {
             Some("PreToolUse") => {
                 if is_bash {
@@ -158,7 +160,7 @@ impl AgentPreset for CodexPreset {
                 } else if is_file_edit {
                     ParsedHookEvent::PreFileEdit(PreFileEdit {
                         context,
-                        file_paths: vec![],
+                        file_paths,
                         dirty_files: None,
                         tool_use_id: Some(tool_use_id.to_string()),
                     })
@@ -178,9 +180,6 @@ impl AgentPreset for CodexPreset {
                         stream_source,
                     })
                 } else if is_file_edit {
-                    let tool_input = data.get("tool_input").or_else(|| data.get("toolInput"));
-                    let mut file_paths = parse::nested_tool_file_paths(tool_input, cwd);
-
                     if file_paths.is_empty() {
                         file_paths = Self::extract_filepaths_from_tool_response(&data);
                     }

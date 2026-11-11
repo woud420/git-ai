@@ -8,7 +8,7 @@ use super::discovery_no_exec::{
 };
 use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero};
 use crate::error::GitAiError;
-use crate::operations::git::cat_file::batch_read_blobs_by_name;
+use crate::operations::git::cat_file::{batch_path_specs, batch_read_blobs_by_name};
 use crate::operations::git::config_access_retry::with_config_access_retry;
 use crate::operations::git::repo_storage::RepoStorage;
 use std::collections::HashMap;
@@ -347,15 +347,12 @@ pub(crate) fn batch_read_paths_at_treeishes(
     repo: &Repository,
     requests: &[(String, String)],
 ) -> Result<HashMap<(String, String), String>, GitAiError> {
-    let names: Vec<String> = requests
-        .iter()
-        .map(|(treeish, path)| format!("{treeish}:{path}"))
-        .collect();
+    let specs = batch_path_specs(repo, requests)?;
+    let names: Vec<String> = specs.iter().map(|(_, spec)| spec.clone()).collect();
     let blobs = batch_read_blobs_by_name(repo, &names)?;
-    Ok(requests
-        .iter()
-        .cloned()
+    Ok(specs
+        .into_iter()
         .zip(blobs)
-        .filter_map(|(request, blob)| Some((request, blob?)))
+        .filter_map(|((request, _), blob)| Some((request.clone(), blob?)))
         .collect())
 }

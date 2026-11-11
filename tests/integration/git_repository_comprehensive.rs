@@ -1308,32 +1308,6 @@ fn test_initial_commit_has_no_parent() {
 }
 
 #[test]
-fn test_tree_clone() {
-    let test_repo = TestRepo::new();
-
-    // Create commit
-    let mut file = test_repo.filename("test.txt");
-    file.set_contents(crate::lines!["content".human()]);
-    let commit = test_repo.stage_all_and_commit("Test").unwrap();
-
-    let repo = find_repository(&[
-        "-C".to_string(),
-        test_repo.path().to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-
-    let commit_obj = repo.find_commit(commit.commit_sha).unwrap();
-    let tree = commit_obj.tree().unwrap();
-    let tree_clone = tree.clone();
-
-    assert_eq!(
-        tree.id(),
-        tree_clone.id(),
-        "Cloned tree should have same ID"
-    );
-}
-
-#[test]
 fn test_multiple_files_in_single_commit() {
     let test_repo = TestRepo::new();
 
@@ -1411,6 +1385,5 @@ crate::reuse_tests_in_worktree!(
     test_global_args_for_exec,
     test_empty_repository,
     test_initial_commit_has_no_parent,
-    test_tree_clone,
     test_multiple_files_in_single_commit,
 );

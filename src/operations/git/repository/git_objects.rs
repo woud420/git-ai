@@ -41,15 +41,6 @@ impl<'a> Tree<'a> {
         self.oid.clone()
     }
 
-    #[allow(dead_code)]
-    #[allow(clippy::should_implement_trait)]
-    pub fn clone(&self) -> Tree<'a> {
-        Tree {
-            repo: self.repo,
-            oid: self.oid.clone(),
-        }
-    }
-
     // Retrieve a tree entry contained in a tree or in any of its subtrees, given its relative path.
     pub fn get_path(&self, path: &Path) -> Result<TreeEntry<'a>, GitAiError> {
         let reader =
@@ -124,11 +115,6 @@ pub struct Blob<'a> {
 }
 
 impl<'a> Blob<'a> {
-    #[allow(dead_code)]
-    pub fn id(&self) -> String {
-        self.oid.clone()
-    }
-
     pub fn content(&self) -> Result<Vec<u8>, GitAiError> {
         let reader =
             crate::operations::git::fast_reader::FastObjectReader::new(&self.repo.git_common_dir);

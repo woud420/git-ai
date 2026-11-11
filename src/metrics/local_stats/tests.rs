@@ -49,10 +49,10 @@ fn committed(ts: u32, repo_url: &str, ai: u32, human: u32, diff_added: u32) -> M
             "claude::claude-sonnet-4-6".to_string(),
         ])
         .ai_additions(vec![ai, ai]);
-    record(MetricEvent::with_timestamp(
-        ts,
-        &values,
+    record(MetricEvent::from_values_with_timestamp(
+        values,
         attrs(Some(repo_url), "claude", None),
+        Some(ts),
     ))
 }
 
@@ -61,10 +61,10 @@ fn checkpoint(ts: u32, repo_url: &str, lines_added: u32) -> MetricHistoryRecord 
         .kind("ai_agent")
         .file_path("src/main.rs")
         .lines_added(lines_added);
-    record(MetricEvent::with_timestamp(
-        ts,
-        &values,
+    record(MetricEvent::from_values_with_timestamp(
+        values,
         attrs(Some(repo_url), "claude", Some("session-1")),
+        Some(ts),
     ))
 }
 
@@ -82,10 +82,10 @@ fn claude_session(ts: u32, repo_url: Option<&str>, session_id: &str) -> MetricHi
             }
         }
     }));
-    record(MetricEvent::with_timestamp(
-        ts,
-        &values,
+    record(MetricEvent::from_values_with_timestamp(
+        values,
         attrs(repo_url, "claude", Some(session_id)),
+        Some(ts),
     ))
 }
 

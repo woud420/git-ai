@@ -193,7 +193,6 @@ pub fn spawn_family_actor(family_key: FamilyKey) -> FamilyActorHandle {
                                 &command_start_refs,
                                 canonical_worktree,
                             )
-                            .map(|(applied, _)| applied)
                         });
                     let _ = respond_to.send(result);
                 }

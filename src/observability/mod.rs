@@ -29,7 +29,6 @@ pub fn log_error(error: &dyn std::error::Error, context: Option<serde_json::Valu
 }
 
 /// Log a message to Sentry (info, warning, etc.) (via daemon telemetry worker)
-#[allow(dead_code)]
 pub fn log_message(message: &str, level: &str, context: Option<serde_json::Value>) {
     let envelope = crate::model::telemetry::TelemetryEnvelope::Message {
         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -55,10 +54,11 @@ pub fn log_metrics(events: Vec<MetricEvent>) {
         return;
     }
 
-    // Split into chunks of MAX_METRICS_PER_ENVELOPE
-    for chunk in events.chunks(MAX_METRICS_PER_ENVELOPE) {
+    // Move events into envelopes of at most MAX_METRICS_PER_ENVELOPE each.
+    let mut events = events.into_iter().peekable();
+    while events.peek().is_some() {
         let envelope = crate::model::telemetry::TelemetryEnvelope::Metrics {
-            events: chunk.to_vec(),
+            events: events.by_ref().take(MAX_METRICS_PER_ENVELOPE).collect(),
         };
         submit_telemetry_envelope(vec![envelope]);
     }

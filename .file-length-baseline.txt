@@ -2,22 +2,22 @@
 # recorded ceiling. The file_length_policy test fails when a listed file
 # grows past its ceiling, when a new src file exceeds 600 lines, or when a
 # listed file drops to the cap (remove its entry). Shrink me over time.
-src/cli/git_ai_handlers.rs	1078
+src/cli/git_ai_handlers.rs	1064
 src/config/file.rs	714
 src/config/tests.rs	851
-src/model/authorship_log_serialization.rs	748
+src/model/authorship_log_serialization.rs	735
 src/model/stream_watermark.rs	629
 src/model/imara_diff_utils.rs	643
 src/operations/authorship/post_commit.rs	905
-src/operations/ci/ci_context.rs	930
-src/operations/commands/daemon.rs	691
-src/operations/commands/debug.rs	1424
+src/operations/ci/ci_context.rs	911
+src/operations/commands/daemon.rs	683
+src/operations/commands/debug.rs	1321
 src/operations/commands/install_hooks.rs	821
-src/operations/commands/log.rs	1119
-src/operations/commands/upgrade.rs	1845
+src/operations/commands/log.rs	1071
+src/operations/commands/upgrade.rs	1833
 src/operations/daemon/checkpoint.rs	993
 src/operations/daemon/stream_worker.rs	1547
 src/operations/git/cli_parser.rs	637
-src/operations/git/refs.rs	716
+src/operations/git/refs.rs	713
 src/operations/git/repo_storage.rs	762
 src/operations/streams/agents/copilot_otel.rs	827

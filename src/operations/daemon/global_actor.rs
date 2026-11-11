@@ -58,8 +58,7 @@ pub fn spawn_global_actor() -> GlobalActorHandle {
         while let Some(msg) = rx.recv().await {
             match msg {
                 GlobalMsg::Apply(cmd, respond_to) => {
-                    let result = reducer::reduce_global_command(&mut state, *cmd, &analyzers)
-                        .map(|(applied, _)| applied);
+                    let result = reducer::reduce_global_command(&mut state, *cmd, &analyzers);
                     let _ = respond_to.send(result);
                 }
                 GlobalMsg::Shutdown => break,

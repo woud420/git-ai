@@ -12,7 +12,7 @@ pub(super) fn reduce_family_command(
     state: &mut FamilyState,
     cmd: NormalizedCommand,
     analyzers: &AnalyzerRegistry,
-) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
+) -> Result<AppliedCommand, GitAiError> {
     reduce_family_command_with_ref_snapshot(state, cmd, analyzers, &HashMap::new(), None)
 }
 
@@ -63,10 +63,10 @@ pub(super) fn normalized() -> NormalizedCommand {
 fn reducer_applies_ref_changes_and_produces_applied_command() {
     let mut state = family_state();
     let registry = AnalyzerRegistry::new();
-    let (applied, analysis) = reduce_family_command(&mut state, normalized(), &registry).unwrap();
+    let applied = reduce_family_command(&mut state, normalized(), &registry).unwrap();
     assert_eq!(applied.seq, 1);
     assert!(matches!(
-        analysis.class,
+        applied.analysis.class,
         crate::model::domain::CommandClass::HistoryRewrite
     ));
     assert_eq!(
@@ -85,7 +85,7 @@ fn reducer_does_not_update_refs_without_ref_transition_for_head_moving_commands(
     cmd.primary_command = Some("commit".to_string());
     cmd.invoked_command = Some("commit".to_string());
 
-    let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+    let _applied = reduce_family_command(&mut state, cmd, &registry).unwrap();
 
     assert_eq!(state.refs.get("refs/heads/main").map(String::as_str), None);
 }
@@ -104,7 +104,7 @@ fn reducer_preserves_refs_for_stash_without_ref_transition() {
     cmd.invoked_command = Some("stash".to_string());
     cmd.invoked_args = vec!["push".to_string()];
 
-    let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+    let _applied = reduce_family_command(&mut state, cmd, &registry).unwrap();
 
     assert_eq!(
         state.refs.get("refs/heads/main").map(String::as_str),
@@ -142,14 +142,13 @@ fn reducer_preserves_ref_deletion_and_raw_observation_semantics() {
             new: new.clone(),
         }];
         let observed = cmd.ref_changes.clone();
-        let (applied, analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+        let applied = reduce_family_command(&mut state, cmd, &registry).unwrap();
         assert_eq!(
             state.refs.get("refs/heads/feature"),
             if deleted { None } else { Some(&new) },
             "new ref value: {new:?}",
         );
         assert_eq!(applied.command.ref_changes, observed);
-        assert_eq!(applied.analysis, analysis);
         assert_eq!(applied.seq, 1);
     }
 }
@@ -172,7 +171,7 @@ fn reducer_records_worktree_branch_from_unique_head_branch_transition() {
         },
     ];
 
-    let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+    let _applied = reduce_family_command(&mut state, cmd, &registry).unwrap();
     let worktree = state.worktrees.get(&PathBuf::from("/tmp/repo")).unwrap();
 
     assert_eq!(worktree.head.as_deref(), Some("bbb"));
@@ -200,7 +199,7 @@ fn reducer_preserves_worktree_branch_when_command_does_not_move_head() {
         new: "ddd".to_string(),
     }];
 
-    let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+    let _applied = reduce_family_command(&mut state, cmd, &registry).unwrap();
     let worktree = state.worktrees.get(&PathBuf::from("/tmp/repo")).unwrap();
 
     assert_eq!(worktree.head.as_deref(), Some("aaa"));
@@ -233,7 +232,7 @@ fn reducer_updates_branch_for_checkout_new_branch_without_head_oid_move() {
     cmd.invoked_args = vec!["-b".to_string(), "feature".to_string()];
     cmd.ref_changes.clear();
 
-    let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+    let _applied = reduce_family_command(&mut state, cmd, &registry).unwrap();
     let worktree = state.worktrees.get(&PathBuf::from("/tmp/repo")).unwrap();
 
     assert_eq!(worktree.head.as_deref(), Some("aaa"));
@@ -252,7 +251,7 @@ fn reducer_marks_head_only_transition_as_detached_or_unknown_branch() {
         new: "bbb".to_string(),
     }];
 
-    let (_applied, _analysis) = reduce_family_command(&mut state, cmd, &registry).unwrap();
+    let _applied = reduce_family_command(&mut state, cmd, &registry).unwrap();
     let worktree = state.worktrees.get(&PathBuf::from("/tmp/repo")).unwrap();
 
     assert_eq!(worktree.head.as_deref(), Some("bbb"));
@@ -264,7 +263,7 @@ fn reducer_marks_head_only_transition_as_detached_or_unknown_branch() {
 fn global_reducer_never_drops_commands() {
     let mut state = GlobalState { applied_seq: 0 };
     let registry = AnalyzerRegistry::new();
-    let (applied, _analysis) = reduce_global_command(&mut state, normalized(), &registry).unwrap();
+    let applied = reduce_global_command(&mut state, normalized(), &registry).unwrap();
     assert_eq!(applied.seq, 1);
     assert_eq!(state.applied_seq, 1);
 }
@@ -366,7 +365,8 @@ fn orphan_checkout_records_unborn_worktree_without_old_head_fallback() {
         "new-root".into(),
     ];
     cmd.ref_changes.clear();
-    let (_, analysis) = reduce_family_command(&mut state, cmd, &AnalyzerRegistry::new()).unwrap();
+    let AppliedCommand { analysis, .. } =
+        reduce_family_command(&mut state, cmd, &AnalyzerRegistry::new()).unwrap();
     assert_eq!(
         analysis.events,
         vec![crate::model::domain::SemanticEvent::OrphanBranchCreated {
@@ -415,7 +415,7 @@ fn reducer_uses_this_worktree_head_and_never_the_family_head() {
         applied_seq: 0,
         watermarks: WatermarkState::default(),
     };
-    let (_, analysis) = reduce_family_command_with_ref_snapshot(
+    let AppliedCommand { analysis, .. } = reduce_family_command_with_ref_snapshot(
         &mut state,
         cmd.clone(),
         &AnalyzerRegistry::new(),
@@ -432,7 +432,7 @@ fn reducer_uses_this_worktree_head_and_never_the_family_head() {
     );
 
     state.worktrees.clear();
-    let (_, analysis) = reduce_family_command_with_ref_snapshot(
+    let AppliedCommand { analysis, .. } = reduce_family_command_with_ref_snapshot(
         &mut state,
         cmd,
         &AnalyzerRegistry::new(),

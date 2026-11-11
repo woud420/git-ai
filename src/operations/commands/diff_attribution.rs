@@ -129,7 +129,25 @@ pub fn build_diff_artifacts_from_hunks(
     authorship_log: Option<&AuthorshipLog>,
 ) -> Result<DiffBuildArtifacts, GitAiError> {
     let effective_patterns = effective_ignore_patterns(repo, &[], &[]);
-    let ignore_matcher = build_ignore_matcher(&effective_patterns);
+    build_diff_artifacts_from_hunks_with_patterns(
+        repo,
+        hunks,
+        &effective_patterns,
+        to_commit,
+        authorship_log,
+    )
+}
+
+/// Like [`build_diff_artifacts_from_hunks`], for callers that already loaded
+/// the repo's effective ignore patterns.
+pub(crate) fn build_diff_artifacts_from_hunks_with_patterns(
+    repo: &Repository,
+    hunks: Vec<DiffHunk>,
+    effective_patterns: &[String],
+    to_commit: &str,
+    authorship_log: Option<&AuthorshipLog>,
+) -> Result<DiffBuildArtifacts, GitAiError> {
+    let ignore_matcher = build_ignore_matcher(effective_patterns);
 
     let mut hunks = hunks;
     hunks.retain(|hunk| {

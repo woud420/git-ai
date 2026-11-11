@@ -120,7 +120,7 @@ fn ensure_daemon_running_attached(timeout: Duration) -> Result<DaemonConfig, Str
     }
 
     let markers = SandboxMarkers::from_env();
-    require_detached_start_allowed(&markers)?;
+    require_detached_start_allowed(false, &markers)?;
 
     remove_stale_daemon_files(&config);
 
@@ -262,15 +262,10 @@ pub(crate) fn ensure_daemon_running(
 
     #[cfg(not(any(test, feature = "test-support")))]
     {
-        use crate::operations::commands::daemon_start_policy::should_auto_start_detached;
         let auto_start_disabled = std::env::var("_GITAI_INTERNAL_DISABLE_WRAPPER_DAEMON_AUTOSPAWN")
             .is_ok_and(|v| v == "1" || v == "true");
-        let markers = SandboxMarkers::from_env();
-        if should_auto_start_detached(auto_start_disabled, &markers)? {
-            start_daemon_detached_with_config(config, timeout)
-        } else {
-            Ok(config)
-        }
+        require_detached_start_allowed(auto_start_disabled, &SandboxMarkers::from_env())?;
+        start_daemon_detached_with_config(config, timeout)
     }
 }
 
@@ -490,7 +485,7 @@ fn handle_restart(args: &[String]) -> Result<(), String> {
     let hard = has_flag(args, "--hard");
 
     // Check post-restart policy before shutting down a healthy daemon.
-    require_detached_start_allowed(&SandboxMarkers::from_env())?;
+    require_detached_start_allowed(false, &SandboxMarkers::from_env())?;
 
     // Only attempt shutdown if daemon appears to be running.
     let was_running = daemon_is_up(&config) || daemon_startup_is_blocked(&config);
@@ -645,7 +640,7 @@ pub(crate) fn stop_daemon(config: &DaemonConfig, timeout: Duration) -> Result<()
 /// Shut down the running daemon and start a fresh one. Escalates to hard kill
 /// if the soft shutdown doesn't complete within GRACEFUL_SHUTDOWN_TIMEOUT.
 pub(crate) fn restart_daemon(config: &DaemonConfig) -> Result<(), String> {
-    require_detached_start_allowed(&SandboxMarkers::from_env())?;
+    require_detached_start_allowed(false, &SandboxMarkers::from_env())?;
     let was_running = daemon_is_up(config) || daemon_startup_is_blocked(config);
     if was_running {
         stop_daemon(config, GRACEFUL_SHUTDOWN_TIMEOUT)?;

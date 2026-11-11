@@ -255,14 +255,17 @@ impl<'a> FastObjectReader<'a> {
 
         let hash_len = oid_byte_len(tree_oid);
         let entries_data = &data[null_pos + 1..];
-        tree_entry_oid(entries_data, name, hash_len)
+        tree_entry(entries_data, name, hash_len).map(|(_mode, oid)| oid)
     }
 }
 
-/// The OID of the entry called `name` in a tree object's raw entries.
+/// Mode of a tree entry that is itself a tree.
+pub(crate) const DIRECTORY_MODE: u32 = 0o40000;
+
+/// The mode and OID of the entry called `name` in a tree object's raw entries.
 ///
 /// Tree entry format: `{mode} {name}\0{raw-binary-hash}`
-pub(crate) fn tree_entry_oid(mut data: &[u8], name: &str, hash_len: usize) -> Option<String> {
+pub(crate) fn tree_entry(mut data: &[u8], name: &str, hash_len: usize) -> Option<(u32, String)> {
     while !data.is_empty() {
         // Find the space separating mode from name
         let space_pos = data.iter().position(|&b| b == b' ')?;
@@ -278,11 +281,12 @@ pub(crate) fn tree_entry_oid(mut data: &[u8], name: &str, hash_len: usize) -> Op
         let hash_bytes = &data[hash_start..hash_start + hash_len];
 
         if &data[space_pos + 1..null_pos] == name.as_bytes() {
+            let mode = std::str::from_utf8(&data[..space_pos]).ok()?;
             let oid = hash_bytes
                 .iter()
                 .map(|b| format!("{:02x}", b))
                 .collect::<String>();
-            return Some(oid);
+            return Some((u32::from_str_radix(mode, 8).ok()?, oid));
         }
 
         data = &data[hash_start + hash_len..];

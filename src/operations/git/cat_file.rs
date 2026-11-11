@@ -9,7 +9,7 @@ use std::io::{BufRead, Write};
 use crate::clients::git_cli::{exec_git_dialogue, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::operations::git::config_access_retry::with_config_access_retry;
-use crate::operations::git::fast_reader::tree_entry_oid;
+use crate::operations::git::fast_reader::{DIRECTORY_MODE, tree_entry};
 use crate::operations::git::repository::Repository;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -125,14 +125,19 @@ fn newline_path_spec(
         let entry = read_raw_object(stdin, stdout, &parent)?
             .filter(|parent| parent.kind == "tree")
             .and_then(|parent| {
-                tree_entry_oid(&parent.content, &path[start..end], parent.oid.len() / 2)
+                tree_entry(&parent.content, &path[start..end], parent.oid.len() / 2)
             });
-        let Some(oid) = entry else {
+        let Some((mode, oid)) = entry else {
             return Ok(None);
         };
         path = path.get(end + 1..).unwrap_or_default();
         if path.is_empty() {
             return Ok(Some(oid));
+        }
+        // Only a directory has entries below it. A gitlink names a commit,
+        // and that commit's tree is not part of this one.
+        if mode != DIRECTORY_MODE {
+            return Ok(None);
         }
         object = oid;
     }

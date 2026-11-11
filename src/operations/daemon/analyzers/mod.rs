@@ -18,6 +18,8 @@ pub mod transport;
 pub mod workspace;
 mod workspace_evidence;
 
+pub(crate) use workspace_evidence::has_only_worktree_globals;
+
 #[derive(Debug, Clone)]
 pub struct AnalysisView<'a> {
     pub refs: &'a HashMap<String, String>,

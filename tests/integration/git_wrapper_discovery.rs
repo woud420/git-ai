@@ -73,7 +73,8 @@ fn wrapper_commit_discovers_repository_for_post_commit_stats() {
     );
 }
 
-#[cfg(unix)]
+// Linux only: macOS file systems refuse to create a non-UTF-8 file name.
+#[cfg(target_os = "linux")]
 #[test]
 fn wrapper_passes_non_utf8_arguments_through_to_git() {
     use std::os::unix::ffi::OsStrExt;

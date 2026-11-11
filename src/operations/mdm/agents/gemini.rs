@@ -1,8 +1,6 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::binary_exists;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-#[cfg(test)]
-use crate::operations::mdm::hooks_merge::is_git_ai_checkpoint_command;
 use crate::operations::mdm::hooks_merge::{
     catch_all_hook_status, check_settings_hooks, install_catch_all_hooks_at, parse_json,
     uninstall_catch_all_hooks_at,
@@ -14,8 +12,6 @@ use std::path::{Path, PathBuf};
 // Command patterns for hooks
 const GEMINI_BEFORE_TOOL_CMD: &str = "checkpoint gemini --hook-input stdin";
 const GEMINI_AFTER_TOOL_CMD: &str = "checkpoint gemini --hook-input stdin";
-#[cfg(test)]
-const GEMINI_CATCH_ALL_MATCHER: &str = "*";
 
 pub struct GeminiInstaller;
 
@@ -121,15 +117,47 @@ impl HookInstaller for GeminiInstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::mdm::agents::catch_all_scenarios::{
+        CatchAllAgent, binary_path, catch_all_scenario_tests, hooks_in_catch_all, params,
+        read_settings, setup_test_env,
+    };
     use serial_test::serial;
     use std::fs;
     use tempfile::TempDir;
 
-    fn setup_test_env() -> (TempDir, PathBuf) {
-        let temp_dir = TempDir::new().unwrap();
-        let settings_path = temp_dir.path().join(".gemini").join("settings.json");
-        fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
-        (temp_dir, settings_path)
+    const AGENT: CatchAllAgent = CatchAllAgent {
+        install_at: GeminiInstaller::install_hooks_at,
+        uninstall_at: GeminiInstaller::uninstall_hooks_at,
+        hook_status: GeminiInstaller::hook_status,
+        hooks: [
+            ("BeforeTool", GEMINI_BEFORE_TOOL_CMD),
+            ("AfterTool", GEMINI_AFTER_TOOL_CMD),
+        ],
+        old_matcher: "write_file|replace",
+        stale_cmd: "/old/git-ai checkpoint gemini",
+        add_install_settings: |settings| settings["tools"]["enableHooks"] = json!(true),
+    };
+
+    catch_all_scenario_tests! { AGENT;
+        s1_fresh_install_creates_catch_all_block,
+        s2_idempotent_already_on_catch_all,
+        s3_migration_old_matcher_no_user_hooks,
+        s4_migration_old_matcher_user_hook_preserved,
+        s5_fresh_install_user_has_old_matcher_hook,
+        s6_fresh_install_user_has_catch_all_hook,
+        s7_idempotent_user_catch_all_plus_git_ai,
+        s8_deduplication_git_ai_in_both_blocks
+            => s8_deduplication_git_ai_in_both_catch_all_and_old_matcher,
+        s9_deduplication_two_git_ai_in_catch_all => s9_deduplication_two_git_ai_in_catch_all_block,
+        s10_stale_command_upgraded => s10_stale_command_upgraded_in_catch_all,
+        u1_uninstall_from_catch_all,
+        u2_uninstall_from_old_matcher_preserves_user_hook,
+        u3_uninstall_from_multiple_blocks => u3_uninstall_from_multiple_blocks_preserves_user_hooks,
+        u4_noop_uninstall_when_no_git_ai,
+        c1_no_hooks_returns_not_installed,
+        c2_git_ai_in_catch_all_returns_up_to_date,
+        c3_git_ai_only_in_old_matcher_not_up_to_date
+            => c3_git_ai_only_in_old_matcher_returns_installed_but_not_up_to_date,
     }
 
     fn with_temp_home<F: FnOnce(&Path)>(f: F) {
@@ -166,78 +194,12 @@ mod tests {
         }
     }
 
-    fn binary_path() -> PathBuf {
-        PathBuf::from("/usr/local/bin/git-ai")
-    }
-
-    fn params() -> HookInstallerParams {
-        HookInstallerParams {
-            binary_path: binary_path(),
-        }
-    }
-
     fn expected_before_cmd() -> String {
         format!("{} {}", binary_path().display(), GEMINI_BEFORE_TOOL_CMD)
     }
 
     fn expected_after_cmd() -> String {
         format!("{} {}", binary_path().display(), GEMINI_AFTER_TOOL_CMD)
-    }
-
-    fn read_settings(path: &Path) -> Value {
-        serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap()
-    }
-
-    fn hooks_in_catch_all<'a>(settings: &'a Value, hook_type: &str) -> Vec<&'a Value> {
-        let Some(blocks) = settings
-            .get("hooks")
-            .and_then(|h| h.get(hook_type))
-            .and_then(|v| v.as_array())
-        else {
-            return Vec::new();
-        };
-        blocks
-            .iter()
-            .find(|b| {
-                b.get("matcher")
-                    .and_then(|m| m.as_str())
-                    .map(|m| m == GEMINI_CATCH_ALL_MATCHER)
-                    .unwrap_or(false)
-            })
-            .and_then(|b| b.get("hooks").and_then(|h| h.as_array()))
-            .map(|v| v.iter().collect())
-            .unwrap_or_default()
-    }
-
-    // ---- Install scenarios ----
-
-    #[test]
-    fn s1_fresh_install_creates_catch_all_block() {
-        let (_td, path) = setup_test_env();
-        fs::remove_file(&path).ok();
-
-        let diff = GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-        assert!(diff.is_some());
-
-        let settings = read_settings(&path);
-
-        // tools.enableHooks must be set
-        assert_eq!(
-            settings.get("tools").and_then(|t| t.get("enableHooks")),
-            Some(&json!(true))
-        );
-
-        for (hook_type, expected) in &[
-            ("BeforeTool", expected_before_cmd()),
-            ("AfterTool", expected_after_cmd()),
-        ] {
-            let hooks = hooks_in_catch_all(&settings, hook_type);
-            assert_eq!(hooks.len(), 1, "{hook_type}: expected 1 hook in catch-all");
-            assert_eq!(
-                hooks[0].get("command").and_then(|c| c.as_str()).unwrap(),
-                expected
-            );
-        }
     }
 
     #[test]
@@ -284,343 +246,6 @@ mod tests {
     }
 
     #[test]
-    fn s2_idempotent_already_on_catch_all() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": bc}]}],
-                    "AfterTool": [{"matcher": "*", "hooks": [{"type":"command","command": ac}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let diff = GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-        assert!(diff.is_none(), "should be idempotent");
-    }
-
-    #[test]
-    fn s3_migration_old_matcher_no_user_hooks() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": bc}]}],
-                    "AfterTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": ac}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-
-        let settings = read_settings(&path);
-        for hook_type in &["BeforeTool", "AfterTool"] {
-            let catch_all = hooks_in_catch_all(&settings, hook_type);
-            assert_eq!(
-                catch_all.len(),
-                1,
-                "{hook_type}: git-ai should be in catch-all"
-            );
-
-            // The old matcher block had only our hook, so it must be removed entirely.
-            let blocks = settings
-                .get("hooks")
-                .and_then(|h| h.get(*hook_type))
-                .and_then(|v| v.as_array())
-                .unwrap();
-            assert_eq!(
-                blocks.len(),
-                1,
-                "{hook_type}: old matcher block should be removed, only catch-all should remain"
-            );
-        }
-    }
-
-    #[test]
-    fn s4_migration_old_matcher_user_hook_preserved() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": "echo before"}, {"type":"command","command": bc}]}],
-                    "AfterTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": "echo after"}, {"type":"command","command": ac}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-
-        let settings = read_settings(&path);
-        for (hook_type, user_cmd) in &[("BeforeTool", "echo before"), ("AfterTool", "echo after")] {
-            let catch_all = hooks_in_catch_all(&settings, hook_type);
-            assert_eq!(catch_all.len(), 1);
-
-            let blocks = settings
-                .get("hooks")
-                .and_then(|h| h.get(*hook_type))
-                .and_then(|v| v.as_array())
-                .unwrap();
-            let old_block = blocks
-                .iter()
-                .find(|b| b.get("matcher").and_then(|m| m.as_str()) == Some("write_file|replace"))
-                .unwrap();
-            let old_hooks = old_block.get("hooks").and_then(|h| h.as_array()).unwrap();
-            assert!(
-                old_hooks
-                    .iter()
-                    .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(*user_cmd))
-            );
-            assert!(!old_hooks.iter().any(|h| {
-                h.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(is_git_ai_checkpoint_command)
-                    .unwrap_or(false)
-            }));
-        }
-    }
-
-    #[test]
-    fn s5_fresh_install_user_has_old_matcher_hook() {
-        let (_td, path) = setup_test_env();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": "echo user"}]}],
-                    "AfterTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": "echo user"}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-
-        let settings = read_settings(&path);
-        for hook_type in &["BeforeTool", "AfterTool"] {
-            let catch_all = hooks_in_catch_all(&settings, hook_type);
-            assert_eq!(catch_all.len(), 1);
-
-            let blocks = settings
-                .get("hooks")
-                .and_then(|h| h.get(*hook_type))
-                .and_then(|v| v.as_array())
-                .unwrap();
-            let old_block = blocks
-                .iter()
-                .find(|b| b.get("matcher").and_then(|m| m.as_str()) == Some("write_file|replace"))
-                .unwrap();
-            let old_hooks = old_block.get("hooks").and_then(|h| h.as_array()).unwrap();
-            assert_eq!(old_hooks.len(), 1);
-            assert_eq!(
-                old_hooks[0]
-                    .get("command")
-                    .and_then(|c| c.as_str())
-                    .unwrap(),
-                "echo user"
-            );
-        }
-    }
-
-    #[test]
-    fn s6_fresh_install_user_has_catch_all_hook() {
-        let (_td, path) = setup_test_env();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": "audit-tool"}]}],
-                    "AfterTool": [{"matcher": "*", "hooks": [{"type":"command","command": "audit-tool"}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-
-        let settings = read_settings(&path);
-        for (hook_type, expected) in &[
-            ("BeforeTool", expected_before_cmd()),
-            ("AfterTool", expected_after_cmd()),
-        ] {
-            let catch_all = hooks_in_catch_all(&settings, hook_type);
-            assert_eq!(catch_all.len(), 2);
-            assert_eq!(
-                catch_all[0]
-                    .get("command")
-                    .and_then(|c| c.as_str())
-                    .unwrap(),
-                "audit-tool"
-            );
-            assert_eq!(
-                catch_all[1]
-                    .get("command")
-                    .and_then(|c| c.as_str())
-                    .unwrap(),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn s7_idempotent_user_catch_all_plus_git_ai() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        let before = json!({
-            "tools": {"enableHooks": true},
-            "hooks": {
-                "BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": "audit-tool"}, {"type":"command","command": bc}]}],
-                "AfterTool": [{"matcher": "*", "hooks": [{"type":"command","command": "audit-tool"}, {"type":"command","command": ac}]}]
-            }
-        });
-        fs::write(&path, serde_json::to_string_pretty(&before).unwrap()).unwrap();
-        let diff = GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-        assert!(diff.is_none());
-    }
-
-    #[test]
-    fn s8_deduplication_git_ai_in_both_blocks() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [
-                        {"matcher": "*", "hooks": [{"type":"command","command": bc}]},
-                        {"matcher": "write_file|replace", "hooks": [{"type":"command","command": "user"}, {"type":"command","command": bc}]}
-                    ],
-                    "AfterTool": [
-                        {"matcher": "*", "hooks": [{"type":"command","command": ac}]},
-                        {"matcher": "write_file|replace", "hooks": [{"type":"command","command": "user"}, {"type":"command","command": ac}]}
-                    ]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-
-        let settings = read_settings(&path);
-        for hook_type in &["BeforeTool", "AfterTool"] {
-            let catch_all = hooks_in_catch_all(&settings, hook_type);
-            assert_eq!(catch_all.len(), 1);
-
-            let blocks = settings
-                .get("hooks")
-                .and_then(|h| h.get(*hook_type))
-                .and_then(|v| v.as_array())
-                .unwrap();
-            let old_block = blocks
-                .iter()
-                .find(|b| b.get("matcher").and_then(|m| m.as_str()) == Some("write_file|replace"))
-                .unwrap();
-            let old_hooks = old_block.get("hooks").and_then(|h| h.as_array()).unwrap();
-            assert!(
-                old_hooks
-                    .iter()
-                    .any(|h| h.get("command").and_then(|c| c.as_str()) == Some("user"))
-            );
-            assert!(!old_hooks.iter().any(|h| {
-                h.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(is_git_ai_checkpoint_command)
-                    .unwrap_or(false)
-            }));
-        }
-    }
-
-    #[test]
-    fn s9_deduplication_two_git_ai_in_catch_all() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": bc}, {"type":"command","command": bc}]}],
-                    "AfterTool": [{"matcher": "*", "hooks": [{"type":"command","command": ac}, {"type":"command","command": ac}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-
-        let settings = read_settings(&path);
-        for hook_type in &["BeforeTool", "AfterTool"] {
-            let catch_all = hooks_in_catch_all(&settings, hook_type);
-            assert_eq!(catch_all.len(), 1);
-        }
-    }
-
-    #[test]
-    fn s10_stale_command_upgraded() {
-        let (_td, path) = setup_test_env();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": "/old/git-ai checkpoint gemini"}]}],
-                    "AfterTool": [{"matcher": "*", "hooks": [{"type":"command","command": "/old/git-ai checkpoint gemini"}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::install_hooks_at(&path, &params(), false).unwrap();
-
-        let settings = read_settings(&path);
-        let before_hooks = hooks_in_catch_all(&settings, "BeforeTool");
-        let after_hooks = hooks_in_catch_all(&settings, "AfterTool");
-        assert_eq!(before_hooks.len(), 1);
-        assert_eq!(
-            before_hooks[0]
-                .get("command")
-                .and_then(|c| c.as_str())
-                .unwrap(),
-            expected_before_cmd()
-        );
-        assert_eq!(
-            after_hooks[0]
-                .get("command")
-                .and_then(|c| c.as_str())
-                .unwrap(),
-            expected_after_cmd()
-        );
-    }
-
-    #[test]
     fn s11_enables_hooks_when_missing() {
         let (_td, path) = setup_test_env();
         // No tools.enableHooks set
@@ -633,177 +258,5 @@ mod tests {
             settings.get("tools").and_then(|t| t.get("enableHooks")),
             Some(&json!(true))
         );
-    }
-
-    // ---- Uninstall scenarios ----
-
-    #[test]
-    fn u1_uninstall_from_catch_all() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": bc}]}],
-                    "AfterTool": [{"matcher": "*", "hooks": [{"type":"command","command": ac}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let diff = GeminiInstaller::uninstall_hooks_at(&path, false).unwrap();
-        assert!(diff.is_some());
-
-        let settings = read_settings(&path);
-        for hook_type in &["BeforeTool", "AfterTool"] {
-            let catch_all = hooks_in_catch_all(&settings, hook_type);
-            assert!(!catch_all.iter().any(|h| {
-                h.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(is_git_ai_checkpoint_command)
-                    .unwrap_or(false)
-            }));
-        }
-    }
-
-    #[test]
-    fn u2_uninstall_from_old_matcher_preserves_user_hook() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": "echo before"}, {"type":"command","command": bc}]}],
-                    "AfterTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": "echo after"}, {"type":"command","command": ac}]}]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::uninstall_hooks_at(&path, false).unwrap();
-
-        let settings = read_settings(&path);
-        for (hook_type, user_cmd) in &[("BeforeTool", "echo before"), ("AfterTool", "echo after")] {
-            let blocks = settings
-                .get("hooks")
-                .and_then(|h| h.get(*hook_type))
-                .and_then(|v| v.as_array())
-                .unwrap();
-            let old_block = blocks
-                .iter()
-                .find(|b| b.get("matcher").and_then(|m| m.as_str()) == Some("write_file|replace"))
-                .unwrap();
-            let hooks = old_block.get("hooks").and_then(|h| h.as_array()).unwrap();
-            assert!(
-                hooks
-                    .iter()
-                    .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(*user_cmd))
-            );
-            assert!(!hooks.iter().any(|h| {
-                h.get("command")
-                    .and_then(|c| c.as_str())
-                    .map(is_git_ai_checkpoint_command)
-                    .unwrap_or(false)
-            }));
-        }
-    }
-
-    #[test]
-    fn u3_uninstall_from_multiple_blocks() {
-        let (_td, path) = setup_test_env();
-        let bc = expected_before_cmd();
-        let ac = expected_after_cmd();
-        let user = "echo user";
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({
-                "tools": {"enableHooks": true},
-                "hooks": {
-                    "BeforeTool": [
-                        {"matcher": "*", "hooks": [{"type":"command","command": bc}, {"type":"command","command": user}]},
-                        {"matcher": "write_file|replace", "hooks": [{"type":"command","command": bc}]}
-                    ],
-                    "AfterTool": [
-                        {"matcher": "*", "hooks": [{"type":"command","command": ac}]},
-                        {"matcher": "write_file|replace", "hooks": [{"type":"command","command": ac}, {"type":"command","command": user}]}
-                    ]
-                }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        GeminiInstaller::uninstall_hooks_at(&path, false).unwrap();
-
-        let settings = read_settings(&path);
-        for hook_type in &["BeforeTool", "AfterTool"] {
-            let all_blocks = settings
-                .get("hooks")
-                .and_then(|h| h.get(*hook_type))
-                .and_then(|v| v.as_array())
-                .unwrap();
-            for block in all_blocks {
-                let empty_hooks: Vec<Value> = Vec::new();
-                let hooks = block
-                    .get("hooks")
-                    .and_then(|h| h.as_array())
-                    .unwrap_or(&empty_hooks);
-                assert!(!hooks.iter().any(|h| {
-                    h.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(is_git_ai_checkpoint_command)
-                        .unwrap_or(false)
-                }));
-            }
-        }
-    }
-
-    #[test]
-    fn u4_noop_uninstall_when_no_git_ai() {
-        let (_td, path) = setup_test_env();
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&json!({"hooks": {"BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": "echo hello"}]}]}}))
-                .unwrap(),
-        )
-        .unwrap();
-
-        let diff = GeminiInstaller::uninstall_hooks_at(&path, false).unwrap();
-        assert!(diff.is_none());
-    }
-
-    // ---- check_hooks scenarios ----
-
-    #[test]
-    fn c1_no_hooks_returns_not_installed() {
-        let (installed, up_to_date) = GeminiInstaller::hook_status(&json!({}));
-        assert!(!installed);
-        assert!(!up_to_date);
-    }
-
-    #[test]
-    fn c2_git_ai_in_catch_all_returns_up_to_date() {
-        let cmd = expected_before_cmd();
-        let settings = json!({"hooks": {"BeforeTool": [{"matcher": "*", "hooks": [{"type":"command","command": cmd}]}]}});
-        let (installed, up_to_date) = GeminiInstaller::hook_status(&settings);
-        assert!(installed);
-        assert!(up_to_date);
-    }
-
-    #[test]
-    fn c3_git_ai_only_in_old_matcher_not_up_to_date() {
-        let cmd = expected_before_cmd();
-        let settings = json!({"hooks": {"BeforeTool": [{"matcher": "write_file|replace", "hooks": [{"type":"command","command": cmd}]}]}});
-        let (installed, up_to_date) = GeminiInstaller::hook_status(&settings);
-        assert!(installed);
-        assert!(!up_to_date);
     }
 }

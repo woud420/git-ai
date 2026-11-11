@@ -20,7 +20,4 @@ src/operations/daemon/stream_worker.rs	1547
 src/operations/git/cli_parser.rs	637
 src/operations/git/refs.rs	716
 src/operations/git/repo_storage.rs	762
-src/operations/mdm/agents/claude_code.rs	1005
-src/operations/mdm/agents/droid.rs	927
-src/operations/mdm/agents/gemini.rs	809
 src/operations/streams/agents/copilot_otel.rs	827

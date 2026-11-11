@@ -99,7 +99,9 @@ impl AgentPreset for DroidPreset {
             parse::optional_str_multi(&data, &["transcript_path", "transcriptPath"]);
 
         let (resolved_transcript_path, resolved_settings_path) = if let Some(tp) = transcript_path {
-            let settings = tp.replace(".jsonl", ".settings.json");
+            let settings = tp
+                .strip_suffix(".jsonl")
+                .map_or_else(|| tp.to_string(), |stem| format!("{stem}.settings.json"));
             (tp.to_string(), settings)
         } else {
             let (jsonl_p, settings_p) = droid_session_paths(&session_id, cwd);
@@ -446,6 +448,27 @@ mod tests {
             }
             _ => panic!("Expected PostFileEdit"),
         }
+    }
+
+    #[test]
+    fn test_droid_settings_path_replaces_only_the_transcript_extension() {
+        let input = json!({
+            "cwd": "/home/user/project",
+            "hookEventName": "PostToolUse",
+            "tool_name": "Write",
+            "session_id": "s",
+            "transcript_path": "/home/user/.factory/sessions/a.jsonl-dir/s.jsonl",
+            "tool_input": {"file_path": "src/main.rs"}
+        })
+        .to_string();
+        let events = DroidPreset.parse(&input, "t_test123456789a").unwrap();
+        let ParsedHookEvent::PostFileEdit(e) = &events[0] else {
+            panic!("Expected PostFileEdit");
+        };
+        assert_eq!(
+            e.context.metadata.get("settings_path").unwrap(),
+            "/home/user/.factory/sessions/a.jsonl-dir/s.settings.json"
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ src/operations/commands/upgrade.rs	1845
 src/operations/daemon/checkpoint.rs	993
 src/operations/daemon/stream_worker.rs	1547
 src/operations/git/cli_parser.rs	637
-src/operations/git/refs.rs	722
+src/operations/git/refs.rs	716
 src/operations/git/repo_storage.rs	762
 src/operations/mdm/agents/claude_code.rs	1005
 src/operations/mdm/agents/droid.rs	927

@@ -1173,6 +1173,38 @@ fn test_cherry_pick_no_commit_defers_to_final_commit_tree() {
     ]);
 }
 
+/// `git cherry-pick main..x y` is one revision walk over all arguments, so it
+/// also picks y's first commit even though `y` is written as a single commit.
+#[test]
+fn test_cherry_pick_range_plus_single_keeps_every_source_attribution() {
+    let repo = TestRepo::new();
+    fs::write(repo.path().join("base.txt"), "base\n").unwrap();
+    repo.stage_all_and_commit("initial").unwrap();
+    let main_branch = repo.current_branch();
+
+    let commit_ai_file = |name: &str| {
+        fs::write(repo.path().join(name), format!("AI {name}\n")).unwrap();
+        repo.git_ai(&["checkpoint", "mock_ai", name]).unwrap();
+        repo.stage_all_and_commit(&format!("add {name}")).unwrap();
+    };
+    repo.git(&["checkout", "-b", "x"]).unwrap();
+    commit_ai_file("x1.txt");
+    commit_ai_file("x2.txt");
+    repo.git(&["checkout", "-b", "y", &main_branch]).unwrap();
+    commit_ai_file("y1.txt");
+    commit_ai_file("y2.txt");
+
+    repo.git(&["checkout", &main_branch]).unwrap();
+    repo.git(&["cherry-pick", &format!("{main_branch}..x"), "y"])
+        .unwrap();
+
+    for name in ["x1.txt", "x2.txt", "y1.txt", "y2.txt"] {
+        let line = format!("AI {name}");
+        repo.filename(name)
+            .assert_committed_lines(crate::lines![line.as_str().ai()]);
+    }
+}
+
 /// Cherry-pick chain where only commit 1 conflicts (on file_a), requiring a
 /// conflict-resolution working log.  Commit 2 (file_b only) applies cleanly and
 /// its working log was consumed at commit time on the feature branch, so only

@@ -18,13 +18,6 @@ fn add_git_note(repo: &TmpRepo, commit_sha: &str, note: &str) {
         .expect("git notes add");
 }
 
-fn read_note_blobs(
-    repo: &crate::operations::git::repository::Repository,
-    blob_shas: &[String],
-) -> Result<HashMap<String, String>, GitAiError> {
-    batch_read_blob_contents_with_policy(repo, blob_shas, BatchReadPolicy::Tolerant)
-}
-
 /// Integration test:
 ///   1. Create a TmpRepo with several commits and git notes.
 ///   2. Start a mockito server to accept the upload.
@@ -73,25 +66,8 @@ fn migration_uploads_notes_and_caches_with_synced_1() {
     }
 
     // --- Run the migration core logic ---
-    let note_pairs = list_notes(repo.gitai_repo()).expect("list_notes");
-    assert_eq!(note_pairs.len(), 3, "should list 3 notes");
-
-    let blob_to_commit: HashMap<String, String> = note_pairs
-        .iter()
-        .map(|(b, c)| (b.clone(), c.clone()))
-        .collect();
-    let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
-
-    let blob_contents = read_note_blobs(repo.gitai_repo(), &blob_shas).expect("read_note_blobs");
-    assert_eq!(blob_contents.len(), 3, "should read 3 blob contents");
-
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for (blob_sha, content) in &blob_contents {
-        if let Some(commit_sha) = blob_to_commit.get(blob_sha) {
-            entries.push((commit_sha.clone(), content.clone()));
-        }
-    }
-    assert_eq!(entries.len(), 3);
+    let entries = read_all_ref_notes(repo.gitai_repo()).expect("read_all_ref_notes");
+    assert_eq!(entries.len(), 3, "should read 3 notes");
 
     // Upload to the mock server.
     let cfg = crate::config::Config::fresh();
@@ -160,27 +136,39 @@ fn migration_uploads_notes_and_caches_with_synced_1() {
     }
 }
 
-/// Unit test: `list_notes` returns empty when there are no notes.
+/// Unit test: `read_all_ref_notes` returns empty when there are no notes.
 #[test]
-fn list_notes_returns_empty_for_repo_without_notes() {
+fn read_all_ref_notes_returns_empty_for_repo_without_notes() {
     let repo = TmpRepo::new().expect("TmpRepo::new");
-    // Create a commit so HEAD exists (list_notes on an empty repo might error differently).
+    // Create a commit so HEAD exists (listing notes on an empty repo might error differently).
     repo.write_file("a.txt", "a", false).expect("write file");
     repo.commit_all("c").expect("commit");
 
-    let pairs = list_notes(repo.gitai_repo()).expect("list_notes");
+    let pairs = read_all_ref_notes(repo.gitai_repo()).expect("read_all_ref_notes");
     assert!(
         pairs.is_empty(),
         "no notes should be listed for a fresh repo"
     );
 }
 
-/// Unit test: the tolerant shared reader returns an empty map for empty input.
+/// Commits whose notes have identical content share one note blob; each
+/// commit must still get its own entry.
 #[test]
-fn read_note_blobs_empty_input() {
+fn read_all_ref_notes_keeps_every_commit_sharing_a_note_blob() {
     let repo = TmpRepo::new().expect("TmpRepo::new");
-    let result = read_note_blobs(repo.gitai_repo(), &[]).expect("read_note_blobs");
-    assert!(result.is_empty());
+    let sha1 = make_commit(&repo, "file1.txt", "a", "commit 1");
+    let sha2 = make_commit(&repo, "file2.txt", "b", "commit 2");
+    add_git_note(&repo, &sha1, "same note");
+    add_git_note(&repo, &sha2, "same note");
+
+    let mut entries = read_all_ref_notes(repo.gitai_repo()).expect("read_all_ref_notes");
+    entries.sort();
+    let mut expected = vec![
+        (sha1, "same note\n".to_string()),
+        (sha2, "same note\n".to_string()),
+    ];
+    expected.sort();
+    assert_eq!(entries, expected);
 }
 
 /// Integration test: `--force` re-uploads notes that are already cached as synced.
@@ -206,22 +194,7 @@ fn force_flag_bypasses_synced_cache_filter() {
     add_git_note(&repo, &sha2, "note-2");
 
     // Read notes from repo.
-    let note_pairs = list_notes(repo.gitai_repo()).expect("list_notes");
-    let blob_to_commit: HashMap<String, String> = note_pairs
-        .iter()
-        .map(|(b, c)| (b.clone(), c.clone()))
-        .collect();
-    let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
-    let blob_contents = read_note_blobs(repo.gitai_repo(), &blob_shas).expect("read_note_blobs");
-
-    let entries: Vec<(String, String)> = blob_contents
-        .iter()
-        .filter_map(|(blob_sha, content)| {
-            blob_to_commit
-                .get(blob_sha)
-                .map(|commit_sha| (commit_sha.clone(), content.clone()))
-        })
-        .collect();
+    let entries = read_all_ref_notes(repo.gitai_repo()).expect("read_all_ref_notes");
     assert_eq!(entries.len(), 2);
 
     // Pre-cache all entries as synced=1.

@@ -521,7 +521,10 @@ pub fn fallback_merge_notes_ours(repo: &Repository, source_ref: &str) -> Result<
 }
 
 /// List all notes on a given ref. Returns Vec<(note_blob_sha, annotated_object_sha)>.
-fn list_all_notes(repo: &Repository, notes_ref: &str) -> Result<Vec<(String, String)>, GitAiError> {
+pub(crate) fn list_all_notes(
+    repo: &Repository,
+    notes_ref: &str,
+) -> Result<Vec<(String, String)>, GitAiError> {
     // `git notes list` uses --ref to specify which notes ref.
     // The --ref option prepends "refs/notes/" automatically, so for full refs
     // like "refs/notes/ai-remote/origin" we need to strip the prefix.
@@ -537,17 +540,11 @@ fn list_all_notes(repo: &Repository, notes_ref: &str) -> Result<Vec<(String, Str
     let output = exec_git(&args)?;
     let stdout = String::from_utf8(output.stdout).map_err(|_| parse_output_error("notes list"))?;
 
-    Ok(stdout
-        .lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() == 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
-            } else {
-                None
-            }
-        })
-        .collect())
+    let parse = |line: &str| match line.split_whitespace().collect::<Vec<_>>()[..] {
+        [blob, object] => Some((blob.to_string(), object.to_string())),
+        _ => None,
+    };
+    Ok(stdout.lines().filter_map(parse).collect())
 }
 
 /// Parse a revision to its SHA

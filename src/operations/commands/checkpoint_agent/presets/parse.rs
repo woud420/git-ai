@@ -199,10 +199,14 @@ fn normalize_nested_tool_path(raw_path: &str, cwd: &str) -> Option<String> {
         return None;
     }
 
-    let path_without_scheme = trimmed
+    let path_without_scheme = match trimmed
         .strip_prefix("file://localhost")
         .or_else(|| trimmed.strip_prefix("file://"))
-        .unwrap_or(trimmed);
+    {
+        Some(uri_path) => crate::hex::percent_decode(uri_path),
+        None => trimmed.to_string(),
+    };
+    let path_without_scheme = path_without_scheme.as_str();
     let path = Path::new(path_without_scheme);
     let joined = if path.is_absolute()
         || path_without_scheme.starts_with("\\\\")
@@ -393,6 +397,8 @@ mod tests {
             {"file_path": "src/main.rs"},
             {"nested": {"files": ["src/lib.rs", 42, ""]}},
             "file:///tmp/output.rs",
+            "file:///tmp/my%20file.rs",
+            {"file_path": "src/100%25.rs"},
             "*** Update File: src/main.rs\n*** Move to: src/moved.rs"
         ]);
         let tool_response = json!({
@@ -410,6 +416,8 @@ mod tests {
                 PathBuf::from("/repo/src/main.rs"),
                 PathBuf::from("/repo/src/lib.rs"),
                 PathBuf::from("/tmp/output.rs"),
+                PathBuf::from("/tmp/my file.rs"),
+                PathBuf::from("/repo/src/100%25.rs"),
                 PathBuf::from("/repo/src/moved.rs"),
                 PathBuf::from("C:/repo/windows.rs"),
                 PathBuf::from("//server/share/file.rs"),

@@ -3,11 +3,9 @@ use crate::clients::git_cli::{
 };
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::model::working_log::Checkpoint;
 use crate::operations::git::cat_file::batch_read_blob_contents;
 use crate::operations::git::oid::is_full_oid;
 use crate::operations::git::repository::Repository;
-use serde_json;
 use std::collections::{HashMap, HashSet};
 
 mod note_fanout;
@@ -396,17 +394,6 @@ pub(in crate::operations::git) fn get_authorship(
     // Keep metadata aligned with the commit where this note is attached.
     authorship_log.metadata.base_commit_sha = commit_sha.to_string();
     Some(authorship_log)
-}
-
-#[allow(dead_code)]
-pub fn get_reference_as_working_log(
-    repo: &Repository,
-    commit_sha: &str,
-) -> Result<Vec<Checkpoint>, GitAiError> {
-    let content = show_authorship_note(repo, commit_sha)
-        .ok_or_else(|| GitAiError::Generic("No authorship note found".to_string()))?;
-    let working_log = serde_json::from_str(&content)?;
-    Ok(working_log)
 }
 
 /// Sanitize a remote name to create a safe ref name

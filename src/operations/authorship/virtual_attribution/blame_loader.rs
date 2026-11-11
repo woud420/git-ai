@@ -40,12 +40,6 @@ impl VirtualAttributions {
         Ok(virtual_attrs)
     }
 
-    /// Add a single pathspec to the virtual attributions
-    #[allow(dead_code)]
-    pub async fn add_pathspec(&mut self, pathspec: &str) -> Result<(), GitAiError> {
-        self.add_pathspecs_concurrent(&[pathspec.to_string()]).await
-    }
-
     /// Add multiple pathspecs concurrently
     pub(super) async fn add_pathspecs_concurrent(
         &mut self,

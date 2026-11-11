@@ -48,6 +48,35 @@ fn paths_holding_newlines_are_read_with_the_rest_of_the_batch() {
     assert_eq!(read, expected);
 }
 
+/// A gitlink is not a directory of the superproject, even when the commit
+/// it names is in the object database: nothing may be read through it.
+#[cfg(not(windows))]
+#[test]
+fn paths_below_a_gitlink_named_with_a_newline_are_absent() {
+    let tmp = TmpRepo::new().unwrap();
+    tmp.write_file("plain.txt", "plain\n", false).unwrap();
+    tmp.write_file("new\nline.txt", "leaf\n", false).unwrap();
+    let commit = tmp.commit_all("base").unwrap();
+    let gitlink = format!("160000,{commit},sub\nmodule");
+    tmp.git_command(&["update-index", "--add", "--cacheinfo", &gitlink])
+        .unwrap();
+    let tree = tmp.git_command(&["write-tree"]).unwrap().trim().to_string();
+    let requests = [
+        "sub\nmodule/plain.txt",
+        "sub\nmodule/new\nline.txt",
+        "sub\nmodule",
+    ]
+    .map(|path| (tree.clone(), path.to_string()));
+
+    let read = crate::operations::git::repository::batch_read_paths_at_treeishes(
+        tmp.gitai_repo(),
+        &requests,
+    )
+    .unwrap();
+
+    assert_eq!(read, HashMap::new());
+}
+
 #[test]
 fn raw_object_dialogue_reads_binary_content_and_missing_specs() {
     let mut requests = Vec::new();

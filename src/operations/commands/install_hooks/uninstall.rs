@@ -112,7 +112,7 @@ pub(super) async fn async_run_uninstall(
     if !any_checked {
         println!("No git-ai hooks found to uninstall.");
     } else if has_changes && dry_run {
-        println!("\n\x1b[33m⚠ Dry-run mode (default). No changes were made.\x1b[0m");
+        println!("\n\x1b[33m⚠ Dry-run mode. No changes were made.\x1b[0m");
         println!("To apply these changes, run:");
         println!("\x1b[1m  git-ai uninstall-hooks --dry-run=false\x1b[0m");
     } else if !has_changes {

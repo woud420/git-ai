@@ -443,16 +443,13 @@ fn print_last_n_lines(file: &std::fs::File, n: usize) -> Result<(), std::io::Err
     for line in &all_lines[start..] {
         println!("{}", line);
     }
-
-    // Seek to end so tail_file can pick up from here.
-    f.seek(SeekFrom::End(0))?;
     Ok(())
 }
 
+/// Follow `file` from its current position: the caller leaves it just past
+/// the bytes it printed, so lines appended in between are not skipped.
 fn tail_file(file: std::fs::File) -> Result<(), std::io::Error> {
     let mut reader = BufReader::new(file);
-    // Seek to end in case print_last_n_lines didn't (full mode).
-    reader.seek(SeekFrom::End(0))?;
     let mut line = String::new();
     loop {
         line.clear();

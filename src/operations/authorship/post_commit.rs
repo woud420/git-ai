@@ -22,7 +22,7 @@ use crate::operations::authorship::virtual_attribution::{
 };
 use crate::operations::git::notes_api::write_note;
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
-use crate::operations::git::repository::Repository;
+use crate::operations::git::repository::{Repository, parse_diff_added_lines};
 use snapshots::{commit_tree_snapshot_for_files, recovery_committed_hunks};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
@@ -462,10 +462,21 @@ where
             .map(|commit| commit.parent_count().unwrap_or(0) > 1)
             .unwrap_or(false);
         let ignore_patterns = effective_ignore_patterns(repo, &[], &[]);
-        skip_reason = if is_merge_commit {
-            Some(StatsSkipReason::MergeCommit)
+        // One `git diff -U0` feeds both the cost estimate and the stats hunks.
+        let stats_diff_text = if is_merge_commit {
+            None
         } else {
-            estimate_stats_cost(repo, &stats_diff_base, &commit_sha, &ignore_patterns)
+            Some(crate::operations::commands::diff_parsing::get_diff_text(
+                repo,
+                &stats_diff_base,
+                &commit_sha,
+                true,
+            )?)
+        };
+        skip_reason = match &stats_diff_text {
+            None => Some(StatsSkipReason::MergeCommit),
+            Some(diff_text) => parse_diff_added_lines(diff_text)
+                .map(|added| estimate_stats_cost_from_added_lines(added, &ignore_patterns))
                 .ok()
                 .and_then(|estimate| {
                     if should_skip_expensive_post_commit_stats(&estimate) {
@@ -473,15 +484,14 @@ where
                     } else {
                         None
                     }
-                })
+                }),
         };
 
-        if skip_reason.is_none() {
-            let diff_hunks = crate::operations::commands::diff::get_diff_with_line_numbers(
-                repo,
-                &stats_diff_base,
-                &commit_sha,
-            )?;
+        if skip_reason.is_none()
+            && let Some(diff_text) = &stats_diff_text
+        {
+            let diff_hunks =
+                crate::operations::commands::diff_parsing::parse_diff_hunks(diff_text)?;
             let ignore_matcher = build_ignore_matcher(&ignore_patterns);
             let diff_hunks: Vec<_> = diff_hunks
                 .into_iter()
@@ -898,8 +908,16 @@ fn estimate_stats_cost(
     commit_sha: &str,
     ignore_patterns: &[String],
 ) -> Result<StatsCostEstimate, GitAiError> {
-    let (mut added_lines_by_file, total_deleted_lines) =
-        repo.diff_added_lines_with_deleted_count(parent_sha, commit_sha)?;
+    Ok(estimate_stats_cost_from_added_lines(
+        repo.diff_added_lines_with_deleted_count(parent_sha, commit_sha)?,
+        ignore_patterns,
+    ))
+}
+
+fn estimate_stats_cost_from_added_lines(
+    (mut added_lines_by_file, total_deleted_lines): (HashMap<String, Vec<u32>>, usize),
+    ignore_patterns: &[String],
+) -> StatsCostEstimate {
     let ignore_matcher = build_ignore_matcher(ignore_patterns);
     added_lines_by_file
         .retain(|file_path, _| !should_ignore_file_with_matcher(file_path, &ignore_matcher));
@@ -920,12 +938,12 @@ fn estimate_stats_cost(
         hunk_ranges += count_line_ranges(&lines);
     }
 
-    Ok(StatsCostEstimate {
+    StatsCostEstimate {
         files_with_additions,
         added_lines,
         hunk_ranges,
         deleted_lines: total_deleted_lines,
-    })
+    }
 }
 
 #[doc(hidden)]

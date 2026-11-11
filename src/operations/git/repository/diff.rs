@@ -253,7 +253,7 @@ pub(crate) fn parse_numstat_line(line: &str) -> Option<NumstatLine<'_>> {
 /// Also returns the total number of deleted lines across all hunks so that
 /// callers can estimate the cost of a deletion-heavy commit without a second
 /// git invocation.
-fn parse_diff_added_lines(
+pub(crate) fn parse_diff_added_lines(
     diff_output: &str,
 ) -> Result<(HashMap<String, Vec<u32>>, usize), GitAiError> {
     let parsed = parse_diff_added_lines_internal(diff_output);

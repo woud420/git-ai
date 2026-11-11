@@ -163,15 +163,17 @@ pub trait Agent: Send + Sync {
 
     /// Extract the event timestamp as seconds since Unix epoch.
     ///
-    /// Every agent MUST provide a concrete timestamp for each event. Agents with
-    /// per-event timestamps in JSON should parse them; agents without should fall
-    /// back to file metadata (birthtime for first event, mtime for others).
+    /// Every event gets a concrete timestamp. The default parses the event's
+    /// `timestamp` field and falls back to file metadata (birthtime for the
+    /// first event, mtime for others); agents with other layouts override it.
     fn extract_event_timestamp(
         &self,
         event: &serde_json::Value,
         file_meta: &std::fs::Metadata,
         is_first_event: bool,
-    ) -> u32;
+    ) -> u32 {
+        super::timestamp::event_timestamp_or_file_time(event, file_meta, is_first_event)
+    }
 
     /// Extract the per-event session identifier from a raw event.
     ///

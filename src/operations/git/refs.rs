@@ -1,6 +1,4 @@
-use crate::clients::git_cli::{
-    exec_git, exec_git_allow_nonzero, exec_git_stdin, exec_git_with_stdin_writer,
-};
+use crate::clients::git_cli::{exec_git, exec_git_stdin, exec_git_with_stdin_writer};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::git::cat_file::batch_read_blob_contents;
@@ -280,11 +278,10 @@ pub(in crate::operations::git) fn get_commits_with_notes_from_list(
     args.push("rev-list".to_string());
     args.push("--no-walk".to_string());
     args.push("--pretty=format:%H%n%an%n%ae".to_string());
-    for sha in commit_shas {
-        args.push(sha.clone());
-    }
+    // The list goes over stdin: a long range does not fit on a command line.
+    args.push("--stdin".to_string());
 
-    let output = exec_git(&args)?;
+    let output = exec_git_stdin(&args, commit_shas.join("\n").as_bytes())?;
     let stdout =
         String::from_utf8(output.stdout).map_err(|_| parse_output_error("git rev-list"))?;
 
@@ -635,12 +632,9 @@ pub(crate) fn sort_commit_shas_by_date_desc(
     args.push("--format=%H".to_string());
     args.push("--date-order".to_string());
     args.push("--no-walk".to_string());
-    for sha in &sha_vec {
-        args.push(sha.clone());
-    }
+    args.push("--stdin".to_string());
 
-    if let Ok(output) = exec_git_allow_nonzero(&args)
-        && output.status.success()
+    if let Ok(output) = exec_git_stdin(&args, sha_vec.join("\n").as_bytes())
         && let Ok(stdout) = String::from_utf8(output.stdout)
     {
         let sorted: Vec<String> = stdout.lines().map(|s| s.to_string()).collect();

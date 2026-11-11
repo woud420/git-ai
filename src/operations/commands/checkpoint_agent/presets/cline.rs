@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub struct ClinePreset;
 
@@ -114,28 +114,18 @@ impl ClinePreset {
             if let Some(s) = item.as_str() {
                 let trimmed = s.trim();
                 if !trimmed.is_empty() {
-                    out.push(Self::resolve_hook_path(trimmed, cwd));
+                    out.push(parse::resolve_absolute(trimmed, cwd));
                 }
             } else if let Some(obj) = item.as_object()
                 && let Some(s) = obj.get("path").and_then(|v| v.as_str())
             {
                 let trimmed = s.trim();
                 if !trimmed.is_empty() {
-                    out.push(Self::resolve_hook_path(trimmed, cwd));
+                    out.push(parse::resolve_absolute(trimmed, cwd));
                 }
             }
         }
         out
-    }
-
-    fn resolve_hook_path(raw: &str, cwd: &str) -> PathBuf {
-        let trimmed = raw.trim();
-        let path = Path::new(trimmed);
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            Path::new(cwd).join(path)
-        }
     }
 
     fn extract_bash_command(parameters: &Value) -> Option<String> {

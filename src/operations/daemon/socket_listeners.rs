@@ -311,10 +311,9 @@ pub fn trace_listener_loop_actor(
                 .is_err()
             {
                 tracing::error!("trace listener: failed to spawn handler thread");
-                if let Err(error) = finalize_trace_connection_roots(
-                    coordinator.clone(),
-                    observed_roots_on_spawn_failure,
-                ) {
+                if let Err(error) =
+                    finalize_trace_connection_roots(coordinator, observed_roots_on_spawn_failure)
+                {
                     tracing::debug!(
                         %error,
                         "trace connection close bookkeeping error"

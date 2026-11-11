@@ -101,15 +101,15 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
     {
         clone_base_with_pr_head(&base_ref, &authenticated_url, &clone_dir, pr_number)?;
 
-        let repo = find_repository_in_path(&clone_dir.clone())?;
+        let repo = find_repository_in_path(&clone_dir)?;
 
         return Ok(Some(CiContext {
             repo,
             event: CiEvent::Merge {
                 merge_commit_sha,
-                head_ref: head_ref.clone(),
-                head_sha: head_sha.clone(),
-                base_ref: base_ref.clone(),
+                head_ref,
+                head_sha,
+                base_ref,
                 base_sha,
                 fork_clone_url: authenticated_fork_url,
             },
@@ -131,9 +131,8 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
     };
     let current_head_sha = event_payload
         .after
-        .clone()
         .filter(|sha| !sha.is_empty() && sha != "0000000000000000000000000000000000000000")
-        .unwrap_or(head_sha.clone());
+        .unwrap_or(head_sha);
 
     // Clone the base branch at its current tip and fetch both the current PR
     // head and the previous head from the synchronize payload. For a normal PR
@@ -172,7 +171,7 @@ pub fn get_github_ci_context() -> Result<Option<CiContext>, GitAiError> {
         ])?;
     }
 
-    let repo = find_repository_in_path(&clone_dir.clone())?;
+    let repo = find_repository_in_path(&clone_dir)?;
 
     Ok(Some(CiContext {
         repo,

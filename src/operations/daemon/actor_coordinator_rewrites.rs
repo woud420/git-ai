@@ -123,7 +123,7 @@ impl ActorDaemonCoordinator {
                         Some(&range),
                     )?;
                 repo.storage.rename_working_log(&original_head, &new_tip)?;
-                let conflict_base = rebase_onto.clone();
+                let conflict_base = rebase_onto;
                 let metric_context = process_conflict_resolution_working_logs(
                     &repo,
                     &new_tip,

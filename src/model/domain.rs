@@ -250,9 +250,7 @@ pub enum SemanticEvent {
     SendPackCompleted {
         repository: String,
     },
-    CloneCompleted {
-        target: PathBuf,
-    },
+    CloneCompleted,
     LsRemoteCompleted,
     RepoInitialized {
         path: PathBuf,

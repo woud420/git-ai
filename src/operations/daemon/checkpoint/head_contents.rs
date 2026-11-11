@@ -31,9 +31,6 @@ pub(super) fn read_head_contents<'a>(
             Some(bytes) => {
                 contents.insert(file.clone(), Arc::from(String::from_utf8_lossy(&bytes)));
             }
-            // Batch requests are newline-framed; such a path would corrupt
-            // the answers for every other file.
-            None if file.contains('\n') => {}
             None => requests.push((tree_id.to_string(), file.clone())),
         }
     }
@@ -79,5 +76,29 @@ mod tests {
         tmp.git_command(&["repack", "-a", "-d", "-q"]).unwrap();
         assert_eq!(read(&tmp, Some(tree.trim())), expected, "packed objects");
         assert!(read(&tmp, None).is_empty(), "no HEAD commit");
+    }
+
+    /// The batched lookup is newline-framed, but a tracked file may be named
+    /// with a newline. Once HEAD is packed it must still read its contents:
+    /// an empty baseline credits the AI with every line the file already had.
+    #[cfg(not(windows))]
+    #[test]
+    fn packed_head_file_named_with_a_newline_keeps_its_contents() {
+        let tmp = TmpRepo::new().unwrap();
+        tmp.write_file("new\nline.txt", "one\ntwo\n", false)
+            .unwrap();
+        tmp.write_file("plain.txt", "plain\n", false).unwrap();
+        tmp.commit_all("base").unwrap();
+        tmp.git_command(&["repack", "-a", "-d", "-q"]).unwrap();
+        let tree = tmp.git_command(&["rev-parse", "HEAD^{tree}"]).unwrap();
+        let files = ["new\nline.txt", "plain.txt"].map(String::from);
+
+        let contents = read_head_contents(tmp.gitai_repo(), Some(tree.trim()), files.iter());
+
+        let expected = HashMap::from([
+            ("new\nline.txt".to_string(), Arc::<str>::from("one\ntwo\n")),
+            ("plain.txt".to_string(), Arc::from("plain\n")),
+        ]);
+        assert_eq!(contents, expected);
     }
 }

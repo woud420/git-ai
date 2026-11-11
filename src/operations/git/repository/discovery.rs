@@ -8,7 +8,7 @@ use super::discovery_no_exec::{
 };
 use crate::clients::git_cli::{exec_git, exec_git_stdin};
 use crate::error::GitAiError;
-use crate::operations::git::cat_file::batch_read_blob_contents;
+use crate::operations::git::cat_file::{batch_path_specs, batch_read_blob_contents};
 use crate::operations::git::config_access_retry::with_config_access_retry;
 use crate::operations::git::repo_storage::RepoStorage;
 use std::collections::{HashMap, HashSet};
@@ -295,7 +295,8 @@ pub(crate) fn batch_read_paths_at_treeishes(
     repo: &Repository,
     requests: &[(String, String)],
 ) -> Result<HashMap<(String, String), String>, GitAiError> {
-    if requests.is_empty() {
+    let specs = batch_path_specs(repo, requests)?;
+    if specs.is_empty() {
         return Ok(HashMap::new());
     }
 
@@ -305,20 +306,20 @@ pub(crate) fn batch_read_paths_at_treeishes(
         "--batch-check=%(objectname) %(objecttype)".to_string(),
     ]);
 
-    let stdin_data = requests
+    let stdin_data = specs
         .iter()
-        .map(|(treeish, path)| format!("{treeish}:{path}"))
+        .map(|(_, spec)| spec.as_str())
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
     let output = exec_git_stdin(&args, stdin_data.as_bytes())?;
     let stdout = String::from_utf8(output.stdout)?;
     let lines: Vec<&str> = stdout.lines().collect();
-    if lines.len() != requests.len() {
+    if lines.len() != specs.len() {
         return Err(GitAiError::Generic(format!(
             "git cat-file returned {} records for {} path requests",
             lines.len(),
-            requests.len()
+            specs.len()
         )));
     }
 
@@ -326,14 +327,12 @@ pub(crate) fn batch_read_paths_at_treeishes(
     let mut unique_blob_oids = Vec::new();
     let mut seen_blob_oids = HashSet::new();
 
-    for (request, line) in requests.iter().zip(lines) {
-        let mut parts = line.split_whitespace();
-        let Some(oid) = parts.next() else {
+    for ((request, _), line) in specs.into_iter().zip(lines) {
+        // `<oid> blob`. A spec that names nothing is echoed as `<spec> missing`,
+        // and the spec may itself hold spaces.
+        let Some((oid, "blob")) = line.rsplit_once(' ') else {
             continue;
         };
-        if parts.next() != Some("blob") {
-            continue;
-        }
         let oid = oid.to_string();
         request_blob_oids.insert(request.clone(), oid.clone());
         if seen_blob_oids.insert(oid.clone()) {

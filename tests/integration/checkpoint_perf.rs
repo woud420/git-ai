@@ -204,6 +204,31 @@ fn first_touch_checkpoint_git_process_count_does_not_grow_with_packed_files() {
     );
 }
 
+/// A tracked file may be named with a newline. Once HEAD is packed its
+/// content must still be the baseline of the file's first checkpoint, or the
+/// AI is credited with every line the file already had.
+#[cfg(not(windows))]
+#[test]
+fn first_touch_checkpoint_of_a_packed_file_named_with_a_newline_keeps_its_lines() {
+    let repo = TestRepo::new();
+    let file = "new\nline.txt";
+    fs::write(repo.path().join(file), "base\n").unwrap();
+    repo.stage_all_and_commit("base file").unwrap();
+    repo.git_og(&["repack", "-a", "-d", "-q"]).unwrap();
+    repo.sync_daemon();
+
+    fs::write(repo.path().join(file), "base\nAI line\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
+
+    let status = repo.git_ai(&["status", "--json"]).unwrap();
+    let status: serde_json::Value =
+        serde_json::from_str(&crate::test_utils::extract_json_object(&status)).unwrap();
+    assert_eq!(
+        status["checkpoints"][0]["additions"], 1,
+        "only the added line is the AI's: {status}"
+    );
+}
+
 #[test]
 #[ignore]
 fn bench_checkpoint_all_modes_summary() {

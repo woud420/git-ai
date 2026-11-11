@@ -255,47 +255,39 @@ impl<'a> FastObjectReader<'a> {
 
         let hash_len = oid_byte_len(tree_oid);
         let entries_data = &data[null_pos + 1..];
-        self.parse_tree_entries_for_name(entries_data, name, hash_len)
+        tree_entry_oid(entries_data, name, hash_len)
     }
+}
 
-    /// Parse binary tree entries to find an entry by name.
-    ///
-    /// Tree entry format: `{mode} {name}\0{raw-binary-hash}`
-    fn parse_tree_entries_for_name(
-        &self,
-        mut data: &[u8],
-        target_name: &str,
-        hash_len: usize,
-    ) -> Option<String> {
-        while !data.is_empty() {
-            // Find the space separating mode from name
-            let space_pos = data.iter().position(|&b| b == b' ')?;
-            // Find the null byte after name
-            let null_pos = data[space_pos + 1..].iter().position(|&b| b == 0)?;
-            let null_pos = space_pos + 1 + null_pos;
+/// The OID of the entry called `name` in a tree object's raw entries.
+///
+/// Tree entry format: `{mode} {name}\0{raw-binary-hash}`
+pub(crate) fn tree_entry_oid(mut data: &[u8], name: &str, hash_len: usize) -> Option<String> {
+    while !data.is_empty() {
+        // Find the space separating mode from name
+        let space_pos = data.iter().position(|&b| b == b' ')?;
+        // Find the null byte after name
+        let null_pos = data[space_pos + 1..].iter().position(|&b| b == 0)?;
+        let null_pos = space_pos + 1 + null_pos;
 
-            let name_bytes = &data[space_pos + 1..null_pos];
-            let name = std::str::from_utf8(name_bytes).ok()?;
-
-            // The hash follows the null byte
-            let hash_start = null_pos + 1;
-            if data.len() < hash_start + hash_len {
-                return None;
-            }
-            let hash_bytes = &data[hash_start..hash_start + hash_len];
-
-            if name == target_name {
-                let oid = hash_bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>();
-                return Some(oid);
-            }
-
-            data = &data[hash_start + hash_len..];
+        // The hash follows the null byte
+        let hash_start = null_pos + 1;
+        if data.len() < hash_start + hash_len {
+            return None;
         }
-        None
+        let hash_bytes = &data[hash_start..hash_start + hash_len];
+
+        if &data[space_pos + 1..null_pos] == name.as_bytes() {
+            let oid = hash_bytes
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>();
+            return Some(oid);
+        }
+
+        data = &data[hash_start + hash_len..];
     }
+    None
 }
 
 #[cfg(test)]

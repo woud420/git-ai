@@ -49,9 +49,7 @@ fn test_ci_result_types_coverage() {
     let result1 = CiRunResult::AuthorshipRewritten {
         authorship_log: AuthorshipLog::default(),
     };
-    let result2 = CiRunResult::AlreadyExists {
-        authorship_log: AuthorshipLog::default(),
-    };
+    let result2 = CiRunResult::AlreadyExists;
     let result3 = CiRunResult::SkippedSimpleMerge;
     let result4 = CiRunResult::SkippedFastForward;
     let result5 = CiRunResult::NoAuthorshipAvailable;
@@ -65,7 +63,7 @@ fn test_ci_result_types_coverage() {
     }
 
     match result2 {
-        CiRunResult::AlreadyExists { .. } => {}
+        CiRunResult::AlreadyExists => {}
         _ => panic!("Expected AlreadyExists"),
     }
 

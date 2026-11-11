@@ -45,6 +45,11 @@ pub fn open_with_flags_and_memory_limits(
     Ok(conn)
 }
 
+/// `?,?,…` for an SQL `IN (...)` list of `count` bound values.
+pub fn in_placeholders(count: usize) -> String {
+    vec!["?"; count].join(",")
+}
+
 // ----- Singleton store scaffolding -----
 //
 // `notes_db`, `internal_db`, `bash_history_db`, and `metrics_db` are four
@@ -56,11 +61,10 @@ pub fn open_with_flags_and_memory_limits(
 // `SCHEMA_VERSION` and `MIGRATIONS` sequence and passes them to
 // `apply_migrations`.
 //
-// `internal_db` differs in two ways it handles itself, around its
+// `internal_db` differs in one way it handles itself, ahead of its
 // `apply_migrations` call: its fast path treats a newer on-disk schema as
 // forward-compatible (returns `Ok(())`) instead of failing closed with
-// `PersistenceError::schema_version`, and it runs an extra post-loop
-// verification step.
+// `PersistenceError::schema_version`.
 
 /// Create parent directories, open a writable connection with the standard
 /// memory limits, and hand it to `init` to build and schema-initialize the

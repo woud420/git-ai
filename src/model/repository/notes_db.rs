@@ -17,6 +17,7 @@
 
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
+use crate::model::repository::sqlite::in_placeholders;
 use rusqlite::{Connection, ToSql, params, params_from_iter};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -354,20 +355,25 @@ impl NotesDatabase {
             return Ok(());
         }
         let now = unix_now();
-        let tx = self.conn.transaction()?;
-        for sha in commit_shas {
-            tx.execute(
-                r#"UPDATE notes
-                   SET processing_started_at = NULL,
-                       attempts              = attempts + 1,
-                       last_sync_error       = ?1,
-                       last_sync_at          = ?2,
-                       next_retry_at         = ?2 + (1 << MIN(attempts + 1, 8)) * 5
-                   WHERE commit_sha = ?3 AND synced = 0 AND processing_started_at IS NOT NULL"#,
-                params![error, now, sha],
-            )?;
-        }
-        tx.commit()?;
+        let sql = format!(
+            r#"UPDATE notes
+               SET processing_started_at = NULL,
+                   attempts              = attempts + 1,
+                   last_sync_error       = ?1,
+                   last_sync_at          = ?2,
+                   next_retry_at         = ?2 + (1 << MIN(attempts + 1, 8)) * 5
+               WHERE synced = 0 AND processing_started_at IS NOT NULL AND commit_sha IN ({})"#,
+            in_placeholders(commit_shas.len())
+        );
+        let leading: [&dyn ToSql; 2] = [&error, &now];
+        self.conn.execute(
+            &sql,
+            params_from_iter(
+                leading
+                    .into_iter()
+                    .chain(commit_shas.iter().map(|sha| sha as &dyn ToSql)),
+            ),
+        )?;
         Ok(())
     }
 
@@ -489,11 +495,6 @@ fn unix_now() -> i64 {
 
 /// SHAs bound per `IN (...)` read, well under SQLite's bound-variable limit.
 const MAX_SHAS_PER_QUERY: usize = 500;
-
-/// `?,?,…` for an SQL `IN (...)` list of `count` bound values.
-fn in_placeholders(count: usize) -> String {
-    vec!["?"; count].join(",")
-}
 
 /// Bind order for `... = ? ... IN (?,?,…)`: a timestamp, then the commit SHAs.
 fn timestamp_then_shas<'a>(

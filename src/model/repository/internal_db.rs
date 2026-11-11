@@ -186,28 +186,7 @@ impl InternalDatabase {
             SCHEMA_VERSION,
             MIGRATIONS,
             |_, _| Ok(()),
-        )?;
-
-        // Verify final version matches expected
-        let final_version: usize = self.conn.query_row(
-            "SELECT value FROM schema_metadata WHERE key = 'version'",
-            [],
-            |row| {
-                let version_str: String = row.get(0)?;
-                version_str
-                    .parse::<usize>()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            },
-        )?;
-
-        if final_version != SCHEMA_VERSION {
-            return Err(GitAiError::Generic(format!(
-                "Migration failed: expected version {} but got version {}",
-                SCHEMA_VERSION, final_version
-            )));
-        }
-
-        Ok(())
+        )
     }
 
     /// Delete CAS sync records by their content hashes (used by daemon after successful upload).
@@ -215,15 +194,13 @@ impl InternalDatabase {
         if hashes.is_empty() {
             return Ok(0);
         }
-        let placeholders: Vec<&str> = hashes.iter().map(|_| "?").collect();
         let sql = format!(
             "DELETE FROM cas_sync_queue WHERE hash IN ({})",
-            placeholders.join(",")
+            crate::model::repository::sqlite::in_placeholders(hashes.len())
         );
-        let params: Vec<&dyn rusqlite::ToSql> =
-            hashes.iter().map(|h| h as &dyn rusqlite::ToSql).collect();
-        let deleted = self.conn.execute(&sql, params.as_slice())?;
-        Ok(deleted)
+        Ok(self
+            .conn
+            .execute(&sql, rusqlite::params_from_iter(hashes))?)
     }
 }
 

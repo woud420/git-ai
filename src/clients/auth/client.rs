@@ -34,6 +34,19 @@ fn validate_https_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Turn a successful token-endpoint body into stored credentials.
+fn parse_token_response(body: &str) -> Result<StoredCredentials, String> {
+    let token_response: TokenResponse =
+        serde_json::from_str(body).map_err(|e| format!("Invalid token response: {}", e))?;
+    let now = chrono::Utc::now().timestamp();
+    Ok(StoredCredentials {
+        access_token: token_response.access_token,
+        refresh_token: token_response.refresh_token,
+        access_token_expires_at: now + token_response.expires_in as i64,
+        refresh_token_expires_at: now + token_response.refresh_expires_in as i64,
+    })
+}
+
 impl OAuthClient {
     /// Create a new OAuth client using the current config
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
@@ -57,14 +70,18 @@ impl OAuthClient {
         })
     }
 
-    /// Common token exchange logic - POST to /worker/oauth/token with given body
-    fn exchange_token(&self, body: serde_json::Value) -> Result<StoredCredentials, String> {
+    /// POST `body` to /worker/oauth/token.
+    fn post_token_request(&self, body: &serde_json::Value) -> Result<http::Response, String> {
         let url = format!("{}/worker/oauth/token", self.base_url);
-
         let (_agent, request) = ApiContext::http_post(&url, Some(30));
         let request = request.header("Content-Type", "application/json");
-        let response = http::send_with_body(request, &body.to_string())
-            .map_err(|e| format!("Failed to connect to server: {}", e))?;
+        http::send_with_body(request, &body.to_string())
+            .map_err(|e| format!("Failed to connect to server: {}", e))
+    }
+
+    /// Common token exchange logic - POST to /worker/oauth/token with given body
+    fn exchange_token(&self, body: serde_json::Value) -> Result<StoredCredentials, String> {
+        let response = self.post_token_request(&body)?;
 
         let response_body = response
             .as_str()
@@ -82,16 +99,7 @@ impl OAuthClient {
             return Err(msg);
         }
 
-        let token_response: TokenResponse = serde_json::from_str(response_body)
-            .map_err(|e| format!("Invalid token response: {}", e))?;
-
-        let now = chrono::Utc::now().timestamp();
-        Ok(StoredCredentials {
-            access_token: token_response.access_token,
-            refresh_token: token_response.refresh_token,
-            access_token_expires_at: now + token_response.expires_in as i64,
-            refresh_token_expires_at: now + token_response.refresh_expires_in as i64,
-        })
+        parse_token_response(response_body)
     }
 
     /// Start the device authorization flow
@@ -128,7 +136,6 @@ impl OAuthClient {
         interval: u32,
         expires_in: u32,
     ) -> Result<StoredCredentials, String> {
-        let url = format!("{}/worker/oauth/token", self.base_url);
         let mut elapsed = 0u32;
         let mut current_interval = interval;
 
@@ -143,26 +150,14 @@ impl OAuthClient {
                 "client_id": "git-ai-cli"
             });
 
-            let (_agent, request) = ApiContext::http_post(&url, Some(30));
-            let request = request.header("Content-Type", "application/json");
-            let response = http::send_with_body(request, &body.to_string())
-                .map_err(|e| format!("Failed to connect to server: {}", e))?;
+            let response = self.post_token_request(&body)?;
 
             let response_body = response
                 .as_str()
                 .map_err(|e| format!("Invalid response encoding: {}", e))?;
 
             if response.status_code == 200 {
-                let token_response: TokenResponse = serde_json::from_str(response_body)
-                    .map_err(|e| format!("Invalid token response: {}", e))?;
-
-                let now = chrono::Utc::now().timestamp();
-                return Ok(StoredCredentials {
-                    access_token: token_response.access_token,
-                    refresh_token: token_response.refresh_token,
-                    access_token_expires_at: now + token_response.expires_in as i64,
-                    refresh_token_expires_at: now + token_response.refresh_expires_in as i64,
-                });
+                return parse_token_response(response_body);
             }
 
             // Parse error response

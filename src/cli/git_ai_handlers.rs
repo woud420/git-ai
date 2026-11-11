@@ -949,14 +949,7 @@ fn synthesize_hook_input_from_cli_args(
             let mut paths: Vec<String> = remaining_args
                 .iter()
                 .filter(|a| !a.starts_with("--"))
-                .map(|s| {
-                    let p = std::path::Path::new(s.as_str());
-                    if p.is_absolute() {
-                        s.clone()
-                    } else {
-                        cwd.join(p).to_string_lossy().to_string()
-                    }
-                })
+                .map(|arg| absolute_path_arg(&cwd, arg))
                 .collect();
             if paths.is_empty() {
                 crate::operations::commands::checkpoint_agent::orchestrator::
@@ -991,23 +984,15 @@ fn synthesize_hook_input_from_cli_args(
                         i += 2;
                     }
                     "--" => {
-                        files.extend(remaining_args[i + 1..].iter().map(|s| {
-                            let p = std::path::Path::new(s.as_str());
-                            if p.is_absolute() {
-                                s.clone()
-                            } else {
-                                cwd.join(p).to_string_lossy().to_string()
-                            }
-                        }));
+                        files.extend(
+                            remaining_args[i + 1..]
+                                .iter()
+                                .map(|arg| absolute_path_arg(&cwd, arg)),
+                        );
                         break;
                     }
                     arg if !arg.starts_with("--") => {
-                        let p = std::path::Path::new(arg);
-                        if p.is_absolute() {
-                            files.push(arg.to_string());
-                        } else {
-                            files.push(cwd.join(p).to_string_lossy().to_string());
-                        }
+                        files.push(absolute_path_arg(&cwd, arg));
                         i += 1;
                     }
                     _ => {
@@ -1026,6 +1011,15 @@ fn synthesize_hook_input_from_cli_args(
         }
         _ => String::new(),
     })
+}
+
+fn absolute_path_arg(cwd: &std::path::Path, arg: &str) -> String {
+    let path = std::path::Path::new(arg);
+    if path.is_absolute() {
+        arg.to_string()
+    } else {
+        cwd.join(path).to_string_lossy().to_string()
+    }
 }
 
 fn discover_dirty_files_from_status(cwd: &std::path::Path) -> Vec<String> {
@@ -1063,14 +1057,8 @@ fn discover_dirty_files_from_status(cwd: &std::path::Path) -> Vec<String> {
             let raw_file = raw_file
                 .split_once(" -> ")
                 .map_or(raw_file, |(_, new_name)| new_name);
-            let unescaped = crate::operations::git::path_format::unescape_git_path(raw_file);
-            let file = unescaped.as_str();
-            let p = std::path::Path::new(file);
-            if p.is_absolute() {
-                Some(file.to_string())
-            } else {
-                Some(repo_root.join(p).to_string_lossy().to_string())
-            }
+            let file = crate::operations::git::path_format::unescape_git_path(raw_file);
+            Some(absolute_path_arg(&repo_root, &file))
         })
         .collect()
 }

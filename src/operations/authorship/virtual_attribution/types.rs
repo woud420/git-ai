@@ -73,15 +73,6 @@ impl VirtualAttributions {
         }
     }
 
-    /// Get both character and line attributions for a file
-    #[allow(dead_code)]
-    pub fn get_attributions(
-        &self,
-        file_path: &str,
-    ) -> Option<&(Vec<Attribution>, Vec<LineAttribution>)> {
-        self.attributions.get(file_path)
-    }
-
     /// Get just character-level attributions for a file
     pub fn get_char_attributions(&self, file_path: &str) -> Option<&Vec<Attribution>> {
         self.attributions

@@ -9,7 +9,7 @@
 use crate::test_utils::raw_git;
 use git_ai::operations::authorship::diff_ai_accepted::diff_ai_accepted_stats;
 use git_ai::operations::authorship::post_commit::estimate_stats_cost_for_head;
-use git_ai::operations::authorship::stats::{get_git_diff_stats, stats_for_commit_stats};
+use git_ai::operations::authorship::stats::stats_for_commit_stats;
 use git_ai::operations::git::find_repository_in_path;
 use std::fs;
 use std::path::Path;
@@ -19,7 +19,6 @@ use tempfile::TempDir;
 
 #[derive(Debug)]
 struct StatsBreakdown {
-    git_numstat: Duration,
     diff_ai_accepted: Duration,
     total_stats: Duration,
 }
@@ -151,10 +150,6 @@ fn benchmark_stats(repo_path: &Path) -> StatsBreakdown {
         .expect("failed to find parent")
         .id();
 
-    let git_numstat_start = Instant::now();
-    let _git_numstat = get_git_diff_stats(&repo, &head_sha, &[]).expect("git numstat failed");
-    let git_numstat = git_numstat_start.elapsed();
-
     let diff_ai_start = Instant::now();
     let _diff_ai = diff_ai_accepted_stats(&repo, &parent_sha, &head_sha, Some(&parent_sha), &[])
         .expect("diff_ai_accepted_stats failed");
@@ -165,7 +160,6 @@ fn benchmark_stats(repo_path: &Path) -> StatsBreakdown {
     let total_stats = total_stats_start.elapsed();
 
     StatsBreakdown {
-        git_numstat,
         diff_ai_accepted,
         total_stats,
     }
@@ -241,10 +235,6 @@ fn benchmark_stats_hunk_density_hotspot() {
 
     println!("\n=== Stats Benchmark: Contiguous Changes ===");
     println!(
-        "git numstat:          {:>8.2}ms",
-        contiguous.git_numstat.as_secs_f64() * 1000.0
-    );
-    println!(
         "diff_ai_accepted:     {:>8.2}ms",
         contiguous.diff_ai_accepted.as_secs_f64() * 1000.0
     );
@@ -254,10 +244,6 @@ fn benchmark_stats_hunk_density_hotspot() {
     );
 
     println!("\n=== Stats Benchmark: Scattered Changes ===");
-    println!(
-        "git numstat:          {:>8.2}ms",
-        scattered.git_numstat.as_secs_f64() * 1000.0
-    );
     println!(
         "diff_ai_accepted:     {:>8.2}ms",
         scattered.diff_ai_accepted.as_secs_f64() * 1000.0

@@ -9,7 +9,6 @@ src/model/authorship_log_serialization.rs	748
 src/model/stream_watermark.rs	629
 src/model/imara_diff_utils.rs	643
 src/operations/authorship/post_commit.rs	905
-src/operations/authorship/stats.rs	636
 src/operations/ci/ci_context.rs	930
 src/operations/commands/daemon.rs	691
 src/operations/commands/debug.rs	1424

@@ -291,12 +291,14 @@ impl ActorDaemonCoordinator {
                 if affects_checked_out_branch {
                     if repo.storage.has_working_log(old) {
                         let author = repo.effective_author_identity().formatted_or_unknown();
-                        crate::operations::authorship::post_commit::post_commit_from_working_log(
+                        crate::operations::authorship::post_commit::post_commit_from_working_log_with_recovery_timestamps(
                             repo,
                             Some(old.to_string()),
                             new.to_string(),
                             author,
                             true,
+                            None,
+                            None,
                         )?;
                     }
                     repo.storage.rename_working_log(old, new)?;

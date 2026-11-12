@@ -6,12 +6,12 @@ use super::core::Repository;
 use super::discovery_no_exec::{
     canonicalize_workdir, no_parent_error, require_dir, worktree_storage_ai_dir,
 };
-use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero, exec_git_stdin};
+use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero};
 use crate::error::GitAiError;
-use crate::operations::git::cat_file::batch_read_blob_contents;
+use crate::operations::git::cat_file::batch_read_blobs_by_name;
 use crate::operations::git::config_access_retry::with_config_access_retry;
 use crate::operations::git::repo_storage::RepoStorage;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Text-dedup constructor for the "Missing --X output from git rev-parse"
@@ -353,59 +353,15 @@ pub(crate) fn batch_read_paths_at_treeishes(
     repo: &Repository,
     requests: &[(String, String)],
 ) -> Result<HashMap<(String, String), String>, GitAiError> {
-    if requests.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "cat-file".to_string(),
-        "--batch-check=%(objectname) %(objecttype)".to_string(),
-    ]);
-
-    let stdin_data = requests
+    let names: Vec<String> = requests
         .iter()
         .map(|(treeish, path)| format!("{treeish}:{path}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-    let output = exec_git_stdin(&args, stdin_data.as_bytes())?;
-    let stdout = String::from_utf8(output.stdout)?;
-    let lines: Vec<&str> = stdout.lines().collect();
-    if lines.len() != requests.len() {
-        return Err(GitAiError::Generic(format!(
-            "git cat-file returned {} records for {} path requests",
-            lines.len(),
-            requests.len()
-        )));
-    }
-
-    let mut request_blob_oids: HashMap<(String, String), String> = HashMap::new();
-    let mut unique_blob_oids = Vec::new();
-    let mut seen_blob_oids = HashSet::new();
-
-    for (request, line) in requests.iter().zip(lines) {
-        let mut parts = line.split_whitespace();
-        let Some(oid) = parts.next() else {
-            continue;
-        };
-        if parts.next() != Some("blob") {
-            continue;
-        }
-        let oid = oid.to_string();
-        request_blob_oids.insert(request.clone(), oid.clone());
-        if seen_blob_oids.insert(oid.clone()) {
-            unique_blob_oids.push(oid);
-        }
-    }
-
-    let blob_contents = batch_read_blob_contents(repo, &unique_blob_oids)?;
-
-    let mut contents = HashMap::new();
-    for (request, blob_oid) in request_blob_oids {
-        if let Some(content) = blob_contents.get(&blob_oid) {
-            contents.insert(request, content.clone());
-        }
-    }
-    Ok(contents)
+        .collect();
+    let blobs = batch_read_blobs_by_name(repo, &names)?;
+    Ok(requests
+        .iter()
+        .cloned()
+        .zip(blobs)
+        .filter_map(|(request, blob)| Some((request, blob?)))
+        .collect())
 }

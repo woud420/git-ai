@@ -299,43 +299,24 @@ pub fn stats_for_commit_stats_with_authorship(
     let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
     let parent_count = commit_obj.parent_count()?;
 
-    if parent_count > 1 {
-        return stats_for_commit_stats_from_hunks(
-            repo,
-            commit_sha,
-            ignore_patterns,
-            &[],
-            authorship_log,
-        );
-    }
-
-    let parent_sha = if parent_count == 0 {
-        None
+    let is_merge_commit = parent_count > 1;
+    let hunks = if is_merge_commit {
+        Vec::new()
     } else {
-        Some(commit_obj.parent(0)?.id())
+        let from_ref = if parent_count == 0 {
+            empty_tree_for(commit_sha).to_string()
+        } else {
+            commit_obj.parent(0)?.id()
+        };
+        crate::operations::commands::diff::get_diff_with_line_numbers(repo, &from_ref, commit_sha)?
     };
 
-    stats_for_commit_stats_with_parent_and_authorship(
-        repo,
-        commit_sha,
-        parent_sha.as_deref(),
+    Ok(stats_for_commit_stats_from_hunks_with_merge_flag(
         ignore_patterns,
+        &hunks,
         authorship_log,
-    )
-}
-
-pub fn stats_for_commit_stats_with_parent_and_authorship(
-    repo: &Repository,
-    commit_sha: &str,
-    parent_sha: Option<&str>,
-    ignore_patterns: &[String],
-    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
-) -> Result<CommitStats, GitAiError> {
-    use crate::operations::commands::diff::get_diff_with_line_numbers;
-
-    let from_ref = parent_sha.unwrap_or_else(|| empty_tree_for(commit_sha));
-    let hunks = get_diff_with_line_numbers(repo, from_ref, commit_sha)?;
-    stats_for_commit_stats_from_hunks(repo, commit_sha, ignore_patterns, &hunks, authorship_log)
+        is_merge_commit,
+    ))
 }
 
 #[doc(hidden)]
@@ -423,27 +404,8 @@ pub fn line_range_overlap_len(range: &LineRange, added_lines: &[u32]) -> u32 {
     }
 }
 
-/// Like `stats_for_commit_stats` but accepts pre-computed diff hunks and authorship log,
-/// avoiding redundant git subprocess calls in the post-commit hook path.
-pub fn stats_for_commit_stats_from_hunks(
-    repo: &Repository,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-    hunks: &[crate::operations::commands::diff::DiffHunk],
-    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
-) -> Result<CommitStats, GitAiError> {
-    let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
-    let parent_count = commit_obj.parent_count()?;
-    let is_merge_commit = parent_count > 1;
-
-    Ok(stats_for_commit_stats_from_hunks_with_merge_flag(
-        ignore_patterns,
-        hunks,
-        authorship_log,
-        is_merge_commit,
-    ))
-}
-
+/// Stats from pre-computed diff hunks and authorship log; the caller already
+/// knows whether the commit is a merge, so no git subprocess runs here.
 pub(crate) fn stats_for_commit_stats_from_hunks_with_merge_flag(
     ignore_patterns: &[String],
     hunks: &[crate::operations::commands::diff::DiffHunk],

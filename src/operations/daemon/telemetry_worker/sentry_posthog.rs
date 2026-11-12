@@ -3,6 +3,7 @@
 use super::buffer::{ErrorEvent, MessageEvent, PerformanceEvent};
 use crate::config::Config;
 use serde_json::{Value, json};
+use std::cell::Cell;
 use std::collections::BTreeMap;
 
 /// Flush buffered Sentry/PostHog events (errors, performance, messages).
@@ -43,6 +44,9 @@ pub(super) fn flush_sentry_and_posthog(
             .or_else(|| option_env!("POSTHOG_API_KEY").map(|s| s.to_string()))
             .filter(|s| !s.is_empty())
     };
+    let posthog = posthog_api_key.map(|key| (key, crate::clients::http::build_agent(Some(30))));
+    // After the first failed send, the rest of this flush skips PostHog.
+    let mut posthog_failed = false;
 
     let posthog_host = std::env::var("POSTHOG_HOST")
         .ok()
@@ -82,10 +86,10 @@ pub(super) fn flush_sentry_and_posthog(
         });
 
         if let Some(client) = &oss_client {
-            let _ = client.send_event(event.clone());
+            client.send_event(event.clone());
         }
         if let Some(client) = &enterprise_client {
-            let _ = client.send_event(event);
+            client.send_event(event);
         }
     }
 
@@ -120,10 +124,10 @@ pub(super) fn flush_sentry_and_posthog(
         });
 
         if let Some(client) = &oss_client {
-            let _ = client.send_event(event.clone());
+            client.send_event(event.clone());
         }
         if let Some(client) = &enterprise_client {
-            let _ = client.send_event(event);
+            client.send_event(event);
         }
     }
 
@@ -149,14 +153,16 @@ pub(super) fn flush_sentry_and_posthog(
         });
 
         if let Some(client) = &oss_client {
-            let _ = client.send_event(sentry_event.clone());
+            client.send_event(sentry_event.clone());
         }
         if let Some(client) = &enterprise_client {
-            let _ = client.send_event(sentry_event);
+            client.send_event(sentry_event);
         }
 
         // PostHog only gets messages
-        if let Some(api_key) = &posthog_api_key {
+        if let Some((api_key, agent)) = &posthog
+            && !posthog_failed
+        {
             let mut properties = BTreeMap::new();
             properties.insert("os".to_string(), json!(std::env::consts::OS));
             properties.insert("arch".to_string(), json!(std::env::consts::ARCH));
@@ -180,22 +186,25 @@ pub(super) fn flush_sentry_and_posthog(
             });
             ph_event["timestamp"] = json!(msg.timestamp);
 
-            let agent = crate::clients::http::build_agent(Some(30));
             let request = agent
                 .post(&endpoint)
                 .header("Content-Type", "application/json");
-            let _ = crate::clients::http::send_with_body(
+            posthog_failed = crate::clients::http::send_with_body(
                 request,
                 &serde_json::to_string(&ph_event).unwrap_or_default(),
-            );
+            )
+            .is_err();
         }
     }
 }
 
-/// Minimal Sentry client for sending events to a Sentry DSN.
+/// Minimal Sentry client for sending events to a Sentry DSN, built once per flush.
 struct SentryClient {
     endpoint: String,
     public_key: String,
+    agent: ureq::Agent,
+    /// Set by the first failed send; the rest of this flush skips the endpoint.
+    failed: Cell<bool>,
 }
 
 impl SentryClient {
@@ -217,30 +226,30 @@ impl SentryClient {
         Some(SentryClient {
             endpoint,
             public_key,
+            agent: crate::clients::http::build_agent(Some(30)),
+            failed: Cell::new(false),
         })
     }
 
-    fn send_event(&self, event: Value) -> Result<(), Box<dyn std::error::Error>> {
+    fn send_event(&self, event: Value) {
+        if self.failed.get() {
+            return;
+        }
         let auth_header = format!(
             "Sentry sentry_version=7, sentry_key={}, sentry_client=git-ai/{}",
             self.public_key,
             env!("CARGO_PKG_VERSION")
         );
 
-        let body = serde_json::to_string(&event)?;
-        let agent = crate::clients::http::build_agent(Some(30));
-        let request = agent
+        let request = self
+            .agent
             .post(&self.endpoint)
             .header("X-Sentry-Auth", &auth_header)
             .header("Content-Type", "application/json");
-        let response = crate::clients::http::send_with_body(request, &body)?;
-
-        let status = response.status_code;
-        if (200..300).contains(&status) {
-            Ok(())
-        } else {
-            Err(format!("Sentry returned status {}", status).into())
-        }
+        let body = serde_json::to_string(&event).unwrap_or_default();
+        let sent = crate::clients::http::send_with_body(request, &body)
+            .is_ok_and(|response| (200..300).contains(&response.status_code));
+        self.failed.set(!sent);
     }
 }
 
@@ -259,5 +268,28 @@ mod tests {
             endpoint("https://key@sentry.corp:9000/sentry/7"),
             "https://sentry.corp:9000/sentry/api/7/store/"
         );
+    }
+
+    #[test]
+    fn send_event_skips_the_endpoint_after_its_first_failure() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connections = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = connections.clone();
+        // Accept and drop every connection: each request that reaches it fails.
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                counter.fetch_add(1, Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+
+        let client = SentryClient::from_dsn(&format!("http://key@127.0.0.1:{port}/1")).unwrap();
+        client.send_event(serde_json::json!({"message": "first"}));
+        client.send_event(serde_json::json!({"message": "second"}));
+
+        assert!(client.failed.get());
+        assert_eq!(connections.load(Ordering::SeqCst), 1);
     }
 }

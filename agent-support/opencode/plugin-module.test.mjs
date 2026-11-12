@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import childProcess from "node:child_process"
 import { EventEmitter } from "node:events"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -454,4 +454,44 @@ test("disposal closes lifecycle subscription without reopening it for remaining 
   assert.equal(signals[0].aborted, true)
   await hooks["execute.after"]({ ...call, status: "completed" })
   assert.equal(checkpoints.length, 2)
+})
+
+for (const scenario of ["subdirectory", "worktree"]) {
+  test(`V2 resolves relative edits from the active ${scenario}`, async (t) => {
+    const project = await makeRepoDir(t)
+    const directory = join(project, scenario)
+    await mkdir(directory)
+    if (scenario === "worktree") {
+      await writeFile(join(directory, ".git"), `gitdir: ${join(project, ".git")}\n`)
+    }
+    const checkpoints = []
+    mockCheckpointSpawn(t, checkpoints)
+    const hooks = {}
+    await plugin.default.setup({
+      location: { directory, project: { directory: project } },
+      tool: { hook: async (name, callback) => { hooks[name] = callback } },
+    })
+    const event = { tool: "edit", id: "edit-1", sessionID: "session-1", input: { path: "edit.ts" } }
+    await hooks["execute.before"](event)
+    await hooks["execute.after"]({ ...event, status: "completed", result: { metadata: {} } })
+    assert.equal(checkpoints.length, 2)
+    assert.ok(checkpoints.every((checkpoint) => checkpoint.cwd === directory))
+  })
+}
+
+test("V2 keeps the edited repository when the active directory is elsewhere", async (t) => {
+  const directory = await makeRepoDir(t)
+  const editedRepo = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints)
+  const hooks = {}
+  await plugin.default.setup({
+    location: { directory, project: { directory } },
+    tool: { hook: async (name, callback) => { hooks[name] = callback } },
+  })
+  const event = { tool: "edit", id: "edit-1", sessionID: "session-1", input: { path: join(editedRepo, "edit.ts") } }
+  await hooks["execute.before"](event)
+  await hooks["execute.after"]({ ...event, status: "completed", result: { metadata: {} } })
+  assert.equal(checkpoints.length, 2)
+  assert.ok(checkpoints.every((checkpoint) => checkpoint.cwd === editedRepo))
 })

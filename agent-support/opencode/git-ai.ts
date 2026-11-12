@@ -478,10 +478,12 @@ const createGitAiCheckpoints = (defaultCwd: string, onPendingChange: (active: bo
     try {
       const repoDir = await resolveRepoDir(call.filePaths, call.toolCwd)
       if (!repoDir || call.cancelled) return
-      call.repoDir = repoDir
+      const checkpointCwd = await findGitRepo(call.toolCwd) === repoDir ? call.toolCwd : repoDir
+      if (call.cancelled) return
+      call.repoDir = checkpointCwd
       await runCheckpoint(JSON.stringify({
         hook_event_name: "PreToolUse", session_id: call.sessionID, tool_use_id: call.callID,
-        cwd: repoDir, tool_name: call.toolName, tool_input: call.toolInput,
+        cwd: checkpointCwd, tool_name: call.toolName, tool_input: call.toolInput,
       }), call.controller.signal)
       if (!call.cancelled) call.phase = "ready"
     } finally {
@@ -577,7 +579,7 @@ export const GitAiPlugin = Plugin.define({
   async setup(ctx) {
     try {
       const defaultCwd =
-        ctx.location?.project?.directory ?? ctx.location?.directory ?? process.cwd()
+        ctx.location?.directory ?? ctx.location?.project?.directory ?? process.cwd()
       let controller: AbortController | undefined
       const { before, after, terminal, dispose } = createGitAiCheckpoints(defaultCwd, (active) => {
         if (!active) {

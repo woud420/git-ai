@@ -68,9 +68,6 @@ const EMBEDDED_SKILLS: &[EmbeddedSkill] = &[
 pub struct SkillsInstallResult {
     /// Whether any changes were made
     pub changed: bool,
-    /// Number of skills installed
-    #[allow(dead_code)]
-    pub installed_count: usize,
 }
 
 /// Get the ~/.agents/skills directory path
@@ -217,10 +214,7 @@ fn install(
     let skills_base = &paths.source;
 
     if dry_run {
-        return Ok(SkillsInstallResult {
-            changed: true,
-            installed_count: EMBEDDED_SKILLS.len(),
-        });
+        return Ok(SkillsInstallResult { changed: true });
     }
 
     // Nuke the skills directory if it exists
@@ -263,10 +257,7 @@ fn install(
         }
     }
 
-    Ok(SkillsInstallResult {
-        changed: true,
-        installed_count: EMBEDDED_SKILLS.len(),
-    })
+    Ok(SkillsInstallResult { changed: true })
 }
 
 /// Uninstall all skills by removing ~/.git-ai/skills/ and linked skill directories
@@ -278,17 +269,11 @@ fn uninstall(paths: &SkillsPaths, dry_run: bool) -> Result<SkillsInstallResult, 
     let skills_base = &paths.source;
 
     if !skills_base.exists() {
-        return Ok(SkillsInstallResult {
-            changed: false,
-            installed_count: 0,
-        });
+        return Ok(SkillsInstallResult { changed: false });
     }
 
     if dry_run {
-        return Ok(SkillsInstallResult {
-            changed: true,
-            installed_count: EMBEDDED_SKILLS.len(),
-        });
+        return Ok(SkillsInstallResult { changed: true });
     }
 
     // Remove linked skill directories first
@@ -307,10 +292,7 @@ fn uninstall(paths: &SkillsPaths, dry_run: bool) -> Result<SkillsInstallResult, 
     // Nuke the entire skills directory
     fs::remove_dir_all(skills_base)?;
 
-    Ok(SkillsInstallResult {
-        changed: true,
-        installed_count: EMBEDDED_SKILLS.len(),
-    })
+    Ok(SkillsInstallResult { changed: true })
 }
 
 #[cfg(test)]
@@ -529,7 +511,6 @@ mod tests {
 
         let dry_result = install(&paths, true, &all_tools).unwrap();
         assert!(dry_result.changed);
-        assert_eq!(dry_result.installed_count, EMBEDDED_SKILLS.len());
         for root in [
             &paths.source,
             paths.agents.as_ref().unwrap(),
@@ -545,7 +526,6 @@ mod tests {
 
         let result = install(&paths, false, &all_tools).unwrap();
         assert!(result.changed);
-        assert_eq!(result.installed_count, EMBEDDED_SKILLS.len());
         assert_installed();
 
         let first_skill = &EMBEDDED_SKILLS[0];
@@ -560,7 +540,6 @@ mod tests {
 
         let repeated_result = install(&paths, false, &all_tools).unwrap();
         assert!(repeated_result.changed);
-        assert_eq!(repeated_result.installed_count, EMBEDDED_SKILLS.len());
         assert_installed();
 
         let uninstall_result = uninstall(&paths, false).unwrap();
@@ -583,6 +562,5 @@ mod tests {
 
         let noop_result = uninstall(&paths, false).unwrap();
         assert!(!noop_result.changed);
-        assert_eq!(noop_result.installed_count, 0);
     }
 }

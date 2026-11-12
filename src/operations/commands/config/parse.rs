@@ -133,14 +133,9 @@ pub(super) fn parse_bool(value: &str) -> Result<bool, String> {
     }
 }
 
-pub(super) fn parse_value(value: &str) -> Result<Value, String> {
-    // Try to parse as JSON first
-    if let Ok(json_value) = serde_json::from_str::<Value>(value) {
-        return Ok(json_value);
-    }
-
-    // Otherwise treat as string
-    Ok(Value::String(value.to_string()))
+/// A value parsed as JSON, or else taken as a plain string.
+pub(super) fn parse_value(value: &str) -> Value {
+    serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
 }
 
 pub(super) fn parse_author_config_object(value: &str) -> Result<AuthorConfig, String> {

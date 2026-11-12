@@ -1,5 +1,6 @@
 use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
+use crate::operations::commands::whoami::format_org;
 use crate::operations::daemon::attribution_self_check::run_attribution_self_check;
 use crate::operations::daemon::self_check::{
     DiagnosticCheckResult, DiagnosticStatus, GitDiagnosticTarget,
@@ -375,16 +376,8 @@ fn build_debug_report(options: DebugOptions) -> String {
     }
     if !auth_info.orgs.is_empty() {
         let _ = writeln!(out, "Organizations:");
-        for org in auth_info.orgs {
-            let org_id = org.org_id.unwrap_or_else(|| "<unknown-id>".to_string());
-            let org_slug = org.org_slug.unwrap_or_else(|| "<unknown-slug>".to_string());
-            let org_name = org.org_name.unwrap_or_else(|| "<unknown-name>".to_string());
-            let role = org.role.unwrap_or_else(|| "<unknown-role>".to_string());
-            let _ = writeln!(
-                out,
-                "  - {} ({}) [{}] role={}",
-                org_slug, org_name, org_id, role
-            );
+        for org in &auth_info.orgs {
+            let _ = writeln!(out, "  - {}", format_org(org));
         }
     }
     let _ = writeln!(out);

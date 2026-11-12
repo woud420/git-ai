@@ -6,7 +6,6 @@ use super::super::{
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::working_log::AgentId;
-use crate::operations::commands::checkpoint_agent::bash_tool::ToolClass;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -183,8 +182,7 @@ pub(super) fn parse_vscode_native_hooks(
         )));
     }
 
-    let tool_class = classify_copilot_tool(tool_name);
-    let is_bash = tool_class == ToolClass::Bash;
+    let is_bash = tool_name.eq_ignore_ascii_case("run_in_terminal");
     let bash_command = parse::bash_command_from_hook_input(data);
 
     let tool_use_id = parse::optional_str_multi(data, &["tool_use_id", "toolUseId"])
@@ -365,25 +363,6 @@ fn is_supported_vscode_edit_tool_name(tool_name: &str) -> bool {
     }
 
     lower.contains("edit") || lower.contains("write") || lower.contains("replace")
-}
-
-/// Classify GitHub Copilot tool for bash vs file edit handling.
-/// GithubCopilot is not in the `Agent` enum, so we implement classification locally.
-fn classify_copilot_tool(tool_name: &str) -> ToolClass {
-    let lower = tool_name.to_ascii_lowercase();
-    match lower.as_str() {
-        "run_in_terminal" => ToolClass::Bash,
-        "create_file"
-        | "replace_string_in_file"
-        | "apply_patch"
-        | "delete_file"
-        | "rename_file"
-        | "move_file" => ToolClass::FileEdit,
-        _ if lower.contains("edit") || lower.contains("write") || lower.contains("replace") => {
-            ToolClass::FileEdit
-        }
-        _ => ToolClass::Skip,
-    }
 }
 
 #[cfg(test)]

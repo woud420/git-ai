@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::config::Config;
-use crate::error::GitAiError;
 use crate::metrics::{EventAttributes, MetricEvent, PosEncoded, RewriteCommittedValues};
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::authorship::ignore::effective_ignore_patterns;
@@ -99,22 +98,12 @@ fn build_rewrite_metric_events(
     hydrate_missing_parent_diffs(repo, &mut metric_commits);
     let batch_context = RewriteMetricBatchContext::new(repo);
 
-    let mut events = Vec::new();
-    for metric_commit in &metric_commits {
-        match build_rewrite_committed_metric_event(metric_commit, &batch_context) {
-            Ok(Some(event)) => events.push(event),
-            Ok(None) => {}
-            Err(err) => {
-                tracing::debug!(
-                    %err,
-                    commit_sha = %metric_commit.new_sha,
-                    operation_kind = metric_commit.operation.as_str(),
-                    "skipping rewrite committed metric"
-                );
-            }
-        }
-    }
-    events
+    metric_commits
+        .iter()
+        .filter_map(|metric_commit| {
+            build_rewrite_committed_metric_event(metric_commit, &batch_context)
+        })
+        .collect()
 }
 
 fn hydrate_missing_parent_shas(repo: &Repository, metric_commits: &mut [RewriteMetricCommit]) {
@@ -251,22 +240,14 @@ fn hydrate_missing_parent_diffs(repo: &Repository, metric_commits: &mut [Rewrite
 fn build_rewrite_committed_metric_event(
     metric_commit: &RewriteMetricCommit,
     batch_context: &RewriteMetricBatchContext,
-) -> Result<Option<MetricEvent>, GitAiError> {
-    let Some(raw_note) = metric_commit.authorship_note.as_ref() else {
-        return Ok(None);
-    };
-    let authorship_log = match AuthorshipLog::deserialize_from_string(raw_note) {
-        Ok(log) => log,
-        Err(_) => return Ok(None),
-    };
-
-    let Some(parent_diff) = metric_commit.parent_diff.as_ref() else {
-        return Ok(None);
-    };
+) -> Option<MetricEvent> {
+    let raw_note = metric_commit.authorship_note.as_ref()?;
+    let authorship_log = AuthorshipLog::deserialize_from_string(raw_note).ok()?;
+    let parent_diff = metric_commit.parent_diff.as_ref()?;
 
     let diff_hunks = diff_hunks_from_diff_tree_result(parent_diff);
     if should_skip_rewrite_metric_stats(&diff_hunks, &batch_context.ignore_patterns) {
-        return Ok(None);
+        return None;
     }
     let stats =
         crate::operations::authorship::stats::stats_for_commit_stats_from_hunks_with_merge_flag(
@@ -275,9 +256,7 @@ fn build_rewrite_committed_metric_event(
             Some(&authorship_log),
             false,
         );
-    let Some(breakdown) = metric_tool_model_breakdown(&stats) else {
-        return Ok(None);
-    };
+    let breakdown = metric_tool_model_breakdown(&stats)?;
 
     let mut values = RewriteCommittedValues::new()
         .human_additions(stats.human_additions)
@@ -294,7 +273,7 @@ fn build_rewrite_committed_metric_event(
 
     let attrs = rewrite_metric_attrs(metric_commit, batch_context);
 
-    Ok(Some(MetricEvent::from_values(values, attrs.to_sparse())))
+    Some(MetricEvent::from_values(values, attrs.to_sparse()))
 }
 
 fn diff_hunks_from_diff_tree_result(

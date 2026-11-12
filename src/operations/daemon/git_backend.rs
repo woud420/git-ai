@@ -136,7 +136,7 @@ impl SystemGitBackend {
         // If the sync refresh fails (e.g. repo discovery error), the cache won't
         // contain the family key. Fall back to uncached resolution which correctly
         // propagates errors.
-        self.refresh_alias_cache_sync(worktree, &family_key)?;
+        refresh_alias_cache(worktree, &family_key, &self.alias_cache);
         let cache = self
             .alias_cache
             .lock()
@@ -151,16 +151,6 @@ impl SystemGitBackend {
                 self.resolve_alias_uncached(worktree, alias_name)
             }
         }
-    }
-
-    /// Synchronously load all aliases for a family into the cache.
-    fn refresh_alias_cache_sync(
-        &self,
-        worktree: &Path,
-        family_key: &str,
-    ) -> Result<(), GitAiError> {
-        refresh_alias_cache(worktree, family_key, &self.alias_cache);
-        Ok(())
     }
 
     /// Fallback when we can't determine a family key for caching.

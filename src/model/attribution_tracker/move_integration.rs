@@ -6,7 +6,6 @@
 //! byte-range `MoveMapping` entries consumed by `transform_attributions`.
 
 use crate::model::move_detection::{DeletedLine, InsertedLine, detect_moves};
-use std::collections::HashMap;
 
 use super::diff_engine::{MOVE_DETECTION_MAX_OPS, MOVE_DETECTION_MIN_FILE_BYTES};
 use super::tokenizer::{LineMetadata, collect_line_metadata};
@@ -67,32 +66,17 @@ impl AttributionTracker {
         let old_lines = collect_line_metadata(old_content);
         let new_lines = collect_line_metadata(new_content);
 
-        let old_line_map: HashMap<usize, LineMetadata> = old_lines
-            .iter()
-            .cloned()
-            .map(|line| (line.number, line))
-            .collect();
-        let new_line_map: HashMap<usize, LineMetadata> = new_lines
-            .iter()
-            .cloned()
-            .map(|line| (line.number, line))
-            .collect();
-
         let mut inserted_lines: Vec<InsertedLine> = Vec::new();
         for (insertion_idx, insertion) in insertions.iter().enumerate() {
-            for line in new_lines.iter() {
-                if line.start < insertion.end && line.end > insertion.start {
-                    inserted_lines.push(InsertedLine::new(line.text, line.number, insertion_idx));
-                }
+            for line in overlapping_lines(&new_lines, insertion.start, insertion.end) {
+                inserted_lines.push(InsertedLine::new(line.text, line.number, insertion_idx));
             }
         }
 
         let mut deleted_lines: Vec<DeletedLine> = Vec::new();
         for (deletion_idx, deletion) in deletions.iter().enumerate() {
-            for line in old_lines.iter() {
-                if line.start < deletion.end && line.end > deletion.start {
-                    deleted_lines.push(DeletedLine::new(line.text, line.number, deletion_idx));
-                }
+            for line in overlapping_lines(&old_lines, deletion.start, deletion.end) {
+                deleted_lines.push(DeletedLine::new(line.text, line.number, deletion_idx));
             }
         }
 
@@ -100,13 +84,7 @@ impl AttributionTracker {
             return Vec::new();
         }
 
-        let mut inserted_lines_slice = inserted_lines;
-        let mut deleted_lines_slice = deleted_lines;
-        let line_mappings = detect_moves(
-            inserted_lines_slice.as_mut_slice(),
-            deleted_lines_slice.as_mut_slice(),
-            threshold,
-        );
+        let line_mappings = detect_moves(&mut inserted_lines, &mut deleted_lines, threshold);
 
         let mut move_mappings: Vec<MoveMapping> = Vec::new();
 
@@ -151,9 +129,10 @@ impl AttributionTracker {
             for (deleted_line, inserted_line) in
                 line_mapping.deleted.iter().zip(&line_mapping.inserted)
             {
+                // Line numbers are 1-based indexes into the line lists.
                 let (Some(old_line), Some(new_line)) = (
-                    old_line_map.get(&deleted_line.line_number),
-                    new_line_map.get(&inserted_line.line_number),
+                    old_lines.get(deleted_line.line_number - 1),
+                    new_lines.get(inserted_line.line_number - 1),
                 ) else {
                     continue;
                 };
@@ -220,6 +199,18 @@ impl AttributionTracker {
 
         move_mappings
     }
+}
+
+/// The lines overlapping `start..end`; `lines` are in content order.
+fn overlapping_lines<'l, 'a>(
+    lines: &'l [LineMetadata<'a>],
+    start: usize,
+    end: usize,
+) -> impl Iterator<Item = &'l LineMetadata<'a>> {
+    let first = lines.partition_point(|line| line.end <= start);
+    lines[first..]
+        .iter()
+        .take_while(move |line| line.start < end)
 }
 
 /// Byte offset in the content where the line's trimmed text starts.

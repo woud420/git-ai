@@ -1,5 +1,6 @@
 use crate::error::GitAiError;
 use crate::model::authorship_log::{LineRange, metadata_key};
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -79,7 +80,18 @@ pub fn stats_command(
     Ok(())
 }
 
+/// Print the stats bar when stdout is interactive; returns what it rendered.
 pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> String {
+    let output = stats_terminal_output(stats, is_interactive);
+    if is_interactive {
+        print!("{output}");
+    }
+    output
+}
+
+/// The stats bar and its percentage line. `is_interactive` only selects the
+/// terminal hyperlink on the untracked label.
+pub fn stats_terminal_output(stats: &CommitStats, is_interactive: bool) -> String {
     let mut output = String::new();
 
     // Set maximum bar width to 40 characters
@@ -97,17 +109,11 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
 
         output.push_str(&progress_bar);
         output.push('\n');
-        if is_interactive {
-            println!("{}", progress_bar);
-        }
 
         // Show "(no additions)" message below the bar
         let no_additions_msg = format!("     \x1b[90m{:^40}\x1b[0m", "(no additions)");
         output.push_str(&no_additions_msg);
         output.push('\n');
-        if is_interactive {
-            println!("{}", no_additions_msg);
-        }
         // No percentage line or AI stats for deletion-only commits
         return output;
     }
@@ -178,9 +184,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
     // Print the stats
     output.push_str(&progress_bar);
     output.push('\n');
-    if is_interactive {
-        println!("{}", progress_bar);
-    }
 
     // Percentage line: three anchors (human / untracked / AI) when untracked is visible,
     // two anchors (human / AI) otherwise.
@@ -207,9 +210,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
         );
         output.push_str(&percentage_line);
         output.push('\n');
-        if is_interactive {
-            println!("{}", percentage_line);
-        }
     } else {
         let percentage_line = format!(
             "     {:<3}{:>33}{:>3}%",
@@ -219,9 +219,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
         );
         output.push_str(&percentage_line);
         output.push('\n');
-        if is_interactive {
-            println!("{}", percentage_line);
-        }
     }
 
     output
@@ -298,43 +295,24 @@ pub fn stats_for_commit_stats_with_authorship(
     let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
     let parent_count = commit_obj.parent_count()?;
 
-    if parent_count > 1 {
-        return stats_for_commit_stats_from_hunks(
-            repo,
-            commit_sha,
-            ignore_patterns,
-            &[],
-            authorship_log,
-        );
-    }
-
-    let parent_sha = if parent_count == 0 {
-        None
+    let is_merge_commit = parent_count > 1;
+    let hunks = if is_merge_commit {
+        Vec::new()
     } else {
-        Some(commit_obj.parent(0)?.id())
+        let from_ref = if parent_count == 0 {
+            empty_tree_for(commit_sha).to_string()
+        } else {
+            commit_obj.parent(0)?.id()
+        };
+        crate::operations::commands::diff::get_diff_with_line_numbers(repo, &from_ref, commit_sha)?
     };
 
-    stats_for_commit_stats_with_parent_and_authorship(
-        repo,
-        commit_sha,
-        parent_sha.as_deref(),
+    Ok(stats_for_commit_stats_from_hunks_with_merge_flag(
         ignore_patterns,
+        &hunks,
         authorship_log,
-    )
-}
-
-pub fn stats_for_commit_stats_with_parent_and_authorship(
-    repo: &Repository,
-    commit_sha: &str,
-    parent_sha: Option<&str>,
-    ignore_patterns: &[String],
-    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
-) -> Result<CommitStats, GitAiError> {
-    use crate::operations::commands::diff::get_diff_with_line_numbers;
-
-    let from_ref = parent_sha.unwrap_or("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
-    let hunks = get_diff_with_line_numbers(repo, from_ref, commit_sha)?;
-    stats_for_commit_stats_from_hunks(repo, commit_sha, ignore_patterns, &hunks, authorship_log)
+        is_merge_commit,
+    ))
 }
 
 #[doc(hidden)]
@@ -422,27 +400,8 @@ pub fn line_range_overlap_len(range: &LineRange, added_lines: &[u32]) -> u32 {
     }
 }
 
-/// Like `stats_for_commit_stats` but accepts pre-computed diff hunks and authorship log,
-/// avoiding redundant git subprocess calls in the post-commit hook path.
-pub fn stats_for_commit_stats_from_hunks(
-    repo: &Repository,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-    hunks: &[crate::operations::commands::diff::DiffHunk],
-    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
-) -> Result<CommitStats, GitAiError> {
-    let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
-    let parent_count = commit_obj.parent_count()?;
-    let is_merge_commit = parent_count > 1;
-
-    Ok(stats_for_commit_stats_from_hunks_with_merge_flag(
-        ignore_patterns,
-        hunks,
-        authorship_log,
-        is_merge_commit,
-    ))
-}
-
+/// Stats from pre-computed diff hunks and authorship log; the caller already
+/// knows whether the commit is a merge, so no git subprocess runs here.
 pub(crate) fn stats_for_commit_stats_from_hunks_with_merge_flag(
     ignore_patterns: &[String],
     hunks: &[crate::operations::commands::diff::DiffHunk],

@@ -160,9 +160,7 @@ fn rewrite_metric_event_uses_supplied_note_and_parent_diff() {
         .with_parent_diff(parent_diff);
 
     let batch_context = RewriteMetricBatchContext::new(tmp.gitai_repo());
-    let event = build_rewrite_committed_metric_event(&commit, &batch_context)
-        .expect("metric build")
-        .expect("event");
+    let event = build_rewrite_committed_metric_event(&commit, &batch_context).expect("event");
 
     assert_eq!(
         event

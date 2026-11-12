@@ -171,7 +171,7 @@ pub fn build_json_hunks(
             line_details,
             line_contents,
             commits,
-        )?);
+        ));
         hunks.extend(build_json_hunk_segments(
             diff_hunk,
             LineSide::Old,
@@ -180,7 +180,7 @@ pub fn build_json_hunks(
             line_details,
             line_contents,
             commits,
-        )?);
+        ));
     }
     load_commit_metadata(repo, commits);
 
@@ -195,13 +195,13 @@ fn build_json_hunk_segments(
     line_details: &HashMap<DiffLineKey, LineAttributionDetail>,
     line_contents: &HashMap<DiffLineKey, String>,
     commits: &mut BTreeMap<String, DiffCommitMetadata>,
-) -> Result<Vec<DiffJsonHunk>, GitAiError> {
+) -> Vec<DiffJsonHunk> {
     let lines = match side {
         LineSide::Old => &diff_hunk.deleted_lines,
         LineSide::New => &diff_hunk.added_lines,
     };
     if lines.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
     let mut segments: Vec<DiffJsonHunk> = Vec::new();
@@ -322,7 +322,7 @@ fn build_json_hunk_segments(
         &mut current_contents,
     );
 
-    Ok(segments)
+    segments
 }
 
 fn hash_hunk_content(lines: &[String]) -> String {

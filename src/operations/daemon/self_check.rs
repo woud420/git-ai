@@ -9,7 +9,6 @@
 
 use crate::process_spawn::format_posix_shell_command as format_command;
 use crate::process_timeout::run_command_with_timeout;
-use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -472,7 +471,7 @@ fn daemon_binary_is_stale(
 fn read_daemon_started_at_ns(
     config: &crate::operations::daemon::DaemonConfig,
 ) -> Result<Option<u128>, String> {
-    let pid_path = config.internal_dir.join("daemon").join("daemon.pid.json");
+    let pid_path = super::pid_metadata_path(config);
     let contents = match fs::read_to_string(&pid_path) {
         Ok(contents) => contents,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -484,11 +483,8 @@ fn read_daemon_started_at_ns(
             ));
         }
     };
-    let value: Value = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
-    Ok(value
-        .get("started_at_ns")
-        .and_then(Value::as_u64)
-        .map(u128::from))
+    let meta: super::DaemonPidMeta = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+    Ok(Some(meta.started_at_ns))
 }
 
 fn current_binary_modified_ns() -> Result<u128, String> {
@@ -538,6 +534,25 @@ pub(crate) fn format_status(status: Option<i32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn daemon_start_time_is_read_from_the_configured_pid_metadata_path() {
+        let internal = tempfile::tempdir().unwrap();
+        let short_socket_dir = tempfile::tempdir().unwrap();
+        let config = crate::operations::daemon::DaemonConfig {
+            internal_dir: internal.path().to_path_buf(),
+            lock_path: short_socket_dir.path().join("daemon.lock"),
+            trace_socket_path: short_socket_dir.path().join("trace.sock"),
+            control_socket_path: short_socket_dir.path().join("control.sock"),
+        };
+        fs::write(
+            short_socket_dir.path().join("daemon.pid.json"),
+            r#"{"pid":1,"started_at_ns":42}"#,
+        )
+        .unwrap();
+
+        assert_eq!(read_daemon_started_at_ns(&config), Ok(Some(42)));
+    }
 
     #[test]
     fn format_command_preserves_posix_shell_words() {

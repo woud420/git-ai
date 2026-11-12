@@ -225,7 +225,7 @@ pub fn execute_resolved_checkpoint_from_daemon(
         let checkpoint_create_start = Instant::now();
         let mut checkpoint = Checkpoint::new(kind, combined_hash, author.to_string(), entries);
         checkpoint.timestamp = (resolved.ts / 1000) as u64;
-        checkpoint.line_stats = compute_line_stats(&file_stats)?;
+        checkpoint.line_stats = compute_line_stats(&file_stats);
         checkpoint.trace_id = Some(trace_id);
         checkpoint.delivery_id = checkpoint_request.delivery_id.clone();
 
@@ -339,21 +339,14 @@ fn save_current_file_states(
     let files = files.to_vec();
 
     let file_content_hashes = crate::tokio_runtime::block_on(async {
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
         let blobs_dir = Arc::new(blobs_dir);
 
         let mut futures = Vec::with_capacity(files.len());
         for file_path in files {
             let blobs_dir = Arc::clone(&blobs_dir);
             let dirty_files = dirty_files.clone();
-            let semaphore = Arc::clone(&semaphore);
 
             futures.push(async move {
-                let _permit = semaphore
-                    .acquire_owned()
-                    .await
-                    .expect("file state semaphore was closed");
-
                 let content = if let Some(ref dirty_map) = dirty_files {
                     dirty_map.get(&file_path).cloned()
                 } else {
@@ -379,7 +372,7 @@ fn save_current_file_states(
             });
         }
 
-        // Collect results from all concurrent operations
+        // At most 8 file writes run at once.
         let results: Vec<Result<(String, String), GitAiError>> =
             stream::iter(futures).buffer_unordered(8).collect().await;
 
@@ -978,7 +971,7 @@ pub fn compute_file_line_stats(previous_content: &str, current_content: &str) ->
 /// This avoids redundant diff computation since stats are already computed during entry creation
 fn compute_line_stats(
     file_stats: &[FileLineStats],
-) -> Result<crate::model::working_log::CheckpointLineStats, GitAiError> {
+) -> crate::model::working_log::CheckpointLineStats {
     let mut stats = crate::model::working_log::CheckpointLineStats::default();
 
     // Aggregate line stats from all files
@@ -989,5 +982,5 @@ fn compute_line_stats(
         stats.deletions_sloc += file_stat.deletions_sloc;
     }
 
-    Ok(stats)
+    stats
 }

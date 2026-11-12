@@ -1,35 +1,14 @@
 use super::*;
-use crate::model::domain::{CommandScope, RefChange, ResetKind};
+use crate::model::domain::{RefChange, ResetKind};
 
 fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
     NormalizedCommand {
-        scope: CommandScope::Global,
-        family_key: None,
-        worktree: None,
-        root_sid: "r".to_string(),
-        trace_derived: false,
-        raw_argv: argv.iter().map(|s| s.to_string()).collect(),
-        primary_command: Some(primary.to_string()),
-        invoked_command: Some(primary.to_string()),
-        invoked_args: argv.iter().skip(2).map(|s| s.to_string()).collect(),
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
-        reflog_start_offsets: std::collections::HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
         ref_changes: vec![RefChange {
             reference: "HEAD".to_string(),
             old: "a".to_string(),
             new: "b".to_string(),
         }],
-        confidence: Confidence::Low,
+        ..crate::operations::daemon::analyzers::tests::command(primary, argv)
     }
 }
 fn assert_only_opaque(result: &AnalysisResult) {

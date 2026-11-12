@@ -1335,6 +1335,49 @@ fn test_multi_commit_cherry_pick_chain_with_conflict_resolution_working_logs() {
     ]);
 }
 
+/// A conflicted cherry-pick in one linked worktree must not hand its pending
+/// sources to a `--continue` in another worktree of the same repository.
+#[test]
+fn test_cherry_pick_continue_uses_own_worktree_pending_sources() {
+    let repo = TestRepo::new();
+    let mut a = repo.filename("a.txt");
+    a.set_contents(crate::lines!["a1", "a2"]);
+    let mut b = repo.filename("b.txt");
+    b.set_contents(crate::lines!["b1", "b2"]);
+    repo.stage_all_and_commit("initial").unwrap();
+    let main_branch = repo.current_branch();
+
+    repo.git(&["checkout", "-b", "feature"]).unwrap();
+    a.replace_at(1, "AI_A".ai());
+    repo.stage_all_and_commit("AI a").unwrap();
+    let pick_a = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+    b.replace_at(1, "AI_B".ai());
+    repo.stage_all_and_commit("AI b").unwrap();
+    let pick_b = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+
+    repo.git(&["checkout", &main_branch]).unwrap();
+    a.replace_at(1, "MAIN_A".human());
+    b.replace_at(1, "MAIN_B".human());
+    repo.stage_all_and_commit("conflicting main").unwrap();
+
+    let other = repo.path().with_extension("other-worktree");
+    let other_str = other.to_str().unwrap();
+    repo.git(&["worktree", "add", "-b", "other", other_str, "HEAD"])
+        .unwrap();
+
+    assert!(repo.git(&["cherry-pick", &pick_b]).is_err());
+    assert!(
+        repo.git_from_working_dir(&other, &["cherry-pick", &pick_a])
+            .is_err()
+    );
+
+    fs::write(repo.path().join("b.txt"), "b1\nAI_B").unwrap();
+    repo.git(&["add", "b.txt"]).unwrap();
+    repo.git(&["cherry-pick", "--continue"]).unwrap();
+
+    b.assert_lines_and_blame(crate::lines!["b1".human(), "AI_B".ai()]);
+}
+
 crate::reuse_tests_in_worktree!(
     test_single_commit_cherry_pick,
     test_cherry_pick_preserves_human_only_commit_note_metadata,

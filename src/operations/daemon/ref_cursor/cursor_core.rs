@@ -10,7 +10,7 @@ impl RefCursor {
             consumed_anchors: HashMap::new(),
             command_start_hints: HashMap::new(),
             stash_stack: Vec::new(),
-            pending_cherry_pick_source_oids: Vec::new(),
+            pending_cherry_pick_source_oids: HashMap::new(),
         }
     }
 

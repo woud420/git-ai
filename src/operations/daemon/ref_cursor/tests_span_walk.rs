@@ -179,7 +179,10 @@ fn cherry_pick_span_stops_at_its_source_count_and_compacts_the_consumed_prefix()
     let mut cursor = RefCursor::new(repo.family.clone());
     let key = head_key(&repo.git_dir);
     cursor.offsets.insert(key.clone(), ends[0]);
-    cursor.pending_cherry_pick_source_oids = (10..14).map(oid).collect();
+    cursor.pending_cherry_pick_source_oids.insert(
+        crate::operations::daemon::ActorDaemonCoordinator::worktree_state_key(&repo.worktree),
+        (10..14).map(oid).collect(),
+    );
     let mut cmd = command_with_worktree(
         &repo.family,
         Some(repo.worktree.clone()),

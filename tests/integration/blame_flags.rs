@@ -893,6 +893,34 @@ fn test_blame_first_parent_blames_merge_commit() {
     );
 }
 
+/// The author column is padded to the widest name in characters, as git
+/// does, not in bytes.
+#[test]
+fn test_blame_pads_non_ascii_author_names_like_git() {
+    let repo = TestRepo::new();
+    repo.write_file("test.txt", "one\n");
+    repo.stage_all_and_commit_with_env("one", &[("GIT_AUTHOR_NAME", "Zoë Ångström")])
+        .unwrap();
+    repo.write_file("test.txt", "one\ntwo\n");
+    repo.stage_all_and_commit_with_env("two", &[("GIT_AUTHOR_NAME", "Bob")])
+        .unwrap();
+
+    // Characters between "(" and ")": author, date and line number.
+    let inner_widths = |output: &str| -> Vec<usize> {
+        output
+            .lines()
+            .map(|line| {
+                let inner = &line[line.find('(').unwrap()..line.find(')').unwrap()];
+                inner.chars().count()
+            })
+            .collect()
+    };
+    assert_eq!(
+        inner_widths(&repo.git_ai(&["blame", "test.txt"]).unwrap()),
+        inner_widths(&repo.git(&["blame", "test.txt"]).unwrap())
+    );
+}
+
 #[test]
 fn test_blame_multiple_flags() {
     let repo = TestRepo::new();

@@ -1,5 +1,6 @@
 mod pending;
 
+use crate::cli::fail::print_stdout;
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
@@ -90,7 +91,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
                 checkpoints: if diff_only { None } else { Some(vec![]) },
             };
             let json_str = serde_json::to_string(&output)?;
-            println!("{}", json_str);
+            print_stdout(&format!("{json_str}\n"));
         } else if !checkpoint_processing_pending {
             eprintln!(
                 "No checkpoints recorded since last commit ({})",
@@ -190,7 +191,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
             },
         };
         let json_str = serde_json::to_string(&output)?;
-        println!("{}", json_str);
+        print_stdout(&format!("{json_str}\n"));
         return Ok(());
     }
 
@@ -200,7 +201,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
         return Ok(());
     }
 
-    println!();
+    let mut out = String::from("\n");
     for cp in &checkpoint_infos {
         let add_str = if cp.additions > 0 {
             format!("+{}", cp.additions)
@@ -219,11 +220,12 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
         );
 
         if cp.is_human {
-            println!("\x1b[90m{}\x1b[0m", line);
+            out.push_str(&format!("\x1b[90m{}\x1b[0m\n", line));
         } else {
-            println!("{}", line);
+            out.push_str(&format!("{}\n", line));
         }
     }
+    print_stdout(&out);
 
     Ok(())
 }

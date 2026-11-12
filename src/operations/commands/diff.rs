@@ -7,6 +7,7 @@
 //! - `diff_json_builder` — building the `--json` output structures
 //! - `diff_render`       — ANSI terminal rendering
 
+use crate::cli::fail::print_stdout;
 use crate::error::GitAiError;
 use crate::operations::git::repository::Repository;
 
@@ -100,7 +101,7 @@ pub fn handle_diff(repo: &Repository, args: &[String]) -> Result<(), GitAiError>
 
     let parsed = parse_diff_args(args)?;
     let output = execute_diff(repo, parsed)?;
-    print!("{}", output);
+    print_stdout(&output);
 
     Ok(())
 }

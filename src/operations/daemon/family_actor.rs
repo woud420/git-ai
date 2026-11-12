@@ -34,7 +34,10 @@ fn should_retry_ref_enrichment(cmd: &NormalizedCommand) -> bool {
 
 fn command_can_move_head(cmd: &NormalizedCommand) -> bool {
     match cmd.primary_command.as_deref() {
-        Some("commit") => !has_command_arg(cmd, "--dry-run"),
+        // `--short`, `--porcelain` and `--long` imply `--dry-run` (git-commit(1)).
+        Some("commit") => !["--dry-run", "--short", "--porcelain", "--long"]
+            .iter()
+            .any(|arg| has_command_arg(cmd, arg)),
         Some("cherry-pick") => !["--abort", "--no-commit", "--quit", "-n"]
             .iter()
             .any(|arg| has_command_arg(cmd, arg)),

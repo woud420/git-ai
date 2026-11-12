@@ -851,6 +851,74 @@ fn test_blame_date_format() {
         git_ai_output.contains("-"),
         "Git-ai output should contain date"
     );
+    // git's `--opt=value` form and a `--` before the path are accepted too.
+    let equals_form = repo
+        .git_ai(&["blame", "--date=short", "--", "test.txt"])
+        .unwrap();
+    assert_eq!(equals_form, git_ai_output);
+}
+
+/// `--first-parent` follows only first parents, so a line merged from a side
+/// branch is blamed on the merge commit, as git does.
+#[test]
+fn test_blame_first_parent_blames_merge_commit() {
+    let repo = TestRepo::new();
+    repo.write_file("test.txt", "base\n");
+    repo.stage_all_and_commit("base").unwrap();
+    let main_branch = repo.git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap();
+    repo.git(&["checkout", "-b", "side"]).unwrap();
+    repo.write_file("test.txt", "base\nside\n");
+    repo.stage_all_and_commit("side").unwrap();
+    repo.git(&["checkout", main_branch.trim()]).unwrap();
+    repo.git(&["merge", "--no-ff", "-m", "merge side", "side"])
+        .unwrap();
+    let merge_sha = repo.git(&["rev-parse", "HEAD"]).unwrap();
+
+    let args = [
+        "blame",
+        "--porcelain",
+        "--first-parent",
+        "-L",
+        "2,2",
+        "test.txt",
+    ];
+    let git_ai_output = repo.git_ai(&args).unwrap();
+    assert!(
+        git_ai_output.starts_with(merge_sha.trim()),
+        "{git_ai_output}"
+    );
+    assert_eq!(
+        normalize_for_snapshot(&repo.git(&args).unwrap()),
+        normalize_for_snapshot(&git_ai_output)
+    );
+}
+
+/// The author column is padded to the widest name in characters, as git
+/// does, not in bytes.
+#[test]
+fn test_blame_pads_non_ascii_author_names_like_git() {
+    let repo = TestRepo::new();
+    repo.write_file("test.txt", "one\n");
+    repo.stage_all_and_commit_with_env("one", &[("GIT_AUTHOR_NAME", "Zoë Ångström")])
+        .unwrap();
+    repo.write_file("test.txt", "one\ntwo\n");
+    repo.stage_all_and_commit_with_env("two", &[("GIT_AUTHOR_NAME", "Bob")])
+        .unwrap();
+
+    // Characters between "(" and ")": author, date and line number.
+    let inner_widths = |output: &str| -> Vec<usize> {
+        output
+            .lines()
+            .map(|line| {
+                let inner = &line[line.find('(').unwrap()..line.find(')').unwrap()];
+                inner.chars().count()
+            })
+            .collect()
+    };
+    assert_eq!(
+        inner_widths(&repo.git_ai(&["blame", "test.txt"]).unwrap()),
+        inner_widths(&repo.git(&["blame", "test.txt"]).unwrap())
+    );
 }
 
 #[test]
@@ -1584,6 +1652,43 @@ fn test_blame_ai_human_author() {
         normalize_for_snapshot(&repo.git_ai(&args).unwrap()),
         "renderer preparation must preserve Git's unsplit porcelain hunks"
     );
+}
+
+/// A reader that closes the pipe early (`git-ai blame f | head -1`) must end
+/// the command quietly with status 0, as `git-ai log` already does.
+#[test]
+fn test_output_commands_exit_cleanly_when_reader_closes_pipe() {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let repo = TestRepo::new();
+    // Far larger than a pipe buffer, so the write runs into the closed pipe.
+    let content: String = (0..20_000)
+        .map(|i| format!("line {i} with enough text to overflow the pipe buffer\n"))
+        .collect();
+    std::fs::write(repo.path().join("big.txt"), content).unwrap();
+    repo.stage_all_and_commit("big file").unwrap();
+
+    for args in [&["blame", "big.txt"][..], &["diff", "HEAD"]] {
+        let mut child = repo
+            .git_ai_command_without_pre_sync_for_test(args, &[])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut first_bytes = [0u8; 64];
+        // Dropping the reader closes the pipe.
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_exact(&mut first_bytes)
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{args:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+    }
 }
 
 crate::reuse_tests_in_worktree!(

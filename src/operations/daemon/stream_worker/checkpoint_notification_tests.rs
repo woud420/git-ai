@@ -103,19 +103,17 @@ async fn checkpoint_notification_revalidates_session_binding_before_enqueue() {
     .unwrap();
     let db = Arc::new(StreamsDatabase::open(tmp.path().join("test.db")).unwrap());
     let mut worker = make_worker(db);
-    worker
-        .handle_checkpoint_notification(CheckpointNotification {
-            session_id,
-            tool: "pi".to_string(),
-            trace_id: "trace-pi".to_string(),
-            tool_use_id: None,
-            stream_path: transcript,
-            stream_format: CheckpointStreamFormat::PiJsonl,
-            repo_work_dir: Some(tmp.path().to_path_buf()),
-            external_session_id: "pi-session".to_string(),
-            external_parent_session_id: None,
-        })
-        .await;
+    worker.handle_checkpoint_notification(CheckpointNotification {
+        session_id,
+        tool: "pi".to_string(),
+        trace_id: "trace-pi".to_string(),
+        tool_use_id: None,
+        stream_path: transcript,
+        stream_format: CheckpointStreamFormat::PiJsonl,
+        repo_work_dir: Some(tmp.path().to_path_buf()),
+        external_session_id: "pi-session".to_string(),
+        external_parent_session_id: None,
+    });
 
     assert!(
         worker.priority_queue.is_empty(),
@@ -285,19 +283,17 @@ async fn validated_opencode_checkpoint_reads_external_session_rows() {
     let internal_session_id = generate_session_id(external_session_id, "opencode");
     let db = Arc::new(StreamsDatabase::open(tmp.path().join("streams.db")).unwrap());
     let mut worker = make_worker(db.clone());
-    worker
-        .handle_checkpoint_notification(CheckpointNotification {
-            session_id: internal_session_id.clone(),
-            tool: "opencode".to_string(),
-            trace_id: "trace-opencode".to_string(),
-            tool_use_id: None,
-            stream_path: database_path,
-            stream_format: CheckpointStreamFormat::OpenCodeSqlite,
-            repo_work_dir: Some(canonical_repo),
-            external_session_id: external_session_id.to_string(),
-            external_parent_session_id: None,
-        })
-        .await;
+    worker.handle_checkpoint_notification(CheckpointNotification {
+        session_id: internal_session_id.clone(),
+        tool: "opencode".to_string(),
+        trace_id: "trace-opencode".to_string(),
+        tool_use_id: None,
+        stream_path: database_path,
+        stream_format: CheckpointStreamFormat::OpenCodeSqlite,
+        repo_work_dir: Some(canonical_repo),
+        external_session_id: external_session_id.to_string(),
+        external_parent_session_id: None,
+    });
 
     let task = worker
         .priority_queue

@@ -332,7 +332,10 @@ fn cherry_pick_span_starts_at_first_pick_when_expected_state_matches_second_pick
         .refs
         .insert("refs/heads/intermediate".to_string(), C.to_string());
     let mut cursor = RefCursor::new(family.clone());
-    cursor.pending_cherry_pick_source_oids = vec![A.to_string(), E.to_string()];
+    cursor.pending_cherry_pick_source_oids.insert(
+        crate::operations::daemon::ActorDaemonCoordinator::worktree_state_key(&worktree),
+        vec![A.to_string(), E.to_string()],
+    );
     let mut cmd = command_with_worktree(&family, Some(worktree), &["cherry-pick", "--continue"]);
 
     cursor.enrich_command(&mut cmd, &state).unwrap();
@@ -376,7 +379,10 @@ fn span_walk_does_not_reclaim_a_row_an_earlier_command_consumed() {
 
     // A later two-commit span that starts at the untraced row must stop
     // there: the row after it already belongs to the traced pick.
-    cursor.pending_cherry_pick_source_oids = vec![F.to_string(), G.to_string()];
+    cursor.pending_cherry_pick_source_oids.insert(
+        crate::operations::daemon::ActorDaemonCoordinator::worktree_state_key(&worktree),
+        vec![F.to_string(), G.to_string()],
+    );
     let mut later = command_with_worktree(&family, Some(worktree), &["cherry-pick", "--continue"]);
     cursor.enrich_command(&mut later, &state).unwrap();
     assert_eq!(later.ref_changes, vec![ref_change("HEAD", B, C)]);

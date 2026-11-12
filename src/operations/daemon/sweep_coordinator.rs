@@ -109,7 +109,7 @@ impl SweepCoordinator {
             let mut seen_shared_paths = HashSet::new();
             for (session, canonical) in discovered.iter().zip(&canonical_paths) {
                 for stream in &shared {
-                    let Some(item) = self.check_shared_stream(stream, canonical, &session.tool)?
+                    let Some(item) = self.check_shared_stream(stream, canonical, &session.tool)
                     else {
                         continue;
                     };
@@ -173,19 +173,17 @@ impl SweepCoordinator {
         stream: &StreamDescriptor,
         canonical_path: &Path,
         tool: &str,
-    ) -> Result<Option<SweepItem>, StreamError> {
-        let Some(path) = stream.resolve_path(canonical_path) else {
-            return Ok(None);
-        };
+    ) -> Option<SweepItem> {
+        let path = stream.resolve_path(canonical_path)?;
         if !path.exists() {
-            return Ok(None);
+            return None;
         }
 
-        Ok(Some(SweepItem::SharedStream {
+        Some(SweepItem::SharedStream {
             tool: tool.to_string(),
             stream_kind: stream.stream_kind.to_string(),
             canonical_path: path,
-        }))
+        })
     }
 
     fn is_within_lookback(&self, metadata: &std::fs::Metadata) -> bool {

@@ -255,7 +255,7 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                 .ok_or_else(|| format!("Cannot navigate through non-object at {}", segment))?;
         }
         // On an object, --add is an upsert: the same as a plain set.
-        current.insert(key_path.last().unwrap().clone(), parse_value(value)?);
+        current.insert(key_path.last().unwrap().clone(), parse_value(value));
 
         validate_feature_flags(&flags)?;
         file_config.feature_flags = Some(flags);

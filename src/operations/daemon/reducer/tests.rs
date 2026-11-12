@@ -1,9 +1,9 @@
 use super::*;
 use crate::model::domain::{
-    CommandScope, Confidence, FamilyKey, FamilyState, GlobalState, RefChange, WatermarkState,
-    WorktreeState,
+    CommandScope, FamilyKey, FamilyState, GlobalState, RefChange, WatermarkState, WorktreeState,
 };
 use crate::operations::daemon::analyzers::AnalyzerRegistry;
+use crate::operations::daemon::tests_fixtures::normalized_command;
 use std::collections::HashMap;
 
 /// Reduce without a ref snapshot or canonical worktree: worktrees are keyed
@@ -33,29 +33,12 @@ pub(super) fn normalized() -> NormalizedCommand {
         family_key: Some(FamilyKey::new("family:/tmp/repo")),
         worktree: Some(PathBuf::from("/tmp/repo")),
         root_sid: "sid".to_string(),
-        trace_derived: false,
-        raw_argv: vec!["git".to_string(), "update-ref".to_string()],
-        primary_command: Some("update-ref".to_string()),
-        invoked_command: Some("update-ref".to_string()),
-        invoked_args: Vec::new(),
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
-        reflog_start_offsets: std::collections::HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
         ref_changes: vec![RefChange {
             reference: "refs/heads/main".to_string(),
             old: "".to_string(),
             new: "abc".to_string(),
         }],
-        confidence: Confidence::Low,
+        ..normalized_command("update-ref", &["git", "update-ref"])
     }
 }
 

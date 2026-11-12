@@ -136,22 +136,11 @@ impl CredentialBackend for FileBackend {
             fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
 
+        // Replaced by rename so a concurrent reader or a crash never sees a
+        // truncated file; created 0o600, never world-readable.
         #[cfg(unix)]
-        {
-            // Create (or truncate) the file with mode 0o600 atomically so there
-            // is no window where it exists with default (world-readable) permissions.
-            use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut file = fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&self.path)
-                .map_err(|e| format!("Failed to write credentials file: {}", e))?;
-            file.write_all(value.as_bytes())
-                .map_err(|e| format!("Failed to write credentials file: {}", e))?;
-        }
+        crate::atomic_write::write_private_atomic(&self.path, value.as_bytes())
+            .map_err(|e| format!("Failed to write credentials file: {}", e))?;
 
         #[cfg(not(unix))]
         {
@@ -389,5 +378,44 @@ mod tests {
 
         // Should succeed even if file doesn't exist
         assert!(backend.clear().is_ok());
+    }
+
+    #[cfg(unix)]
+    fn file_mode(path: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_file_backend_store_is_owner_only_for_new_and_existing_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("internal").join("credentials");
+        let backend = FileBackend::new(path.clone());
+
+        backend.store("first").unwrap();
+        assert_eq!(file_mode(&path), 0o600);
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        backend.store("second").unwrap();
+        assert_eq!(file_mode(&path), 0o600);
+        assert_eq!(backend.load().unwrap().as_deref(), Some("second"));
+    }
+
+    /// The file is replaced by rename, never truncated in place: a failed
+    /// write leaves the previous credentials readable.
+    #[test]
+    #[cfg(unix)]
+    fn test_file_backend_failed_store_keeps_previous_credentials() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("credentials");
+        let backend = FileBackend::new(path.clone());
+        backend.store("old-token").unwrap();
+
+        // Block the sibling temp file so the write fails before the rename.
+        fs::create_dir(dir.path().join("credentials.tmp")).unwrap();
+        assert!(backend.store("new-token").is_err());
+        assert_eq!(backend.load().unwrap().as_deref(), Some("old-token"));
     }
 }

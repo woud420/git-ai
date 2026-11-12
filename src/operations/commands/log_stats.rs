@@ -1,6 +1,7 @@
 //! Per-commit "Git AI stats" for `git-ai log`.
 
 use crate::model::authorship_log_serialization::AuthorshipLog;
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -28,7 +29,7 @@ pub(super) fn render_stats(
     let parent_sha = parents
         .first()
         .map(String::as_str)
-        .unwrap_or("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+        .unwrap_or_else(|| empty_tree_for(commit_sha));
 
     // One diff per commit feeds both the size guard and the stats.
     let hunks = get_diff_with_line_numbers(repo, parent_sha, commit_sha)

@@ -321,10 +321,10 @@ fn parse_attestation_section(
     Ok(attestations)
 }
 
-/// Check if a file path needs quoting: it contains whitespace, or written bare
-/// it would be read back as a quoted path or as the `---` divider.
+/// Quote paths with whitespace (any trailing kind is trimmed on read) or that look quoted or `---`.
 fn needs_quoting(path: &str) -> bool {
     path.contains([' ', '\t', '\n'])
+        || path.ends_with(char::is_whitespace)
         || path == "---"
         || (path.starts_with('"') && path.ends_with('"'))
 }

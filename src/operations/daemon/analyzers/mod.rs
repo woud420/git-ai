@@ -121,6 +121,23 @@ pub(crate) fn command_args(cmd: &NormalizedCommand) -> Vec<String> {
     normalized_args(&cmd.raw_argv)
 }
 
+/// Arguments after the `stash` subcommand token, never including global options.
+pub(crate) fn stash_args(cmd: &NormalizedCommand) -> Vec<String> {
+    if cmd.invoked_command.as_deref() == Some("stash") {
+        return cmd.invoked_args.clone();
+    }
+    crate::operations::git::cli_parser::parse_git_cli_args(&normalized_args(&cmd.raw_argv))
+        .command_args
+}
+
+/// Git runs `stash push` when no subcommand is given or the first argument is an option.
+pub(crate) fn stash_subcommand(stash_args: &[String]) -> &str {
+    match stash_args.first() {
+        Some(arg) if !arg.starts_with('-') => arg,
+        _ => "push",
+    }
+}
+
 pub(crate) fn normalized_args(argv: &[String]) -> Vec<String> {
     let start = argv
         .first()
@@ -147,9 +164,9 @@ mod tests {
     use crate::model::domain::{CommandScope, Confidence};
 
     /// Shared fixture builder for analyzer unit tests: a global-scope command
-    /// with no ref changes. `workspace.rs` and `transport.rs` import
-    /// this. `history.rs` adds its default HEAD ref change; `generic.rs`
-    /// keeps a 1-arg variant that does not need argv.
+    /// with no ref changes. The analyzer tests build on it with struct update
+    /// syntax; the analyzers are a pure layer, so it cannot be shared with
+    /// the rest of the daemon's tests.
     pub(super) fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {
             scope: CommandScope::Global,

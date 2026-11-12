@@ -161,7 +161,6 @@ pub struct YieldStats {
 pub enum BucketGranularity {
     Daily,
     Weekly,
-    Monthly,
 }
 
 /// Summary of activity for a single repository.

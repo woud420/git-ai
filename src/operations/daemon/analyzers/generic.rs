@@ -76,34 +76,10 @@ fn is_read_only_command(command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::domain::{CommandScope, RefChange};
+    use crate::model::domain::RefChange;
 
     fn command(primary: &str) -> NormalizedCommand {
-        NormalizedCommand {
-            scope: CommandScope::Global,
-            family_key: None,
-            worktree: None,
-            root_sid: "r".to_string(),
-            trace_derived: false,
-            raw_argv: vec!["git".to_string(), primary.to_string()],
-            primary_command: Some(primary.to_string()),
-            invoked_command: Some(primary.to_string()),
-            invoked_args: Vec::new(),
-            observed_child_commands: Vec::new(),
-            index_write: Default::default(),
-            index_v2: false,
-            bisect_checkout: None,
-            exit_code: 0,
-            started_at_ns: 1,
-            finished_at_ns: 2,
-            reflog_start_offsets: std::collections::HashMap::new(),
-            stash_target_oid: None,
-            cherry_pick_source_oids: Vec::new(),
-            revert_source_oids: Vec::new(),
-            transport_targets: None,
-            ref_changes: Vec::new(),
-            confidence: Confidence::Low,
-        }
+        crate::operations::daemon::analyzers::tests::command(primary, &["git", primary])
     }
 
     #[test]

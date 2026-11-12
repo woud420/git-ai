@@ -3,6 +3,7 @@ use std::io::{self, IsTerminal, Write};
 
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 
+use crate::cli::fail::print_stdout;
 use crate::model::authorship_log::PromptRecord;
 
 use super::hunk_parser::BlameRenderPreparation;
@@ -80,7 +81,7 @@ pub(super) fn output_default_format(
         .iter()
         .filter_map(|line_num| {
             let hunk = prepared.line_to_hunk.get(line_num)?;
-            Some(author_display(*line_num, hunk).len())
+            Some(author_display(*line_num, hunk).chars().count())
         })
         .max()
         .unwrap_or(0);
@@ -194,35 +195,54 @@ pub(super) fn output_default_format(
         .or_else(|_| std::env::var("PAGER"))
         .unwrap_or_else(|_| "less".to_string());
 
-    // If pager is set to "cat" or empty, output directly
-    if pager == "cat" || pager.is_empty() {
-        print!("{}", output);
-    } else if io::stdout().is_terminal() {
-        // Try to use the specified pager
-        match std::process::Command::new(&pager)
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            Ok(mut child) => {
-                if let Some(stdin) = child.stdin.as_mut() {
-                    if stdin.write_all(output.as_bytes()).is_ok() {
-                        let _ = child.wait();
-                    } else {
-                        // Fall back to direct output if pager fails
-                        print!("{}", output);
-                    }
-                } else {
-                    // Fall back to direct output if pager fails
-                    print!("{}", output);
-                }
-            }
-            Err(_) => {
-                // Fall back to direct output if pager fails
-                print!("{}", output);
-            }
-        }
-    } else {
-        // Not a terminal, output directly
-        print!("{}", output);
+    // A pager of "cat" or "" means no pager, as in git.
+    let paged = pager != "cat"
+        && !pager.is_empty()
+        && io::stdout().is_terminal()
+        && run_pager(&pager, &output);
+    if !paged {
+        print_stdout(&output);
+    }
+}
+
+/// Feed `output` to `pager`. Returns false when the pager cannot be run.
+fn run_pager(pager: &str, output: &str) -> bool {
+    // Like git, run the pager through the shell so `GIT_PAGER="less -R"` works.
+    #[cfg(unix)]
+    let mut command = {
+        let mut command = std::process::Command::new("sh");
+        command.arg("-c").arg(pager);
+        command
+    };
+    #[cfg(not(unix))]
+    let mut command = std::process::Command::new(pager);
+    let Ok(mut child) = command.stdin(std::process::Stdio::piped()).spawn() else {
+        return false;
+    };
+    // Taking stdin closes it after the write, so a pager reading to EOF ends.
+    // A write error means the pager quit early (e.g. `q` in less), as in git.
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(output.as_bytes());
+    }
+    // 126/127 is the shell reporting it could not run the pager (e.g. `less`
+    // is not installed): the caller prints directly, as for a failed spawn.
+    !matches!(child.wait(), Ok(status) if matches!(status.code(), Some(126 | 127)))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    #[test]
+    fn run_pager_passes_arguments_through_the_shell_and_closes_its_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let paged = dir.path().join("paged");
+        let pager = format!("cat > '{}'", paged.display());
+
+        assert!(super::run_pager(&pager, "line 1\nline 2\n"));
+        assert_eq!(std::fs::read_to_string(paged).unwrap(), "line 1\nline 2\n");
+    }
+
+    #[test]
+    fn run_pager_reports_a_pager_the_shell_cannot_find() {
+        assert!(!super::run_pager("git-ai-no-such-pager", "line 1\n"));
     }
 }

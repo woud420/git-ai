@@ -96,23 +96,20 @@ pub(super) fn commit_subject(message: &str) -> Option<String> {
 }
 
 pub(super) fn resolve_cherry_pick_source_oids_from_sources(
-    _cmd: &NormalizedCommand,
     state: &FamilyState,
     sources: &[&str],
-) -> Result<Option<Vec<String>>, GitAiError> {
+) -> Option<Vec<String>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
 
     for source in sources {
-        let Some(oid) = resolve_cherry_pick_source_from_state(source, &state.refs) else {
-            return Ok(None);
-        };
+        let oid = resolve_cherry_pick_source_from_state(source, &state.refs)?;
         if seen.insert(oid.clone()) {
             out.push(oid);
         }
     }
 
-    Ok(Some(out))
+    Some(out)
 }
 
 pub(super) fn cherry_pick_source_is_range(source: &str) -> bool {

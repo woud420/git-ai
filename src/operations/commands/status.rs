@@ -275,11 +275,9 @@ fn get_working_dir_diff_stats(
             return Ok((0, 0));
         }
         if needs_working_dir_post_filter(paths) {
-            // Disable rename detection so git reports renames as separate
-            // delete + add entries with clean filenames. Without this,
-            // numstat outputs "old => new" arrow notation in the filename
-            // field, which won't match pathspec entries.
-            args.push("--no-renames".to_string());
+            // The NumstatParse profile disables rename detection, so renames
+            // come back as delete + add entries with plain filenames that
+            // match pathspec entries.
             true
         } else {
             args.push("--".to_string());

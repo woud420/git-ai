@@ -339,21 +339,14 @@ fn save_current_file_states(
     let files = files.to_vec();
 
     let file_content_hashes = crate::tokio_runtime::block_on(async {
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
         let blobs_dir = Arc::new(blobs_dir);
 
         let mut futures = Vec::with_capacity(files.len());
         for file_path in files {
             let blobs_dir = Arc::clone(&blobs_dir);
             let dirty_files = dirty_files.clone();
-            let semaphore = Arc::clone(&semaphore);
 
             futures.push(async move {
-                let _permit = semaphore
-                    .acquire_owned()
-                    .await
-                    .expect("file state semaphore was closed");
-
                 let content = if let Some(ref dirty_map) = dirty_files {
                     dirty_map.get(&file_path).cloned()
                 } else {
@@ -379,7 +372,7 @@ fn save_current_file_states(
             });
         }
 
-        // Collect results from all concurrent operations
+        // At most 8 file writes run at once.
         let results: Vec<Result<(String, String), GitAiError>> =
             stream::iter(futures).buffer_unordered(8).collect().await;
 

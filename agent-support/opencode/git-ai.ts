@@ -31,6 +31,11 @@ import { dirname, isAbsolute, join, resolve } from "path"
 // Absolute path to git-ai binary, replaced at install time by `git-ai install-hooks`
 const GIT_AI_BIN = "__GIT_AI_BINARY_PATH__"
 const CHECKPOINT_TIMEOUT_MS = 10_000
+const CHECKPOINT_KILL_GRACE_MS = 250
+const MAX_STDERR_BYTES = 64 * 1024
+const MAX_PENDING_CALLS = 64
+const MAX_PENDING_BYTES = 8 * 1024 * 1024
+const MAX_CALL_BYTES = 1024 * 1024
 const CHECKPOINT_ARGS = ["checkpoint", "opencode", "--hook-input", "stdin"]
 
 // Tools that modify files and should be tracked
@@ -78,16 +83,25 @@ const normalizePath = (rawPath: string, cwd?: string): string | null => {
 }
 
 const collectApplyPatchPaths = (raw: string, out: Set<string>): void => {
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim()
-    for (const prefix of APPLY_PATCH_FILE_PREFIXES) {
-      if (trimmed.startsWith(prefix)) {
-        const path = trimmed.slice(prefix.length).trim().replace(/^['"]|['"]$/g, "")
-        if (path) {
-          out.add(path)
+  // Scan header candidates only. Splitting a large edit/patch body creates a
+  // separate array entry and string for every line even when it has no paths.
+  let offset = raw.indexOf("*** ")
+  while (offset !== -1) {
+    const lineStart = raw.lastIndexOf("\n", offset - 1) + 1
+    const newline = raw.indexOf("\n", offset)
+    const lineEnd = newline === -1 ? raw.length : newline
+    if (raw.slice(lineStart, offset).trim() === "") {
+      const header = raw.slice(offset, lineEnd).trim()
+      for (const prefix of APPLY_PATCH_FILE_PREFIXES) {
+        if (header.startsWith(prefix)) {
+          const path = header.slice(prefix.length).trim().replace(/^['"]|['"]$/g, "")
+          if (path) {
+            out.add(path)
+          }
         }
       }
     }
+    offset = newline === -1 ? -1 : raw.indexOf("*** ", newline + 1)
   }
 }
 
@@ -212,66 +226,119 @@ const swallowHookErrors = <Args extends unknown[]>(
   }
 }
 
-const runCheckpoint = (hookInput: string): Promise<void> => {
+const runCheckpoint = (hookInput: string, signal: AbortSignal): Promise<void> => {
   return new Promise((resolve, reject) => {
-    let settled = false
     let timeout: ReturnType<typeof setTimeout> | undefined
+    let killTimeout: ReturnType<typeof setTimeout> | undefined
+    let stopped: Error | undefined
+    let closed = false
+    let stderr: Buffer | undefined
+    let stderrBytes = 0
+    let stderrTruncated = false
     const finish = (error: Error | null): void => {
-      if (settled) {
-        return
-      }
-
-      settled = true
-      if (timeout) {
-        clearTimeout(timeout)
-      }
-      if (error) {
-        reject(error)
-      } else {
-        resolve()
-      }
+      if (closed) return
+      closed = true
+      clearTimeout(timeout)
+      clearTimeout(killTimeout)
+      signal.removeEventListener("abort", abort)
+      stderr = undefined
+      if (error) reject(error)
+      else resolve()
     }
-
     const child = spawn(GIT_AI_BIN, CHECKPOINT_ARGS, {
       stdio: ["pipe", "ignore", "pipe"],
     })
-
-    timeout = setTimeout(() => {
+    const kill = (kind: NodeJS.Signals): void => {
       try {
-        child.kill("SIGTERM")
+        child.kill(kind)
       } catch (error) {
-        debugLog("failed to kill timed-out checkpoint command", error)
+        debugLog("failed to signal checkpoint command", error)
       }
-      finish(new Error(`git-ai checkpoint opencode timed out after ${CHECKPOINT_TIMEOUT_MS}ms`))
-    }, CHECKPOINT_TIMEOUT_MS)
-
-    const stderr: Buffer[] = []
-
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
-    child.stderr.on("error", (error) => {
-      debugLog("failed to read checkpoint stderr", error)
+    }
+    const stop = (error: Error): void => {
+      if (closed || stopped) return
+      stopped = error
+      kill("SIGTERM")
+      if (closed) return
+      killTimeout = setTimeout(() => {
+        kill("SIGKILL")
+        // Descendants may hold inherited pipes; do not signal the shared daemon.
+        child.stdin.destroy()
+        child.stderr.destroy()
+        finish(stopped ?? null)
+      }, CHECKPOINT_KILL_GRACE_MS)
+    }
+    const abort = (): void => stop(new Error("git-ai checkpoint opencode disposed"))
+    signal.addEventListener("abort", abort, { once: true })
+    if (signal.aborted) abort()
+    timeout = setTimeout(() => stop(new Error(`git-ai checkpoint opencode timed out after ${CHECKPOINT_TIMEOUT_MS}ms`)), CHECKPOINT_TIMEOUT_MS)
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (closed) return
+      const remaining = MAX_STDERR_BYTES - stderrBytes
+      const length = Math.min(chunk.length, remaining)
+      if (length > 0) {
+        stderr ??= Buffer.allocUnsafe(MAX_STDERR_BYTES)
+        chunk.copy(stderr, stderrBytes, 0, length)
+        stderrBytes += length
+      }
+      stderrTruncated ||= chunk.length > remaining
     })
-    child.stdin.on("error", () => {
-      // The child may exit before stdin is fully written; close/error handling below reports failures.
-    })
+    child.stderr.on("error", (error) => debugLog("failed to read checkpoint stderr", error))
+    child.stdin.on("error", () => {})
     child.on("error", finish)
     child.on("close", (code) => {
-      if (code === 0) {
-        finish(null)
-        return
-      }
-
-      const stderrText = Buffer.concat(stderr).toString().trim()
-      finish(new Error(`git-ai checkpoint opencode exited with ${code}${stderrText ? `: ${stderrText}` : ""}`))
+      const detail = stderr?.toString("utf8", 0, stderrBytes).trim() ?? ""
+      finish(stopped ?? (code === 0 ? null : new Error(
+        `git-ai checkpoint opencode exited with ${code}${detail ? `: ${detail}` : ""}${stderrTruncated ? " [stderr truncated]" : ""}`,
+      )))
     })
-
     child.stdin.end(hookInput)
   })
 }
 
+type PendingCall = {
+  key: string
+  repoDir?: string
+  sessionID: string
+  callID: string
+  toolName: string
+  toolCwd: string
+  filePaths: string[]
+  toolInput: { file_paths?: string[]; command?: string }
+  bytes: number
+  phase: "pre" | "ready" | "post"
+  cancelled: boolean
+  controller: AbortController
+}
+
+// Copy admitted strings so short slices cannot retain a large source input.
+const ownString = (value: string): string => Buffer.from(value, "utf16le").toString("utf16le")
+
 const createGitAiCheckpoints = (defaultCwd: string) => {
-  // Track pending calls by callID so we can reference them in the after hook
-  const pendingCalls = new Map<string, { repoDir: string; sessionID: string; toolInput: unknown }>()
+  const pendingCalls = new Map<string, PendingCall>()
+  let pendingBytes = 0
+  let warned = false
+  let disposed = false
+  const warnLimit = (): void => {
+    if (!warned) {
+      warned = true
+      console.error("[git-ai opencode] Checkpoint capacity limit reached; this tool call will not be attributed. Existing calls remain tracked.")
+    }
+  }
+  const release = (call: PendingCall): void => {
+    if (pendingCalls.get(call.key) !== call) return
+    pendingCalls.delete(call.key)
+    pendingBytes -= call.bytes
+    warned = false
+  }
+  const dispose = (): void => {
+    disposed = true
+    for (const call of pendingCalls.values()) {
+      call.cancelled = true
+      call.controller.abort()
+      if (call.phase === "ready") release(call)
+    }
+  }
 
   const nearestExistingDirectory = async (pathHint: string): Promise<string | null> => {
     let candidate = pathHint
@@ -423,92 +490,117 @@ const createGitAiCheckpoints = (defaultCwd: string) => {
     return [...paths]
   }
 
-  const withMetadataFilePaths = (toolInput: unknown, filePaths: string[]): unknown => {
-    if (filePaths.length === 0) {
-      return toolInput
-    }
-
-    if (toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)) {
-      return {
-        ...toolInput,
-        file_paths: filePaths,
+  const captureBefore = swallowHookErrors("pre-tool checkpoint failed", async (call: PendingCall) => {
+    try {
+      const repoDir = await resolveRepoDir(call.filePaths, call.toolCwd)
+      if (!repoDir || call.cancelled) return
+      call.repoDir = repoDir
+      try {
+        await runCheckpoint(JSON.stringify({
+          hook_event_name: "PreToolUse", session_id: call.sessionID, tool_use_id: call.callID,
+          cwd: repoDir, tool_name: call.toolName, tool_input: call.toolInput,
+        }), call.controller.signal)
+      } finally {
+        if (!call.cancelled) call.phase = "ready"
       }
+    } finally {
+      if (call.phase !== "ready") release(call)
     }
+  })
 
-    return {
-      input: toolInput,
-      file_paths: filePaths,
+  // Do not retain the original event or file contents while a checkpoint waits.
+  const before = (event: CheckpointEvent): Promise<void> => {
+    try {
+      if (disposed) return Promise.resolve()
+      const toolName = hookString(event.tool)
+      const edit = isEditTool(toolName)
+      if (!edit && !isBashTool(toolName)) return Promise.resolve()
+      const sessionID = hookString(event.sessionID)
+      const callID = hookString(event.callID)
+      const key = callID
+      const previous = pendingCalls.get(key)
+      if (previous) {
+        previous.cancelled = true
+        if (previous.phase !== "ready") return Promise.resolve()
+        release(previous)
+      }
+      if (pendingCalls.size >= MAX_PENDING_CALLS) {
+        warnLimit()
+        return Promise.resolve()
+      }
+      const toolCwd = resolveCwd(extractToolCwd(asRecord(event.toolInput)))
+      const filePaths = edit ? extractFilePaths(event.toolInput, toolCwd) : []
+      const input = asRecord(event.toolInput)
+      const command = edit ? "" : hookString(input?.command ?? input?.cmd)
+      if (Buffer.byteLength(command) > MAX_CALL_BYTES) {
+        warnLimit()
+        return Promise.resolve()
+      }
+      const toolInput = edit ? { file_paths: filePaths } : { command }
+      const bytes = Buffer.byteLength(JSON.stringify(toolInput)) + Buffer.byteLength(key + sessionID + toolCwd + toolName)
+      if (bytes > MAX_CALL_BYTES || pendingBytes + bytes > MAX_PENDING_BYTES) {
+        warnLimit()
+        return Promise.resolve()
+      }
+      const ownedPaths = filePaths.map(ownString)
+      const call: PendingCall = {
+        key: ownString(key), sessionID: ownString(sessionID), callID: ownString(callID), toolName: ownString(toolName),
+        toolCwd: ownString(toolCwd), filePaths: ownedPaths,
+        toolInput: edit ? { file_paths: ownedPaths } : { command: ownString(command) },
+        bytes, phase: "pre", cancelled: false, controller: new AbortController(),
+      }
+      pendingCalls.set(call.key, call)
+      pendingBytes += bytes
+      return captureBefore(call)
+    } catch (error) {
+      debugLog("pre-tool checkpoint failed", error)
+      return Promise.resolve()
     }
   }
 
-  const before = swallowHookErrors(
-    "pre-tool checkpoint failed",
-    async (event: CheckpointEvent) => {
+  const captureAfter = swallowHookErrors("post-tool checkpoint failed", async (
+    call: PendingCall, toolInput: PendingCall["toolInput"],
+  ) => {
+    try {
+      await runCheckpoint(JSON.stringify({
+        hook_event_name: "PostToolUse", session_id: call.sessionID, tool_use_id: call.callID,
+        cwd: call.repoDir, tool_name: call.toolName, tool_input: toolInput,
+      }), call.controller.signal)
+    } finally {
+      release(call)
+    }
+  })
+
+  const after = (event: CheckpointEvent): Promise<void> => {
+    try {
       const toolName = hookString(event.tool)
-      const isTrackedEdit = isEditTool(toolName)
-      const isTrackedBash = isBashTool(toolName)
-      if (!isTrackedEdit && !isTrackedBash) {
-        return
-      }
-
-      const callID = hookString(event.callID)
-      const sessionID = hookString(event.sessionID)
-      const toolInput = event.toolInput
-      const toolCwd = resolveCwd(extractToolCwd(asRecord(toolInput)))
-      const filePaths = isTrackedEdit ? extractFilePaths(toolInput, toolCwd) : []
-      const repoDir = await resolveRepoDir(filePaths, toolCwd)
-      if (!repoDir) {
-        return
-      }
-
-      pendingCalls.set(callID, { repoDir, sessionID, toolInput })
-
-      const hookInput = JSON.stringify({
-        hook_event_name: "PreToolUse",
-        session_id: sessionID,
-        tool_use_id: callID,
-        cwd: repoDir,
-        tool_name: toolName,
-        tool_input: toolInput,
-      })
-      await runCheckpoint(hookInput)
-    },
-  )
-
-  const after = swallowHookErrors(
-    "post-tool checkpoint failed",
-    async (event: CheckpointEvent) => {
-      const toolName = hookString(event.tool)
-      if (!isEditTool(toolName) && !isBashTool(toolName)) {
-        return
-      }
-
-      const callID = hookString(event.callID)
-      const callInfo = pendingCalls.get(callID)
-      pendingCalls.delete(callID)
-
-      if (!callInfo) {
-        debugLog(`skipping post-tool checkpoint without matching pre-tool call for ${callID}`)
-        return
-      }
-
+      if (!isEditTool(toolName) && !isBashTool(toolName)) return Promise.resolve()
+      const key = hookString(event.callID)
+      const call = pendingCalls.get(key)
+      if (!call || call.phase !== "ready" || call.cancelled) return Promise.resolve()
       const toolCwd = resolveCwd(extractToolCwd(asRecord(event.toolInput)))
-      const metadataFilePaths = extractMetadataFilePaths(event.metadata, toolCwd)
-      const toolInput = withMetadataFilePaths(callInfo.toolInput, metadataFilePaths)
+      const metadataPaths = extractMetadataFilePaths(event.metadata, toolCwd)
+      const paths = [...new Set([...(call.toolInput.file_paths ?? []), ...metadataPaths.map(ownString)])]
+      const extraBytes = metadataPaths.length ? Buffer.byteLength(JSON.stringify(metadataPaths)) : 0
+      if (call.bytes + extraBytes > MAX_CALL_BYTES || pendingBytes + extraBytes > MAX_PENDING_BYTES) {
+        warnLimit()
+        release(call)
+        return Promise.resolve()
+      }
+      const toolInput = paths.length > 0 || call.toolInput.file_paths
+        ? { ...call.toolInput, file_paths: paths }
+        : call.toolInput
+      call.bytes += extraBytes
+      pendingBytes += extraBytes
+      call.phase = "post"
+      return captureAfter(call, toolInput)
+    } catch (error) {
+      debugLog("post-tool checkpoint failed", error)
+      return Promise.resolve()
+    }
+  }
 
-      const hookInput = JSON.stringify({
-        hook_event_name: "PostToolUse",
-        session_id: callInfo.sessionID,
-        tool_use_id: callID,
-        cwd: callInfo.repoDir,
-        tool_name: toolName,
-        tool_input: toolInput,
-      })
-      await runCheckpoint(hookInput)
-    },
-  )
-
-  return { before, after }
+  return { before, after, dispose }
 }
 
 /**
@@ -523,7 +615,7 @@ export const GitAiPlugin = Plugin.define({
     try {
       const defaultCwd =
         ctx.location?.project?.directory ?? ctx.location?.directory ?? process.cwd()
-      const { before, after } = createGitAiCheckpoints(defaultCwd)
+      const { before, after, dispose } = createGitAiCheckpoints(defaultCwd)
 
       await ctx.tool.hook("execute.before", (event) => {
         return before({
@@ -543,6 +635,7 @@ export const GitAiPlugin = Plugin.define({
           metadata: event.status === "completed" ? event.result?.metadata : undefined,
         })
       })
+      return dispose
     } catch (error) {
       debugLog("failed to initialize plugin", error)
     }

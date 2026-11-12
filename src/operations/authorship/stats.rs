@@ -80,7 +80,18 @@ pub fn stats_command(
     Ok(())
 }
 
+/// Print the stats bar when stdout is interactive; returns what it rendered.
 pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> String {
+    let output = stats_terminal_output(stats, is_interactive);
+    if is_interactive {
+        print!("{output}");
+    }
+    output
+}
+
+/// The stats bar and its percentage line. `is_interactive` only selects the
+/// terminal hyperlink on the untracked label.
+pub fn stats_terminal_output(stats: &CommitStats, is_interactive: bool) -> String {
     let mut output = String::new();
 
     // Set maximum bar width to 40 characters
@@ -98,17 +109,11 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
 
         output.push_str(&progress_bar);
         output.push('\n');
-        if is_interactive {
-            println!("{}", progress_bar);
-        }
 
         // Show "(no additions)" message below the bar
         let no_additions_msg = format!("     \x1b[90m{:^40}\x1b[0m", "(no additions)");
         output.push_str(&no_additions_msg);
         output.push('\n');
-        if is_interactive {
-            println!("{}", no_additions_msg);
-        }
         // No percentage line or AI stats for deletion-only commits
         return output;
     }
@@ -179,9 +184,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
     // Print the stats
     output.push_str(&progress_bar);
     output.push('\n');
-    if is_interactive {
-        println!("{}", progress_bar);
-    }
 
     // Percentage line: three anchors (human / untracked / AI) when untracked is visible,
     // two anchors (human / AI) otherwise.
@@ -208,9 +210,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
         );
         output.push_str(&percentage_line);
         output.push('\n');
-        if is_interactive {
-            println!("{}", percentage_line);
-        }
     } else {
         let percentage_line = format!(
             "     {:<3}{:>33}{:>3}%",
@@ -220,9 +219,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
         );
         output.push_str(&percentage_line);
         output.push('\n');
-        if is_interactive {
-            println!("{}", percentage_line);
-        }
     }
 
     output

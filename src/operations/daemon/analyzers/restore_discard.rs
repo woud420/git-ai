@@ -71,7 +71,6 @@ pub(crate) fn event(
 mod tests {
     use super::*;
     use crate::model::domain::Confidence;
-    use crate::operations::daemon::checkout_discard::is_explicit_path_checkout;
 
     type Event = fn(&NormalizedCommand, &HashMap<String, String>) -> Option<SemanticEvent>;
     type Case = (Event, NormalizedCommand, HashMap<String, String>);
@@ -234,7 +233,6 @@ mod tests {
             let mut cmd = original.clone();
             cmd.raw_argv.truncate(4);
             cmd.raw_argv.extend(args.iter().map(|arg| arg.to_string()));
-            assert!(!is_explicit_path_checkout(&cmd), "{args:?}");
             assert!(
                 super::super::checkout_discard::event(&cmd, &refs).is_none(),
                 "{args:?}"

@@ -21,7 +21,7 @@ fn opencode_install_replaces_legacy_plugin_with_named_module() {
     // V1 compatibility entrypoint (OpenCode 1.x calls `server()`)
     assert!(installed.contains("async server("));
     // V2 plugin definition registered through the tool domain
-    assert!(installed.contains("export const GitAiPlugin = Plugin.define("));
+    assert!(installed.contains("export const GitAiPlugin: Plugin.Plugin = {"));
     assert!(installed.contains("ctx.tool.hook(\"execute.before\""));
     assert!(installed.contains("export default GitAiPluginModule"));
     assert!(!installed.contains("__GIT_AI_BINARY_PATH__"));

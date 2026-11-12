@@ -161,9 +161,8 @@ mod tests {
     fn test_opencode_plugin_template_contains_checkpoint_hooks() {
         let content = OPENCODE_PLUGIN_CONTENT;
 
-        assert!(content.contains("import { Plugin } from \"@opencode/plugin\""));
-        assert!(content.contains("@opencode/plugin"));
-        assert!(content.contains("export const GitAiPlugin = Plugin.define("));
+        assert!(content.contains("import type { Plugin } from \"@opencode/plugin\""));
+        assert!(content.contains("export const GitAiPlugin: Plugin.Plugin = {"));
         assert!(content.contains("export default GitAiPluginModule"));
         // V1 compatibility entrypoint (OpenCode 1.x calls `server()`)
         assert!(content.contains("async server("));

@@ -236,6 +236,8 @@ fn test_amp_e2e_checkpoint_and_commit() {
 
     assert_eq!(session_record.agent_id.tool, "amp");
     assert_eq!(session_record.agent_id.model, "claude-opus-4-6");
+    // The plugin sends no thread_id; the session is the thread found by tool_use_id.
+    assert_eq!(session_record.agent_id.id, AMP_SIMPLE_THREAD_ID);
 }
 
 #[test]

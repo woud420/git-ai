@@ -145,25 +145,25 @@ fn test_parse_custom_attributes_object_rejects_empty_name() {
 
 #[test]
 fn test_parse_value_json_string() {
-    let result = parse_value("\"hello\"").unwrap();
+    let result = parse_value("\"hello\"");
     assert_eq!(result, Value::String("hello".to_string()));
 }
 
 #[test]
 fn test_parse_value_json_number() {
-    let result = parse_value("42").unwrap();
+    let result = parse_value("42");
     assert_eq!(result, Value::Number(serde_json::Number::from(42)));
 }
 
 #[test]
 fn test_parse_value_json_boolean() {
-    let result = parse_value("true").unwrap();
+    let result = parse_value("true");
     assert_eq!(result, Value::Bool(true));
 }
 
 #[test]
 fn test_parse_value_json_array() {
-    let result = parse_value("[1,2,3]").unwrap();
+    let result = parse_value("[1,2,3]");
     assert!(result.is_array());
     let arr = result.as_array().unwrap();
     assert_eq!(arr.len(), 3);
@@ -171,13 +171,13 @@ fn test_parse_value_json_array() {
 
 #[test]
 fn test_parse_value_json_object() {
-    let result = parse_value(r#"{"key":"value"}"#).unwrap();
+    let result = parse_value(r#"{"key":"value"}"#);
     assert!(result.is_object());
 }
 
 #[test]
 fn test_parse_value_plain_string() {
-    let result = parse_value("plain text").unwrap();
+    let result = parse_value("plain text");
     assert_eq!(result, Value::String("plain text".to_string()));
 }
 

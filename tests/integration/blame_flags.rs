@@ -714,6 +714,180 @@ fn test_blame_hash_column_matches_git() {
     }
 }
 
+fn assert_hash_columns_match(repo: &TestRepo, args: &[&str]) {
+    let git_output = repo.git(args).unwrap();
+    let ai_output = repo.git_ai(args).unwrap();
+    let columns = |output: &str| {
+        output
+            .lines()
+            .map(|line| line.split_once('(').unwrap().0.to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(columns(&ai_output), columns(&git_output), "{args:?}");
+}
+
+#[test]
+fn test_blame_configured_markers_and_abbrev_match_git() {
+    let repo = TestRepo::new();
+    std::fs::write(
+        repo.path().join("markers.txt"),
+        "old expression\nold neighbor\n",
+    )
+    .unwrap();
+    repo.stage_all_and_commit("root").unwrap();
+    std::fs::write(
+        repo.path().join("markers.txt"),
+        "let value = 1;\nordinary neighbor\n",
+    )
+    .unwrap();
+    repo.stage_all_and_commit("content").unwrap();
+    std::fs::write(
+        repo.path().join("markers.txt"),
+        "  let value = 1;\nordinary neighbor\nzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n",
+    )
+    .unwrap();
+    let ignored = repo.stage_all_and_commit("format").unwrap().commit_sha;
+    repo.git(&["config", "blame.markIgnoredLines", "true"])
+        .unwrap();
+    repo.git(&["config", "blame.markUnblamableLines", "true"])
+        .unwrap();
+    let porcelain = repo
+        .git(&[
+            "blame",
+            "--line-porcelain",
+            "--ignore-rev",
+            &ignored,
+            "markers.txt",
+        ])
+        .unwrap();
+    assert!(
+        porcelain.contains("\nignored\n") && porcelain.contains("\nunblamable\n"),
+        "{porcelain}"
+    );
+    for config in ["4", "12", "40", "false", "auto"] {
+        repo.git(&["config", "core.abbrev", config]).unwrap();
+        for flag in [None, Some("-b"), Some("--root"), Some("-l")] {
+            let mut args = vec!["blame", "--ignore-rev", ignored.as_str()];
+            args.extend(flag);
+            args.push("markers.txt");
+            assert_hash_columns_match(&repo, &args);
+        }
+    }
+}
+
+#[test]
+fn test_blame_ignored_boundary_markers_match_git() {
+    let repo = TestRepo::new();
+    std::fs::write(repo.path().join("boundary.txt"), "boundary expression\n").unwrap();
+    repo.stage_all_and_commit("root").unwrap();
+    std::fs::write(repo.path().join("boundary.txt"), "  boundary expression\n").unwrap();
+    let ignored = repo.stage_all_and_commit("format").unwrap().commit_sha;
+    repo.git(&["config", "blame.markIgnoredLines", "true"])
+        .unwrap();
+    let porcelain = repo
+        .git(&[
+            "blame",
+            "--line-porcelain",
+            "--ignore-rev",
+            &ignored,
+            "boundary.txt",
+        ])
+        .unwrap();
+    assert!(
+        porcelain.contains("\nboundary\n") && porcelain.contains("\nignored\n"),
+        "{porcelain}"
+    );
+    for flag in [None, Some("-b"), Some("--root"), Some("-l")] {
+        let mut args = vec!["blame", "--ignore-rev", ignored.as_str()];
+        args.extend(flag);
+        args.push("boundary.txt");
+        assert_hash_columns_match(&repo, &args);
+    }
+}
+
+#[test]
+fn test_blame_wholly_uncommitted_hash_column_matches_git() {
+    let repo = TestRepo::new();
+    std::fs::write(repo.path().join("uncommitted.txt"), "before\n").unwrap();
+    repo.stage_all_and_commit("root").unwrap();
+    std::fs::write(
+        repo.path().join("uncommitted.txt"),
+        "completely different\n",
+    )
+    .unwrap();
+    for config in ["4", "12", "40", "false", "auto"] {
+        repo.git(&["config", "core.abbrev", config]).unwrap();
+        assert_hash_columns_match(&repo, &["blame", "uncommitted.txt"]);
+    }
+}
+
+#[test]
+fn test_blame_automatic_abbreviation_uses_constant_git_processes() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let repo = TestRepo::new();
+    let mut child = Command::new(git_ai::config::Config::get().git_cmd())
+        .current_dir(repo.path())
+        .args(["fast-import", "--quiet"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut contents = String::new();
+    {
+        let input = child.stdin.as_mut().unwrap();
+        for i in 0..260 {
+            contents.push_str(&format!("line {i:03}\n"));
+            let message = format!("commit {i}");
+            write!(input, "commit refs/heads/main\ncommitter Test <test@example.com> {} +0000\ndata {}\n{}\nM 100644 inline many.txt\ndata {}\n{}\n", 1_700_000_000 + i, message.len(), message, contents.len(), contents).unwrap();
+        }
+    }
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+    repo.git(&["reset", "--hard", "HEAD"]).unwrap();
+    let porcelain = repo
+        .git(&["blame", "--line-porcelain", "many.txt"])
+        .unwrap();
+    assert_eq!(
+        porcelain
+            .lines()
+            .filter(|line| line.ends_with(" 1")
+                && line
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|sha| sha.len() == 40))
+            .count(),
+        260
+    );
+    let log = repo.test_home_path().join("abbrev-spawns.log");
+    let run = |args: &[&str]| {
+        std::fs::write(&log, "").unwrap();
+        let output = repo
+            .git_ai_with_env(args, &[("GIT_AI_SPAWN_LOG", log.to_str().unwrap())])
+            .unwrap();
+        let spawns = std::fs::read_to_string(&log).unwrap();
+        let count = spawns
+            .lines()
+            .filter(|line| *line == "log" || *line == "rev-parse")
+            .count();
+        (output, count)
+    };
+    let (_, baseline) = run(&["blame", "-l", "many.txt"]);
+    let (actual, automatic) = run(&["blame", "many.txt"]);
+    let expected = repo.git(&["blame", "many.txt"]).unwrap();
+    let columns = |output: &str| {
+        output
+            .lines()
+            .map(|line| line.split_once('(').unwrap().0.to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(columns(&actual), columns(&expected));
+    assert_eq!(
+        automatic,
+        baseline + 2,
+        "one abbreviation lookup for each of two blame passes"
+    );
+}
+
 // #[test]
 // fn test_blame_show_stats() {
 //     let tmp_dir = tempdir().unwrap();

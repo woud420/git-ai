@@ -81,12 +81,16 @@ pub(super) fn output_default_format(
         max_author_width = max_author_width.max(author_display.len());
     }
 
-    let blank_boundary_hash_width = prepared
-        .hunks
-        .iter()
-        .map(|hunk| hunk.abbrev_sha.len())
-        .max()
-        .unwrap_or(0);
+    let hash_column_width = if options.long_rev {
+        40
+    } else {
+        prepared
+            .hunks
+            .iter()
+            .map(|hunk| hunk.abbrev_sha.len() + Repository::blame_hunk_marker_width(hunk, options))
+            .max()
+            .unwrap_or(0)
+    };
 
     for line_num in prepared.requested_lines {
         let line_index = (line_num - 1) as usize;
@@ -99,19 +103,25 @@ pub(super) fn output_default_format(
         if let Some(hunk) = prepared.line_to_hunk.get(&line_num) {
             let sha = &hunk.abbrev_sha;
 
-            // Match git blame boundary formatting:
-            // - default boundary: prefix abbreviated hash with '^'
-            // - -b/--blank-boundary: print a blank hash column
-            let full_sha = if hunk.is_boundary && options.blank_boundary && !options.show_root {
-                " ".repeat(blank_boundary_hash_width)
+            // Markers share the hash column, including -l and blank boundaries.
+            let mut full_sha = String::new();
+            if hunk.is_boundary && !options.blank_boundary && !options.show_root {
+                full_sha.push('^');
+            }
+            if hunk.is_unblamable {
+                full_sha.push('*');
+            }
+            if hunk.is_ignored {
+                full_sha.push('?');
+            }
+            let remaining_width = hash_column_width.saturating_sub(full_sha.len());
+            if hunk.is_boundary && options.blank_boundary && !options.show_root {
+                full_sha.push_str(&" ".repeat(remaining_width.min(sha.len())));
+            } else if options.long_rev {
+                full_sha.push_str(&sha[..sha.len().min(remaining_width)]);
             } else {
-                let boundary_marker = if hunk.is_boundary && !options.show_root {
-                    "^"
-                } else {
-                    ""
-                };
-                format!("{}{}", boundary_marker, sha)
-            };
+                full_sha.push_str(sha);
+            }
 
             // Get the author for this line (AI authorship or original)
             let author = line_authors.get(&line_num).unwrap_or(&hunk.original_author);

@@ -57,6 +57,10 @@ pub struct BlameHunk {
     pub committer_tz: String,
     /// Whether this is a boundary commit
     pub is_boundary: bool,
+    #[serde(skip)]
+    pub is_ignored: bool,
+    #[serde(skip)]
+    pub is_unblamable: bool,
     /// The filename at the blamed commit (may differ from current if file was renamed)
     #[serde(default)]
     pub orig_filename: Option<String>,

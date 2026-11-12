@@ -280,16 +280,13 @@ pub fn save_file_config(config: &FileConfig) -> Result<(), String> {
     let path =
         config_file_path().ok_or_else(|| "Could not determine config file path".to_string())?;
 
-    // Ensure the directory exists
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-    }
-
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&path, json).map_err(|e| format!("Failed to write config file: {}", e))
+    // Replaced by rename: a concurrent load never sees a partial file (which
+    // would silently fall back to defaults and stop collection).
+    crate::atomic_write::write_atomic(&path, json.as_bytes())
+        .map_err(|e| format!("Failed to write config file: {}", e))
 }
 
 pub(crate) fn build_config() -> Config {

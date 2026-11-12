@@ -113,9 +113,9 @@ pub fn quarantine_ready_record(root: &Path, name: &str) -> Result<(), Checkpoint
     secure_root.sync_all()
 }
 
-/// Deletes quarantined records older than `retention`, returning how many
-/// were removed. Uses file mtime, which the quarantining rename preserves
-/// from publication time.
+/// Deletes quarantined records and orphaned temporary records older than
+/// `retention`, returning how many were removed. Uses file mtime, which the
+/// quarantining rename preserves from publication time.
 pub fn prune_quarantined_records(
     root: &Path,
     retention: Duration,
@@ -132,7 +132,14 @@ pub fn prune_quarantined_records(
         let Ok(name) = name.into_string() else {
             continue;
         };
-        if !name.ends_with(QUARANTINE_SUFFIX) || !is_safe_record_name(&name) {
+        // Publication holds the lock while its `.<uuid>.tmp` exists, so one
+        // seen here was orphaned by a crash and only consumes capacity.
+        let orphaned_temporary = name
+            .strip_prefix('.')
+            .is_some_and(|rest| rest.ends_with(".tmp") && is_safe_record_name(rest));
+        if !orphaned_temporary
+            && (!name.ends_with(QUARANTINE_SUFFIX) || !is_safe_record_name(&name))
+        {
             continue;
         }
         let Ok(record) = open_record_at(secure_root.as_raw_fd(), c_filename(&name)?.as_c_str())
@@ -185,5 +192,41 @@ fn require_record_name(name: &str) -> Result<(), CheckpointOutboxError> {
         Ok(())
     } else {
         Err(CheckpointOutboxError::UnsafeReadyRecord)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{OutboxLimits, unix::publish_encoded};
+    use super::*;
+    use std::fs;
+
+    fn outbox_with_record() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("outbox");
+        publish_encoded(&root, "a.ready", b"a", OutboxLimits::default()).unwrap();
+        (temp, root)
+    }
+
+    #[test]
+    fn prune_removes_orphaned_temporary_records_after_retention() {
+        let (_temp, root) = outbox_with_record();
+        let old = root.join(".orphan.tmp");
+        fs::write(&old, b"x").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(7200))
+            .unwrap();
+        fs::write(root.join(".fresh.tmp"), b"x").unwrap();
+
+        assert_eq!(
+            prune_quarantined_records(&root, Duration::from_secs(3600)).unwrap(),
+            1
+        );
+        assert!(!old.exists());
+        assert!(root.join(".fresh.tmp").exists());
+        assert!(root.join("a.ready").exists());
     }
 }

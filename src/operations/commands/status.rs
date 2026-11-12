@@ -4,7 +4,7 @@ use crate::cli::fail::print_stdout;
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
-use crate::operations::authorship::diff_base::EMPTY_TREE_SHA;
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::authorship::ignore::{
     IgnoreMatcher, build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
@@ -78,7 +78,9 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
     // working tree is compared with the empty tree.
     let (head_sha, head_rev) = match repo.head()?.target() {
         Ok(sha) => (sha.clone(), sha),
-        Err(_) => ("initial".to_string(), EMPTY_TREE_SHA.to_string()),
+        // There is no commit id to take the object format from yet, so this
+        // is the SHA-1 empty tree.
+        Err(_) => ("initial".to_string(), empty_tree_for("").to_string()),
     };
 
     let working_log = repo.storage.working_log_for_base_commit(&head_sha)?;

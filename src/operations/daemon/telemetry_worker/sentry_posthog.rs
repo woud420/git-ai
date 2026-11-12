@@ -203,9 +203,17 @@ impl SentryClient {
         let url = url::Url::parse(dsn).ok()?;
         let public_key = url.username().to_string();
         let host = url.host_str()?;
-        let project_id = url.path().trim_start_matches('/');
-        let scheme = url.scheme();
-        let endpoint = format!("{}://{}/api/{}/store/", scheme, host, project_id);
+        let port = url
+            .port()
+            .map(|port| format!(":{port}"))
+            .unwrap_or_default();
+        // `{scheme}://{key}@{host}[:{port}]/{path-prefix/}{project_id}`
+        let path = url.path().trim_matches('/');
+        let (prefix, project_id) = path.split_at(path.rfind('/').map_or(0, |i| i + 1));
+        let endpoint = format!(
+            "{}://{host}{port}/{prefix}api/{project_id}/store/",
+            url.scheme()
+        );
         Some(SentryClient {
             endpoint,
             public_key,
@@ -233,5 +241,23 @@ impl SentryClient {
         } else {
             Err(format!("Sentry returned status {}", status).into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SentryClient;
+
+    #[test]
+    fn from_dsn_keeps_port_and_path_prefix() {
+        let endpoint = |dsn: &str| SentryClient::from_dsn(dsn).unwrap().endpoint;
+        assert_eq!(
+            endpoint("https://key@o1.ingest.sentry.io/42"),
+            "https://o1.ingest.sentry.io/api/42/store/"
+        );
+        assert_eq!(
+            endpoint("https://key@sentry.corp:9000/sentry/7"),
+            "https://sentry.corp:9000/sentry/api/7/store/"
+        );
     }
 }

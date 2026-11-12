@@ -205,7 +205,7 @@ pub(super) fn output_default_format(
     }
 }
 
-/// Feed `output` to `pager`. Returns false when the pager cannot be started.
+/// Feed `output` to `pager`. Returns false when the pager cannot be run.
 fn run_pager(pager: &str, output: &str) -> bool {
     // Like git, run the pager through the shell so `GIT_PAGER="less -R"` works.
     #[cfg(unix)]
@@ -224,8 +224,9 @@ fn run_pager(pager: &str, output: &str) -> bool {
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(output.as_bytes());
     }
-    let _ = child.wait();
-    true
+    // 126/127 is the shell reporting it could not run the pager (e.g. `less`
+    // is not installed): the caller prints directly, as for a failed spawn.
+    !matches!(child.wait(), Ok(status) if matches!(status.code(), Some(126 | 127)))
 }
 
 #[cfg(all(test, unix))]
@@ -238,5 +239,10 @@ mod tests {
 
         assert!(super::run_pager(&pager, "line 1\nline 2\n"));
         assert_eq!(std::fs::read_to_string(paged).unwrap(), "line 1\nline 2\n");
+    }
+
+    #[test]
+    fn run_pager_reports_a_pager_the_shell_cannot_find() {
+        assert!(!super::run_pager("git-ai-no-such-pager", "line 1\n"));
     }
 }

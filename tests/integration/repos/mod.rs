@@ -1,6 +1,7 @@
 #[macro_use]
 pub mod test_file;
 pub(crate) mod blame_support;
+pub(crate) mod clone_target;
 pub mod diff_hostility;
 pub mod test_repo;
 pub(crate) mod test_repo_adapters;

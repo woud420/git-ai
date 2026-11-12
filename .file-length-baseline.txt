@@ -17,7 +17,6 @@ src/operations/commands/log.rs	1071
 src/operations/commands/upgrade.rs	1833
 src/operations/daemon/checkpoint.rs	993
 src/operations/daemon/stream_worker.rs	1547
-src/operations/git/cli_parser.rs	637
 src/operations/git/refs.rs	713
 src/operations/git/repo_storage.rs	762
 src/operations/streams/agents/copilot_otel.rs	827

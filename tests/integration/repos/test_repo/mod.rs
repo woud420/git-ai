@@ -34,6 +34,7 @@ pub use templates::{default_branchname, get_binary_path};
 pub use worktree::with_worktree_mode;
 use worktree::*;
 
+use crate::repos::clone_target::extract_clone_target_directory;
 use git_ai::config::ConfigPatch;
 use git_ai::feature_flags::FeatureFlags;
 use git_ai::model::authorship_log_serialization::AuthorshipLog;
@@ -46,7 +47,7 @@ use git_ai::operations::daemon::{
     ControlRequest, DaemonConfig, local_socket_connects_with_timeout, send_control_request,
     send_control_request_with_timeout,
 };
-use git_ai::operations::git::cli_parser::{ParsedGitInvocation, extract_clone_target_directory};
+use git_ai::operations::git::cli_parser::ParsedGitInvocation;
 use git_ai::operations::git::path_format::normalize_to_posix;
 use git_ai::operations::git::repo_storage::PersistedWorkingLog;
 use git_ai::operations::git::repository as GitAiRepository;

@@ -36,25 +36,32 @@ impl MetricsDatabase {
             let mut stmt = tx.prepare(RETRYABLE_METRIC_IDS_SQL)?;
             let mut rows = stmt.query(params![now as i64, limit.min(i64::MAX as usize) as i64])?;
             let mut ids = Vec::new();
+            let mut oversized = None;
             let mut remaining = max_bytes as u64;
             while let Some(row) = rows.next()? {
                 let id: i64 = row.get(0)?;
                 let bytes: u64 = row.get(1)?;
+                // A row larger than the whole budget can never be sent: skip
+                // it unclaimed so it does not block the rows ordered after it.
+                if bytes > max_bytes as u64 {
+                    oversized.get_or_insert((id, bytes));
+                    continue;
+                }
                 if bytes > remaining {
-                    if ids.is_empty() {
-                        return Err(PersistenceError::ReadBudgetExceeded {
-                            resource: format!(
-                                "metrics record {id} (max_metrics_flush_chunk_bytes)"
-                            ),
-                            actual_bytes: bytes,
-                            limit_bytes: max_bytes as u64,
-                        }
-                        .into());
-                    }
                     break;
                 }
                 remaining -= bytes;
                 ids.push(id);
+            }
+            if ids.is_empty()
+                && let Some((id, bytes)) = oversized
+            {
+                return Err(PersistenceError::ReadBudgetExceeded {
+                    resource: format!("metrics record {id} (max_metrics_flush_chunk_bytes)"),
+                    actual_bytes: bytes,
+                    limit_bytes: max_bytes as u64,
+                }
+                .into());
             }
             ids
         };

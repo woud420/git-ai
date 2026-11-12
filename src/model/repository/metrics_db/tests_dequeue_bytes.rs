@@ -61,3 +61,29 @@ fn oversized_unicode_metric_is_retained_without_claim_or_retry_penalty() {
     assert_eq!(resumed[0].attempts, 0);
     assert_eq!(resumed[0].event_json, event);
 }
+
+#[test]
+fn oversized_metric_does_not_block_older_or_retried_rows() {
+    let (mut db, _dir) = create_test_db();
+    let event = payload();
+    let ids = db.insert_events(&[event.clone(), event.clone()]).unwrap();
+    let claimed = db
+        .dequeue_pending_batch_with_byte_limit(1000, event.len())
+        .unwrap();
+    assert_eq!(claimed[0].id, ids[1]);
+    db.mark_records_failed(&[ids[1]], "fixture upload failure", unix_now() - 1000)
+        .unwrap();
+    let oversized = serde_json::json!({"t": unix_now(), "v": "x".repeat(event.len() * 3)});
+    db.insert_events(&[oversized.to_string()]).unwrap();
+
+    let batch = db
+        .dequeue_pending_batch_with_byte_limit(1000, event.len() * 2)
+        .unwrap();
+    assert_eq!(
+        batch.iter().map(|r| r.id).collect::<Vec<_>>(),
+        [ids[0], ids[1]]
+    );
+    let status = db.status().unwrap();
+    assert_eq!(status.processing, 2);
+    assert_eq!(status.pending_retryable, 1);
+}

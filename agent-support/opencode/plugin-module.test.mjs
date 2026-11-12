@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import childProcess from "node:child_process"
 import { EventEmitter } from "node:events"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { syncBuiltinESMExports } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -9,9 +9,6 @@ import { PassThrough, Writable } from "node:stream"
 import test from "node:test"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-// The plugin imports `@opencode/plugin` at runtime, and bare specifiers cannot
-// be resolved from a data: URL, so import the compiled module from a file
-// inside the package directory where node_modules resolution works.
 const buildDirectory = await mkdtemp(new URL("./git-ai.test-build-", import.meta.url))
 let plugin
 try {
@@ -64,6 +61,35 @@ test("module exposes a stable display ID and both plugin API entrypoints", () =>
   assert.equal(plugin.default.setup, plugin.GitAiPlugin.setup)
   assert.equal(typeof plugin.default.server, "function")
   assert.deepEqual(Object.keys(plugin).sort(), ["GitAiPlugin", "GitAiPluginV1", "default"])
+})
+
+test("installed plugin loads without node_modules and registers both APIs", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "git-ai-opencode-installed-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const pluginDirectory = join(directory, ".config", "opencode", "plugins")
+  await mkdir(pluginDirectory, { recursive: true })
+  const source = await readFile(new URL("./git-ai.ts", import.meta.url), "utf8")
+  const installedSource = source.replace("__GIT_AI_BINARY_PATH__", "/usr/bin/git-ai")
+  await writeFile(join(pluginDirectory, "git-ai.ts"), installedSource)
+  childProcess.execFileSync(process.execPath, [
+    fileURLToPath(new URL("./node_modules/typescript/bin/tsc", import.meta.url)),
+    "--ignoreConfig", "--noCheck", "--module", "ESNext", "--target", "ES2022",
+    "--outDir", pluginDirectory, join(pluginDirectory, "git-ai.ts"),
+  ], { timeout: 30_000 })
+  const pluginPath = join(pluginDirectory, "git-ai.mjs")
+  await writeFile(pluginPath, await readFile(join(pluginDirectory, "git-ai.js")))
+  const { default: installedPlugin } = await import(pathToFileURL(pluginPath).href)
+
+  assert.equal(installedPlugin.id, "git-ai")
+  const hooks = []
+  await installedPlugin.setup({
+    location: { directory },
+    tool: { hook: async (name) => hooks.push(name) },
+  })
+  assert.deepEqual(hooks, ["execute.before", "execute.after"])
+  const legacyHooks = await installedPlugin.server({ directory })
+  assert.equal(typeof legacyHooks["tool.execute.before"], "function")
+  assert.equal(typeof legacyHooks["tool.execute.after"], "function")
 })
 
 test("V1 server emits one checkpoint for each edit boundary", async (t) => {

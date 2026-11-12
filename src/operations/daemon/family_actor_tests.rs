@@ -1,6 +1,7 @@
 use super::*;
-use crate::model::domain::{CommandScope, Confidence, NormalizedCommand, RefChange};
+use crate::model::domain::{CommandScope, NormalizedCommand, RefChange};
 use crate::operations::daemon::ref_cursor::capture_reflog_start_offsets_for_worktree;
+use crate::operations::daemon::tests_fixtures::normalized_command;
 use std::fs;
 use std::path::PathBuf;
 
@@ -10,25 +11,9 @@ fn sample_normalized_cmd(family_key: &str, seq: u128) -> NormalizedCommand {
         family_key: Some(FamilyKey::new(family_key)),
         worktree: Some(PathBuf::from("/tmp/repo")),
         root_sid: format!("sid-{}", seq),
-        trace_derived: false,
-        raw_argv: vec!["git".to_string(), "status".to_string()],
-        primary_command: Some("status".to_string()),
-        invoked_command: Some("status".to_string()),
-        invoked_args: Vec::new(),
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
         started_at_ns: seq,
         finished_at_ns: seq + 1,
-        reflog_start_offsets: std::collections::HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
-        ref_changes: Vec::new(),
-        confidence: Confidence::Low,
+        ..normalized_command("status", &["git", "status"])
     }
 }
 
@@ -57,33 +42,13 @@ async fn commit_enrichment_retries_until_reflog_entry_is_visible() {
         worktree: Some(worktree),
         root_sid: "delayed-reflog".to_string(),
         trace_derived: true,
-        raw_argv: vec![
-            "git".to_string(),
-            "commit".to_string(),
-            "-m".to_string(),
-            "delayed".to_string(),
-        ],
-        primary_command: Some("commit".to_string()),
-        invoked_command: Some("commit".to_string()),
         invoked_args: vec![
             "commit".to_string(),
             "-m".to_string(),
             "delayed".to_string(),
         ],
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
         reflog_start_offsets,
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
-        ref_changes: Vec::new(),
-        confidence: Confidence::Low,
+        ..normalized_command("commit", &["git", "commit", "-m", "delayed"])
     };
 
     let old = "1111111111111111111111111111111111111111";
@@ -140,28 +105,8 @@ async fn trace_cherry_pick_retries_without_initial_reflog_evidence() {
         worktree: Some(worktree),
         root_sid: "trace-cherry-pick".to_string(),
         trace_derived: true,
-        raw_argv: vec![
-            "git".to_string(),
-            "cherry-pick".to_string(),
-            source.to_string(),
-        ],
-        primary_command: Some("cherry-pick".to_string()),
-        invoked_command: Some("cherry-pick".to_string()),
         invoked_args: vec!["cherry-pick".to_string(), source.to_string()],
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
-        reflog_start_offsets: HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
-        ref_changes: Vec::new(),
-        confidence: Confidence::Low,
+        ..normalized_command("cherry-pick", &["git", "cherry-pick", source])
     };
 
     let delayed_head_log = head_log.clone();

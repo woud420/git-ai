@@ -70,7 +70,7 @@ pub(crate) fn event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::domain::{CommandScope, Confidence};
+    use crate::model::domain::Confidence;
     use crate::operations::daemon::checkout_discard::is_explicit_path_checkout;
 
     type Event = fn(&NormalizedCommand, &HashMap<String, String>) -> Option<SemanticEvent>;
@@ -87,29 +87,13 @@ mod tests {
                 .map(|arg| if *arg == "HEAD" { &head } else { *arg }),
         );
         let cmd = NormalizedCommand {
-            scope: CommandScope::Global,
-            family_key: None,
             worktree: Some(root.clone()),
             root_sid: command.into(),
             trace_derived: true,
-            raw_argv: raw_argv.iter().map(|s| s.to_string()).collect(),
-            primary_command: Some(command.into()),
-            invoked_command: Some(command.into()),
-            invoked_args: Vec::new(),
-            observed_child_commands: Vec::new(),
-            transport_targets: None,
-            index_v2: false,
             index_write: IndexWriteEvidence::Exact(root.join(".git/index.lock")),
-            bisect_checkout: None,
-            exit_code: 0,
-            started_at_ns: 1,
-            finished_at_ns: 2,
-            reflog_start_offsets: HashMap::new(),
-            stash_target_oid: None,
-            cherry_pick_source_oids: Vec::new(),
-            revert_source_oids: Vec::new(),
-            ref_changes: Vec::new(),
             confidence: Confidence::High,
+            invoked_args: Vec::new(),
+            ..super::super::tests::command(command, &raw_argv)
         };
         (cmd, HashMap::from([("HEAD".into(), head)]))
     }

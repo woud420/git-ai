@@ -164,9 +164,9 @@ mod tests {
     use crate::model::domain::{CommandScope, Confidence};
 
     /// Shared fixture builder for analyzer unit tests: a global-scope command
-    /// with no ref changes. `workspace.rs` and `transport.rs` import
-    /// this. `history.rs` adds its default HEAD ref change; `generic.rs`
-    /// keeps a 1-arg variant that does not need argv.
+    /// with no ref changes. The analyzer tests build on it with struct update
+    /// syntax; the analyzers are a pure layer, so it cannot be shared with
+    /// the rest of the daemon's tests.
     pub(super) fn command(primary: &str, argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {
             scope: CommandScope::Global,

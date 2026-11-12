@@ -9,6 +9,7 @@
 
 use crate::cli::fail::print_stdout;
 use crate::error::GitAiError;
+use crate::operations::commands::show::resolve_commit;
 use crate::operations::git::repository::Repository;
 
 // Re-export public items used by callers outside this module so the public API
@@ -192,29 +193,6 @@ pub fn execute_diff(repo: &Repository, parsed: ParsedDiffArgs) -> Result<String,
 // ============================================================================
 // Commit Resolution
 // ============================================================================
-
-fn resolve_commit(repo: &Repository, rev: &str) -> Result<String, GitAiError> {
-    use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
-
-    let mut args = repo.global_args_for_exec();
-    args.push("rev-parse".to_string());
-    args.push(rev.to_string());
-
-    let output = exec_git_with_profile(&args, InternalGitProfile::General)?;
-    let sha = String::from_utf8(output.stdout)
-        .map_err(|e| GitAiError::Generic(format!("Failed to parse rev-parse output: {}", e)))?
-        .trim()
-        .to_string();
-
-    if sha.is_empty() {
-        return Err(GitAiError::Generic(format!(
-            "Could not resolve commit: {}",
-            rev
-        )));
-    }
-
-    Ok(sha)
-}
 
 fn resolve_parent(repo: &Repository, commit: &str) -> Result<String, GitAiError> {
     use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};

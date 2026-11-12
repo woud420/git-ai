@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Per-file diff information in JSON output
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FileDiffJson {
     /// Annotations mapping prompt hash to line ranges
     /// Line ranges are serialized as JSON tuples: [start, end] or single number
@@ -29,7 +29,7 @@ pub struct DiffLineKey {
 }
 
 /// JSON output format for `git-ai diff --json`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DiffJson {
     /// Per-file diff information with annotations
     pub files: BTreeMap<String, FileDiffJson>,

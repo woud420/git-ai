@@ -145,9 +145,7 @@ pub fn spawn_self_restart() -> Result<(), String> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
-    for var in GIT_ENV_VARS_TO_SANITIZE {
-        cmd.env_remove(var);
-    }
+    sanitize_daemon_child_environment(&mut cmd);
     cmd.env_remove("GIT_AI");
 
     #[cfg(windows)]

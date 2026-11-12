@@ -304,6 +304,17 @@ fn ref_enrichment_retry_requires_successful_unenriched_commit_like_command() {
     assert!(!should_retry_ref_enrichment(&cmd));
 }
 
+#[test]
+fn ref_enrichment_retry_skips_commit_forms_that_imply_dry_run() {
+    let mut cmd = sample_normalized_cmd("family-1", 1);
+    cmd.primary_command = Some("commit".to_string());
+    cmd.trace_derived = true;
+    for flag in ["--dry-run", "--short", "--porcelain", "--long"] {
+        cmd.invoked_args = vec!["-a".to_string(), flag.to_string()];
+        assert!(!should_retry_ref_enrichment(&cmd), "{flag}");
+    }
+}
+
 #[tokio::test]
 async fn commit_enrichment_fails_closed_when_reflog_entry_stays_missing() {
     let temp = tempfile::tempdir().unwrap();

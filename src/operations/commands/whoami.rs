@@ -1,4 +1,5 @@
 use crate::clients::api::{ApiClient, ApiContext};
+use crate::clients::auth::identity::TokenOrg;
 use crate::clients::auth::state::AuthStatus;
 use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
@@ -45,6 +46,17 @@ pub fn handle_whoami(args: &[String]) {
     if should_exit_failure(&auth, &api_ctx) {
         std::process::exit(1);
     }
+}
+
+/// `slug (name) [id] role=role`, with a placeholder for each missing field.
+pub(crate) fn format_org(org: &TokenOrg) -> String {
+    format!(
+        "{} ({}) [{}] role={}",
+        org.org_slug.as_deref().unwrap_or("<unknown-slug>"),
+        org.org_name.as_deref().unwrap_or("<unknown-name>"),
+        org.org_id.as_deref().unwrap_or("<unknown-id>"),
+        org.role.as_deref().unwrap_or("<unknown-role>")
+    )
 }
 
 fn collect_metrics_status() -> Result<MetricsStatus, String> {
@@ -127,16 +139,7 @@ fn render_whoami(
         } else {
             writeln!(out, "  Organizations:").unwrap();
             for org in &auth.orgs {
-                let org_id = org.org_id.as_deref().unwrap_or("<unknown-id>");
-                let org_slug = org.org_slug.as_deref().unwrap_or("<unknown-slug>");
-                let org_name = org.org_name.as_deref().unwrap_or("<unknown-name>");
-                let role = org.role.as_deref().unwrap_or("<unknown-role>");
-                writeln!(
-                    out,
-                    "    - {} ({}) [{}] role={}",
-                    org_slug, org_name, org_id, role
-                )
-                .unwrap();
+                writeln!(out, "    - {}", format_org(org)).unwrap();
             }
         }
         writeln!(out).unwrap();
@@ -282,7 +285,6 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clients::auth::identity::TokenOrg;
 
     fn auth_status(state: AuthState) -> AuthStatus {
         AuthStatus {

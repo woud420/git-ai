@@ -4,12 +4,21 @@ impl RefCursor {
     /// Sources carried over from a conflicted cherry-pick. An enrichment pass
     /// consumes them even when it finds no reflog row, so a caller that
     /// enriches the same command again must restore them first.
-    pub(crate) fn pending_cherry_pick_sources(&self) -> Vec<String> {
+    pub(crate) fn pending_cherry_pick_sources(&self) -> HashMap<String, Vec<String>> {
         self.pending_cherry_pick_source_oids.clone()
     }
 
-    pub(crate) fn restore_pending_cherry_pick_sources(&mut self, sources: &[String]) {
-        self.pending_cherry_pick_source_oids = sources.to_vec();
+    pub(crate) fn restore_pending_cherry_pick_sources(
+        &mut self,
+        sources: &HashMap<String, Vec<String>>,
+    ) {
+        self.pending_cherry_pick_source_oids = sources.clone();
+    }
+
+    pub(super) fn pending_cherry_pick_sources_for(&self, cmd: &NormalizedCommand) -> &[String] {
+        self.pending_cherry_pick_source_oids
+            .get(&pending_cherry_pick_key(cmd))
+            .map_or(&[], Vec::as_slice)
     }
 
     pub(super) fn enrich_cherry_pick(
@@ -18,11 +27,12 @@ impl RefCursor {
         state: &FamilyState,
     ) -> Result<(), GitAiError> {
         let args = parsed_invocation_for_normalized_command(cmd).command_args;
+        let key = pending_cherry_pick_key(cmd);
         if args
             .iter()
             .any(|arg| matches!(arg.as_str(), "--abort" | "--quit"))
         {
-            self.pending_cherry_pick_source_oids.clear();
+            self.pending_cherry_pick_source_oids.remove(&key);
             return Ok(());
         }
 
@@ -30,8 +40,11 @@ impl RefCursor {
         let is_continue = args.iter().any(|arg| arg == "--continue");
         let is_skip = args.iter().any(|arg| arg == "--skip");
 
-        if is_skip && !self.pending_cherry_pick_source_oids.is_empty() {
-            self.pending_cherry_pick_source_oids.remove(0);
+        if is_skip
+            && let Some(pending) = self.pending_cherry_pick_source_oids.get_mut(&key)
+            && !pending.is_empty()
+        {
+            pending.remove(0);
         }
 
         let source_args = if is_continue || is_skip {
@@ -48,7 +61,10 @@ impl RefCursor {
         let explicit_sources = explicit_sources.unwrap_or_default();
         cmd.cherry_pick_source_oids = if explicit_sources.is_empty() && !unresolved_explicit_sources
         {
-            self.pending_cherry_pick_source_oids.clone()
+            self.pending_cherry_pick_source_oids
+                .get(&key)
+                .cloned()
+                .unwrap_or_default()
         } else {
             explicit_sources
         };
@@ -80,18 +96,19 @@ impl RefCursor {
             .filter(|change| change.reference == "HEAD")
             .count();
         if cmd.exit_code != 0 {
-            self.pending_cherry_pick_source_oids = cmd
+            let remaining = cmd
                 .cherry_pick_source_oids
                 .iter()
                 .skip(applied_count.min(cmd.cherry_pick_source_oids.len()))
                 .cloned()
                 .collect();
+            self.pending_cherry_pick_source_oids.insert(key, remaining);
         } else if is_continue
             || is_skip
             || !cmd.cherry_pick_source_oids.is_empty()
             || applied_count > 0
         {
-            self.pending_cherry_pick_source_oids.clear();
+            self.pending_cherry_pick_source_oids.remove(&key);
         }
 
         Ok(())
@@ -151,4 +168,11 @@ impl RefCursor {
             source_limit,
         )
     }
+}
+
+fn pending_cherry_pick_key(cmd: &NormalizedCommand) -> String {
+    cmd.worktree
+        .as_deref()
+        .map(crate::operations::daemon::ActorDaemonCoordinator::worktree_state_key)
+        .unwrap_or_default()
 }

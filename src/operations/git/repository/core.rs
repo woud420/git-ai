@@ -42,9 +42,7 @@ pub struct Repository {
     pub(super) cached_author_identity: std::sync::OnceLock<GitAuthorIdentity>,
     /// Shared across repository clones so promisor detection runs once per repository.
     pub(super) cached_has_promisor_remote: Arc<OnceLock<bool>>,
-    /// `--is-bare-repository` as `find_repository` already read it, so
-    /// `is_bare_repository` need not ask git again; `None` when the repository
-    /// was found without running git.
+    /// `--is-bare-repository` as `find_repository` read it; `None` if found without git.
     pub(super) discovered_is_bare: Option<bool>,
 }
 

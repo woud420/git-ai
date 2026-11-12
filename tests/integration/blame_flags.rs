@@ -1586,6 +1586,43 @@ fn test_blame_ai_human_author() {
     );
 }
 
+/// A reader that closes the pipe early (`git-ai blame f | head -1`) must end
+/// the command quietly with status 0, as `git-ai log` already does.
+#[test]
+fn test_output_commands_exit_cleanly_when_reader_closes_pipe() {
+    use std::io::Read;
+    use std::process::Stdio;
+
+    let repo = TestRepo::new();
+    // Far larger than a pipe buffer, so the write runs into the closed pipe.
+    let content: String = (0..20_000)
+        .map(|i| format!("line {i} with enough text to overflow the pipe buffer\n"))
+        .collect();
+    std::fs::write(repo.path().join("big.txt"), content).unwrap();
+    repo.stage_all_and_commit("big file").unwrap();
+
+    for args in [&["blame", "big.txt"][..], &["diff", "HEAD"]] {
+        let mut child = repo
+            .git_ai_command_without_pre_sync_for_test(args, &[])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut first_bytes = [0u8; 64];
+        // Dropping the reader closes the pipe.
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_exact(&mut first_bytes)
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{args:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+    }
+}
+
 crate::reuse_tests_in_worktree!(
     test_blame_basic_format,
     test_blame_line_range,

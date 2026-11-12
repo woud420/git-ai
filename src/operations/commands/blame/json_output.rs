@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use crate::cli::fail::print_stdout;
 use crate::clients::auth::CredentialStore;
 use crate::error::GitAiError;
 use crate::model::authorship_log::PromptRecord;
@@ -159,9 +160,9 @@ pub(super) fn output_json_format(
         },
     };
 
-    let json_str = serde_json::to_string_pretty(&output)
+    let mut json_str = serde_json::to_string_pretty(&output)
         .map_err(|e| GitAiError::Generic(format!("Failed to serialize JSON output: {}", e)))?;
-
-    println!("{}", json_str);
+    json_str.push('\n');
+    print_stdout(&json_str);
     Ok(())
 }

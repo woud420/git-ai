@@ -3,6 +3,7 @@ use std::io::{self, IsTerminal, Write};
 
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 
+use crate::cli::fail::print_stdout;
 use crate::model::authorship_log::PromptRecord;
 
 use super::hunk_parser::BlameRenderPreparation;
@@ -196,7 +197,7 @@ pub(super) fn output_default_format(
 
     // If pager is set to "cat" or empty, output directly
     if pager == "cat" || pager.is_empty() {
-        print!("{}", output);
+        print_stdout(&output);
     } else if io::stdout().is_terminal() {
         // Try to use the specified pager
         match std::process::Command::new(&pager)
@@ -209,20 +210,20 @@ pub(super) fn output_default_format(
                         let _ = child.wait();
                     } else {
                         // Fall back to direct output if pager fails
-                        print!("{}", output);
+                        print_stdout(&output);
                     }
                 } else {
                     // Fall back to direct output if pager fails
-                    print!("{}", output);
+                    print_stdout(&output);
                 }
             }
             Err(_) => {
                 // Fall back to direct output if pager fails
-                print!("{}", output);
+                print_stdout(&output);
             }
         }
     } else {
         // Not a terminal, output directly
-        print!("{}", output);
+        print_stdout(&output);
     }
 }

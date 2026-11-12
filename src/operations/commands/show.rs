@@ -1,4 +1,4 @@
-use crate::cli::fail::resolve_repo_or_fail;
+use crate::cli::fail::{print_stdout, resolve_repo_or_fail};
 use crate::error::GitAiError;
 use crate::operations::commands::revision::normalize_head_rev;
 use crate::operations::git::notes_api::{CommitAuthorship, filter_commits_with_notes};
@@ -28,40 +28,38 @@ pub fn handle_show(args: &[String]) {
 fn show_authorship(repo: &Repository, spec: &str) -> Result<(), GitAiError> {
     let commits = resolve_commits(repo, spec)?;
     if commits.is_empty() {
-        println!("{}", NO_AUTHORSHIP_DATA_MESSAGE);
+        print_stdout(&format!("{NO_AUTHORSHIP_DATA_MESSAGE}\n"));
         return Ok(());
     }
 
     let entries = filter_commits_with_notes(repo, &commits)?;
 
     let multiple_commits = entries.len() > 1;
+    let mut out = String::new();
     for (index, entry) in entries.iter().enumerate() {
         if multiple_commits && index > 0 {
-            println!();
+            out.push('\n');
         }
 
-        match entry {
+        let (sha, body) = match entry {
             CommitAuthorship::Log {
                 sha,
                 authorship_log,
                 ..
-            } => {
-                if multiple_commits {
-                    println!("{}", sha);
-                }
-                let serialized = authorship_log.serialize_to_string().map_err(|_| {
+            } => (
+                sha,
+                authorship_log.serialize_to_string().map_err(|_| {
                     GitAiError::Generic("Failed to serialize authorship log".to_string())
-                })?;
-                println!("{}", serialized);
-            }
-            CommitAuthorship::NoLog { sha, .. } => {
-                if multiple_commits {
-                    println!("{}", sha);
-                }
-                println!("{}", NO_AUTHORSHIP_DATA_MESSAGE);
-            }
+                })?,
+            ),
+            CommitAuthorship::NoLog { sha, .. } => (sha, NO_AUTHORSHIP_DATA_MESSAGE.to_string()),
+        };
+        if multiple_commits {
+            out.push_str(&format!("{sha}\n"));
         }
+        out.push_str(&format!("{body}\n"));
     }
+    print_stdout(&out);
 
     Ok(())
 }

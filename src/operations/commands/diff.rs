@@ -196,34 +196,21 @@ pub fn execute_diff(repo: &Repository, parsed: ParsedDiffArgs) -> Result<String,
 
 fn resolve_parent(repo: &Repository, commit: &str) -> Result<String, GitAiError> {
     use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
+    use crate::operations::authorship::diff_base::empty_tree_for;
 
-    let parent_rev = format!("{}^", commit);
-
+    // `<commit>^@` lists the parents and prints nothing for a root commit, so
+    // a failed lookup is reported instead of being taken for a root commit.
     let mut args = repo.global_args_for_exec();
     args.push("rev-parse".to_string());
-    args.push(parent_rev);
+    args.push(format!("{commit}^@"));
 
-    let output = exec_git_with_profile(&args, InternalGitProfile::General);
-
-    match output {
-        Ok(out) => {
-            let sha = String::from_utf8(out.stdout)
-                .map_err(|e| GitAiError::Generic(format!("Failed to parse parent SHA: {}", e)))?
-                .trim()
-                .to_string();
-
-            if sha.is_empty() {
-                // No parent — initial commit; use empty tree.
-                Ok("4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string())
-            } else {
-                Ok(sha)
-            }
-        }
-        Err(_) => {
-            // No parent — initial commit; use empty tree hash.
-            Ok("4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string())
-        }
-    }
+    let output = exec_git_with_profile(&args, InternalGitProfile::General)?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let first_parent = stdout
+        .lines()
+        .next()
+        .unwrap_or_else(|| empty_tree_for(commit));
+    Ok(first_parent.to_string())
 }
 
 // ============================================================================

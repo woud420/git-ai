@@ -1,5 +1,6 @@
 use crate::error::GitAiError;
 use crate::model::authorship_log::{LineRange, metadata_key};
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -332,7 +333,7 @@ pub fn stats_for_commit_stats_with_parent_and_authorship(
 ) -> Result<CommitStats, GitAiError> {
     use crate::operations::commands::diff::get_diff_with_line_numbers;
 
-    let from_ref = parent_sha.unwrap_or("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+    let from_ref = parent_sha.unwrap_or_else(|| empty_tree_for(commit_sha));
     let hunks = get_diff_with_line_numbers(repo, from_ref, commit_sha)?;
     stats_for_commit_stats_from_hunks(repo, commit_sha, ignore_patterns, &hunks, authorship_log)
 }

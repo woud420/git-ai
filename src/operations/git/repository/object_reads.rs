@@ -5,6 +5,7 @@ use super::MAX_PATHSPEC_ARGS;
 use super::core::Repository;
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
+use crate::operations::authorship::diff_base::empty_tree_for;
 use std::collections::HashSet;
 
 impl Repository {
@@ -42,8 +43,7 @@ impl Repository {
 
         // For initial commits (no parent), compare against the empty tree
         if commit.parent_count()? == 0 {
-            let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-            args.push(empty_tree.to_string());
+            args.push(empty_tree_for(commit_sha).to_string());
         }
 
         args.push(commit_sha.to_string());

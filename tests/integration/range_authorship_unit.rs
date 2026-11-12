@@ -2,9 +2,8 @@ mod batched_notes;
 mod note_parity;
 
 use crate::repos::test_repo::TestRepo;
-use git_ai::operations::authorship::range_authorship::{
-    EMPTY_TREE_HASH, range_authorship, should_ignore_file,
-};
+use git_ai::operations::authorship::diff_base::empty_tree_for;
+use git_ai::operations::authorship::range_authorship::{range_authorship, should_ignore_file};
 use git_ai::operations::git::repository::{CommitRange, find_repository_in_path};
 
 #[test]
@@ -91,7 +90,7 @@ fn test_range_authorship_from_empty_tree() {
     let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
     let commit_range = CommitRange::new_infer_refname(
         &gitai_repo,
-        EMPTY_TREE_HASH.to_string(),
+        empty_tree_for(&head_sha).to_string(),
         head_sha.clone(),
         Some("HEAD".to_string()),
     )
@@ -295,7 +294,7 @@ fn test_range_authorship_empty_tree_with_multiple_files() {
     let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
     let commit_range = CommitRange::new_infer_refname(
         &gitai_repo,
-        EMPTY_TREE_HASH.to_string(),
+        empty_tree_for(&head_sha).to_string(),
         head_sha.clone(),
         Some("HEAD".to_string()),
     )

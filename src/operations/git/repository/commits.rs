@@ -6,6 +6,7 @@ use super::core::Repository;
 use super::git_objects::Tree;
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
+use crate::operations::authorship::diff_base::is_empty_tree;
 
 pub struct Object<'a> {
     pub(super) repo: &'a Repository,
@@ -104,11 +105,9 @@ impl<'a> CommitRange<'a> {
     }
 
     pub fn is_valid(&self) -> Result<(), GitAiError> {
-        const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-
         // Check that both commits exist
         // Skip validation for empty tree hash - it's a special git object that may not exist in the repo
-        if self.start_oid != EMPTY_TREE_HASH {
+        if !is_empty_tree(&self.start_oid) {
             self.repo.find_commit(self.start_oid.clone())?;
         }
         self.repo.find_commit(self.end_oid.clone())?;
@@ -116,7 +115,7 @@ impl<'a> CommitRange<'a> {
         // Check that both commits exist on the refname
         // Use git merge-base --is-ancestor <commit> <refname>
         // Skip merge-base check for empty tree hash since it's not part of commit history
-        if self.start_oid != EMPTY_TREE_HASH
+        if !is_empty_tree(&self.start_oid)
             && !self
                 .repo
                 .is_ancestor(&self.start_oid, &self.refname)
@@ -141,7 +140,7 @@ impl<'a> CommitRange<'a> {
 
         // Check that start is an ancestor of end (direct path between them)
         // Skip for empty tree hash - it's not part of the commit DAG
-        if self.start_oid != EMPTY_TREE_HASH
+        if !is_empty_tree(&self.start_oid)
             && !self
                 .repo
                 .is_ancestor(&self.start_oid, &self.end_oid)

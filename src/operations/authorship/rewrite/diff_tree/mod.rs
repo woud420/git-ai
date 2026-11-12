@@ -5,6 +5,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::clients::git_cli::{exec_git_stdin, exec_git_stdin_streaming};
 use crate::error::GitAiError;
 use crate::model::hunk_shift::{DiffHunk, parse_hunk_header};
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::git::oid::is_full_oid;
 use crate::operations::git::path_format::{parse_diff_path_from_header_line, unescape_git_path};
 use crate::operations::git::repository::Repository;
@@ -14,21 +15,7 @@ use super::DiffTreeResult;
 #[cfg(test)]
 mod tests;
 
-const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const DIFF_TREE_STREAM_CHUNK_SIZE: usize = 50;
-
-fn empty_tree_sha() -> &'static str {
-    EMPTY_TREE_SHA
-}
-
-fn insert_known_tree(sha_to_tree: &mut HashMap<String, String>, sha: &str) -> bool {
-    if sha == "initial" {
-        sha_to_tree.insert(sha.to_string(), empty_tree_sha().to_string());
-        true
-    } else {
-        false
-    }
-}
 
 pub(super) fn unique_pair_shas(pairs: &[(String, String)]) -> Vec<String> {
     let mut unique_shas = Vec::new();
@@ -50,9 +37,15 @@ pub(super) fn resolve_tree_shas(
 ) -> Result<HashMap<String, String>, GitAiError> {
     let mut sha_to_tree = HashMap::new();
     let mut shas_to_resolve = Vec::new();
+    // "initial" (no parent) maps to the empty tree of the repository's object
+    // format, which the real commit ids in the batch reveal.
+    let format_sample = unique_shas.iter().find(|sha| *sha != "initial");
+    let empty_tree = empty_tree_for(format_sample.map_or("", String::as_str));
 
     for sha in unique_shas {
-        if !insert_known_tree(&mut sha_to_tree, sha) {
+        if sha == "initial" {
+            sha_to_tree.insert(sha.clone(), empty_tree.to_string());
+        } else {
             shas_to_resolve.push(sha.clone());
         }
     }

@@ -28,7 +28,7 @@ try {
   await rm(buildDirectory, { recursive: true, force: true })
 }
 
-const mockCheckpointSpawn = (t, checkpoints) => {
+const mockCheckpointSpawn = (t, checkpoints, close = (child) => child.emit("close", 0)) => {
   t.mock.method(childProcess, "spawn", (command, args) => {
     assert.deepEqual(args, ["checkpoint", "opencode", "--hook-input", "stdin"])
     const child = new EventEmitter()
@@ -40,7 +40,7 @@ const mockCheckpointSpawn = (t, checkpoints) => {
       },
       final(done) {
         done()
-        queueMicrotask(() => child.emit("close", 0))
+        queueMicrotask(() => close(child))
       },
     })
     return child
@@ -157,7 +157,7 @@ async function resourceFixture(t, behavior = (child) => child.emit("close", 0)) 
     location: { directory },
     tool: { hook: async (name, callback) => { hooks[name] = callback; return { dispose: async () => {} } } },
   })
-  const event = (id = "call", input = { path: "a.ts" }) => ({ id, sessionID: "session", tool: "edit", input })
+  const event = (id = "call", input = { path: "a.ts" }) => ({ id, sessionID: "session", tool: "edit", input, status: "completed" })
   return { before: hooks["execute.before"], after: hooks["execute.after"], cleanup, calls, children, warnings, event }
 }
 
@@ -249,24 +249,209 @@ test("disposal closes descendant-held pipes without signaling a process group", 
 })
 
 
-test("oversized edit paths and post metadata do not bypass the byte limit", async (t) => {
+test("oversized edit paths are rejected and post metadata cannot expand scope", async (t) => {
   const f = await resourceFixture(t)
   await f.before(f.event("large-path", { path: "x".repeat(1024 * 1024 + 1) }))
   assert.equal(f.calls.length, 0)
   const event = f.event("metadata")
   await f.before(event)
   await f.after({ ...event, status: "completed", result: { metadata: { files: [{ path: "x".repeat(1024 * 1024 + 1) }] } } })
-  assert.equal(f.calls.length, 1)
-  await f.before(f.event("replacement"))
   assert.equal(f.calls.length, 2)
+  assert.deepEqual(f.calls[1].tool_input, f.calls[0].tool_input)
+  await f.before(f.event("replacement"))
+  assert.equal(f.calls.length, 3)
 })
 
 
-test("shell post checkpoints retain bounded metadata paths", async (t) => {
+test("shell post checkpoints ignore metadata paths", async (t) => {
   const f = await resourceFixture(t)
   const event = { ...f.event("shell", { command: "touch a.ts" }), tool: "shell" }
   await f.before(event)
   await f.after({ ...event, status: "completed", result: { metadata: { files: [{ path: "a.ts" }] } } })
   assert.equal(f.calls[1].tool_input.command, "touch a.ts")
-  assert.ok(f.calls[1].tool_input.file_paths[0].endsWith("a.ts"))
+  assert.equal(f.calls[1].tool_input.file_paths, undefined)
+})
+
+test("V1 isolates calls with the same ID in different sessions", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints)
+  const hooks = await plugin.default.server({ directory })
+  const first = { tool: "write", callID: "same", sessionID: "first", args: { path: "first.txt" } }
+  const second = { ...first, sessionID: "second", args: { path: "second.txt" } }
+  await hooks["tool.execute.before"](first)
+  await hooks["tool.execute.before"](second)
+  await hooks["tool.execute.after"](first)
+  await hooks["tool.execute.after"](second)
+  const posts = checkpoints.filter((c) => c.hook_event_name === "PostToolUse")
+  assert.deepEqual(posts.map((c) => [c.session_id, c.tool_input.file_paths[0]]), [
+    ["first", join(directory, "first.txt")], ["second", join(directory, "second.txt")],
+  ])
+})
+
+test("failed and repeated pre-checkpoints cannot reuse an older baseline", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  let count = 0
+  mockCheckpointSpawn(t, checkpoints, (child) => child.emit("close", ++count === 2 ? 1 : 0))
+  const hooks = await plugin.default.server({ directory })
+  const input = { tool: "write", callID: "same", sessionID: "session", args: { path: "a.txt" } }
+  await hooks["tool.execute.before"](input)
+  await hooks["tool.execute.before"](input)
+  await hooks["tool.execute.after"](input)
+  assert.deepEqual(checkpoints.map((c) => c.hook_event_name), ["PreToolUse", "PreToolUse"])
+})
+
+test("V1 terminal events cancel matching calls or a deleted session", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints)
+  const hooks = await plugin.default.server({ directory })
+  const input = { tool: "write", callID: "same", sessionID: "session", args: { path: "a.txt" } }
+  await hooks["tool.execute.before"](input)
+  await hooks.event({ event: { type: "message.part.updated", properties: { part: { type: "tool", sessionID: "session", callID: "same", state: { status: "error" } } } } })
+  await hooks["tool.execute.after"](input)
+  await hooks["tool.execute.before"](input)
+  await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "session" } } } })
+  await hooks["tool.execute.after"](input)
+  assert.deepEqual(checkpoints.map((c) => c.hook_event_name), ["PreToolUse", "PreToolUse"])
+})
+
+test("V2 rejects failed results and mismatched messages and ignores result paths", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints)
+  const hooks = {}
+  await plugin.default.setup({ location: { directory }, tool: { hook: async (name, callback) => { hooks[name] = callback } } })
+  const event = { tool: "write", id: "call", sessionID: "session", messageID: "message", input: { path: "a.txt" } }
+  await hooks["execute.before"](event)
+  await hooks["execute.after"]({ ...event, messageID: "other", status: "completed" })
+  await hooks["execute.after"]({ ...event, status: "failed" })
+  await hooks["execute.after"]({ ...event, status: "completed" })
+  await hooks["execute.before"](event)
+  await hooks["execute.after"]({ ...event, status: "completed", result: { metadata: { files: [{ path: "extra.txt" }] } } })
+  assert.deepEqual(checkpoints.map((c) => c.hook_event_name), ["PreToolUse", "PreToolUse", "PostToolUse"])
+  assert.deepEqual(checkpoints.at(-1).tool_input, { file_paths: [join(directory, "a.txt")] })
+})
+
+test("cancellation during a pre-checkpoint cannot restore the call", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  let child
+  mockCheckpointSpawn(t, checkpoints, (pending) => { child = pending })
+  const hooks = await plugin.default.server({ directory })
+  const input = { tool: "write", callID: "call", sessionID: "session", args: { path: "a.txt" } }
+  const pre = hooks["tool.execute.before"](input)
+  while (!child) await new Promise(setImmediate)
+  await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "session" } } } })
+  child.emit("close", 0)
+  await pre
+  await hooks["tool.execute.after"](input)
+  assert.deepEqual(checkpoints.map((c) => c.hook_event_name), ["PreToolUse"])
+})
+
+test("V2 lifecycle events cancel only matching messages and sessions", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints)
+  const hooks = {}
+  let deliver
+  const event = {
+    subscribe: async function* ({ signal }) {
+      while (!signal.aborted) {
+        const value = await new Promise((resolve) => {
+          deliver = resolve
+          signal.addEventListener("abort", () => resolve(undefined), { once: true })
+        })
+        if (value) yield value
+      }
+    },
+  }
+  await plugin.default.setup({ location: { directory }, event, tool: { hook: async (name, callback) => { hooks[name] = callback } } })
+  const call = { tool: "write", id: "call", sessionID: "session", messageID: "message", input: { path: "a.txt" } }
+  const emit = async (type, data) => {
+    deliver({ type, data })
+    await new Promise(setImmediate)
+  }
+  await hooks["execute.before"](call)
+  await emit("session.tool.failed", { sessionID: "session", id: "call", assistantMessageID: "other" })
+  await hooks["execute.after"]({ ...call, status: "completed" })
+  await hooks["execute.before"](call)
+  await emit("session.tool.failed", { sessionID: "session", id: "call", assistantMessageID: "message" })
+  await hooks["execute.after"]({ ...call, status: "completed" })
+  await hooks["execute.before"](call)
+  await emit("session.deleted", { sessionID: "session" })
+  await hooks["execute.after"]({ ...call, status: "completed" })
+  await hooks["execute.before"](call)
+  await emit("session.tool.success", { sessionID: "session", id: "call", assistantMessageID: "message" })
+  await hooks["execute.after"]({ ...call, status: "completed" })
+  assert.deepEqual(checkpoints.map((c) => c.hook_event_name), ["PreToolUse", "PostToolUse", "PreToolUse", "PreToolUse", "PreToolUse"])
+})
+
+test("post-checkpoint uses the input captured before execution", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints)
+  const hooks = await plugin.default.server({ directory })
+  const input = { tool: "write", callID: "call", sessionID: "session", args: { files: ["a.txt"] } }
+  await hooks["tool.execute.before"](input)
+  input.args.files.push("extra.txt")
+  await hooks["tool.execute.after"](input)
+  assert.deepEqual(checkpoints[1].tool_input.file_paths, [join(directory, "a.txt")])
+})
+
+test("repeated pre while a checkpoint is running cannot reuse its baseline", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  let child
+  mockCheckpointSpawn(t, checkpoints, (pending) => { child = pending })
+  const hooks = await plugin.default.server({ directory })
+  const input = { tool: "write", callID: "call", sessionID: "session", args: { path: "a.txt" } }
+  const first = hooks["tool.execute.before"](input)
+  while (!child) await new Promise(setImmediate)
+  await hooks["tool.execute.before"](input)
+  await hooks["tool.execute.before"](input)
+  child.emit("close", 0)
+  await first
+  await hooks["tool.execute.after"](input)
+  assert.deepEqual(checkpoints.map((c) => c.hook_event_name), ["PreToolUse"])
+})
+
+test("a failed pre-checkpoint cannot authorize a post-checkpoint", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints, (child) => child.emit("close", 1))
+  const hooks = await plugin.default.server({ directory })
+  const input = { tool: "write", callID: "call", sessionID: "session", args: { path: "a.txt" } }
+  await hooks["tool.execute.before"](input)
+  await hooks["tool.execute.after"](input)
+  assert.deepEqual(checkpoints.map((c) => c.hook_event_name), ["PreToolUse"])
+})
+
+
+test("disposal closes lifecycle subscription without reopening it for remaining calls", async (t) => {
+  const directory = await makeRepoDir(t)
+  const checkpoints = []
+  mockCheckpointSpawn(t, checkpoints)
+  const hooks = {}
+  const signals = []
+  const event = {
+    subscribe: async function* ({ signal }) {
+      signals.push(signal)
+      await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))
+    },
+  }
+  const cleanup = await plugin.default.setup({
+    location: { directory }, event,
+    tool: { hook: async (name, callback) => { hooks[name] = callback } },
+  })
+  const call = { tool: "write", id: "first", sessionID: "session", input: { path: "a.txt" } }
+  await hooks["execute.before"](call)
+  await hooks["execute.before"]({ ...call, id: "second" })
+  cleanup()
+  await new Promise(setImmediate)
+  assert.equal(signals.length, 1)
+  assert.equal(signals[0].aborted, true)
+  await hooks["execute.after"]({ ...call, status: "completed" })
+  assert.equal(checkpoints.length, 2)
 })

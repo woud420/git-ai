@@ -47,37 +47,19 @@ pub(super) fn has_explicit_fast_forward_transition(cmd: &NormalizedCommand) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::domain::{CommandScope, Confidence, RefChange};
+    use crate::model::domain::{Confidence, RefChange};
+    use crate::operations::daemon::tests_fixtures::normalized_command;
 
     fn command(argv: &[&str]) -> NormalizedCommand {
         NormalizedCommand {
-            scope: CommandScope::Global,
-            family_key: None,
-            worktree: None,
             root_sid: "merge-guard".into(),
-            trace_derived: false,
-            raw_argv: argv.iter().map(|s| s.to_string()).collect(),
-            primary_command: Some("merge".into()),
-            invoked_command: Some("merge".into()),
-            invoked_args: Vec::new(),
-            observed_child_commands: Vec::new(),
-            transport_targets: None,
-            index_write: Default::default(),
-            index_v2: false,
-            exit_code: 0,
-            started_at_ns: 1,
-            finished_at_ns: 2,
-            reflog_start_offsets: Default::default(),
-            stash_target_oid: None,
-            bisect_checkout: None,
-            cherry_pick_source_oids: Vec::new(),
-            revert_source_oids: Vec::new(),
             ref_changes: vec![RefChange {
                 reference: "HEAD".into(),
                 old: "a".repeat(40),
                 new: "b".repeat(40),
             }],
             confidence: Confidence::High,
+            ..normalized_command("merge", argv)
         }
     }
 

@@ -289,16 +289,15 @@ fn batch_rev_parse_verify(
     check_args.push("cat-file".to_string());
     check_args.push("--batch-check".to_string());
     let stdin_data = format!("{}\n", revspecs.join("\n"));
-    if let Ok(output) = exec_git_stdin(&check_args, stdin_data.as_bytes()) {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for (spec, line) in revspecs.iter().zip(stdout.lines()) {
-            let mut parts = line.split_whitespace();
-            if let (Some(oid), Some(kind)) = (parts.next(), parts.next())
-                && kind != "missing"
-                && crate::operations::git::oid::is_full_oid(oid)
-            {
-                out.insert(spec.clone(), oid.to_string());
-            }
+    let output = exec_git_stdin(&check_args, stdin_data.as_bytes())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for (spec, line) in revspecs.iter().zip(stdout.lines()) {
+        let mut parts = line.split_whitespace();
+        if let (Some(oid), Some(kind)) = (parts.next(), parts.next())
+            && kind != "missing"
+            && crate::operations::git::oid::is_full_oid(oid)
+        {
+            out.insert(spec.clone(), oid.to_string());
         }
     }
     Ok(out)
@@ -347,5 +346,14 @@ mod tests {
             Some("reverted-commit".to_string())
         );
         assert_eq!(legacy_revert_metric_original_sha(""), None);
+    }
+
+    /// A git failure is an error, not "no revision resolved".
+    #[test]
+    fn batch_rev_parse_verify_reports_a_git_failure() {
+        let tmp = crate::operations::git::test_utils::TmpRepo::new().unwrap();
+        std::fs::remove_dir_all(tmp.path().join(".git")).unwrap();
+
+        assert!(batch_rev_parse_verify(tmp.gitai_repo(), &["HEAD".to_string()]).is_err());
     }
 }

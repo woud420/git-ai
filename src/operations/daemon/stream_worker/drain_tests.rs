@@ -58,11 +58,8 @@ async fn drain_keeps_a_transiently_failed_immediate_task_queued_for_retry() {
     assert!(worker.delayed_tasks[0].next_retry_at.is_some());
 }
 
-#[tokio::test]
-async fn shutdown_drain_finishes_immediate_tasks_after_shutdown_is_requested() {
-    let temp = TempDir::new().unwrap();
-    let db = Arc::new(StreamsDatabase::open(temp.path().join("streams.db")).unwrap());
-    let mut worker = make_worker(db.clone());
+/// A shared Claude transcript with one unread line, registered with the worker.
+fn unread_transcript(worker: &mut StreamWorker, temp: &TempDir) -> PathBuf {
     let transcript = temp.path().join("session.jsonl");
     std::fs::write(
         &transcript,
@@ -80,6 +77,25 @@ async fn shutdown_drain_finishes_immediate_tasks_after_shutdown_is_requested() {
             None,
         )
         .unwrap();
+    transcript
+}
+
+fn stored_stream(db: &StreamsDatabase, transcript: &Path) -> StreamRecord {
+    db.get_stream(
+        SHARED_STREAM_SESSION_ID,
+        "transcript",
+        &transcript.display().to_string(),
+    )
+    .unwrap()
+    .unwrap()
+}
+
+#[tokio::test]
+async fn shutdown_drain_finishes_immediate_tasks_after_shutdown_is_requested() {
+    let temp = TempDir::new().unwrap();
+    let db = Arc::new(StreamsDatabase::open(temp.path().join("streams.db")).unwrap());
+    let mut worker = make_worker(db.clone());
+    let transcript = unread_transcript(&mut worker, &temp);
     worker
         .priority_queue
         .push(immediate_task(transcript.clone()));
@@ -88,17 +104,34 @@ async fn shutdown_drain_finishes_immediate_tasks_after_shutdown_is_requested() {
     worker.shutdown_flag.store(true, Ordering::Relaxed);
     worker.drain_immediate_tasks().await;
 
-    let stream = db
-        .get_stream(
-            SHARED_STREAM_SESSION_ID,
-            "transcript",
-            &transcript.display().to_string(),
-        )
-        .unwrap()
-        .unwrap();
+    let stream = stored_stream(&db, &transcript);
     assert_ne!(
         stream.watermark_value, "0",
         "drain must read the transcript"
+    );
+}
+
+#[test]
+fn session_stopped_before_end_of_file_leaves_it_stale_for_the_sweep() {
+    let temp = TempDir::new().unwrap();
+    let db = Arc::new(StreamsDatabase::open(temp.path().join("streams.db")).unwrap());
+    let mut worker = make_worker(db.clone());
+    let transcript = unread_transcript(&mut worker, &temp);
+
+    let stopping = AtomicBool::new(true);
+    StreamWorker::process_session_blocking(
+        &db,
+        &worker.telemetry_handle,
+        &immediate_task(transcript.clone()),
+        &stopping,
+    )
+    .unwrap();
+
+    let stream = stored_stream(&db, &transcript);
+    assert_eq!(stream.watermark_value, "0");
+    assert_eq!(
+        stream.last_known_size, 0,
+        "unread bytes must not be recorded as seen, or the sweep skips them"
     );
 }
 

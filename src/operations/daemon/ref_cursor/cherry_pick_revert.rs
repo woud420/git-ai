@@ -55,7 +55,7 @@ impl RefCursor {
         let explicit_sources = if is_continue || is_skip {
             Some(Vec::new())
         } else {
-            resolve_cherry_pick_source_oids_from_sources(cmd, state, &source_args)?
+            resolve_cherry_pick_source_oids_from_sources(state, &source_args)
         };
         let unresolved_explicit_sources = !source_args.is_empty() && explicit_sources.is_none();
         let explicit_sources = explicit_sources.unwrap_or_default();
@@ -146,7 +146,7 @@ impl RefCursor {
         let explicit_sources = if source_args.is_empty() {
             Some(Vec::new())
         } else {
-            resolve_cherry_pick_source_oids_from_sources(cmd, state, &source_args)?
+            resolve_cherry_pick_source_oids_from_sources(state, &source_args)
         };
         let unresolved_explicit_sources = !source_args.is_empty() && explicit_sources.is_none();
         cmd.revert_source_oids = explicit_sources.unwrap_or_default();

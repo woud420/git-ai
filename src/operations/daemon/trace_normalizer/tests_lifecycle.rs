@@ -239,10 +239,7 @@ fn payload_timestamp_prefers_stock_trace2_rfc3339_time_over_relative_t_abs() {
         "t_abs": 0.000226,
     });
 
-    assert_eq!(
-        payload_timestamp_ns(&payload).unwrap(),
-        1_781_045_260_822_668_000
-    );
+    assert_eq!(payload_timestamp_ns(&payload), 1_781_045_260_822_668_000);
 }
 
 #[test]

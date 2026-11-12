@@ -1,4 +1,3 @@
-use crate::error::GitAiError;
 use crate::operations::daemon::trace_helpers::{
     rfc3339_to_unix_nanos, trace_args_after_command, trace_argv_primary_command,
     trace_token_is_git_executable, trace_token_is_git_executable_ascii_case_insensitive,
@@ -17,10 +16,10 @@ pub(super) fn trace_debug_lifecycle(message: &str) {
     }
 }
 
-pub(super) fn payload_timestamp_ns(payload: &Value) -> Result<u128, GitAiError> {
+pub(super) fn payload_timestamp_ns(payload: &Value) -> u128 {
     for key in ["ts", "time_ns", "time"] {
         if let Some(time) = payload.get(key).and_then(Value::as_u64) {
-            return Ok(time as u128);
+            return time as u128;
         }
     }
     if let Some(time) = payload
@@ -28,12 +27,12 @@ pub(super) fn payload_timestamp_ns(payload: &Value) -> Result<u128, GitAiError> 
         .and_then(Value::as_str)
         .and_then(rfc3339_to_unix_nanos)
     {
-        return Ok(time);
+        return time;
     }
     if let Some(seconds) = payload.get("t_abs").and_then(Value::as_f64) {
-        return Ok((seconds * 1_000_000_000_f64) as u128);
+        return (seconds * 1_000_000_000_f64) as u128;
     }
-    Ok(crate::model::clock::now_nanos())
+    crate::model::clock::now_nanos()
 }
 
 pub(super) fn payload_worktree(payload: &Value) -> Option<PathBuf> {

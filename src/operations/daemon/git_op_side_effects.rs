@@ -238,11 +238,6 @@ fn checkout_switch_force_and_merge(
     (is_force, is_merge)
 }
 
-pub fn family_key_for_repository(repo: &Repository) -> String {
-    crate::operations::git::canonicalize::canonicalize_or_self(repo.common_dir())
-        .to_string_lossy()
-        .to_string()
-}
 pub fn is_non_auxiliary_ref(reference: &str) -> bool {
     !(reference.starts_with("refs/notes/")
         || reference.starts_with("refs/tags/")

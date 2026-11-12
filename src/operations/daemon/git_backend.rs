@@ -350,8 +350,12 @@ fn takes_value(arg: &str) -> bool {
     matches!(
         arg,
         "-b" | "-o"
+            | "-u"
             | "--branch"
+            | "--initial-branch"
             | "--origin"
+            | "--revision"
+            | "--ref-format"
             | "--upload-pack"
             | "--template"
             | "--separate-git-dir"

@@ -49,10 +49,10 @@ fn committed(ts: u32, repo_url: &str, ai: u32, human: u32, diff_added: u32) -> M
             "claude::claude-sonnet-4-6".to_string(),
         ])
         .ai_additions(vec![ai, ai]);
-    record(MetricEvent::with_timestamp(
-        ts,
-        &values,
+    record(MetricEvent::from_values_with_timestamp(
+        values,
         attrs(Some(repo_url), "claude", None),
+        Some(ts),
     ))
 }
 
@@ -61,10 +61,10 @@ fn checkpoint(ts: u32, repo_url: &str, lines_added: u32) -> MetricHistoryRecord 
         .kind("ai_agent")
         .file_path("src/main.rs")
         .lines_added(lines_added);
-    record(MetricEvent::with_timestamp(
-        ts,
-        &values,
+    record(MetricEvent::from_values_with_timestamp(
+        values,
         attrs(Some(repo_url), "claude", Some("session-1")),
+        Some(ts),
     ))
 }
 
@@ -82,10 +82,10 @@ fn claude_session(ts: u32, repo_url: Option<&str>, session_id: &str) -> MetricHi
             }
         }
     }));
-    record(MetricEvent::with_timestamp(
-        ts,
-        &values,
+    record(MetricEvent::from_values_with_timestamp(
+        values,
         attrs(repo_url, "claude", Some(session_id)),
+        Some(ts),
     ))
 }
 
@@ -134,6 +134,42 @@ fn compute_activity_aggregates_commits_checkpoints_sessions_and_tokens() {
     assert_eq!(stats.tokens.cache_creation, 10);
     assert_eq!(stats.tokens.by_model[0].model, "claude-sonnet-4-6");
     assert!(stats.buckets.iter().any(|bucket| bucket.ai_lines == 10));
+}
+
+#[test]
+fn daily_buckets_keep_the_same_day_of_different_years_apart() {
+    use chrono::{Datelike, Local, TimeZone};
+    let noon = |date: chrono::NaiveDate| {
+        Local
+            .from_local_datetime(&date.and_hms_opt(12, 0, 0).unwrap())
+            .unwrap()
+            .timestamp() as u32
+    };
+    let recent = Local::now().date_naive() - chrono::Duration::days(1);
+    let year_ago = recent
+        .with_year(recent.year() - 1)
+        .unwrap_or(recent - chrono::Duration::days(365));
+    let records = [
+        committed(noon(year_ago), "github.com/acme/project", 3, 0, 3),
+        committed(noon(recent), "github.com/acme/project", 5, 0, 5),
+    ];
+    let refs: Vec<&MetricHistoryRecord> = records.iter().collect();
+
+    let stats = compute_activity_from_records(
+        &refs,
+        noon(year_ago) - 3600,
+        "last year".to_string(),
+        BucketGranularity::Daily,
+    )
+    .unwrap();
+
+    let active: Vec<u32> = stats
+        .buckets
+        .iter()
+        .map(|bucket| bucket.ai_lines)
+        .filter(|&lines| lines > 0)
+        .collect();
+    assert_eq!(active, vec![3, 5]);
 }
 
 fn day(y: i32, m: u32, d: u32) -> chrono::NaiveDate {

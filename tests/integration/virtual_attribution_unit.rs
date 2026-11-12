@@ -61,13 +61,6 @@ fn test_virtual_attributions() {
     println!("base_commit: {}", virtual_attributions.base_commit());
     println!("timestamp: {}", virtual_attributions.timestamp());
 
-    // Print attribution details if available (for debugging)
-    if let Some((char_attrs, line_attrs)) = virtual_attributions.get_attributions("test_file.rs") {
-        println!("\n=== test_file.rs Attribution Info ===");
-        println!("Character-level attributions: {} ranges", char_attrs.len());
-        println!("Line-level attributions: {} ranges", line_attrs.len());
-    }
-
     assert!(!virtual_attributions.files().is_empty());
 }
 

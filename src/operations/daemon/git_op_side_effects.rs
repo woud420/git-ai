@@ -1,6 +1,6 @@
 pub use super::working_log_discard::remove_working_log_attributions_for_pathspecs;
 use crate::error::GitAiError;
-use crate::operations::daemon::actor_types::{ActorDaemonCoordinator, RecentReplayPrerequisite};
+use crate::operations::daemon::actor_types::ActorDaemonCoordinator;
 use crate::operations::daemon::side_effect_helpers::parsed_invocation_for_normalized_command;
 use crate::operations::git::cli_parser::{ParsedGitInvocation, summarize_rebase_args};
 use crate::operations::git::find_repository_in_path;
@@ -95,13 +95,8 @@ fn explicit_clone_remote(cmd: &crate::model::domain::NormalizedCommand) -> Optio
     if parsed.command.as_deref() != Some("clone") {
         return None;
     }
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        match arg.as_str() {
-            "-C" if globals.next().is_some() => {}
-            value if value.starts_with("-C") && value.len() > 2 => {}
-            _ => return None,
-        }
+    if !crate::operations::daemon::analyzers::has_only_worktree_globals(&parsed) {
+        return None;
     }
     // Require both operands and a single explicit option so another option's
     // value cannot be mistaken for the remote. Other forms keep the old path.
@@ -224,31 +219,6 @@ pub fn apply_checkout_switch_working_log_side_effect(
     Ok(())
 }
 
-pub fn recent_checkout_switch_prerequisite_from_command(
-    cmd: &crate::model::domain::NormalizedCommand,
-) -> Option<RecentReplayPrerequisite> {
-    let parsed = parsed_invocation_for_normalized_command(cmd);
-    let (old_head, new_head) = ActorDaemonCoordinator::resolve_heads_for_command(cmd);
-
-    if old_head.is_empty() || new_head.is_empty() || old_head == new_head {
-        return None;
-    }
-
-    if cmd.primary_command.as_deref() == Some("checkout") && !parsed.pathspecs().is_empty() {
-        return None;
-    }
-
-    let (is_force, is_merge) = checkout_switch_force_and_merge(cmd, &parsed);
-    if is_force || is_merge {
-        return None;
-    }
-
-    Some(RecentReplayPrerequisite::CheckoutSwitchRename {
-        target_head: new_head,
-        old_head,
-    })
-}
-
 /// Whether a checkout/switch invocation discards local changes (`force`) or
 /// carries them across with a three-way merge (`merge`).
 fn checkout_switch_force_and_merge(
@@ -289,6 +259,13 @@ pub fn is_ancestor_commit(repository: &Repository, ancestor: &str, descendant: &
 
 pub fn rebase_is_control_mode(cmd: &crate::model::domain::NormalizedCommand) -> bool {
     summarize_rebase_args(&cmd.invoked_args).is_control_mode
+}
+
+/// True for the rebase actions that act on a stopped rebase and leave it stopped.
+pub fn rebase_stays_stopped(cmd: &crate::model::domain::NormalizedCommand) -> bool {
+    cmd.invoked_args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--edit-todo" | "--show-current-patch"))
 }
 
 pub fn rebase_onto_from_command(

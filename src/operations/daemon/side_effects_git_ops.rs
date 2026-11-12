@@ -1,6 +1,5 @@
 // Existing Generic diagnostics reach persisted daemon errors; their Display
 // text remains byte-stable when changing reset handling.
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::model::domain::RewriteEvent;
@@ -218,8 +217,6 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn handle_bisect(
-        &self,
-        family: Option<&str>,
         cmd: &crate::model::domain::NormalizedCommand,
     ) -> Result<(), GitAiError> {
         let (old_head, new_head) = Self::resolve_heads_for_command(cmd);
@@ -233,40 +230,7 @@ impl ActorDaemonCoordinator {
         if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
             return Ok(());
         }
-        let family = family
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| family_key_for_repository(&repo));
-        self.record_recent_replay_prerequisite(
-            &family,
-            RecentReplayPrerequisite::CheckoutSwitchRename {
-                target_head: new_head.clone(),
-                old_head: old_head.clone(),
-            },
-        )?;
         repo.storage.rename_working_log(&old_head, &new_head)
-    }
-
-    /// For checkout/switch: record a recent-replay prerequisite and migrate the
-    /// working log to the new HEAD.
-    pub(crate) fn handle_checkout_switch(
-        &self,
-        family: Option<&str>,
-        cmd: &crate::model::domain::NormalizedCommand,
-    ) -> Result<(), GitAiError> {
-        if let Some(prerequisite) = recent_checkout_switch_prerequisite_from_command(cmd) {
-            let family = family.map(ToOwned::to_owned).or_else(|| {
-                cmd.worktree.as_ref().and_then(|worktree| {
-                    find_repository_in_path(&worktree.to_string_lossy())
-                        .ok()
-                        .map(|repo| family_key_for_repository(&repo))
-                })
-            });
-            if let Some(family) = family {
-                self.record_recent_replay_prerequisite(&family, prerequisite)?;
-            }
-        }
-        apply_checkout_switch_working_log_side_effect(cmd)?;
-        Ok(())
     }
 
     /// For pull events whose HEAD moved fast-forward, migrate the working log

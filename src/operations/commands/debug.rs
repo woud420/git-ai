@@ -24,7 +24,9 @@ use std::time::Duration;
 mod context;
 mod help;
 mod jj;
+mod redact;
 use help::print_debug_help;
+use redact::{redact_env_value, redact_git_config_line, redact_url_userinfo};
 
 const MIN_GIT_VERSION: GitVersion = GitVersion {
     major: 2,
@@ -279,7 +281,7 @@ fn build_debug_report(options: DebugOptions) -> String {
         if !repository_info.remotes.is_empty() {
             let _ = writeln!(out, "Remotes:");
             for (name, url) in repository_info.remotes {
-                let _ = writeln!(out, "  {} = {}", name, url);
+                let _ = writeln!(out, "  {} = {}", name, redact_url_userinfo(&url));
             }
         }
     }
@@ -1273,88 +1275,6 @@ fn collect_git_config_dump(git_cmd: &str) -> GitConfigDump {
     }
 }
 
-fn redact_git_config_line(line: &str) -> String {
-    if !line.contains('\t') {
-        if let Some((key, value)) = line.split_once('=')
-            && should_redact_key_value(key, value)
-        {
-            return format!("{}=[REDACTED]", key);
-        }
-        return line.to_string();
-    }
-
-    let mut parts = line.splitn(3, '\t');
-    let first = match parts.next() {
-        Some(v) => v,
-        None => return line.to_string(),
-    };
-    let second = match parts.next() {
-        Some(v) => v,
-        None => return line.to_string(),
-    };
-
-    match parts.next() {
-        // 3-field format: scope \t origin \t key=value
-        // (from `git config --list --show-origin --show-scope`)
-        Some(key_value) => {
-            let (key, value) = match key_value.split_once('=') {
-                Some((key, value)) => (key, value),
-                None => return line.to_string(),
-            };
-            if should_redact_key_value(key, value) {
-                format!("{}\t{}\t{}=[REDACTED]", first, second, key)
-            } else {
-                line.to_string()
-            }
-        }
-        // 2-field format: origin \t key=value
-        // (from `git config --list --show-origin` without --show-scope)
-        None => {
-            let (key, value) = match second.split_once('=') {
-                Some((key, value)) => (key, value),
-                None => return line.to_string(),
-            };
-            if should_redact_key_value(key, value) {
-                format!("{}\t{}=[REDACTED]", first, key)
-            } else {
-                line.to_string()
-            }
-        }
-    }
-}
-
-fn should_redact_key_value(key: &str, value: &str) -> bool {
-    let key_lower = key.to_lowercase();
-    let value_lower = value.to_lowercase();
-
-    let sensitive_key_markers = [
-        "password",
-        "passwd",
-        "token",
-        "secret",
-        "oauth",
-        "authorization",
-        "apikey",
-        "api_key",
-        "extraheader",
-    ];
-
-    if sensitive_key_markers
-        .iter()
-        .any(|marker| key_lower.contains(marker))
-    {
-        return true;
-    }
-
-    if key_lower.starts_with("url.") {
-        return true;
-    }
-
-    sensitive_key_markers
-        .iter()
-        .any(|marker| value_lower.contains(marker))
-}
-
 fn collect_git_ai_config_dump() -> Result<String, String> {
     let runtime = config::Config::get();
     let mut out = String::new();
@@ -1395,29 +1315,6 @@ where
 
 fn is_debug_git_env_key(key: &str) -> bool {
     key.starts_with("GIT_AI_") || key.starts_with("GITAI_") || key.starts_with("GIT_")
-}
-
-fn redact_env_value(key: &str, value: &str) -> String {
-    let key_lower = key.to_lowercase();
-    let sensitive_markers = ["token", "secret", "password", "key"];
-    if sensitive_markers
-        .iter()
-        .any(|marker| key_lower.contains(marker))
-    {
-        return "[REDACTED]".to_string();
-    }
-
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return "<empty>".to_string();
-    }
-
-    if trimmed.len() > 200 {
-        let truncated: String = trimmed.chars().take(200).collect();
-        return format!("{}...[truncated]", truncated);
-    }
-
-    trimmed.to_string()
 }
 
 #[cfg(test)]

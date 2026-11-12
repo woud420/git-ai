@@ -152,48 +152,36 @@ pub fn handle_bash_post_tool_use_with_cwd(
     let repo_working_dir = repo_root.to_string_lossy().to_string();
     let metadata = context.agent_metadata.cloned().unwrap_or_default();
 
-    macro_rules! hook_timeout_fallback {
-        ($label:expr) => {{
+    let action = match query_daemon_bash_snapshot(context.session_id, context.tool_use_id) {
+        None => {
+            tracing::debug!(
+                "Pre-snapshot not found in daemon for {}; returning MissingPreSnapshot",
+                invocation_key
+            );
+            BashCheckpointAction::MissingPreSnapshot
+        }
+        Some(_) if hook_start.elapsed() >= hook_timeout => {
+            let label = "post-hook before snapshot";
             let elapsed_ms = hook_start.elapsed().as_millis();
             let msg = format!(
                 "bash_tool: {} exceeded {}ms hook limit ({}ms elapsed); abandoning",
-                $label, hook_timeout.as_millis(), elapsed_ms
+                label,
+                hook_timeout.as_millis(),
+                elapsed_ms
             );
             tracing::debug!("{}", msg);
             crate::observability::log_message(
                 &msg,
                 "warning",
                 Some(serde_json::json!({
-                    "label": $label,
+                    "label": label,
                     "elapsed_ms": elapsed_ms,
                     "hook_timeout_ms": hook_timeout.as_millis(),
                 })),
             );
-            signal_daemon_bash_session_end(BashSessionEndSignal {
-                repo_work_dir: &repo_working_dir,
-                original_cwd,
-                session_id: context.session_id,
-                tool_use_id: context.tool_use_id,
-                agent_id: context.agent_id,
-                metadata: &metadata,
-                trace_id: context.trace_id,
-                ended_at_ns,
-                command: context.command,
-            });
-            return Ok(BashPostHookResult {
-                action: BashCheckpointAction::HookTimeout,
-            });
-        }};
-    }
-
-    let pre_snapshot = query_daemon_bash_snapshot(context.session_id, context.tool_use_id);
-
-    match pre_snapshot {
+            BashCheckpointAction::HookTimeout
+        }
         Some(pre) => {
-            if hook_start.elapsed() >= hook_timeout {
-                hook_timeout_fallback!("post-hook before snapshot");
-            }
-
             let post_wm: Option<DaemonWatermarks> =
                 if pre.effective_worktree_wm.is_some() || !pre.per_file_wm.is_empty() {
                     Some(DaemonWatermarks {
@@ -203,7 +191,7 @@ pub fn handle_bash_post_tool_use_with_cwd(
                 } else {
                     None
                 };
-            let result = match snapshot(
+            match snapshot(
                 repo_root,
                 context.session_id,
                 context.tool_use_id,
@@ -211,12 +199,9 @@ pub fn handle_bash_post_tool_use_with_cwd(
             ) {
                 Ok(post) => {
                     let diff_result = diff(&pre, &post);
-
                     if diff_result.is_empty() {
                         tracing::debug!("Bash tool {}: no changes detected", invocation_key);
-                        Ok(BashPostHookResult {
-                            action: BashCheckpointAction::NoChanges,
-                        })
+                        BashCheckpointAction::NoChanges
                     } else {
                         let paths = diff_result.all_changed_paths();
                         tracing::debug!(
@@ -226,53 +211,28 @@ pub fn handle_bash_post_tool_use_with_cwd(
                             diff_result.created.len(),
                             diff_result.modified.len(),
                         );
-
-                        Ok(BashPostHookResult {
-                            action: BashCheckpointAction::Checkpoint(paths),
-                        })
+                        BashCheckpointAction::Checkpoint(paths)
                     }
                 }
                 Err(e) => {
                     tracing::debug!("Post-snapshot failed: {}; returning SnapshotFailed", e);
-                    Ok(BashPostHookResult {
-                        action: BashCheckpointAction::SnapshotFailed,
-                    })
+                    BashCheckpointAction::SnapshotFailed
                 }
-            };
-
-            signal_daemon_bash_session_end(BashSessionEndSignal {
-                repo_work_dir: &repo_working_dir,
-                original_cwd,
-                session_id: context.session_id,
-                tool_use_id: context.tool_use_id,
-                agent_id: context.agent_id,
-                metadata: &metadata,
-                trace_id: context.trace_id,
-                ended_at_ns,
-                command: context.command,
-            });
-
-            result
+            }
         }
-        None => {
-            tracing::debug!(
-                "Pre-snapshot not found in daemon for {}; returning MissingPreSnapshot",
-                invocation_key
-            );
-            signal_daemon_bash_session_end(BashSessionEndSignal {
-                repo_work_dir: &repo_working_dir,
-                original_cwd,
-                session_id: context.session_id,
-                tool_use_id: context.tool_use_id,
-                agent_id: context.agent_id,
-                metadata: &metadata,
-                trace_id: context.trace_id,
-                ended_at_ns,
-                command: context.command,
-            });
-            Ok(BashPostHookResult {
-                action: BashCheckpointAction::MissingPreSnapshot,
-            })
-        }
-    }
+    };
+
+    signal_daemon_bash_session_end(BashSessionEndSignal {
+        repo_work_dir: &repo_working_dir,
+        original_cwd,
+        session_id: context.session_id,
+        tool_use_id: context.tool_use_id,
+        agent_id: context.agent_id,
+        metadata: &metadata,
+        trace_id: context.trace_id,
+        ended_at_ns,
+        command: context.command,
+    });
+
+    Ok(BashPostHookResult { action })
 }

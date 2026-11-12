@@ -138,7 +138,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
     let working_va = VirtualAttributions::from_just_working_log(
         repo.clone(),
         head_sha.clone(),
-        Some(default_user_name.clone()),
+        Some(default_user_name),
     )?;
 
     let mut pathspecs: HashSet<String> = checkpoints

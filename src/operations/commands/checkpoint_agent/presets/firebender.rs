@@ -48,8 +48,7 @@ impl FirebenderPreset {
 
         let relative = if normalized_path == normalized_cwd {
             String::new()
-        } else if let Some(stripped) = normalized_path.strip_prefix(&(normalized_cwd.clone() + "/"))
-        {
+        } else if let Some(stripped) = normalized_path.strip_prefix(&(normalized_cwd + "/")) {
             stripped.to_string()
         } else {
             normalized_path
@@ -178,7 +177,7 @@ impl AgentPreset for FirebenderPreset {
                 id: format!("firebender-{}", session_id),
                 model,
             },
-            external_session_id: session_id.clone(),
+            external_session_id: session_id,
             trace_id: trace_id.to_string(),
             cwd: PathBuf::from(cwd_str),
             metadata: HashMap::new(),

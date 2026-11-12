@@ -14,7 +14,7 @@ pub fn reduce_family_command_with_ref_snapshot(
     analyzers: &AnalyzerRegistry,
     command_start_refs: &std::collections::HashMap<String, String>,
     canonical_worktree: Option<PathBuf>,
-) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
+) -> Result<AppliedCommand, GitAiError> {
     // Analyze against pre-command state so history/ref analyzers can infer old->new correctly.
     let analysis_refs = analysis_refs::for_command(
         state,
@@ -44,28 +44,26 @@ pub fn reduce_family_command_with_ref_snapshot(
     apply_worktree_state(state, &cmd, canonical_worktree, &analysis);
 
     state.applied_seq = state.applied_seq.saturating_add(1);
-    let applied = AppliedCommand {
+    Ok(AppliedCommand {
         seq: state.applied_seq,
         command: cmd,
-        analysis: analysis.clone(),
-    };
-    Ok((applied, analysis))
+        analysis,
+    })
 }
 
 pub fn reduce_global_command(
     state: &mut GlobalState,
     cmd: NormalizedCommand,
     analyzers: &AnalyzerRegistry,
-) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
+) -> Result<AppliedCommand, GitAiError> {
     let empty_refs = std::collections::HashMap::new();
     let analysis = analyzers.analyze(&cmd, AnalysisView::from_refs(&empty_refs))?;
     state.applied_seq = state.applied_seq.saturating_add(1);
-    let applied = AppliedCommand {
+    Ok(AppliedCommand {
         seq: state.applied_seq,
         command: cmd,
-        analysis: analysis.clone(),
-    };
-    Ok((applied, analysis))
+        analysis,
+    })
 }
 
 pub fn reduce_checkpoint(state: &mut FamilyState) {

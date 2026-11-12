@@ -231,6 +231,25 @@ fn rewrite_metric_worker_hydrates_missing_parent_and_diff() {
     );
 }
 
+/// A large rebase rewrites more commits than fit on a command line (about
+/// 50,000 SHAs on Linux, under 800 on Windows).
+#[test]
+fn parent_lookup_accepts_more_commits_than_fit_in_argv() {
+    let tmp = crate::operations::git::test_utils::TmpRepo::new().expect("tmp repo");
+    tmp.write_file("file.txt", "base\n", false)
+        .expect("write base");
+    let parent_sha = tmp.commit_all("base").expect("base commit");
+    tmp.write_file("file.txt", "base\nnext\n", false)
+        .expect("write update");
+    let new_sha = tmp.commit_all("update").expect("update commit");
+
+    // 60,000 SHAs are about 2.4MB of arguments, past the 2MB Linux limit.
+    let parents = parent_shas_for_commits(tmp.gitai_repo(), &vec![new_sha.clone(); 60_000])
+        .expect("parent lookup should not fail on a long list");
+
+    assert_eq!(parents.get(&new_sha), Some(&parent_sha));
+}
+
 #[test]
 fn rewrite_metric_worker_hydrates_initial_parent_diff() {
     let tmp = crate::operations::git::test_utils::TmpRepo::new().expect("tmp repo");

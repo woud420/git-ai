@@ -62,10 +62,7 @@ pub enum CiRunResult {
     /// Skipped: one or more current PR commits already have authorship notes
     SkippedExistingSyncNotes,
     /// Authorship already exists for this commit
-    AlreadyExists {
-        #[allow(dead_code)]
-        authorship_log: AuthorshipLog,
-    },
+    AlreadyExists,
     /// Fork notes were fetched and preserved for a merge commit from a fork
     ForkNotesPreserved,
     /// No AI authorship to track (pre-git-ai commits or human-only code)
@@ -115,22 +112,13 @@ impl CiContext {
             } => {
                 println!("Working repository is in {}", self.repo.path().display());
 
-                if options.skip_fetch_notes {
-                    println!("Skipping authorship history fetch");
-                } else {
-                    println!("Fetching authorship history");
-                    // Ensure we have the full authorship history before checking for existing notes
-                    fetch_authorship_notes(&self.repo, "origin")?;
-                    println!("Fetched authorship history");
-                }
+                self.fetch_authorship_unless_skipped(options)?;
 
                 // Check if authorship already exists for this commit
                 match read_authorship_v3(&self.repo, merge_commit_sha) {
-                    Ok(existing_log) => {
+                    Ok(_) => {
                         println!("{} already has authorship", merge_commit_sha);
-                        return Ok(CiRunResult::AlreadyExists {
-                            authorship_log: existing_log,
-                        });
+                        return Ok(CiRunResult::AlreadyExists);
                     }
                     Err(e) => {
                         if read_note(&self.repo, merge_commit_sha).is_some() {
@@ -181,13 +169,7 @@ impl CiContext {
                                 "Using existing local authorship notes (no additional fork notes fetched)"
                             );
                         }
-                        if options.skip_push {
-                            println!("Skipping authorship push (--skip-push). Done.");
-                        } else {
-                            println!("Pushing authorship...");
-                            self.repo.push_authorship("origin")?;
-                            println!("Pushed authorship. Done.");
-                        }
+                        self.push_authorship_unless_skipped(options)?;
                         return Ok(CiRunResult::ForkNotesPreserved);
                     }
                     println!(
@@ -215,13 +197,7 @@ impl CiContext {
                                 "Imported {} fork authorship notes for PR commits",
                                 fork_notes_imported
                             );
-                            if options.skip_push {
-                                println!("Skipping authorship push (--skip-push). Done.");
-                            } else {
-                                println!("Pushing authorship...");
-                                self.repo.push_authorship("origin")?;
-                                println!("Pushed authorship. Done.");
-                            }
+                            self.push_authorship_unless_skipped(options)?;
                             return Ok(CiRunResult::ForkNotesPreserved);
                         }
                     }
@@ -373,13 +349,7 @@ impl CiContext {
                             );
                             return Ok(CiRunResult::NoAuthorshipAvailable);
                         }
-                        if options.skip_push {
-                            println!("Skipping authorship push (--skip-push). Done.");
-                        } else {
-                            println!("Pushing authorship...");
-                            self.repo.push_authorship("origin")?;
-                            println!("Pushed authorship. Done.");
-                        }
+                        self.push_authorship_unless_skipped(options)?;
                         Ok(CiRunResult::AuthorshipRewritten { authorship_log })
                     }
                     Err(e) => {
@@ -403,13 +373,7 @@ impl CiContext {
             } => {
                 println!("Working repository is in {}", self.repo.path().display());
 
-                if options.skip_fetch_notes {
-                    println!("Skipping authorship history fetch");
-                } else {
-                    println!("Fetching authorship history");
-                    fetch_authorship_notes(&self.repo, "origin")?;
-                    println!("Fetched authorship history");
-                }
+                self.fetch_authorship_unless_skipped(options)?;
 
                 if previous_head_sha == head_sha {
                     println!(
@@ -535,7 +499,7 @@ impl CiContext {
                     RewriteEvent::NonFastForward {
                         old_tip: previous_head_sha.to_string(),
                         new_tip: head_sha.to_string(),
-                        onto: Some(resolved_base_sha.clone()),
+                        onto: Some(resolved_base_sha),
                     },
                 )?;
                 println!("Rewrote authorship.");
@@ -548,19 +512,36 @@ impl CiContext {
                     return Ok(CiRunResult::NoAuthorshipAvailable);
                 }
 
-                if options.skip_push {
-                    println!("Skipping authorship push (--skip-push). Done.");
-                } else {
-                    println!("Pushing authorship...");
-                    self.repo.push_authorship("origin")?;
-                    println!("Pushed authorship. Done.");
-                }
+                self.push_authorship_unless_skipped(options)?;
 
                 Ok(CiRunResult::SyncAuthorshipRewritten {
                     commit_count: notes_after,
                 })
             }
         }
+    }
+
+    /// Fetch the full authorship history from origin unless `--skip-fetch-notes`.
+    fn fetch_authorship_unless_skipped(&self, options: CiRunOptions) -> Result<(), GitAiError> {
+        if options.skip_fetch_notes {
+            println!("Skipping authorship history fetch");
+        } else {
+            println!("Fetching authorship history");
+            fetch_authorship_notes(&self.repo, "origin")?;
+            println!("Fetched authorship history");
+        }
+        Ok(())
+    }
+
+    fn push_authorship_unless_skipped(&self, options: CiRunOptions) -> Result<(), GitAiError> {
+        if options.skip_push {
+            println!("Skipping authorship push (--skip-push). Done.");
+        } else {
+            println!("Pushing authorship...");
+            self.repo.push_authorship("origin")?;
+            println!("Pushed authorship. Done.");
+        }
+        Ok(())
     }
 
     pub fn teardown(&self) -> Result<(), GitAiError> {

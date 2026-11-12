@@ -8,11 +8,17 @@
 //! callers (telemetry, CAS, and potentially checkpoints). This avoids the
 //! overhead of opening a new connection for every fire-and-forget event.
 
+use crate::error::GitAiError;
 use crate::model::daemon_control::{ControlRequest, ControlResponse};
 use crate::model::telemetry::TelemetryEnvelope;
-use crate::operations::daemon::{DaemonClientStream, open_local_socket_stream_with_timeout};
-use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use crate::operations::daemon::client_helpers::{
+    read_daemon_client_line, write_all_daemon_client_stream,
+};
+use crate::operations::daemon::{
+    DaemonClientStream, open_local_socket_stream_with_timeout, set_daemon_client_stream_timeouts,
+};
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -24,72 +30,72 @@ const DAEMON_SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(not(any(test, feature = "test-support")))]
 const DAEMON_TELEMETRY_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Maximum time to wait when reopening a dropped connection.
+const DAEMON_TELEMETRY_RECONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Global handle to the daemon control socket for telemetry submission.
 static DAEMON_TELEMETRY_HANDLE: OnceLock<Mutex<Option<DaemonTelemetryHandle>>> = OnceLock::new();
 
 struct DaemonTelemetryHandle {
     socket_path: PathBuf,
-    conn: BufReader<DaemonClientStream>,
+    /// `None` after a failed exchange; the next request reconnects.
+    conn: Option<BufReader<DaemonClientStream>>,
+}
+
+/// Open the daemon socket with read/write timeouts applied so that I/O never
+/// blocks indefinitely (which would hold the global mutex and stall the entire
+/// process).
+fn connect(
+    socket_path: &Path,
+    timeout: Duration,
+) -> Result<BufReader<DaemonClientStream>, GitAiError> {
+    let mut stream = open_local_socket_stream_with_timeout(socket_path, timeout)?;
+    let _ = set_daemon_client_stream_timeouts(&mut stream, socket_path, DAEMON_SOCKET_IO_TIMEOUT);
+    Ok(BufReader::new(stream))
 }
 
 impl DaemonTelemetryHandle {
-    /// Apply read/write timeouts to the underlying socket so that I/O never
-    /// blocks indefinitely (which would hold the global mutex and stall the
-    /// entire process).
-    fn apply_socket_timeouts(stream: &mut DaemonClientStream, socket_path: &std::path::Path) {
-        let _ = crate::operations::daemon::set_daemon_client_stream_timeouts(
-            stream,
+    fn new(socket_path: PathBuf, timeout: Duration) -> Result<Self, GitAiError> {
+        let conn = connect(&socket_path, timeout)?;
+        Ok(Self {
             socket_path,
-            DAEMON_SOCKET_IO_TIMEOUT,
-        );
+            conn: Some(conn),
+        })
     }
 
     /// Send a control request over the persistent connection and read the response.
-    /// On I/O error, attempts to reconnect once before giving up.
     fn send(&mut self, request: &ControlRequest) -> Result<ControlResponse, String> {
-        match self.send_inner(request) {
-            Ok(resp) => Ok(resp),
-            Err(first_err) => {
-                // Connection may have been dropped by the daemon; try reconnecting once.
-                match open_local_socket_stream_with_timeout(
-                    &self.socket_path,
-                    Duration::from_secs(1),
-                ) {
-                    Ok(mut stream) => {
-                        Self::apply_socket_timeouts(&mut stream, &self.socket_path);
-                        self.conn = BufReader::new(stream);
-                        self.send_inner(request)
-                            .map_err(|e| format!("reconnect ok but send failed: {}", e))
-                    }
-                    Err(reconnect_err) => Err(format!(
-                        "send failed ({}), reconnect also failed ({})",
-                        first_err, reconnect_err
-                    )),
-                }
-            }
-        }
-    }
-
-    fn send_inner(&mut self, request: &ControlRequest) -> Result<ControlResponse, String> {
         let mut body = serde_json::to_vec(request).map_err(|e| e.to_string())?;
         body.push(b'\n');
-        self.conn
-            .get_mut()
-            .write_all(&body)
-            .map_err(|e| format!("write: {}", e))?;
-        self.conn
-            .get_mut()
-            .flush()
-            .map_err(|e| format!("flush: {}", e))?;
-
-        let mut line = String::new();
-        self.conn
-            .read_line(&mut line)
-            .map_err(|e| format!("read: {}", e))?;
+        // A failed write means the connection is dead (e.g. the daemon restarted),
+        // so resend once on a fresh connection.
+        let mut conn = match self.write(&body) {
+            Ok(conn) => conn,
+            Err(first_err) => self
+                .write(&body)
+                .map_err(|e| format!("send failed ({first_err}), retry failed ({e})"))?,
+        };
+        // The request was delivered, so it is never resent: a duplicate would
+        // repeat the telemetry or flush. On failure the connection is dropped so
+        // a late response cannot be read as the reply to the next request.
+        let line = read_daemon_client_line(&mut conn, &self.socket_path, DAEMON_SOCKET_IO_TIMEOUT)
+            .map_err(|e| e.to_string())?;
+        self.conn = Some(conn);
         if line.trim().is_empty() {
             return Err("empty response from daemon".to_string());
         }
         serde_json::from_str(line.trim()).map_err(|e| format!("parse: {}", e))
+    }
+
+    /// Write `body` on the current connection, reconnecting if there is none.
+    /// The connection is dropped when the write fails.
+    fn write(&mut self, body: &[u8]) -> Result<BufReader<DaemonClientStream>, GitAiError> {
+        let mut conn = match self.conn.take() {
+            Some(conn) => conn,
+            None => connect(&self.socket_path, DAEMON_TELEMETRY_RECONNECT_TIMEOUT)?,
+        };
+        write_all_daemon_client_stream(conn.get_mut(), &self.socket_path, body)?;
+        Ok(conn)
     }
 }
 
@@ -128,23 +134,7 @@ pub fn init_daemon_telemetry_handle() -> DaemonTelemetryInitResult {
             .filter(|p| p.exists());
 
         match socket_path {
-            Some(path) => {
-                match open_local_socket_stream_with_timeout(&path, Duration::from_secs(2)) {
-                    Ok(mut stream) => {
-                        DaemonTelemetryHandle::apply_socket_timeouts(&mut stream, &path);
-                        let handle = DaemonTelemetryHandle {
-                            socket_path: path,
-                            conn: BufReader::new(stream),
-                        };
-                        let _ = DAEMON_TELEMETRY_HANDLE.get_or_init(|| Mutex::new(Some(handle)));
-                        DaemonTelemetryInitResult::Connected
-                    }
-                    Err(e) => {
-                        let _ = DAEMON_TELEMETRY_HANDLE.get_or_init(|| Mutex::new(None));
-                        DaemonTelemetryInitResult::Failed(e.to_string())
-                    }
-                }
-            }
+            Some(path) => install_handle(DaemonTelemetryHandle::new(path, Duration::from_secs(2))),
             None => {
                 let _ = DAEMON_TELEMETRY_HANDLE.get_or_init(|| Mutex::new(None));
                 DaemonTelemetryInitResult::Skipped
@@ -166,26 +156,22 @@ pub fn init_daemon_telemetry_handle() -> DaemonTelemetryInitResult {
         };
 
         // Open a persistent connection to the control socket
-        match open_local_socket_stream_with_timeout(
-            &config.control_socket_path,
+        install_handle(DaemonTelemetryHandle::new(
+            config.control_socket_path,
             DAEMON_TELEMETRY_CONNECT_TIMEOUT,
-        ) {
-            Ok(mut stream) => {
-                DaemonTelemetryHandle::apply_socket_timeouts(
-                    &mut stream,
-                    &config.control_socket_path,
-                );
-                let handle = DaemonTelemetryHandle {
-                    socket_path: config.control_socket_path,
-                    conn: BufReader::new(stream),
-                };
-                let _ = DAEMON_TELEMETRY_HANDLE.get_or_init(|| Mutex::new(Some(handle)));
-                DaemonTelemetryInitResult::Connected
-            }
-            Err(e) => {
-                let _ = DAEMON_TELEMETRY_HANDLE.get_or_init(|| Mutex::new(None));
-                DaemonTelemetryInitResult::Failed(e.to_string())
-            }
+        ))
+    }
+}
+
+fn install_handle(handle: Result<DaemonTelemetryHandle, GitAiError>) -> DaemonTelemetryInitResult {
+    match handle {
+        Ok(handle) => {
+            let _ = DAEMON_TELEMETRY_HANDLE.get_or_init(|| Mutex::new(Some(handle)));
+            DaemonTelemetryInitResult::Connected
+        }
+        Err(e) => {
+            let _ = DAEMON_TELEMETRY_HANDLE.get_or_init(|| Mutex::new(None));
+            DaemonTelemetryInitResult::Failed(e.to_string())
         }
     }
 }
@@ -202,7 +188,7 @@ pub fn daemon_telemetry_available() -> bool {
 ///
 /// This is the unified entry point used by telemetry, CAS submissions,
 /// and any other code that needs to talk to the daemon. The connection
-/// is reused across calls; if the socket is dead it will reconnect once.
+/// is reused across calls; if the socket is dead it will reconnect.
 ///
 /// Returns the daemon's response, or an error string on failure.
 pub fn send_via_daemon(request: &ControlRequest) -> Result<ControlResponse, String> {
@@ -238,4 +224,40 @@ pub fn submit_telemetry(envelopes: Vec<TelemetryEnvelope>) {
 pub fn submit_notes() {
     let request = ControlRequest::FlushNotes;
     let _ = send_via_daemon(&request);
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+    use std::io::BufRead;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn response_timeout_does_not_resend_the_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("control.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        let received = Arc::new(AtomicUsize::new(0));
+        let server_received = received.clone();
+        // A daemon that accepts requests but never answers.
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let received = server_received.clone();
+                std::thread::spawn(move || {
+                    for _ in std::io::BufReader::new(stream)
+                        .lines()
+                        .map_while(Result::ok)
+                    {
+                        received.fetch_add(1, Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+
+        let mut handle = DaemonTelemetryHandle::new(socket_path, Duration::from_secs(1)).unwrap();
+        assert!(handle.send(&ControlRequest::FlushNotes).is_err());
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(received.load(Ordering::SeqCst), 1);
+    }
 }

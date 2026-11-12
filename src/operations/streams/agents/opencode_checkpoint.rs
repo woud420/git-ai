@@ -35,10 +35,7 @@ pub(super) fn validate_checkpoint_stream(
     source: &CheckpointStreamSource,
 ) -> Result<DiscoveredSession, StreamError> {
     validate_checkpoint_stream_claim(source, "opencode", CheckpointStreamFormat::OpenCodeSqlite)?;
-    let database_path = storage_path()
-        .as_deref()
-        .and_then(database_path)
-        .ok_or_else(checkpoint_stream_denied)?;
+    let database_path = opencode_database_path().ok_or_else(checkpoint_stream_denied)?;
     let trusted_root = database_path
         .parent()
         .map(Path::to_path_buf)
@@ -59,7 +56,12 @@ pub(super) fn validate_checkpoint_stream(
     )
 }
 
-pub(crate) fn storage_path() -> Option<PathBuf> {
+/// The local OpenCode SQLite database, honoring `GIT_AI_OPENCODE_STORAGE_PATH`.
+pub fn opencode_database_path() -> Option<PathBuf> {
+    storage_path().as_deref().and_then(database_path)
+}
+
+fn storage_path() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("GIT_AI_OPENCODE_STORAGE_PATH") {
         return Some(PathBuf::from(path));
     }

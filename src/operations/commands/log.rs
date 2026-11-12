@@ -2,9 +2,6 @@ use crate::config::{Config, NotesBackendKind};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::authorship::ignore::effective_ignore_patterns;
-use crate::operations::authorship::stats::{
-    stats_for_commit_stats_with_parent_and_authorship, write_stats_to_terminal,
-};
 use crate::operations::git::repository::Repository;
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -16,10 +13,15 @@ use crossterm::{
         enable_raw_mode,
     },
 };
+use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::process::{Child, ExitStatus};
+
+#[path = "log_stats.rs"]
+mod stats;
+use stats::render_stats;
 
 const LOG_BATCH_SIZE: usize = 24;
 const GIT_LOG_FIELD_COUNT: usize = 8;
@@ -166,7 +168,8 @@ struct ParsedLogArgs {
     plain: bool,
     show_raw_notes: bool,
     oneline: bool,
-    show_decorations: bool,
+    /// The `--decorate=<style>` passed to git, or `None` for `--no-decorate`.
+    decorate: Option<&'static str>,
     help: bool,
 }
 
@@ -177,7 +180,7 @@ impl Default for ParsedLogArgs {
             plain: false,
             show_raw_notes: false,
             oneline: false,
-            show_decorations: true,
+            decorate: Some("short"),
             help: false,
         }
     }
@@ -299,11 +302,14 @@ fn parse_log_args(args: &[String]) -> Result<ParsedLogArgs, String> {
             "--oneline" => {
                 parsed.oneline = true;
             }
-            "--decorate" | "--decorate=short" | "--decorate=full" | "--decorate=auto" => {
-                parsed.show_decorations = true;
+            "--decorate" | "--decorate=short" | "--decorate=auto" => {
+                parsed.decorate = Some("short");
+            }
+            "--decorate=full" => {
+                parsed.decorate = Some("full");
             }
             "--no-decorate" => {
-                parsed.show_decorations = false;
+                parsed.decorate = None;
             }
             _ if is_unsupported_render_arg(arg) => {
                 return Err(format!(
@@ -378,7 +384,7 @@ struct LogRenderer {
 impl LogRenderer {
     fn new(repo: Repository, options: ParsedLogArgs) -> Result<Self, LogError> {
         let ignore_patterns = effective_ignore_patterns(&repo, &[], &[]);
-        let stream = CommitStream::spawn(&repo, &options.git_log_args, options.show_decorations)?;
+        let stream = CommitStream::spawn(&repo, &options.git_log_args, options.decorate)?;
         Ok(Self {
             repo,
             options,
@@ -440,17 +446,15 @@ impl CommitStream {
     fn spawn(
         repo: &Repository,
         git_log_args: &[String],
-        show_decorations: bool,
+        decorate: Option<&str>,
     ) -> Result<Self, LogError> {
         let mut command_args = repo.global_args_for_exec();
         command_args.push("log".to_string());
         command_args.push("--no-color".to_string());
         command_args.push("--no-notes".to_string());
-        if show_decorations {
-            command_args.push("--decorate=short".to_string());
-        } else {
-            command_args.push("--no-decorate".to_string());
-        }
+        command_args.push(decorate.map_or("--no-decorate".to_string(), |style| {
+            format!("--decorate={style}")
+        }));
         command_args.push(format!("--format=format:{}", GIT_LOG_FORMAT));
         command_args.extend(git_log_args.iter().cloned());
 
@@ -564,28 +568,18 @@ fn render_commit(
     let authorship_log =
         raw_note.and_then(|note| AuthorshipLog::deserialize_from_string(note).ok());
     let mut out = String::new();
+    let decorations = commit.decorations.trim();
+    let decorations = if options.decorate.is_some() && !decorations.is_empty() {
+        format!(" ({decorations})")
+    } else {
+        String::new()
+    };
 
     if options.oneline {
-        out.push_str(&short_sha(&commit.sha));
-        out.push(' ');
-        out.push_str(&commit.subject);
-        if options.show_decorations && !commit.decorations.trim().is_empty() {
-            out.push(' ');
-            out.push('(');
-            out.push_str(commit.decorations.trim());
-            out.push(')');
-        }
-        out.push('\n');
+        let sha = short_sha(&commit.sha);
+        let _ = writeln!(out, "{sha}{decorations} {}", commit.subject);
     } else {
-        out.push_str("commit ");
-        out.push_str(&commit.sha);
-        if options.show_decorations && !commit.decorations.trim().is_empty() {
-            out.push(' ');
-            out.push('(');
-            out.push_str(commit.decorations.trim());
-            out.push(')');
-        }
-        out.push('\n');
+        let _ = writeln!(out, "commit {}{decorations}", commit.sha);
 
         if commit.parents.len() > 1 {
             out.push_str("Merge: ");
@@ -646,48 +640,6 @@ fn render_commit(
 
     out.push('\n');
     out
-}
-
-fn render_stats(
-    repo: &Repository,
-    commit_sha: &str,
-    parents: &[String],
-    authorship_log: Option<&AuthorshipLog>,
-    ignore_patterns: &[String],
-) -> Result<String, String> {
-    if parents.len() > 1 {
-        return Err("stats skipped for merge commit".to_string());
-    }
-
-    let parent_sha = parents
-        .first()
-        .map(String::as_str)
-        .unwrap_or("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
-
-    if let Ok(estimate) =
-        crate::operations::authorship::post_commit::estimate_stats_cost_for_commit_range(
-            repo,
-            parent_sha,
-            commit_sha,
-            ignore_patterns,
-        )
-        && estimate.should_skip()
-    {
-        return Err(format!(
-            "stats skipped for large commit; run `git-ai stats {}` to compute on demand",
-            commit_sha
-        ));
-    }
-
-    let stats = stats_for_commit_stats_with_parent_and_authorship(
-        repo,
-        commit_sha,
-        parents.first().map(String::as_str),
-        ignore_patterns,
-        authorship_log,
-    )
-    .map_err(|e| format!("stats unavailable: {}", e))?;
-    Ok(write_stats_to_terminal(&stats, false))
 }
 
 fn append_indented_line(out: &mut String, line: &str, spaces: usize) {

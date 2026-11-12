@@ -73,22 +73,22 @@ pub fn range_authorship(
             if parts.len() == 2 {
                 (parts[0].to_string(), format!("refs/heads/{}", parts[1]))
             } else {
-                (default_remote.clone(), refname.to_string())
+                (default_remote, refname.to_string())
             }
         } else if refname.starts_with("refs/heads/") {
             // Local branch: refs/heads/branch-name -> default_remote, refs/heads/branch-name
-            (default_remote.clone(), refname.to_string())
+            (default_remote, refname.to_string())
         } else if refname.contains('/') && !refname.starts_with("refs/") {
             // Simple remote format: origin/branch-name -> origin, refs/heads/branch-name
             let parts: Vec<&str> = refname.splitn(2, '/').collect();
             if parts.len() == 2 {
                 (parts[0].to_string(), format!("refs/heads/{}", parts[1]))
             } else {
-                (default_remote.clone(), format!("refs/heads/{}", refname))
+                (default_remote, format!("refs/heads/{}", refname))
             }
         } else {
             // Plain branch name: branch-name -> default_remote, refs/heads/branch-name
-            (default_remote.clone(), format!("refs/heads/{}", refname))
+            (default_remote, format!("refs/heads/{}", refname))
         };
 
         let mut args = repository.global_args_for_exec();
@@ -117,10 +117,7 @@ pub fn range_authorship(
     // Use provided commit SHAs or collect them from the range
     let commit_shas: Vec<String> = match commit_shas {
         Some(shas) => shas,
-        None => commit_range
-            .into_iter()
-            .map(|c| c.id().to_string())
-            .collect(),
+        None => commit_range.into_iter().map(|c| c.id()).collect(),
     };
     let commit_authorship = filter_commits_with_notes(repository, &commit_shas)?;
 
@@ -394,7 +391,7 @@ fn calculate_range_stats_direct(
     ignore_patterns: &[String],
 ) -> Result<CommitStats, GitAiError> {
     let start_sha = commit_range.start_oid.clone();
-    let end_sha = commit_range.end_oid.clone();
+    let end_sha = commit_range.end_oid;
     // Special case: single commit range (start == end)
     if start_sha == end_sha {
         return stats_for_commit_stats(repo, &end_sha, ignore_patterns);

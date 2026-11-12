@@ -27,11 +27,8 @@ pub fn extract_model(
 pub fn extract_model_from_droid_settings(
     settings_path: &Path,
 ) -> Result<Option<String>, StreamError> {
-    let content = match std::fs::read_to_string(settings_path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return Ok(None),
-        Err(_) => return Ok(None),
+    let Ok(content) = std::fs::read_to_string(settings_path) else {
+        return Ok(None);
     };
 
     let json: serde_json::Value = match serde_json::from_str(&content) {

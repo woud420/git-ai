@@ -59,20 +59,7 @@ impl LineRange {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn overlaps(&self, other: &LineRange) -> bool {
-        match (self, other) {
-            (LineRange::Single(l1), LineRange::Single(l2)) => l1 == l2,
-            (LineRange::Single(l), LineRange::Range(start, end)) => *l >= *start && *l <= *end,
-            (LineRange::Range(start, end), LineRange::Single(l)) => *l >= *start && *l <= *end,
-            (LineRange::Range(start1, end1), LineRange::Range(start2, end2)) => {
-                start1 <= end2 && start2 <= end1
-            }
-        }
-    }
-
     /// Remove a line or range from this range, returning the remaining parts
-    #[allow(dead_code)]
     pub fn remove(&self, to_remove: &LineRange) -> Vec<LineRange> {
         match (self, to_remove) {
             (LineRange::Single(l), LineRange::Single(r)) => {
@@ -169,54 +156,10 @@ impl LineRange {
         ranges
     }
 
-    #[allow(dead_code)]
     pub fn expand(&self) -> Vec<u32> {
         match self {
             LineRange::Single(l) => vec![*l],
             LineRange::Range(start, end) => (*start..=*end).collect(),
-        }
-    }
-
-    /// Shift line numbers by a given offset
-    /// - For insertions: offset is positive (shift lines down/forward)
-    /// - For deletions: offset is negative (shift lines up/backward)
-    /// - insertion_point: the line number where the change occurred
-    #[allow(dead_code)]
-    pub fn shift(&self, insertion_point: u32, offset: i32) -> Option<LineRange> {
-        // Helper: apply offset to a line number, returning None if result is negative
-        let apply_offset = |line: u32| -> Option<u32> {
-            if line >= insertion_point {
-                let shifted = (line as i64) + (offset as i64);
-                if shifted >= 0 && shifted <= u32::MAX as i64 {
-                    Some(shifted as u32)
-                } else {
-                    None
-                }
-            } else {
-                Some(line)
-            }
-        };
-
-        match self {
-            LineRange::Single(l) => {
-                let new_line = apply_offset(*l)?;
-                Some(LineRange::Single(new_line))
-            }
-            LineRange::Range(start, end) => {
-                let new_start = apply_offset(*start)?;
-                let new_end = apply_offset(*end)?;
-
-                // Ensure the range is still valid
-                if new_start <= new_end {
-                    if new_start == new_end {
-                        Some(LineRange::Single(new_start))
-                    } else {
-                        Some(LineRange::Range(new_start, new_end))
-                    }
-                } else {
-                    None
-                }
-            }
         }
     }
 }
@@ -326,59 +269,5 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
-    }
-
-    // --- LineRange::shift regression tests ---
-
-    #[test]
-    fn test_shift_single_underflow_returns_none() {
-        // Single(5) at insertion_point=3 with offset=-10: 5 >= 3, so shifted = 5 + (-10) = -5 => None
-        let result = LineRange::Single(5).shift(3, -10);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_shift_range_zero_offset_identity() {
-        // Zero offset should be the identity transform
-        let result = LineRange::Range(10, 20).shift(5, 0);
-        assert_eq!(result, Some(LineRange::Range(10, 20)));
-    }
-
-    #[test]
-    fn test_shift_range_partial_underflow() {
-        // Range(2, 10) at insertion_point=0, offset=-5:
-        //   start: 2 >= 0, so 2 + (-5) = -3 => None (apply_offset fails on start)
-        let result = LineRange::Range(2, 10).shift(0, -5);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_shift_range_collapses_to_single() {
-        // Range(10, 11) at insertion_point=11, offset=-1:
-        //   start: 10 < 11, so stays 10
-        //   end:   11 >= 11, so 11 + (-1) = 10
-        //   10 == 10 => collapses to Single(10)
-        let result = LineRange::Range(10, 11).shift(11, -1);
-        assert_eq!(result, Some(LineRange::Single(10)));
-    }
-
-    #[test]
-    fn test_shift_single_below_insertion_unchanged() {
-        // Single(3) with insertion_point=5: 3 < 5, so line is unchanged
-        let result = LineRange::Single(3).shift(5, 10);
-        assert_eq!(result, Some(LineRange::Single(3)));
-    }
-
-    #[test]
-    fn test_shift_single_large_value_i64_arithmetic() {
-        // Single(u32::MAX) at insertion_point=0, offset=1:
-        //   u32::MAX >= 0, so shifted = (u32::MAX as i64) + 1 = 4294967296
-        //   shifted >= 0, so Some(4294967296 as u32) which wraps to 0
-        //   This verifies the i64 arithmetic path doesn't panic.
-        let result = LineRange::Single(u32::MAX).shift(0, 1);
-        assert_eq!(
-            result, None,
-            "u32::MAX + 1 should overflow u32 and return None"
-        );
     }
 }

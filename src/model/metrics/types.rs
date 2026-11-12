@@ -52,24 +52,9 @@ pub struct MetricEvent {
 }
 
 impl MetricEvent {
-    /// Create a new metric event with current timestamp.
-    pub fn new<V: EventValues>(values: &V, attrs: SparseArray) -> Self {
-        Self {
-            timestamp: crate::model::clock::now_secs() as u32,
-            event_id: V::event_id() as u16,
-            values: values.to_sparse(),
-            attrs,
-        }
-    }
-
-    /// Create a new metric event by consuming the values (avoids cloning).
+    /// Create a metric event with the current timestamp, consuming the values.
     pub fn from_values<V: EventValues>(values: V, attrs: SparseArray) -> Self {
-        Self {
-            timestamp: crate::model::clock::now_secs() as u32,
-            event_id: V::event_id() as u16,
-            values: values.into_sparse(),
-            attrs,
-        }
+        Self::from_values_with_timestamp(values, attrs, None)
     }
 
     /// Create a new metric event by consuming the values, with an optional explicit timestamp.
@@ -83,17 +68,6 @@ impl MetricEvent {
             timestamp: event_ts.unwrap_or_else(|| crate::model::clock::now_secs() as u32),
             event_id: V::event_id() as u16,
             values: values.into_sparse(),
-            attrs,
-        }
-    }
-
-    /// Create with explicit timestamp (for deserialization/testing).
-    #[allow(dead_code)]
-    pub fn with_timestamp<V: EventValues>(timestamp: u32, values: &V, attrs: SparseArray) -> Self {
-        Self {
-            timestamp,
-            event_id: V::event_id() as u16,
-            values: values.to_sparse(),
             attrs,
         }
     }
@@ -175,7 +149,7 @@ mod tests {
         let mut attrs = SparseArray::new();
         attrs.insert("0".to_string(), Value::String("1.0.0".to_string()));
 
-        let event = MetricEvent::with_timestamp(1700000000, &values, attrs);
+        let event = MetricEvent::from_values_with_timestamp(values, attrs, Some(1700000000));
 
         assert_eq!(event.timestamp, 1700000000);
         assert_eq!(event.event_id, 1);
@@ -258,7 +232,7 @@ mod tests {
             .unwrap()
             .as_secs() as u32;
 
-        let event = MetricEvent::new(&values, attrs);
+        let event = MetricEvent::from_values(values, attrs);
 
         let after = SystemTime::now()
             .duration_since(UNIX_EPOCH)

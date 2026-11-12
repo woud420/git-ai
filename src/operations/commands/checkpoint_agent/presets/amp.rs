@@ -110,7 +110,6 @@ impl AgentPreset for AmpPreset {
 
         // Determine session_id: thread_id preferred, falls back to tool_use_id
         let session_id = thread_id
-            .clone()
             .or(tool_use_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
 
@@ -148,7 +147,7 @@ impl AgentPreset for AmpPreset {
                 context,
                 file_paths,
                 dirty_files: None,
-                tool_use_id: tool_use_id.clone(),
+                tool_use_id,
             }),
             (false, true) => ParsedHookEvent::PostBashCall(PostBashCall {
                 context,
@@ -161,7 +160,7 @@ impl AgentPreset for AmpPreset {
                 file_paths,
                 dirty_files: None,
                 stream_source: None,
-                tool_use_id: tool_use_id.clone(),
+                tool_use_id,
             }),
         };
 

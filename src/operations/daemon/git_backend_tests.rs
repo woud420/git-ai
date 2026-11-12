@@ -61,6 +61,18 @@ fn clone_positionals_skips_value_for_config_short_flag() {
 }
 
 #[test]
+fn clone_init_positionals_skip_values_of_separate_value_options() {
+    for flag in ["--revision", "-u", "--ref-format", "--initial-branch"] {
+        let args = argv(&[flag, "value", "src", "dst"]);
+        assert_eq!(
+            clone_init_positionals(&args),
+            vec!["src".to_string(), "dst".to_string()],
+            "{flag} should consume its value"
+        );
+    }
+}
+
+#[test]
 fn clone_target_derives_name_from_url_with_depth_flag() {
     let backend = SystemGitBackend::new();
     let cwd = PathBuf::from("/home/testuser/projects");

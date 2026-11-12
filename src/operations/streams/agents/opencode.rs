@@ -1,6 +1,6 @@
 //! OpenCode agent implementation (SQLite-only).
 
-pub use super::opencode_checkpoint::open_sqlite_readonly;
+pub use super::opencode_checkpoint::{open_sqlite_readonly, opencode_database_path};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::{
     TimestampCursorWatermark, TimestampWatermark, WatermarkStrategy,

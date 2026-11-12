@@ -35,7 +35,7 @@ pub fn stash_base_head(repo: &Repository, stash_sha: &str) -> Option<String> {
     repo.find_commit(stash_sha.to_string())
         .ok()
         .and_then(|commit| commit.parent(0).ok())
-        .map(|parent| parent.id().to_string())
+        .map(|parent| parent.id())
 }
 
 pub(crate) fn commit_parent_pairs_from_log(log_output: &str) -> Vec<(String, String)> {

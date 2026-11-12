@@ -226,7 +226,7 @@ pub fn execute_resolved_checkpoint_from_daemon(
         let mut checkpoint = Checkpoint::new(kind, combined_hash, author.to_string(), entries);
         checkpoint.timestamp = (resolved.ts / 1000) as u64;
         checkpoint.line_stats = compute_line_stats(&file_stats)?;
-        checkpoint.trace_id = Some(trace_id.clone());
+        checkpoint.trace_id = Some(trace_id);
         checkpoint.delivery_id = checkpoint_request.delivery_id.clone();
 
         if kind.is_ai() {
@@ -704,7 +704,7 @@ async fn get_checkpoint_entries(
 
     // Determine author_id based on checkpoint kind and agent_id
     let author_id = match kind {
-        CheckpointKind::Human => kind.to_str(), // "human" — stripped, never attested
+        CheckpointKind::Human => kind.to_str().to_string(), // "human" — stripped, never attested
         CheckpointKind::KnownHuman => {
             crate::model::authorship_log_serialization::generate_human_short_hash(author)
         }
@@ -717,7 +717,7 @@ async fn get_checkpoint_entries(
                     let session_id = generate_session_id(&aid.id, &aid.tool);
                     format!("{}::{}", session_id, trace_id)
                 })
-                .unwrap_or_else(|| kind.to_str())
+                .unwrap_or_else(|| kind.to_str().to_string())
         }
     };
 
@@ -734,7 +734,7 @@ async fn get_checkpoint_entries(
     let head_tree_id = head_commit
         .as_ref()
         .and_then(|c| c.tree().ok())
-        .map(|t| t.id().to_string());
+        .map(|t| t.id());
 
     // Files with no earlier checkpoint state are diffed against HEAD.
     let head_contents = read_head_contents(
@@ -881,7 +881,7 @@ fn make_entry_for_file(
     let filled_in_prev_attributions = tracker.attribute_unattributed_ranges(
         previous_content,
         previous_attributions,
-        &CheckpointKind::Human.to_str(),
+        CheckpointKind::Human.to_str(),
         ts - 1,
     );
     tracing::debug!(

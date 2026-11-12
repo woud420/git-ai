@@ -7,7 +7,6 @@ use crate::operations::mdm::paths::gemini_config_dir;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -130,15 +129,6 @@ impl Agent for GeminiAgent {
             "Gemini",
             "read",
         )
-    }
-
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
     }
 
     fn streams(&self) -> Vec<StreamDescriptor> {

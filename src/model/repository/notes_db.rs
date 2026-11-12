@@ -17,6 +17,7 @@
 
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
+use crate::model::repository::sqlite::in_placeholders;
 use rusqlite::{Connection, ToSql, params, params_from_iter};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -354,20 +355,25 @@ impl NotesDatabase {
             return Ok(());
         }
         let now = unix_now();
-        let tx = self.conn.transaction()?;
-        for sha in commit_shas {
-            tx.execute(
-                r#"UPDATE notes
-                   SET processing_started_at = NULL,
-                       attempts              = attempts + 1,
-                       last_sync_error       = ?1,
-                       last_sync_at          = ?2,
-                       next_retry_at         = ?2 + (1 << MIN(attempts + 1, 8)) * 5
-                   WHERE commit_sha = ?3 AND synced = 0 AND processing_started_at IS NOT NULL"#,
-                params![error, now, sha],
-            )?;
-        }
-        tx.commit()?;
+        let sql = format!(
+            r#"UPDATE notes
+               SET processing_started_at = NULL,
+                   attempts              = attempts + 1,
+                   last_sync_error       = ?1,
+                   last_sync_at          = ?2,
+                   next_retry_at         = ?2 + (1 << MIN(attempts + 1, 8)) * 5
+               WHERE synced = 0 AND processing_started_at IS NOT NULL AND commit_sha IN ({})"#,
+            in_placeholders(commit_shas.len())
+        );
+        let leading: [&dyn ToSql; 2] = [&error, &now];
+        self.conn.execute(
+            &sql,
+            params_from_iter(
+                leading
+                    .into_iter()
+                    .chain(commit_shas.iter().map(|sha| sha as &dyn ToSql)),
+            ),
+        )?;
         Ok(())
     }
 
@@ -399,18 +405,17 @@ impl NotesDatabase {
 
     /// Return the subset of `commit_shas` that exist in the DB with `synced = 1`.
     pub fn get_synced_shas(&self, commit_shas: &[&str]) -> Result<HashSet<String>, GitAiError> {
-        if commit_shas.is_empty() {
-            return Ok(HashSet::new());
-        }
-        let sql = format!(
-            "SELECT commit_sha FROM notes WHERE synced = 1 AND commit_sha IN ({})",
-            in_placeholders(commit_shas.len())
-        );
-        let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(commit_shas), |row| row.get::<_, String>(0))?;
         let mut result = HashSet::new();
-        for row in rows {
-            result.insert(row?);
+        for chunk in commit_shas.chunks(MAX_SHAS_PER_QUERY) {
+            let sql = format!(
+                "SELECT commit_sha FROM notes WHERE synced = 1 AND commit_sha IN ({})",
+                in_placeholders(chunk.len())
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows = stmt.query_map(params_from_iter(chunk), |row| row.get::<_, String>(0))?;
+            for row in rows {
+                result.insert(row?);
+            }
         }
         Ok(result)
     }
@@ -420,22 +425,20 @@ impl NotesDatabase {
     /// Only SHAs that exist in the database are returned; missing SHAs are absent
     /// from the result map.
     pub fn get_notes(&self, commit_shas: &[&str]) -> Result<HashMap<String, String>, GitAiError> {
-        if commit_shas.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let sql = format!(
-            "SELECT commit_sha, content FROM notes WHERE commit_sha IN ({})",
-            in_placeholders(commit_shas.len())
-        );
-        let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(commit_shas), |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-
         let mut result = HashMap::new();
-        for row in rows {
-            let (sha, content) = row?;
-            result.insert(sha, content);
+        for chunk in commit_shas.chunks(MAX_SHAS_PER_QUERY) {
+            let sql = format!(
+                "SELECT commit_sha, content FROM notes WHERE commit_sha IN ({})",
+                in_placeholders(chunk.len())
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows = stmt.query_map(params_from_iter(chunk), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            for row in rows {
+                let (sha, content) = row?;
+                result.insert(sha, content);
+            }
         }
         Ok(result)
     }
@@ -490,10 +493,8 @@ fn unix_now() -> i64 {
     crate::model::clock::now_secs() as i64
 }
 
-/// `?,?,…` for an SQL `IN (...)` list of `count` bound values.
-fn in_placeholders(count: usize) -> String {
-    vec!["?"; count].join(",")
-}
+/// SHAs bound per `IN (...)` read, well under SQLite's bound-variable limit.
+const MAX_SHAS_PER_QUERY: usize = 500;
 
 /// Bind order for `... = ? ... IN (?,?,…)`: a timestamp, then the commit SHAs.
 fn timestamp_then_shas<'a>(

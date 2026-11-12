@@ -972,7 +972,7 @@ impl StreamWorker {
                 );
 
                 // Re-queue with updated retry count and next_retry_at
-                let mut retried_task = task.clone();
+                let mut retried_task = task;
                 retried_task.retry_count = retry_count;
                 retried_task.next_retry_at = Some(std::time::Instant::now() + delay);
                 self.delayed_tasks.push(retried_task);

@@ -18,8 +18,8 @@ use crate::model::api_types::{NoteEntry, NotesUploadRequest};
 use crate::model::repository::notes_db::NotesDatabase;
 use crate::operations::git::cat_file::{BatchReadPolicy, batch_read_blob_contents_with_policy};
 use crate::operations::git::find_repository;
+use crate::operations::git::refs::list_all_notes;
 use crate::operations::git::repository::resolve_api_author_identity;
-use std::collections::HashMap;
 
 /// Entry point for `git-ai notes migrate`.
 pub fn handle_notes_migrate(args: &[String]) {
@@ -156,27 +156,22 @@ fn migrate_sqlite_to_git_notes(
 }
 
 /// Read every note in `refs/notes/ai` as `(commit_sha, content)` pairs.
+///
+/// Commits whose notes have identical content share one blob, so entries are
+/// built per listed note, not per blob.
 fn read_all_ref_notes(
     repo: &crate::operations::git::repository::Repository,
 ) -> Result<Vec<(String, String)>, GitAiError> {
-    let note_pairs = list_notes(repo)?;
-    if note_pairs.is_empty() {
-        return Ok(Vec::new());
-    }
-    let blob_to_commit: HashMap<String, String> = note_pairs
-        .iter()
-        .map(|(blob, commit)| (blob.clone(), commit.clone()))
-        .collect();
+    let note_pairs = list_all_notes(repo, "refs/notes/ai")?;
     let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
     let blob_contents =
         batch_read_blob_contents_with_policy(repo, &blob_shas, BatchReadPolicy::Tolerant)?;
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for (blob_sha, content) in &blob_contents {
-        if let Some(commit_sha) = blob_to_commit.get(blob_sha) {
-            entries.push((commit_sha.clone(), content.clone()));
-        }
-    }
-    Ok(entries)
+    Ok(note_pairs
+        .into_iter()
+        .filter_map(|(blob_sha, commit_sha)| {
+            Some((commit_sha, blob_contents.get(&blob_sha)?.clone()))
+        })
+        .collect())
 }
 
 /// Bulk-upload `refs/notes/ai` to the remote HTTP backend and warm the cache.
@@ -186,7 +181,7 @@ fn migrate_refs_to_http(
     cfg: &Config,
     force: bool,
 ) {
-    // 3. Build the API client.
+    // Build the API client.
     let Some(backend_url) = cfg.notes_backend_url().map(str::to_string) else {
         eprintln!(
             "error: notes_backend.backend_url is not configured.\n\
@@ -208,44 +203,17 @@ fn migrate_refs_to_http(
 
     eprintln!("Listing notes from refs/notes/ai ...");
 
-    // 4. List notes: `git notes --ref=ai list` → "blob_sha commit_sha\n" lines.
-    let note_pairs = match list_notes(repo) {
-        Ok(pairs) => pairs,
+    let mut entries = match read_all_ref_notes(repo) {
+        Ok(entries) => entries,
         Err(e) => {
-            eprintln!("error: failed to list notes: {}", e);
+            eprintln!("error: failed to read notes: {}", e);
             std::process::exit(1);
         }
     };
 
-    if note_pairs.is_empty() {
+    if entries.is_empty() {
         eprintln!("No notes found in refs/notes/ai. Nothing to migrate.");
         return;
-    }
-
-    eprintln!("Found {} note(s). Reading content ...", note_pairs.len());
-
-    // 5. Bulk-read note content via `git cat-file --batch`.
-    let blob_to_commit: HashMap<String, String> = note_pairs
-        .iter()
-        .map(|(blob, commit)| (blob.clone(), commit.clone()))
-        .collect();
-
-    let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
-    let blob_contents =
-        match batch_read_blob_contents_with_policy(repo, &blob_shas, BatchReadPolicy::Tolerant) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("error: failed to read note content: {}", e);
-                std::process::exit(1);
-            }
-        };
-
-    // Build (commit_sha, content) pairs.
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for (blob_sha, content) in &blob_contents {
-        if let Some(commit_sha) = blob_to_commit.get(blob_sha) {
-            entries.push((commit_sha.clone(), content.clone()));
-        }
     }
 
     // Skip entries already confirmed synced (enables safe re-run after interruption).
@@ -276,7 +244,7 @@ fn migrate_refs_to_http(
         entries.len()
     );
 
-    // 6. Upload in chunks of 50 and cache locally.
+    // Upload in chunks of 50 and cache locally.
     let mut total_uploaded = 0usize;
     let mut total_failed = 0usize;
     let mut cached_entries: Vec<(String, String)> = Vec::new();
@@ -331,7 +299,7 @@ fn migrate_refs_to_http(
         }
     }
 
-    // 8. Summary.
+    // Summary.
     eprintln!();
     if total_failed == 0 {
         eprintln!(
@@ -347,48 +315,6 @@ fn migrate_refs_to_http(
             std::process::exit(1);
         }
     }
-}
-
-/// Run `git notes --ref=ai list` and return `(blob_sha, commit_sha)` pairs.
-fn list_notes(
-    repo: &crate::operations::git::repository::Repository,
-) -> Result<Vec<(String, String)>, GitAiError> {
-    use crate::clients::git_cli::exec_git;
-
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "notes".to_string(),
-        "--ref=ai".to_string(),
-        "list".to_string(),
-    ]);
-
-    let output = exec_git(&args)
-        .map_err(|e| GitAiError::Generic(format!("git notes --ref=ai list failed: {}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // `git notes list` exits non-zero when there are no notes — treat as empty.
-        if stderr.contains("No notes found") || output.stdout.is_empty() {
-            return Ok(Vec::new());
-        }
-        return Err(GitAiError::Generic(format!(
-            "git notes --ref=ai list exited {}: {}",
-            output.status, stderr
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pairs: Vec<(String, String)> = stdout
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.split_whitespace();
-            let blob_sha = parts.next()?.to_string();
-            let commit_sha = parts.next()?.to_string();
-            Some((blob_sha, commit_sha))
-        })
-        .collect();
-
-    Ok(pairs)
 }
 
 fn print_help() {

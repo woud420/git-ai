@@ -1,13 +1,9 @@
-use crate::clients::git_cli::{
-    exec_git, exec_git_allow_nonzero, exec_git_stdin, exec_git_with_stdin_writer,
-};
+use crate::clients::git_cli::{exec_git, exec_git_stdin, exec_git_with_stdin_writer};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::model::working_log::Checkpoint;
 use crate::operations::git::cat_file::batch_read_blob_contents;
 use crate::operations::git::oid::is_full_oid;
 use crate::operations::git::repository::Repository;
-use serde_json;
 use std::collections::{HashMap, HashSet};
 
 mod note_fanout;
@@ -282,11 +278,10 @@ pub(in crate::operations::git) fn get_commits_with_notes_from_list(
     args.push("rev-list".to_string());
     args.push("--no-walk".to_string());
     args.push("--pretty=format:%H%n%an%n%ae".to_string());
-    for sha in commit_shas {
-        args.push(sha.clone());
-    }
+    // The list goes over stdin: a long range does not fit on a command line.
+    args.push("--stdin".to_string());
 
-    let output = exec_git(&args)?;
+    let output = exec_git_stdin(&args, commit_shas.join("\n").as_bytes())?;
     let stdout =
         String::from_utf8(output.stdout).map_err(|_| parse_output_error("git rev-list"))?;
 
@@ -396,17 +391,6 @@ pub(in crate::operations::git) fn get_authorship(
     // Keep metadata aligned with the commit where this note is attached.
     authorship_log.metadata.base_commit_sha = commit_sha.to_string();
     Some(authorship_log)
-}
-
-#[allow(dead_code)]
-pub fn get_reference_as_working_log(
-    repo: &Repository,
-    commit_sha: &str,
-) -> Result<Vec<Checkpoint>, GitAiError> {
-    let content = show_authorship_note(repo, commit_sha)
-        .ok_or_else(|| GitAiError::Generic("No authorship note found".to_string()))?;
-    let working_log = serde_json::from_str(&content)?;
-    Ok(working_log)
 }
 
 /// Sanitize a remote name to create a safe ref name
@@ -537,7 +521,10 @@ pub fn fallback_merge_notes_ours(repo: &Repository, source_ref: &str) -> Result<
 }
 
 /// List all notes on a given ref. Returns Vec<(note_blob_sha, annotated_object_sha)>.
-fn list_all_notes(repo: &Repository, notes_ref: &str) -> Result<Vec<(String, String)>, GitAiError> {
+pub(crate) fn list_all_notes(
+    repo: &Repository,
+    notes_ref: &str,
+) -> Result<Vec<(String, String)>, GitAiError> {
     // `git notes list` uses --ref to specify which notes ref.
     // The --ref option prepends "refs/notes/" automatically, so for full refs
     // like "refs/notes/ai-remote/origin" we need to strip the prefix.
@@ -553,17 +540,11 @@ fn list_all_notes(repo: &Repository, notes_ref: &str) -> Result<Vec<(String, Str
     let output = exec_git(&args)?;
     let stdout = String::from_utf8(output.stdout).map_err(|_| parse_output_error("notes list"))?;
 
-    Ok(stdout
-        .lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() == 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
-            } else {
-                None
-            }
-        })
-        .collect())
+    let parse = |line: &str| match line.split_whitespace().collect::<Vec<_>>()[..] {
+        [blob, object] => Some((blob.to_string(), object.to_string())),
+        _ => None,
+    };
+    Ok(stdout.lines().filter_map(parse).collect())
 }
 
 /// Parse a revision to its SHA
@@ -648,12 +629,9 @@ pub(crate) fn sort_commit_shas_by_date_desc(
     args.push("--format=%H".to_string());
     args.push("--date-order".to_string());
     args.push("--no-walk".to_string());
-    for sha in &sha_vec {
-        args.push(sha.clone());
-    }
+    args.push("--stdin".to_string());
 
-    if let Ok(output) = exec_git_allow_nonzero(&args)
-        && output.status.success()
+    if let Ok(output) = exec_git_stdin(&args, sha_vec.join("\n").as_bytes())
         && let Ok(stdout) = String::from_utf8(output.stdout)
     {
         let sorted: Vec<String> = stdout.lines().map(|s| s.to_string()).collect();

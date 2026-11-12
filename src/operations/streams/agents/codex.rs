@@ -7,7 +7,6 @@ use crate::operations::mdm::paths::codex_home_dir;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::path::{Path, PathBuf};
 
 /// Codex agent that reads Codex JSONL transcript files.
@@ -50,7 +49,11 @@ impl CodexAgent {
                 continue;
             }
 
-            let pattern = format!("{}/**/rollout-*{}*.jsonl", search_dir.display(), session_id);
+            let pattern = format!(
+                "{}/**/rollout-*{}*.jsonl",
+                glob::Pattern::escape(&search_dir.to_string_lossy()),
+                glob::Pattern::escape(session_id)
+            );
 
             let entries = glob::glob(&pattern).map_err(|e| StreamError::Fatal {
                 message: format!("Invalid glob pattern for Codex session search: {}", e),
@@ -212,15 +215,6 @@ impl Agent for CodexAgent {
         )
     }
 
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
-    }
-
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
         // Codex has cwd in session_meta or turn_context payload events
         for line in
@@ -282,6 +276,22 @@ mod tests {
             "test",
             StreamAdapterContractCapabilities::APPEND_ALL,
         );
+    }
+
+    #[test]
+    fn test_find_rollout_path_treats_home_and_session_id_literally() {
+        let temp = tempfile::tempdir().unwrap();
+        let codex_home = temp.path().join("home[1]");
+        let rollout_dir = codex_home.join("sessions/2026/02/11");
+        std::fs::create_dir_all(&rollout_dir).unwrap();
+        let rollout = rollout_dir.join("rollout-2026-02-11-sess[a].jsonl");
+        std::fs::write(&rollout, "{}\n").unwrap();
+        std::fs::write(rollout_dir.join("rollout-2026-02-11-sessa.jsonl"), "{}\n").unwrap();
+
+        let found = CodexAgent::find_rollout_path_for_session_in_home("sess[a]", &codex_home)
+            .unwrap()
+            .expect("rollout should be found");
+        assert_eq!(found, rollout);
     }
 
     #[test]

@@ -310,6 +310,7 @@ mod tests {
             api_key: api_key.map(str::to_string),
             author_identity: author_identity.map(str::to_string),
             timeout_secs: Some(30),
+            agent: crate::clients::http::build_agent(Some(30)),
         }
     }
 

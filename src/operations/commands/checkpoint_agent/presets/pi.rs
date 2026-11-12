@@ -129,7 +129,7 @@ impl AgentPreset for PiPreset {
         // Build agent metadata
         let mut metadata = HashMap::new();
         metadata.insert("session_path".to_string(), session_path.clone());
-        metadata.insert("tool_name".to_string(), tool_name.clone());
+        metadata.insert("tool_name".to_string(), tool_name);
         if let Some(tool_name_raw) = tool_name_raw
             && !tool_name_raw.trim().is_empty()
         {
@@ -179,7 +179,7 @@ impl AgentPreset for PiPreset {
                     context,
                     file_paths: will_edit_filepaths.into_iter().map(PathBuf::from).collect(),
                     dirty_files: dirty,
-                    tool_use_id: tool_use_id.clone(),
+                    tool_use_id,
                 })
             }
             PiHookEvent::AfterEdit => {

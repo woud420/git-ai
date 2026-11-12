@@ -73,6 +73,9 @@ impl Repository {
         if options.ignore_whitespace {
             args.push("-w".to_string());
         }
+        if options.first_parent {
+            args.push("--first-parent".to_string());
+        }
 
         // Detect lines moved within a file (-M) and copied from other files (-C, implies -M).
         // Needed so that lines shifted by an adjacent insertion/deletion are traced back to the

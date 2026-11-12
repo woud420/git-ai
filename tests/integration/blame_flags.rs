@@ -851,6 +851,46 @@ fn test_blame_date_format() {
         git_ai_output.contains("-"),
         "Git-ai output should contain date"
     );
+    // git's `--opt=value` form and a `--` before the path are accepted too.
+    let equals_form = repo
+        .git_ai(&["blame", "--date=short", "--", "test.txt"])
+        .unwrap();
+    assert_eq!(equals_form, git_ai_output);
+}
+
+/// `--first-parent` follows only first parents, so a line merged from a side
+/// branch is blamed on the merge commit, as git does.
+#[test]
+fn test_blame_first_parent_blames_merge_commit() {
+    let repo = TestRepo::new();
+    repo.write_file("test.txt", "base\n");
+    repo.stage_all_and_commit("base").unwrap();
+    let main_branch = repo.git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap();
+    repo.git(&["checkout", "-b", "side"]).unwrap();
+    repo.write_file("test.txt", "base\nside\n");
+    repo.stage_all_and_commit("side").unwrap();
+    repo.git(&["checkout", main_branch.trim()]).unwrap();
+    repo.git(&["merge", "--no-ff", "-m", "merge side", "side"])
+        .unwrap();
+    let merge_sha = repo.git(&["rev-parse", "HEAD"]).unwrap();
+
+    let args = [
+        "blame",
+        "--porcelain",
+        "--first-parent",
+        "-L",
+        "2,2",
+        "test.txt",
+    ];
+    let git_ai_output = repo.git_ai(&args).unwrap();
+    assert!(
+        git_ai_output.starts_with(merge_sha.trim()),
+        "{git_ai_output}"
+    );
+    assert_eq!(
+        normalize_for_snapshot(&repo.git(&args).unwrap()),
+        normalize_for_snapshot(&git_ai_output)
+    );
 }
 
 #[test]

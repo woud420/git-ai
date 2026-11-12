@@ -79,13 +79,17 @@ fn resolve_commits(repo: &Repository, spec: &str) -> Result<Vec<String>, GitAiEr
         let mut commits: Vec<String> = range.into_iter().map(|commit| commit.id()).collect();
 
         if commits.is_empty() {
-            let end_commit = repo.revparse_single(&end)?;
-            commits.push(end_commit.id());
+            commits.push(resolve_commit(repo, &end)?);
         }
 
         Ok(commits)
     } else {
-        let commit = repo.revparse_single(&normalize_head_rev(spec))?;
-        Ok(vec![commit.id()])
+        Ok(vec![resolve_commit(repo, &normalize_head_rev(spec))?])
     }
+}
+
+/// Peel in the same rev-parse so an annotated tag yields its commit, which is
+/// what notes are keyed by.
+pub(crate) fn resolve_commit(repo: &Repository, rev: &str) -> Result<String, GitAiError> {
+    Ok(repo.revparse_single(&format!("{rev}^{{commit}}"))?.id())
 }

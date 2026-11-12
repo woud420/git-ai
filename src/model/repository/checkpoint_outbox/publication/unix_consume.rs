@@ -18,7 +18,7 @@ const READY_SUFFIX: &str = ".ready";
 const QUARANTINE_SUFFIX: &str = ".quarantined";
 
 /// The ready records visible in one scan, oldest first, plus any entries
-/// whose names or file metadata failed validation (for quarantining).
+/// with unsafe names that the scan could not delete.
 #[derive(Debug, Default)]
 pub struct ReadyScan {
     pub ready: Vec<String>,
@@ -51,6 +51,11 @@ pub fn scan_ready_records(root: &Path, limit: usize) -> Result<ReadyScan, Checkp
             scan.invalid.push(name);
         }
     }
+    drop(entries);
+    // An unsafe name can be neither replayed nor quarantined (prune only
+    // deletes safe names), so delete it now under the lock.
+    scan.invalid
+        .retain(|name| unlink_at(&secure_root, name).is_err());
     scan.ready.sort();
     scan.ready.truncate(limit);
     Ok(scan)
@@ -206,6 +211,19 @@ mod tests {
         let root = temp.path().join("outbox");
         publish_encoded(&root, "a.ready", b"a", OutboxLimits::default()).unwrap();
         (temp, root)
+    }
+
+    #[test]
+    fn scan_removes_ready_names_that_can_never_be_quarantined() {
+        let (_temp, root) = outbox_with_record();
+        fs::write(root.join(".hidden.ready"), b"x").unwrap();
+        fs::write(root.join("sp ace.ready"), b"x").unwrap();
+
+        let scan = scan_ready_records(&root, 10).unwrap();
+        assert_eq!(scan.ready, ["a.ready"]);
+        assert!(scan.invalid.is_empty(), "{:?}", scan.invalid);
+        assert!(!root.join(".hidden.ready").exists());
+        assert!(!root.join("sp ace.ready").exists());
     }
 
     #[test]

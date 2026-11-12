@@ -107,8 +107,7 @@ fn compute_activity_aggregates_commits_checkpoints_sessions_and_tokens() {
         now.saturating_sub(24 * 3600),
         "last 1 day".to_string(),
         BucketGranularity::Daily,
-    )
-    .unwrap();
+    );
 
     assert_eq!(stats.commits.total, 1);
     assert_eq!(stats.commits.ai_lines, 10);
@@ -160,8 +159,7 @@ fn daily_buckets_keep_the_same_day_of_different_years_apart() {
         noon(year_ago) - 3600,
         "last year".to_string(),
         BucketGranularity::Daily,
-    )
-    .unwrap();
+    );
 
     let active: Vec<u32> = stats
         .buckets
@@ -256,8 +254,7 @@ fn derived_summary_from_records() {
         now.saturating_sub(24 * 3600),
         "last 1 day".to_string(),
         BucketGranularity::Daily,
-    )
-    .unwrap();
+    );
 
     // Both commits land on the same local day → one active day, 50 AI lines.
     assert_eq!(stats.summary.active_days, 1);
@@ -290,8 +287,7 @@ fn repo_summaries_group_records_by_repo_and_skip_unknown_repo() {
         &records,
         now.saturating_sub(24 * 3600),
         BucketGranularity::Daily,
-    )
-    .unwrap();
+    );
 
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].repo_url, repo);

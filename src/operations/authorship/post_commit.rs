@@ -8,7 +8,7 @@ use crate::model::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry};
 use crate::operations::authorship::attribution_recovery::{
     AttributionRecoveryContext, FileTimestampsByPath, UnknownLinesByFile,
 };
-use crate::operations::authorship::diff_base::single_commit_diff_base;
+use crate::operations::authorship::diff_base::{empty_tree_for, single_commit_diff_base};
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
@@ -630,7 +630,7 @@ pub fn estimate_stats_cost_for_head(
             .map(|p| p.id())
             .unwrap_or_else(|_| "initial".to_string())
     } else {
-        "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()
+        empty_tree_for(commit_sha).to_string()
     };
     estimate_stats_cost_for_commit_range(repo, &parent_sha, commit_sha, ignore_patterns)
 }

@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::operations::authorship::diff_ai_accepted::diff_ai_accepted_stats;
+use crate::operations::authorship::diff_base::is_empty_tree;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -19,11 +20,6 @@ use crate::operations::git::path_format::unescape_git_path;
 use crate::operations::git::repository::{CommitRange, Repository, parse_numstat_line};
 use std::io::IsTerminal;
 use unicode_normalization::UnicodeNormalization;
-
-/// The git empty tree hash - represents an empty repository state
-/// This is the hash of the empty tree object that git uses internally
-#[doc(hidden)]
-pub const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /// Check if a file path should be ignored based on the provided patterns
 /// Supports both exact matches and glob patterns (e.g., "*.lock", "**/*.generated.js")
@@ -223,7 +219,7 @@ fn create_authorship_log_for_range(
 
     // Special handling for empty tree: there's no start state to compare against
     // We only need the end state's attributions
-    if start_sha == EMPTY_TREE_HASH {
+    if is_empty_tree(start_sha) {
         tracing::debug!("Start is empty tree - using only end commit attributions");
 
         let repo_clone = repo.clone();

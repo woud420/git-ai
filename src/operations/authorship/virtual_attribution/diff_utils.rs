@@ -3,6 +3,7 @@ use crate::model::authorship_log::LineRange;
 use crate::model::imara_diff_utils::{
     content_eq_ignoring_line_endings, normalize_line_endings, split_lines_with_terminators,
 };
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 use std::collections::{HashMap, HashSet};
 
@@ -18,8 +19,8 @@ pub(super) fn collect_committed_hunks(
     // Handle initial commit (no parent)
     if parent_sha == "initial" {
         // For initial commit, use git diff against the empty tree
-        let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"; // Git's empty tree hash
-        let added_lines = repo.diff_added_lines(empty_tree, commit_sha, pathspecs)?;
+        let added_lines =
+            repo.diff_added_lines(empty_tree_for(commit_sha), commit_sha, pathspecs)?;
 
         for (file_path, lines) in added_lines {
             if !lines.is_empty() {

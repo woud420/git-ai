@@ -183,6 +183,7 @@ pub fn find_repository(global_args: &[String]) -> Result<Repository, GitAiError>
         canonical_workdir,
         cached_author_identity: std::sync::OnceLock::new(),
         cached_has_promisor_remote: std::sync::Arc::new(std::sync::OnceLock::new()),
+        discovered_is_bare: Some(is_bare),
     })
 }
 

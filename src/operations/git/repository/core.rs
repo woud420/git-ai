@@ -42,6 +42,8 @@ pub struct Repository {
     pub(super) cached_author_identity: std::sync::OnceLock<GitAuthorIdentity>,
     /// Shared across repository clones so promisor detection runs once per repository.
     pub(super) cached_has_promisor_remote: Arc<OnceLock<bool>>,
+    /// `--is-bare-repository` as `find_repository` read it; `None` if found without git.
+    pub(super) discovered_is_bare: Option<bool>,
 }
 
 impl Repository {
@@ -179,6 +181,9 @@ impl Repository {
 
     /// Returns true when this repository is bare.
     pub fn is_bare_repository(&self) -> Result<bool, GitAiError> {
+        if let Some(is_bare) = self.discovered_is_bare {
+            return Ok(is_bare);
+        }
         let mut args = self.global_args_for_exec();
         args.push("rev-parse".to_string());
         args.push("--is-bare-repository".to_string());

@@ -2,7 +2,7 @@ mod cli;
 mod installer_environment;
 mod uninstall;
 
-use uninstall::async_run_uninstall;
+use uninstall::uninstall_agent_hooks;
 
 use crate::config;
 use crate::error::GitAiError;
@@ -363,8 +363,7 @@ fn run_install(options: InstallOptions) -> Result<HashMap<String, String>, GitAi
     persist_install_config_with_values(&binary_path, options.dry_run, &install_config)?;
     let params = HookInstallerParams { binary_path };
 
-    // Run async operations and convert result.
-    let statuses = crate::tokio_runtime::block_on(async_run_install(&params, &options))?;
+    let statuses = install_agent_hooks(&params, &options)?;
 
     let statuses = to_hashmap(statuses);
     // Clean up legacy artifacts and update the install manifest.
@@ -483,16 +482,11 @@ pub(crate) fn run_uninstall_cli(args: &[String]) -> Result<UninstallCommandOutco
     let binary_path = get_current_binary_path()?;
     let params = HookInstallerParams { binary_path };
 
-    // Run async operations and convert result.
-    let statuses = crate::tokio_runtime::block_on(async_run_uninstall(
-        &params,
-        options.dry_run,
-        options.verbose,
-    ))?;
+    let statuses = uninstall_agent_hooks(&params, options.dry_run, options.verbose)?;
     Ok(UninstallCommandOutcome::Uninstalled(to_hashmap(statuses)))
 }
 
-async fn async_run_install(
+fn install_agent_hooks(
     params: &HookInstallerParams,
     options: &InstallOptions,
 ) -> Result<HashMap<String, InstallStatus>, GitAiError> {

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn async_run_uninstall(
+pub(super) fn uninstall_agent_hooks(
     params: &HookInstallerParams,
     dry_run: bool,
     verbose: bool,

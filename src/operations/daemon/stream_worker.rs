@@ -196,9 +196,17 @@ pub struct StreamWorkerHandle {
     sweep_tx: tokio::sync::mpsc::UnboundedSender<SweepRequest>,
     drain_tx: tokio::sync::mpsc::UnboundedSender<DrainRequest>,
     sweep_trigger_gate: SweepTriggerGate,
+    shutdown_notify: Arc<Notify>,
+    shutdown_flag: Arc<AtomicBool>,
 }
 
 impl StreamWorkerHandle {
+    /// Stop sessions in progress at their next batch, then drain and exit the worker.
+    pub(crate) fn request_shutdown(&self) {
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+        self.shutdown_notify.notify_one();
+    }
+
     /// Notify the worker that a checkpoint was recorded.
     #[allow(clippy::too_many_arguments)]
     pub fn notify_checkpoint(
@@ -293,6 +301,8 @@ impl StreamWorkerHandle {
             sweep_tx,
             drain_tx,
             sweep_trigger_gate: SweepTriggerGate::new(),
+            shutdown_notify: Arc::new(Notify::new()),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -399,7 +409,6 @@ impl StreamWorker {
                 _ = self.shutdown_notify.notified() => {
                     tracing::info!("transcript worker received shutdown signal");
                     self.drain_immediate_tasks().await;
-                    self.shutdown_flag.store(true, Ordering::Relaxed);
                     break;
                 }
                 _ = async {}, if has_ready_task => {
@@ -904,20 +913,23 @@ impl StreamWorker {
             return;
         }
 
-        if let Err(e) = self.run_task(&task).await {
+        if let Err(e) = self.run_task(&task, self.shutdown_flag.clone()).await {
             self.handle_processing_error(task, e);
         }
     }
 
     /// Run one task on the blocking pool (so the worker loop stays responsive),
     /// tracking it as in-flight meanwhile. A panic is reported as a fatal error.
-    async fn run_task(&mut self, task: &ProcessingTask) -> Result<(), StreamError> {
+    async fn run_task(
+        &mut self,
+        task: &ProcessingTask,
+        shutdown_flag: Arc<AtomicBool>,
+    ) -> Result<(), StreamError> {
         let in_flight_key = (task.canonical_path.clone(), task.stream_kind.clone());
         self.in_flight.insert(in_flight_key.clone());
 
         let db = self.streams_db.clone();
         let telemetry = self.telemetry_handle.clone();
-        let shutdown_flag = self.shutdown_flag.clone();
         let task_clone = task.clone();
         let result = tokio::task::spawn_blocking(move || {
             Self::process_session_blocking(&db, &telemetry, &task_clone, &shutdown_flag)
@@ -1022,8 +1034,10 @@ impl StreamWorker {
         tracing::info!(tasks = immediate_tasks.len(), "draining immediate tasks");
 
         // Nothing runs after shutdown, so failures are logged rather than retried.
+        // The worker's shutdown flag is already set; the drain runs to completion.
         for task in immediate_tasks {
-            if let Err(e) = self.run_task(&task).await {
+            let not_stopping = Arc::new(AtomicBool::new(false));
+            if let Err(e) = self.run_task(&task, not_stopping).await {
                 tracing::error!(error = %e, session_id = %task.session_id, "drain task processing error");
             }
         }
@@ -1060,8 +1074,8 @@ impl StreamWorker {
 pub fn spawn_stream_worker(
     streams_db: Arc<StreamsDatabase>,
     telemetry_handle: DaemonTelemetryWorkerHandle,
-    shutdown_notify: Arc<Notify>,
 ) -> StreamWorkerHandle {
+    let shutdown_notify = Arc::new(Notify::new());
     let (checkpoint_tx, checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
     let (sweep_tx, sweep_rx) = tokio::sync::mpsc::unbounded_channel();
     let (drain_tx, drain_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1071,8 +1085,8 @@ pub fn spawn_stream_worker(
     let worker = StreamWorker::new(
         streams_db,
         telemetry_handle,
-        shutdown_notify,
-        shutdown_flag,
+        shutdown_notify.clone(),
+        shutdown_flag.clone(),
         checkpoint_rx,
         sweep_rx,
         drain_rx,
@@ -1088,6 +1102,8 @@ pub fn spawn_stream_worker(
         sweep_tx,
         drain_tx,
         sweep_trigger_gate,
+        shutdown_notify,
+        shutdown_flag,
     }
 }
 

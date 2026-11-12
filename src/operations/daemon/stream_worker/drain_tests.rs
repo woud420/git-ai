@@ -59,6 +59,50 @@ async fn drain_keeps_a_transiently_failed_immediate_task_queued_for_retry() {
 }
 
 #[tokio::test]
+async fn shutdown_drain_finishes_immediate_tasks_after_shutdown_is_requested() {
+    let temp = TempDir::new().unwrap();
+    let db = Arc::new(StreamsDatabase::open(temp.path().join("streams.db")).unwrap());
+    let mut worker = make_worker(db.clone());
+    let transcript = temp.path().join("session.jsonl");
+    std::fs::write(
+        &transcript,
+        "{\"type\":\"user\",\"sessionId\":\"s\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+    )
+    .unwrap();
+    worker
+        .ensure_stream_session(
+            SHARED_STREAM_SESSION_ID,
+            "claude",
+            &StreamDescriptor::identity_transcript(StreamFormat::ClaudeJsonl),
+            &transcript,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    worker
+        .priority_queue
+        .push(immediate_task(transcript.clone()));
+
+    // Shutdown stops sessions already in progress, but not the final drain.
+    worker.shutdown_flag.store(true, Ordering::Relaxed);
+    worker.drain_immediate_tasks().await;
+
+    let stream = db
+        .get_stream(
+            SHARED_STREAM_SESSION_ID,
+            "transcript",
+            &transcript.display().to_string(),
+        )
+        .unwrap()
+        .unwrap();
+    assert_ne!(
+        stream.watermark_value, "0",
+        "drain must read the transcript"
+    );
+}
+
+#[tokio::test]
 async fn drain_leaves_immediate_tasks_that_are_backing_off_for_their_retry() {
     let temp = TempDir::new().unwrap();
     let db = Arc::new(StreamsDatabase::open(temp.path().join("streams.db")).unwrap());

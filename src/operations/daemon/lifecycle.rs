@@ -440,18 +440,13 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
         match crate::model::repository::streams_db::StreamsDatabase::open(&streams_db_path) {
             Ok(streams_db) => {
                 let streams_db = std::sync::Arc::new(streams_db);
-                let shutdown_notify = Arc::new(tokio::sync::Notify::new());
                 let transcript_handle =
                     crate::operations::daemon::stream_worker::spawn_stream_worker(
                         streams_db.clone(),
                         telemetry_handle.clone(),
-                        shutdown_notify.clone(),
                     );
                 coordinator_inner.streams_db = Some(streams_db);
                 coordinator_inner.stream_worker = Some(transcript_handle);
-                let _ = coordinator_inner
-                    .transcript_shutdown_notify
-                    .set(shutdown_notify);
                 tracing::info!("transcript worker spawned");
             }
             Err(e) => {

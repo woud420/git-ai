@@ -5,6 +5,7 @@ use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 
 use crate::cli::fail::print_stdout;
 use crate::model::authorship_log::PromptRecord;
+use crate::operations::git::repository::Repository;
 
 use super::hunk_parser::BlameRenderPreparation;
 use super::{BlameHunk, GitAiBlameOptions};

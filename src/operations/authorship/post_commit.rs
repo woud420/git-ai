@@ -1,3 +1,4 @@
+mod commit_metadata;
 mod snapshots;
 mod stale_checkpoint;
 
@@ -23,6 +24,9 @@ use crate::operations::authorship::virtual_attribution::{
 use crate::operations::git::notes_api::write_note;
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::repository::{Repository, parse_diff_added_lines};
+use commit_metadata::commit_metric_metadata;
+#[cfg(test)]
+use commit_metadata::parse_commit_metric_metadata_output;
 use snapshots::{commit_tree_snapshot_for_files, recovery_committed_hunks};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
@@ -742,58 +746,6 @@ pub(crate) fn metric_tool_model_breakdown(
         ai_additions,
         ai_accepted,
     })
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CommitMetricMetadata {
-    pub subject: Option<String>,
-    pub body: Option<String>,
-    pub author_ts: Option<u64>,
-    pub commit_ts: Option<u64>,
-}
-
-pub(crate) fn commit_metric_metadata(
-    repo: &Repository,
-    commit_sha: &str,
-) -> Result<CommitMetricMetadata, GitAiError> {
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "show".to_string(),
-        "-s".to_string(),
-        "--no-notes".to_string(),
-        "--encoding=UTF-8".to_string(),
-        "--format=%s%x00%b%x00%at%x00%ct".to_string(),
-        commit_sha.to_string(),
-    ]);
-    let output = crate::clients::git_cli::exec_git(&args)?;
-    let stdout = String::from_utf8(output.stdout)?;
-    Ok(parse_commit_metric_metadata_output(&stdout))
-}
-
-fn parse_commit_metric_metadata_output(output: &str) -> CommitMetricMetadata {
-    let mut parts = output.splitn(4, '\0');
-    let Some(subject) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(body) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(author_ts) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(commit_ts) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-
-    let subject = subject.trim().to_string();
-    let body = body.trim().to_string();
-
-    CommitMetricMetadata {
-        subject: Some(subject),
-        body: (!body.is_empty()).then_some(body),
-        author_ts: author_ts.trim().parse::<u64>().ok(),
-        commit_ts: commit_ts.trim().parse::<u64>().ok(),
-    }
 }
 
 pub(crate) fn stable_patch_id_for_commit(repo: &Repository, commit_sha: &str) -> Option<String> {

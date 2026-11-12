@@ -2343,12 +2343,12 @@ fn test_diff_json_deleted_hunks_line_level_exact_mapping() {
         assert!(metadata["authorship_note"].is_string(), "{metadata}");
     }
 
-    // Metadata for every referenced commit comes from one `git log`, not a
-    // `git show` per commit.
+    // One log resolves blame abbreviations, and one reads metadata for all
+    // referenced commits without a `git show` per commit.
     let spawns = std::fs::read_to_string(&spawn_log).expect("read diff spawn log");
     assert_eq!(
         spawns.lines().filter(|line| *line == "log").count(),
-        1,
+        2,
         "spawns:\n{spawns}"
     );
     assert!(

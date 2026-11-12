@@ -147,18 +147,6 @@ impl Repository {
         Ok(hunks)
     }
 
-    pub(super) fn prepare_blame_render(
-        &self,
-        file_path: &str,
-        line_ranges: &[(u32, u32)],
-        options: &GitAiBlameOptions,
-    ) -> Result<BlameRenderPreparation, GitAiError> {
-        let mut no_split_options = options.clone();
-        no_split_options.split_hunks_by_ai_author = false;
-        self.blame_hunks_for_ranges(file_path, line_ranges, &no_split_options)
-            .map(prepare_blame_hunks)
-    }
-
     pub(super) fn blame_hunk_marker_width(hunk: &BlameHunk, options: &GitAiBlameOptions) -> usize {
         usize::from(hunk.is_boundary && !options.blank_boundary && !options.show_root)
             + usize::from(hunk.is_unblamable)

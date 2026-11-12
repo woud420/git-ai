@@ -991,8 +991,8 @@ fn test_blame_automatic_abbreviation_uses_constant_git_processes() {
     assert_eq!(columns(&actual), columns(&expected));
     assert_eq!(
         automatic,
-        baseline + 2,
-        "one abbreviation lookup for each of two blame passes"
+        baseline + 1,
+        "one abbreviation lookup for the single blame pass"
     );
 }
 

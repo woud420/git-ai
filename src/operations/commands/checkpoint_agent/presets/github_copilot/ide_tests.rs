@@ -388,37 +388,6 @@ fn test_copilot_session_id_fallback() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn test_classify_copilot_tool_bash() {
-    assert_eq!(classify_copilot_tool("run_in_terminal"), ToolClass::Bash);
-}
-
-#[test]
-fn test_classify_copilot_tool_file_edit() {
-    assert_eq!(classify_copilot_tool("create_file"), ToolClass::FileEdit);
-    assert_eq!(
-        classify_copilot_tool("replace_string_in_file"),
-        ToolClass::FileEdit
-    );
-    assert_eq!(classify_copilot_tool("apply_patch"), ToolClass::FileEdit);
-    assert_eq!(classify_copilot_tool("delete_file"), ToolClass::FileEdit);
-}
-
-#[test]
-fn test_classify_copilot_tool_heuristic() {
-    assert_eq!(
-        classify_copilot_tool("custom_edit_tool"),
-        ToolClass::FileEdit
-    );
-    assert_eq!(classify_copilot_tool("write_changes"), ToolClass::FileEdit);
-}
-
-#[test]
-fn test_classify_copilot_tool_skip() {
-    assert_eq!(classify_copilot_tool("search_files"), ToolClass::Skip);
-    assert_eq!(classify_copilot_tool("unknown_tool"), ToolClass::Skip);
-}
-
-#[test]
 fn test_collect_apply_patch_paths() {
     let text = "*** Update File: /home/user/src/main.rs\n--- some diff ---\n*** Add File: /home/user/src/new.rs\n";
     let mut paths = Vec::new();

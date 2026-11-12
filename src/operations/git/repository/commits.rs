@@ -305,7 +305,6 @@ impl<'a> Commit<'a> {
 
     // Get the number of parents of this commit.
     // Use the parents iterator to return an iterator over all parents.
-    #[allow(dead_code)]
     pub fn parent_count(&self) -> Result<usize, GitAiError> {
         Ok(self.parents().count())
     }

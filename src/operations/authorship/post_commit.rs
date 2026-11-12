@@ -4,7 +4,7 @@ mod stale_checkpoint;
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::model::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry};
+use crate::model::working_log::{Checkpoint, CheckpointKind, InitialAttributions, WorkingLogEntry};
 use crate::operations::authorship::attribution_recovery::{
     AttributionRecoveryContext, FileTimestampsByPath, UnknownLinesByFile,
 };
@@ -24,7 +24,7 @@ use crate::operations::git::notes_api::write_note;
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::repository::Repository;
 use snapshots::{commit_tree_snapshot_for_files, recovery_committed_hunks};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 
 /// Skip expensive post-commit stats when this threshold is exceeded.
@@ -69,24 +69,6 @@ fn checkpoint_entry_requires_post_processing(
             .attributions
             .iter()
             .any(|attr| attr.author_id != CheckpointKind::Human.to_str())
-}
-
-pub fn post_commit_from_working_log(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    supress_output: bool,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log_with_recovery_timestamps(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        supress_output,
-        None,
-        None,
-    )
 }
 
 pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
@@ -258,19 +240,7 @@ where
         authorship_log.metadata.base_commit_sha = commit_sha.clone();
     }
 
-    // Use Config::fresh() so long-lived daemon processes observe runtime config changes.
-    let config = Config::fresh();
-    let custom_attrs = config.custom_attributes().clone();
-
-    // Inject custom attributes into all PromptRecords and SessionRecords.
-    if !custom_attrs.is_empty() {
-        for pr in authorship_log.metadata.prompts.values_mut() {
-            pr.custom_attributes = Some(custom_attrs.clone());
-        }
-        for sr in authorship_log.metadata.sessions.values_mut() {
-            sr.custom_attributes = Some(custom_attrs.clone());
-        }
-    }
+    inject_custom_attributes(&mut authorship_log);
 
     // This diagnostic is persisted in daemon failure state; keep its text stable.
     let authorship_note_str = authorship_log
@@ -369,17 +339,12 @@ where
         }
     }
 
-    // Write INITIAL file for uncommitted AI attributions (if any)
-    if !initial_attributions.files.is_empty() {
-        let new_working_log = repo_storage.working_log_for_base_commit(&commit_sha)?;
-        new_working_log.write_initial_attributions_with_contents(
-            initial_attributions.files,
-            initial_attributions.prompts,
-            initial_attributions.humans,
-            initial_file_contents,
-            initial_attributions.sessions,
-        )?;
-    }
+    write_uncommitted_initial(
+        repo,
+        &commit_sha,
+        initial_attributions,
+        initial_file_contents,
+    )?;
 
     // When deferring, the caller deletes working logs only after a successful
     // flush; deleting here would make attribution unrecoverable on flush failure.
@@ -418,6 +383,42 @@ where
         authorship_log,
         authorship_note: authorship_note_str,
     })
+}
+
+/// Stamp the configured custom attributes on every prompt and session record.
+/// Config::fresh() so long-lived daemon processes observe runtime changes.
+fn inject_custom_attributes(authorship_log: &mut AuthorshipLog) {
+    let custom_attrs = Config::fresh().custom_attributes().clone();
+    if custom_attrs.is_empty() {
+        return;
+    }
+    for pr in authorship_log.metadata.prompts.values_mut() {
+        pr.custom_attributes = Some(custom_attrs.clone());
+    }
+    for sr in authorship_log.metadata.sessions.values_mut() {
+        sr.custom_attributes = Some(custom_attrs.clone());
+    }
+}
+
+/// Carry attributions that stayed uncommitted into `commit_sha`'s INITIAL file.
+fn write_uncommitted_initial(
+    repo: &Repository,
+    commit_sha: &str,
+    initial: InitialAttributions,
+    file_contents: HashMap<String, String>,
+) -> Result<(), GitAiError> {
+    if initial.files.is_empty() {
+        return Ok(());
+    }
+    repo.storage
+        .working_log_for_base_commit(commit_sha)?
+        .write_initial_attributions_with_contents(
+            initial.files,
+            initial.prompts,
+            initial.humans,
+            file_contents,
+            initial.sessions,
+        )
 }
 
 pub(crate) struct PostCommitAmendResult {
@@ -479,15 +480,11 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     })?;
 
     // Resolve parent of the amended commit for diff base
-    let amended_commit_obj = repo.find_commit(amended_commit.to_string())?;
-    let parent_sha = if amended_commit_obj.parent_count()? > 0 {
-        amended_commit_obj
-            .parent(0)
-            .map(|p| p.id())
-            .unwrap_or_else(|_| "initial".to_string())
-    } else {
-        "initial".to_string()
-    };
+    let parent_sha = repo
+        .find_commit(amended_commit.to_string())?
+        .parents()
+        .next()
+        .map_or_else(|| "initial".to_string(), |parent| parent.id());
 
     let (mut authorship_log, initial_attributions, initial_file_contents) = working_va
         .to_authorship_log_and_initial_working_log(
@@ -539,16 +536,7 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         }
     }
 
-    // Inject custom attributes
-    let custom_attrs = Config::fresh().custom_attributes().clone();
-    if !custom_attrs.is_empty() {
-        for pr in authorship_log.metadata.prompts.values_mut() {
-            pr.custom_attributes = Some(custom_attrs.clone());
-        }
-        for sr in authorship_log.metadata.sessions.values_mut() {
-            sr.custom_attributes = Some(custom_attrs.clone());
-        }
-    }
+    inject_custom_attributes(&mut authorship_log);
 
     // This diagnostic is persisted in daemon failure state; keep its text stable.
     let authorship_note_str = authorship_log
@@ -556,17 +544,12 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         .map_err(|_| GitAiError::Generic("Failed to serialize authorship log".to_string()))?;
     write_note(repo, amended_commit, &authorship_note_str)?;
 
-    // Write INITIAL file for uncommitted attributions
-    if !initial_attributions.files.is_empty() {
-        let new_working_log = repo_storage.working_log_for_base_commit(amended_commit)?;
-        new_working_log.write_initial_attributions_with_contents(
-            initial_attributions.files,
-            initial_attributions.prompts,
-            initial_attributions.humans,
-            initial_file_contents,
-            initial_attributions.sessions,
-        )?;
-    }
+    write_uncommitted_initial(
+        repo,
+        amended_commit,
+        initial_attributions,
+        initial_file_contents,
+    )?;
 
     // Clean up old working log
     repo_storage.delete_working_log_for_base_commit(original_commit)?;
@@ -611,15 +594,14 @@ pub fn estimate_stats_cost_for_head(
     commit_sha: &str,
     ignore_patterns: &[String],
 ) -> Result<StatsSkipEstimate, GitAiError> {
-    let commit = repo.find_commit(commit_sha.to_string())?;
-    let parent_sha = if commit.parent_count().unwrap_or(0) > 0 {
-        commit
-            .parent(0)
-            .map(|p| p.id())
-            .unwrap_or_else(|_| "initial".to_string())
-    } else {
-        empty_tree_for(commit_sha).to_string()
-    };
+    let parent_sha = repo
+        .find_commit(commit_sha.to_string())?
+        .parents()
+        .next()
+        .map_or_else(
+            || empty_tree_for(commit_sha).to_string(),
+            |parent| parent.id(),
+        );
     estimate_stats_cost_for_commit_range(repo, &parent_sha, commit_sha, ignore_patterns)
 }
 
@@ -812,9 +794,7 @@ pub(crate) fn commit_metric_attrs(
         .commit_sha(commit_sha)
         .base_commit_sha(parent_sha);
 
-    if let Ok(Some(remote_name)) = repo.get_default_remote()
-        && let Ok(remotes) = repo.remotes_with_urls()
-        && let Some((_, url)) = remotes.into_iter().find(|(n, _)| n == &remote_name)
+    if let Ok(Some((_, url))) = repo.default_remote_with_url()
         && let Ok(normalized) = crate::operations::git::remote_url::normalize_repo_url(&url)
     {
         attrs = attrs.repo_url(normalized);

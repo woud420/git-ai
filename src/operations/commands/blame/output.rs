@@ -81,7 +81,7 @@ pub(super) fn output_default_format(
         .iter()
         .filter_map(|line_num| {
             let hunk = prepared.line_to_hunk.get(line_num)?;
-            Some(author_display(*line_num, hunk).len())
+            Some(author_display(*line_num, hunk).chars().count())
         })
         .max()
         .unwrap_or(0);

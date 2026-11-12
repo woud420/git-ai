@@ -71,3 +71,16 @@ fn bare_quote_path_line_from_an_older_note_does_not_panic() {
     let parsed = AuthorshipLog::deserialize_from_string(&note).unwrap();
     assert_eq!(parsed.attestations[0].file_path, "\"");
 }
+
+#[test]
+fn paths_ending_in_other_whitespace_round_trip() {
+    for path in [
+        "a.rs\r",
+        "a.rs\u{a0}",
+        "a.rs\u{c}",
+        "a.rs\u{3000}",
+        "a\r\u{a0}",
+    ] {
+        assert_eq!(round_trip_path(path), path);
+    }
+}

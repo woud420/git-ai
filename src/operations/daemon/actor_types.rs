@@ -234,7 +234,6 @@ pub struct ActorDaemonCoordinator {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) jj_observer: Option<Arc<super::jj_observer::Observer>>,
     pub(crate) stream_worker: Option<crate::operations::daemon::stream_worker::StreamWorkerHandle>,
-    pub(crate) transcript_shutdown_notify: std::sync::OnceLock<Arc<tokio::sync::Notify>>,
     pub(crate) streams_db: Option<Arc<crate::model::repository::streams_db::StreamsDatabase>>,
     // Resolved once at daemon init; None in unit-test constructions (global() is the fallback).
     pub(crate) bash_history_db: Option<

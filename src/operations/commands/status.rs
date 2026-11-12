@@ -9,7 +9,7 @@ use crate::operations::authorship::ignore::{
     IgnoreMatcher, build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
 use crate::operations::authorship::stats::{
-    CommitStats, stats_from_authorship_log, write_stats_to_terminal,
+    CommitStats, stats_from_authorship_log, stats_terminal_output,
 };
 use crate::operations::authorship::virtual_attribution::VirtualAttributions;
 use crate::operations::git::find_repository;
@@ -202,7 +202,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
         return Ok(());
     }
 
-    write_stats_to_terminal(&stats, true);
+    print_stdout(&stats_terminal_output(&stats, true));
 
     if diff_only {
         return Ok(());

@@ -92,6 +92,38 @@ fn test_find_repository_for_bare_repo() {
 }
 
 #[test]
+fn test_find_repository_workdir_matches_git_across_layouts() {
+    let toplevel = |dir: &Path| {
+        let output = std::process::Command::new("git")
+            .args(["-C", dir.to_str().unwrap(), "rev-parse", "--show-toplevel"])
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+    let find = |dir: &Path| find_repository(&["-C".to_string(), dir.to_str().unwrap().to_string()]);
+
+    let repo = TestRepo::new();
+    let nested = repo.path().join("a").join("b");
+    fs::create_dir_all(&nested).unwrap();
+    for dir in [repo.path().to_path_buf(), nested] {
+        let found = find(&dir).unwrap();
+        assert_eq!(found.workdir().unwrap(), Path::new(&toplevel(&dir)));
+        assert!(!found.is_bare_repository().unwrap());
+    }
+
+    // `--show-toplevel` fails inside `.git`, and discovery keeps failing there.
+    assert!(find(&repo.path().join(".git")).is_err());
+
+    // A bare repository's work dir stays the parent of its git dir.
+    let bare = TestRepo::new_bare();
+    let found = find(bare.path()).unwrap();
+    assert_eq!(
+        found.workdir().unwrap(),
+        found.path().parent().unwrap().to_path_buf()
+    );
+}
+
+#[test]
 fn test_repository_path_methods() {
     let test_repo = TestRepo::new();
     let repo = find_repository(&[

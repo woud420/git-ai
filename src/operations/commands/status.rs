@@ -4,6 +4,7 @@ use crate::cli::fail::print_stdout;
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
+use crate::operations::authorship::diff_base::EMPTY_TREE_SHA;
 use crate::operations::authorship::ignore::{
     IgnoreMatcher, build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
@@ -73,8 +74,12 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
 
     let default_user_name = repo.effective_author_identity().formatted_or_unknown();
 
-    let head = repo.head()?;
-    let head_sha = head.target()?;
+    // Before the first commit, checkpoints are stored under "initial" and the
+    // working tree is compared with the empty tree.
+    let (head_sha, head_rev) = match repo.head()?.target() {
+        Ok(sha) => (sha.clone(), sha),
+        Err(_) => ("initial".to_string(), EMPTY_TREE_SHA.to_string()),
+    };
 
     let working_log = repo.storage.working_log_for_base_commit(&head_sha)?;
     let checkpoints = working_log.read_all_checkpoints()?;
@@ -156,15 +161,15 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
 
     let (authorship_log, initial, _) = working_va.to_authorship_log_and_initial_working_log(
         &repo,
-        &head_sha,
-        &head_sha,
+        &head_rev,
+        &head_rev,
         Some(&pathspecs),
         None,
     )?;
 
     // Get actual git diff stats between HEAD and working directory (like post_commit does)
     let (total_additions, total_deletions) =
-        get_working_dir_diff_stats(&repo, Some(&pathspecs), &ignore_matcher)?;
+        get_working_dir_diff_stats(&repo, &head_rev, Some(&pathspecs), &ignore_matcher)?;
 
     // For status (uncommitted changes), the AI attributions are in `initial` (uncommitted),
     // not in authorship_log.attestations (which is for committed changes).
@@ -252,13 +257,14 @@ fn format_time_ago(timestamp: u64) -> String {
 /// This mirrors the logic in stats.rs get_git_diff_stats but for uncommitted changes
 fn get_working_dir_diff_stats(
     repo: &Repository,
+    head_rev: &str,
     pathspecs: Option<&HashSet<String>>,
     ignore_matcher: &IgnoreMatcher,
 ) -> Result<(u32, u32), GitAiError> {
     let mut args = repo.global_args_for_exec();
     args.push("diff".to_string());
     args.push("--numstat".to_string());
-    args.push("HEAD".to_string());
+    args.push(head_rev.to_string());
 
     // Add pathspecs if provided to scope the diff to specific files. Pass them
     // as CLI args only when they are below the E2BIG threshold and ASCII; Git

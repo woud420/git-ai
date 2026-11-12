@@ -19,8 +19,9 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
     write_atomic_with_privacy(path, data, false)
 }
 
-/// [`write_atomic`] for secrets: the file is owner-only (0600 on Unix) from
-/// creation, whatever the mode of the file it replaces.
+/// [`write_atomic`] for secrets: the file is owner-only (0600) from creation,
+/// whatever the mode of the file it replaces.
+#[cfg(unix)]
 pub fn write_private_atomic(path: &Path, data: &[u8]) -> Result<(), GitAiError> {
     write_atomic_with_privacy(path, data, true)
 }

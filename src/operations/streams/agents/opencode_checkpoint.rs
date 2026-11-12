@@ -6,7 +6,7 @@ use crate::operations::streams::agent::{
     checkpoint_stream_denied, validate_checkpoint_stream_claim, validate_checkpoint_stream_file,
 };
 use crate::operations::streams::sweep::DiscoveredSession;
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 
 pub fn open_sqlite_readonly(path: &Path) -> Result<Connection, StreamError> {
@@ -53,51 +53,32 @@ pub(super) fn validate_checkpoint_stream(
         vec![trusted_root],
         |path| {
             let connection = open_sqlite_readonly(path).ok()?;
-            let parent = connection
-                .query_row(
-                    "SELECT parent_id FROM session WHERE id = ?",
-                    [&source.external_session_id],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .optional()
-                .ok()
-                .flatten()?;
+            let parent = super::opencode::schema::parent(&connection, &source.external_session_id)?;
             Some((source.external_session_id.clone(), parent))
         },
     )
 }
 
-fn storage_path() -> Option<PathBuf> {
+pub(crate) fn storage_path() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("GIT_AI_OPENCODE_STORAGE_PATH") {
         return Some(PathBuf::from(path));
     }
-
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    {
-        if cfg!(target_os = "linux")
-            && let Ok(xdg_data) = std::env::var("XDG_DATA_HOME")
-        {
-            return Some(PathBuf::from(xdg_data).join("opencode"));
-        }
-        dirs::home_dir().map(|home| home.join(".local/share/opencode"))
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var("APPDATA")
-            .or_else(|_| std::env::var("LOCALAPPDATA"))
-            .ok()
-            .map(PathBuf::from)
-            .map(|path| path.join("opencode"))
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        None
-    }
+    let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var_os(home_var)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir);
+    data_path(std::env::var_os("XDG_DATA_HOME"), home)
 }
 
-fn database_path(storage_path: &Path) -> Option<PathBuf> {
+fn data_path(xdg: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(xdg) = xdg.filter(|value| !value.is_empty()) {
+        return Some(PathBuf::from(xdg).join("opencode"));
+    }
+    home.map(|home| home.join(".local/share/opencode"))
+}
+
+pub(crate) fn database_path(storage_path: &Path) -> Option<PathBuf> {
     if storage_path.file_name().and_then(|name| name.to_str()) == Some("opencode.db")
         && storage_path.is_file()
     {
@@ -114,4 +95,22 @@ fn database_path(storage_path: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn empty_xdg_uses_home_and_nonempty_xdg_takes_precedence() {
+        use std::ffi::OsString;
+        use std::path::PathBuf;
+        let home = PathBuf::from("home");
+        assert_eq!(
+            super::data_path(Some(OsString::new()), Some(home.clone())),
+            Some(home.join(".local/share/opencode"))
+        );
+        assert_eq!(
+            super::data_path(Some(OsString::from("data")), Some(home)),
+            Some(PathBuf::from("data/opencode"))
+        );
+    }
 }

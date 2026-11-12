@@ -348,31 +348,34 @@ fn checkpoint_stream_authority_resolves_host_opencode_database_without_sweeping(
     connection
         .execute_batch(
             "CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
-             INSERT INTO session (id, parent_id) VALUES ('oc-session', 'oc-parent');",
+             CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT);
+             INSERT INTO session VALUES ('oc-session', 'oc-parent');
+             INSERT INTO session_v2 VALUES ('oc-v2-session', 'oc-v2-parent');",
         )
         .unwrap();
     drop(connection);
     let _storage =
         CheckpointStreamEnvGuard::set("GIT_AI_OPENCODE_STORAGE_PATH", storage.as_os_str());
 
-    let mut request = checkpoint_stream_request_for(
-        &fixture.repo,
-        fixture._temp.path().join("sandbox-opencode.db"),
-        "oc-session",
-        true,
-        "opencode",
-        crate::model::checkpoint_request::StreamFormat::OpenCodeSqlite,
-    );
-    authorize_checkpoint_stream_source(&mut request).unwrap();
-
-    let source = request
-        .stream_source
-        .expect("host OpenCode session should resolve");
-    assert_eq!(source.path, database.canonicalize().unwrap());
-    assert_eq!(
-        source.external_parent_session_id.as_deref(),
-        Some("oc-parent")
-    );
+    for (session, parent) in [
+        ("oc-session", "oc-parent"),
+        ("oc-v2-session", "oc-v2-parent"),
+    ] {
+        let mut request = checkpoint_stream_request_for(
+            &fixture.repo,
+            fixture._temp.path().join("sandbox-opencode.db"),
+            session,
+            true,
+            "opencode",
+            crate::model::checkpoint_request::StreamFormat::OpenCodeSqlite,
+        );
+        authorize_checkpoint_stream_source(&mut request).unwrap();
+        let source = request
+            .stream_source
+            .expect("host OpenCode session should resolve");
+        assert_eq!(source.path, database.canonicalize().unwrap());
+        assert_eq!(source.external_parent_session_id.as_deref(), Some(parent));
+    }
 }
 
 #[test]

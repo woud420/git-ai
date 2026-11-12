@@ -2,7 +2,9 @@
 
 pub use super::opencode_checkpoint::open_sqlite_readonly;
 use crate::model::stream_types::{StreamBatch, StreamError};
-use crate::model::stream_watermark::{TimestampWatermark, WatermarkStrategy};
+use crate::model::stream_watermark::{
+    TimestampCursorWatermark, TimestampWatermark, WatermarkStrategy,
+};
 use crate::operations::streams::agent::{Agent, StreamDescriptor};
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
 use crate::operations::streams::timestamp::file_time_fallback;
@@ -11,9 +13,12 @@ use std::time::Duration;
 
 mod budget;
 mod reader;
+pub(crate) mod schema;
 
 #[cfg(test)]
 mod budget_tests;
+#[cfg(test)]
+mod v2_tests;
 
 /// OpenCode agent that reads from an OpenCode SQLite database.
 pub struct OpenCodeAgent {
@@ -87,18 +92,21 @@ impl Agent for OpenCodeAgent {
         watermark: Box<dyn WatermarkStrategy>,
         session_id: &str,
     ) -> Result<StreamBatch, StreamError> {
-        // Downcast to TimestampWatermark
-        let ts_watermark = watermark
+        let cursor = if let Some(cursor) = watermark
             .as_any()
-            .downcast_ref::<TimestampWatermark>()
-            .ok_or_else(|| StreamError::Fatal {
+            .downcast_ref::<TimestampCursorWatermark>()
+        {
+            cursor.clone()
+        } else if let Some(legacy) = watermark.as_any().downcast_ref::<TimestampWatermark>() {
+            TimestampCursorWatermark::new(legacy.0.timestamp_millis() as f64, String::new())
+        } else {
+            return Err(StreamError::Fatal {
                 message: format!(
-                    "OpenCode reader requires TimestampWatermark, got incompatible type for session {}",
-                    session_id
+                    "OpenCode reader requires a timestamp cursor for session {session_id}"
                 ),
-            })?;
-
-        reader::read_batch(path, ts_watermark, session_id, self.batch_size)
+            });
+        };
+        reader::read_batch(path, &cursor, session_id, self.batch_size)
     }
 
     fn extract_event_ids(
@@ -125,9 +133,22 @@ impl Agent for OpenCodeAgent {
                 arr.iter().find_map(|part| {
                     part.get("data")
                         .and_then(|d| d.get("callID"))
+                        .or_else(|| part.get("call_id"))
                         .and_then(|v| v.as_str())
                         .map(String::from)
                 })
+            })
+            .or_else(|| {
+                message?
+                    .pointer("/data/content")?
+                    .as_array()?
+                    .iter()
+                    .find_map(|part| {
+                        if part.get("type")?.as_str()? != "tool" {
+                            return None;
+                        }
+                        part.get("id")?.as_str().map(String::from)
+                    })
             });
 
         (event_id, parent_event_id, tool_use_id)
@@ -319,26 +340,6 @@ mod tests {
             "single call must not exceed batch_size (got {})",
             batch.events.len()
         );
-    }
-
-    #[test]
-    fn test_parts_are_batch_loaded_not_per_message() {
-        let db_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/opencode-sqlite/opencode.db");
-        let conn = open_sqlite_readonly(&db_path).unwrap();
-        // watermark=0 matches all messages in the fixture
-        let parts = reader::read_parts_for_messages_through(&conn, "test-session-123", 0, i64::MAX)
-            .unwrap();
-        // Verify IN-subquery loading returns parts grouped by message_id.
-        // Single query with IN-subquery instead of one per message,
-        // prevents full-table-scan memory blowup on large unindexed databases.
-        assert!(
-            !parts.is_empty(),
-            "batch parts query must return data from fixture"
-        );
-        for msg_parts in parts.values() {
-            assert!(!msg_parts.is_empty());
-        }
     }
 
     #[test]

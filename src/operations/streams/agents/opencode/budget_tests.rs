@@ -7,7 +7,7 @@ fn initial() -> Box<dyn WatermarkStrategy> {
 }
 
 #[test]
-fn tied_timestamp_messages_are_never_split_at_the_row_hint() {
+fn tied_timestamp_messages_resume_at_the_row_hint() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("opencode.db");
     super::tests::create_test_db(&path, 4);
@@ -21,16 +21,20 @@ fn tied_timestamp_messages_are_never_split_at_the_row_hint() {
     let first = agent
         .read_incremental(&path, initial(), "test-session")
         .unwrap();
-    assert_eq!(
-        first.events.len(),
-        3,
-        "the timestamp watermark cannot represent a partial group"
-    );
+    assert_eq!(first.events.len(), 2);
     let second = agent
         .read_incremental(&path, first.new_watermark, "test-session")
         .unwrap();
-    assert_eq!(second.events.len(), 1);
-    assert_eq!(second.events[0]["message"]["id"], "msg-3");
+    assert_eq!(second.events.len(), 2);
+    assert_eq!(second.events[0]["message"]["id"], "msg-2");
+    assert_eq!(second.events[1]["message"]["id"], "msg-3");
+    assert!(
+        agent
+            .read_incremental(&path, second.new_watermark, "test-session")
+            .unwrap()
+            .events
+            .is_empty()
+    );
 }
 
 #[test]
@@ -62,7 +66,7 @@ fn oversized_unicode_part_blocks_only_after_the_complete_prefix() {
     assert!(matches!(blocked, Err(StreamError::Transient { .. })));
     conn.execute("UPDATE part SET data = '{}' WHERE message_id = 'msg-1'", [])
         .unwrap();
-    let resume = cursor.parse::<TimestampWatermark>().unwrap();
+    let resume = cursor.parse::<TimestampCursorWatermark>().unwrap();
     let resumed = agent
         .read_incremental(&path, Box::new(resume), "test-session")
         .unwrap();
@@ -92,7 +96,7 @@ fn oversized_message_does_not_bypass_the_budget_through_model_lookup() {
 }
 
 #[test]
-fn batch_bytes_stop_before_a_whole_tied_group_and_resume_without_duplicates() {
+fn batch_bytes_split_tied_messages_and_resume_without_duplicates() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("opencode.db");
     super::tests::create_test_db(&path, 3);
@@ -109,23 +113,22 @@ fn batch_bytes_stop_before_a_whole_tied_group_and_resume_without_duplicates() {
     let first = agent
         .read_incremental(&path, initial(), "test-session")
         .unwrap();
-    assert_eq!(first.events.len(), 1);
+    assert_eq!(first.events.len(), 2);
     let second = agent
         .read_incremental(&path, first.new_watermark, "test-session")
         .unwrap();
-    assert_eq!(second.events.len(), 2);
-    assert_eq!(second.events[0]["message"]["id"], "msg-1");
-    assert_eq!(second.events[1]["message"]["id"], "msg-2");
+    assert_eq!(second.events.len(), 1);
+    assert_eq!(second.events[0]["message"]["id"], "msg-2");
     let last = agent
         .read_incremental(&path, second.new_watermark, "test-session")
         .unwrap();
     assert!(last.events.is_empty());
     conn.execute("UPDATE message SET time_updated = 1000", [])
         .unwrap();
-    assert!(matches!(
-        agent.read_incremental(&path, initial(), "test-session"),
-        Err(StreamError::Transient { .. })
-    ));
+    let batch = agent
+        .read_incremental(&path, initial(), "test-session")
+        .unwrap();
+    assert!(!batch.events.is_empty());
 }
 
 #[test]
@@ -137,9 +140,15 @@ fn the_read_snapshot_keeps_parts_from_growing_after_the_plan() {
     writer.pragma_update(None, "journal_mode", "WAL").unwrap();
     let mut reader = open_sqlite_readonly(&path).unwrap();
     let tx = reader.transaction().unwrap();
-    let through = super::budget::plan_through(&tx, "test-session", 0, 1000)
-        .unwrap()
-        .unwrap();
+    let ids = super::budget::plan_ids(
+        &tx,
+        "test-session",
+        &TimestampCursorWatermark::initial(),
+        1000,
+        false,
+        true,
+    )
+    .unwrap();
     let oversized =
         serde_json::json!({"text": "x".repeat(Config::get().max_transcript_line_bytes())})
             .to_string();
@@ -147,7 +156,8 @@ fn the_read_snapshot_keeps_parts_from_growing_after_the_plan() {
         .execute("UPDATE part SET data = ?1", [&oversized])
         .unwrap();
     let parts =
-        super::reader::read_parts_for_messages_through(&tx, "test-session", 0, through).unwrap();
+        super::reader::read_parts_for_messages(&tx, &serde_json::to_string(&ids).unwrap(), false)
+            .unwrap();
     assert_eq!(parts["msg-0"][0]["data"]["text"], "part-0");
     drop(tx);
     assert!(matches!(

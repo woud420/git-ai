@@ -111,6 +111,40 @@ fn test_update_watermark() {
 }
 
 #[test]
+fn opencode_legacy_cursor_persists_type_and_value_on_restart() {
+    use crate::model::stream_watermark::TimestampCursorWatermark;
+    let (db, file) = create_test_db();
+    let mut stream = create_test_stream("legacy");
+    stream.stream_format = StreamFormat::OpenCodeSqlite;
+    stream.watermark_type = WatermarkType::Timestamp;
+    stream.watermark_value = "2023-11-14T22:13:20Z".into();
+    db.insert_stream(&stream).unwrap();
+    let cursor = TimestampCursorWatermark::new(1_700_000_000_000.0, "msg-1".into());
+    db.update_watermark(
+        &stream.session_id,
+        &stream.stream_kind,
+        &stream.stream_path,
+        &cursor,
+    )
+    .unwrap();
+    drop(db);
+    let db = StreamsDatabase::open(file.path()).unwrap();
+    let saved = db
+        .get_stream(&stream.session_id, &stream.stream_kind, &stream.stream_path)
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.watermark_type, WatermarkType::TimestampCursor);
+    assert_eq!(
+        saved
+            .watermark_type
+            .deserialize(&saved.watermark_value)
+            .unwrap()
+            .serialize(),
+        cursor.serialize()
+    );
+}
+
+#[test]
 fn test_update_file_metadata() {
     let (db, _temp) = create_test_db();
     let stream = create_test_stream("session-1");

@@ -210,7 +210,7 @@ async fn test_copilot_checkpoint_enqueues_shared_otel_stream_immediately() {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn validated_opencode_checkpoint_reads_external_session_rows() {
+async fn validated_opencode_v2_checkpoint_reads_external_session_rows() {
     let tmp = TempDir::new().unwrap();
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
@@ -229,35 +229,10 @@ async fn validated_opencode_checkpoint_reads_external_session_rows() {
         crate::model::repository::sqlite::open_with_memory_limits(&database_path).unwrap();
     connection
         .execute_batch(
-            "CREATE TABLE session (
-                id TEXT PRIMARY KEY,
-                parent_id TEXT
-            );
-            CREATE TABLE message (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                time_created INTEGER NOT NULL,
-                time_updated INTEGER NOT NULL,
-                data TEXT NOT NULL
-            );
-            CREATE TABLE part (
-                id TEXT PRIMARY KEY,
-                message_id TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                time_created INTEGER NOT NULL,
-                time_updated INTEGER NOT NULL,
-                data TEXT NOT NULL
-            );
-            INSERT INTO session (id, parent_id)
-                VALUES ('external-opencode-session', NULL);
-            INSERT INTO message (id, session_id, time_created, time_updated, data)
-                VALUES (
-                    'message-1',
-                    'external-opencode-session',
-                    1000,
-                    1000,
-                    '{\"role\":\"user\",\"content\":\"hello\"}'
-                );",
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, model TEXT);
+             CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+             INSERT INTO session_v2 VALUES ('external-opencode-session', 'parent-session', NULL);
+             INSERT INTO session_message VALUES ('message-1', 'external-opencode-session', 'assistant', 1, 1000, 1000, '{\"model\":{\"id\":\"producing\"},\"content\":[]}');",
         )
         .unwrap();
     drop(connection);
@@ -325,6 +300,11 @@ async fn validated_opencode_checkpoint_reads_external_session_rows() {
         .unwrap();
     assert_eq!(processed.session_id, internal_session_id);
     assert_eq!(processed.external_session_id, external_session_id);
+    assert_eq!(
+        processed.external_parent_session_id.as_deref(),
+        Some("parent-session")
+    );
+    assert_eq!(processed.watermark_type, WatermarkType::TimestampCursor);
     assert_ne!(
         processed.watermark_value, initial_watermark,
         "reading the external-keyed row must advance the internal stream watermark"

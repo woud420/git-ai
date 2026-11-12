@@ -110,10 +110,15 @@ fn assert_saved_progress(repo: &TestRepo, metrics_path: &std::path::Path, count:
         .into_iter()
         .find(|row| row.external_session_id == SESSION)
         .expect("transcript is registered");
-    let cursor: git_ai::model::stream_watermark::TimestampWatermark =
+    assert_eq!(
+        row.watermark_type,
+        git_ai::model::stream_watermark::WatermarkType::TimestampCursor
+    );
+    let cursor: git_ai::model::stream_watermark::TimestampCursorWatermark =
         row.watermark_value.parse().unwrap();
     assert_eq!(
-        cursor.0.timestamp_millis(),
-        if count == 0 { 0 } else { 1000 }
+        cursor.timestamp_millis,
+        if count == 0 { 0.0 } else { 1000.0 }
     );
+    assert_eq!(cursor.last_id, if count == 0 { "" } else { "message-1" });
 }

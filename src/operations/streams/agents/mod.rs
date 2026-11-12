@@ -10,7 +10,7 @@ mod discovery;
 mod droid;
 mod gemini;
 pub mod opencode;
-mod opencode_checkpoint;
+pub(crate) mod opencode_checkpoint;
 mod pi;
 #[cfg(test)]
 pub(crate) mod test_support;

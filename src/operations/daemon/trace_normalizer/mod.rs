@@ -201,7 +201,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
         if self.is_completed_root(&root_sid) {
             return Ok(None);
         }
-        let ts = payload_timestamp_ns(payload)?;
+        let ts = payload_timestamp_ns(payload);
 
         if let Some(pending) = self.state.pending.get_mut(&root_sid) {
             pending.bisect_checkout.observe(payload, sid, &root_sid, ts);

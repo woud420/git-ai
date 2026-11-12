@@ -77,7 +77,6 @@ impl ActorDaemonCoordinator {
             stream_worker: None,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             jj_observer: None,
-            transcript_shutdown_notify: std::sync::OnceLock::new(),
             streams_db: None,
             bash_history_db: None,
             metrics_db: None,
@@ -338,8 +337,8 @@ impl ActorDaemonCoordinator {
         // The ingest worker exits via its select! shutdown arm (watching
         // shutdown_notify); we no longer rely on channel closure to stop it.
         self.shutdown_notify.notify_waiters();
-        if let Some(transcript_shutdown) = self.transcript_shutdown_notify.get() {
-            transcript_shutdown.notify_one();
+        if let Some(stream_worker) = &self.stream_worker {
+            stream_worker.request_shutdown();
         }
         // Hold the condvar mutex so notify_all cannot race with the
         // check-then-wait sequence in daemon_update_check_loop.

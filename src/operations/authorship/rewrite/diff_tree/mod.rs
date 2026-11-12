@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 
+use unicode_normalization::UnicodeNormalization;
+
 use crate::clients::git_cli::{exec_git_stdin, exec_git_stdin_streaming};
 use crate::error::GitAiError;
 use crate::model::hunk_shift::{DiffHunk, parse_hunk_header};
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::git::oid::is_full_oid;
+use crate::operations::git::path_format::{parse_diff_path_from_header_line, unescape_git_path};
 use crate::operations::git::repository::Repository;
 
 use super::DiffTreeResult;
@@ -11,21 +15,7 @@ use super::DiffTreeResult;
 #[cfg(test)]
 mod tests;
 
-const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const DIFF_TREE_STREAM_CHUNK_SIZE: usize = 50;
-
-fn empty_tree_sha() -> &'static str {
-    EMPTY_TREE_SHA
-}
-
-fn insert_known_tree(sha_to_tree: &mut HashMap<String, String>, sha: &str) -> bool {
-    if sha == "initial" {
-        sha_to_tree.insert(sha.to_string(), empty_tree_sha().to_string());
-        true
-    } else {
-        false
-    }
-}
 
 pub(super) fn unique_pair_shas(pairs: &[(String, String)]) -> Vec<String> {
     let mut unique_shas = Vec::new();
@@ -47,9 +37,15 @@ pub(super) fn resolve_tree_shas(
 ) -> Result<HashMap<String, String>, GitAiError> {
     let mut sha_to_tree = HashMap::new();
     let mut shas_to_resolve = Vec::new();
+    // "initial" (no parent) maps to the empty tree of the repository's object
+    // format, which the real commit ids in the batch reveal.
+    let format_sample = unique_shas.iter().find(|sha| *sha != "initial");
+    let empty_tree = empty_tree_for(format_sample.map_or("", String::as_str));
 
     for sha in unique_shas {
-        if !insert_known_tree(&mut sha_to_tree, sha) {
+        if sha == "initial" {
+            sha_to_tree.insert(sha.clone(), empty_tree.to_string());
+        } else {
             shas_to_resolve.push(sha.clone());
         }
     }
@@ -135,7 +131,7 @@ fn build_diff_tree_stdin_args(repo: &Repository) -> Vec<String> {
     // ignores the user's diff.{noprefix,mnemonicPrefix,srcPrefix,dstPrefix},
     // diff.external, and per-path textconv attributes. It always emits raw
     // content with default `a/`..`b/` prefixes, which is exactly what
-    // extract_b_path / parse_diff_tree_output expect. (Contrast diff_added_lines
+    // parse_diff_tree_output expects. (Contrast diff_added_lines
     // in repository.rs, which DOES run `git diff` and therefore must force
     // InternalGitProfile::PatchParse.)
     let mut args = repo.global_args_for_exec();
@@ -318,18 +314,24 @@ struct DiffTreeChunkParser {
 
 impl DiffTreeChunkParser {
     fn feed_line(&mut self, line: &str) {
-        if let Some(rest) = line.strip_prefix("diff --git ") {
-            // Extract the b/ path from "a/old b/new"
-            self.current_file = extract_b_path(rest);
+        if line.starts_with("diff --git ") {
+            self.current_file = None;
             self.current_rename_from = None;
             self.active_hunk_new_line = None;
         } else if let Some(from_path) = line.strip_prefix("rename from ") {
-            self.current_rename_from = Some(from_path.to_string());
+            self.current_rename_from = Some(unquote_path(from_path));
             self.active_hunk_new_line = None;
         } else if let Some(to_path) = line.strip_prefix("rename to ") {
             if let Some(from_path) = self.current_rename_from.take() {
-                self.renames.push((from_path, to_path.to_string()));
+                self.renames.push((from_path, unquote_path(to_path)));
             }
+        } else if self.active_hunk_new_line.is_none()
+            && let Some(Some(path)) = parse_diff_path_from_header_line(line, "--- ")
+                .or_else(|| parse_diff_path_from_header_line(line, "+++ "))
+        {
+            // `+++ b/new` follows `--- a/old`, so the new path wins; a deleted
+            // file (`+++ /dev/null`) keeps its old path.
+            self.current_file = Some(path);
         } else if line.starts_with("@@")
             && let Some(ref file) = self.current_file
             && let Some(hunk) = parse_hunk_header(line)
@@ -380,10 +382,8 @@ fn parse_diff_tree_output(output: &str) -> DiffTreeResult {
     parser.finish()
 }
 
-fn extract_b_path(diff_header: &str) -> Option<String> {
-    // Format: "a/path b/path" or "a/path with spaces b/path with spaces"
-    // The b/ path starts after the last occurrence of " b/"
-    let marker = " b/";
-    let pos = diff_header.rfind(marker)?;
-    Some(diff_header[pos + marker.len()..].to_string())
+/// `rename from/to` paths carry no `a/`/`b/` prefix but are C-quoted like
+/// header paths; keys are NFC to match attestation paths.
+fn unquote_path(path: &str) -> String {
+    unescape_git_path(path).nfc().collect()
 }

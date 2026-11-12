@@ -47,106 +47,49 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn checkout_uses_only_its_sequenced_worktree_head() {
-        let mut state = family_state();
-        state.refs.insert("HEAD".into(), "family-head".into());
-        state.worktrees.insert(
-            PathBuf::from("/canonical/repo"),
-            WorktreeState {
-                head: Some("own-head".into()),
-                branch: None,
-                detached: true,
-                last_updated_ns: 1,
-            },
-        );
-        let mut cmd = normalized();
-        cmd.primary_command = Some("checkout".into());
-        cmd.raw_argv = vec![
+    fn path_discard_commands_use_only_their_sequenced_worktree_head() {
+        let mut checkout = normalized();
+        checkout.primary_command = Some("checkout".into());
+        checkout.raw_argv = vec![
             "git".into(),
             "checkout".into(),
             "a".repeat(40),
             "--".into(),
             "/repo/file.txt".into(),
         ];
-        let snapshot = HashMap::from([("HEAD".into(), "other-head".into())]);
-        let refs = for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo")));
-        assert_eq!(
-            refs.as_ref(),
-            &HashMap::from([("HEAD".into(), "own-head".into())])
-        );
-        assert!(for_command(&state, &cmd, &snapshot, None).is_empty());
-        state
-            .worktrees
-            .get_mut(Path::new("/canonical/repo"))
-            .unwrap()
-            .head = None;
-        assert!(
-            for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo"))).is_empty()
-        );
-    }
+        let mut restore = normalized();
+        restore.primary_command = Some("restore".into());
+        let mut mv = normalized();
+        mv.primary_command = Some("mv".into());
 
-    #[test]
-    fn restore_uses_only_its_sequenced_worktree_head() {
-        let mut state = family_state();
-        state.refs.insert("HEAD".into(), "family-head".into());
-        state.worktrees.insert(
-            PathBuf::from("/canonical/repo"),
-            WorktreeState {
-                head: Some("own-head".into()),
-                branch: None,
-                detached: true,
-                last_updated_ns: 1,
-            },
-        );
-        let mut cmd = normalized();
-        cmd.primary_command = Some("restore".into());
-        let snapshot = HashMap::from([("HEAD".into(), "other-head".into())]);
-        let refs = for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo")));
-        assert_eq!(
-            refs.as_ref(),
-            &HashMap::from([("HEAD".into(), "own-head".into())])
-        );
-        assert!(for_command(&state, &cmd, &snapshot, None).is_empty());
-        state
-            .worktrees
-            .get_mut(Path::new("/canonical/repo"))
-            .unwrap()
-            .head = None;
-        assert!(
-            for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo"))).is_empty()
-        );
-    }
-
-    #[test]
-    fn mv_uses_only_its_sequenced_worktree_head() {
-        let mut state = family_state();
-        state.refs.insert("HEAD".into(), "family-head".into());
-        state.worktrees.insert(
-            PathBuf::from("/canonical/repo"),
-            WorktreeState {
-                head: Some("own-head".into()),
-                branch: None,
-                detached: true,
-                last_updated_ns: 1,
-            },
-        );
-        let mut cmd = normalized();
-        cmd.primary_command = Some("mv".into());
-        let snapshot = HashMap::from([("HEAD".into(), "other-head".into())]);
-        let refs = for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo")));
-        assert_eq!(
-            refs.as_ref(),
-            &HashMap::from([("HEAD".into(), "own-head".into())])
-        );
-        assert!(for_command(&state, &cmd, &snapshot, None).is_empty());
-        state
-            .worktrees
-            .get_mut(Path::new("/canonical/repo"))
-            .unwrap()
-            .head = None;
-        assert!(
-            for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo"))).is_empty()
-        );
+        for cmd in [checkout, restore, mv] {
+            let mut state = family_state();
+            state.refs.insert("HEAD".into(), "family-head".into());
+            state.worktrees.insert(
+                PathBuf::from("/canonical/repo"),
+                WorktreeState {
+                    head: Some("own-head".into()),
+                    branch: None,
+                    detached: true,
+                    last_updated_ns: 1,
+                },
+            );
+            let snapshot = HashMap::from([("HEAD".into(), "other-head".into())]);
+            let refs = for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo")));
+            assert_eq!(
+                refs.as_ref(),
+                &HashMap::from([("HEAD".into(), "own-head".into())])
+            );
+            assert!(for_command(&state, &cmd, &snapshot, None).is_empty());
+            state
+                .worktrees
+                .get_mut(Path::new("/canonical/repo"))
+                .unwrap()
+                .head = None;
+            assert!(
+                for_command(&state, &cmd, &snapshot, Some(Path::new("/canonical/repo"))).is_empty()
+            );
+        }
     }
 
     #[test]

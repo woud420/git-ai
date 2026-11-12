@@ -302,7 +302,7 @@ impl RefCursor {
                 {
                     usize::MAX
                 } else if source_args.is_empty() {
-                    self.pending_cherry_pick_source_oids.len().max(1)
+                    self.pending_cherry_pick_sources_for(cmd).len().max(1)
                 } else {
                     source_args.len().max(1)
                 };

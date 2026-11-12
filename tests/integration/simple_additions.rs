@@ -1,5 +1,5 @@
 use crate::repos::test_file::ExpectedLineExt;
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{TestRepo, real_git_executable};
 use git_ai::config::AuthorConfig;
 use git_ai::model::attribution_tracker::Attribution;
 use git_ai::model::working_log::{CheckpointKind, WorkingLogEntry};
@@ -44,6 +44,29 @@ fn test_simple_additions_empty_repo() {
     repo.stage_all_and_commit("Initial commit").unwrap();
 
     file.assert_lines_and_blame(crate::lines!["Line1".human(), "Line 2".ai(), "Line 3".ai(),]);
+}
+
+#[test]
+fn test_simple_additions_sha256_root_commit() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("sha256-repo");
+    let init = std::process::Command::new(real_git_executable())
+        .args(["init", "--object-format=sha256"])
+        .arg(&path)
+        .output()
+        .expect("git init should run");
+    if !init.status.success() {
+        eprintln!("skipping: this git does not support --object-format=sha256");
+        return;
+    }
+
+    let repo = TestRepo::new_at_path(&path);
+    let mut file = repo.filename("test.txt");
+    file.set_contents(crate::lines!["Line1", "Line 2".ai()]);
+    let commit = repo.stage_all_and_commit("Initial commit").unwrap();
+
+    assert_eq!(commit.commit_sha.len(), 64);
+    file.assert_lines_and_blame(crate::lines!["Line1".human(), "Line 2".ai()]);
 }
 
 #[test]

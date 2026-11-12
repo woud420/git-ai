@@ -145,9 +145,7 @@ pub fn spawn_self_restart() -> Result<(), String> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
-    for var in GIT_ENV_VARS_TO_SANITIZE {
-        cmd.env_remove(var);
-    }
+    sanitize_daemon_child_environment(&mut cmd);
     cmd.env_remove("GIT_AI");
 
     #[cfg(windows)]
@@ -440,18 +438,13 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
         match crate::model::repository::streams_db::StreamsDatabase::open(&streams_db_path) {
             Ok(streams_db) => {
                 let streams_db = std::sync::Arc::new(streams_db);
-                let shutdown_notify = Arc::new(tokio::sync::Notify::new());
                 let transcript_handle =
                     crate::operations::daemon::stream_worker::spawn_stream_worker(
                         streams_db.clone(),
                         telemetry_handle.clone(),
-                        shutdown_notify.clone(),
                     );
                 coordinator_inner.streams_db = Some(streams_db);
                 coordinator_inner.stream_worker = Some(transcript_handle);
-                let _ = coordinator_inner
-                    .transcript_shutdown_notify
-                    .set(shutdown_notify);
                 tracing::info!("transcript worker spawned");
             }
             Err(e) => {
@@ -586,9 +579,16 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
         }
     }
 
-    remove_socket_if_exists(&config.trace_socket_path)?;
-    remove_socket_if_exists(&config.control_socket_path)?;
-    remove_pid_metadata(&config)?;
+    // The daemon has stopped; a cleanup failure must not lose its exit action.
+    for removal in [
+        remove_socket_if_exists(&config.trace_socket_path),
+        remove_socket_if_exists(&config.control_socket_path),
+        remove_pid_metadata(&config),
+    ] {
+        if let Err(error) = removal {
+            tracing::warn!(%error, "failed to remove daemon file at shutdown");
+        }
+    }
 
     let action = coordinator.shutdown_action();
     tracing::info!(?action, "daemon shutdown complete");

@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
+use crate::cli::fail::print_stdout;
 use crate::operations::authorship::agent_detection::match_email_to_agent;
 
 use super::hunk_parser::BlameRenderPreparation;
@@ -16,32 +18,36 @@ fn display_author<'a>(hunk: &'a BlameHunk, commits_with_notes: &HashSet<String>)
 }
 
 /// `<sha> <orig line> <final line>`, plus the group size on a hunk's first line.
-fn print_header(hunk: &BlameHunk, line_num: u32, first_in_hunk: bool) {
+fn write_header(out: &mut String, hunk: &BlameHunk, line_num: u32, first_in_hunk: bool) {
     let orig_line = hunk.orig_range.0 + (line_num - hunk.range.0);
     if first_in_hunk {
         let group_size = hunk.range.1 - hunk.range.0 + 1;
-        println!("{} {orig_line} {line_num} {group_size}", hunk.commit_sha);
+        let _ = writeln!(
+            out,
+            "{} {orig_line} {line_num} {group_size}",
+            hunk.commit_sha
+        );
     } else {
-        println!("{} {orig_line} {line_num}", hunk.commit_sha);
+        let _ = writeln!(out, "{} {orig_line} {line_num}", hunk.commit_sha);
     }
 }
 
 /// The commit block git prints between a header and the `filename` line.
-fn print_commit_metadata(hunk: &BlameHunk, commits_with_notes: &HashSet<String>) {
-    println!("author {}", display_author(hunk, commits_with_notes));
-    println!("author-mail <{}>", hunk.author_email);
-    println!("author-time {}", hunk.author_time);
-    println!("author-tz {}", hunk.author_tz);
-    println!("committer {}", hunk.committer);
-    println!("committer-mail <{}>", hunk.committer_email);
-    println!("committer-time {}", hunk.committer_time);
-    println!("committer-tz {}", hunk.committer_tz);
-    println!("summary {}", hunk.summary);
+fn write_commit_metadata(out: &mut String, hunk: &BlameHunk, commits_with_notes: &HashSet<String>) {
+    let _ = writeln!(out, "author {}", display_author(hunk, commits_with_notes));
+    let _ = writeln!(out, "author-mail <{}>", hunk.author_email);
+    let _ = writeln!(out, "author-time {}", hunk.author_time);
+    let _ = writeln!(out, "author-tz {}", hunk.author_tz);
+    let _ = writeln!(out, "committer {}", hunk.committer);
+    let _ = writeln!(out, "committer-mail <{}>", hunk.committer_email);
+    let _ = writeln!(out, "committer-time {}", hunk.committer_time);
+    let _ = writeln!(out, "committer-tz {}", hunk.committer_tz);
+    let _ = writeln!(out, "summary {}", hunk.summary);
     if hunk.is_boundary {
-        println!("boundary");
+        let _ = writeln!(out, "boundary");
     }
     if let Some(previous) = &hunk.previous {
-        println!("previous {previous}");
+        let _ = writeln!(out, "previous {previous}");
     }
 }
 
@@ -51,6 +57,7 @@ pub(super) fn output_porcelain_format(
     options: &GitAiBlameOptions,
     commits_with_notes: &HashSet<String>,
 ) {
+    let mut out = String::new();
     let mut last_hunk = None;
     let mut seen_commits: HashSet<&str> = HashSet::new();
     for &line_num in &prepared.requested_lines {
@@ -61,15 +68,20 @@ pub(super) fn output_porcelain_format(
         let first_in_hunk = last_hunk != Some(hunk_id);
         last_hunk = Some(hunk_id);
 
-        print_header(hunk, line_num, first_in_hunk);
+        write_header(&mut out, hunk, line_num, first_in_hunk);
         // --line-porcelain repeats the commit block on every line; --porcelain
         // prints it once, with the first hunk of each commit.
         if options.line_porcelain || (first_in_hunk && seen_commits.insert(&hunk.commit_sha)) {
-            print_commit_metadata(hunk, commits_with_notes);
-            println!("filename {}", hunk.git_filename);
+            write_commit_metadata(&mut out, hunk, commits_with_notes);
+            let _ = writeln!(out, "filename {}", hunk.git_filename);
         }
-        println!("\t{}", lines.get((line_num - 1) as usize).unwrap_or(&""));
+        let _ = writeln!(
+            out,
+            "\t{}",
+            lines.get((line_num - 1) as usize).unwrap_or(&"")
+        );
     }
+    print_stdout(&out);
 }
 
 /// One entry per hunk, and no content lines.
@@ -77,6 +89,7 @@ pub(super) fn output_incremental_format(
     prepared: &BlameRenderPreparation,
     commits_with_notes: &HashSet<String>,
 ) {
+    let mut out = String::new();
     let mut last_hunk = None;
     let mut seen_commits: HashSet<&str> = HashSet::new();
     for &line_num in &prepared.requested_lines {
@@ -89,10 +102,11 @@ pub(super) fn output_incremental_format(
         }
         last_hunk = Some(hunk_id);
 
-        print_header(hunk, line_num, true);
+        write_header(&mut out, hunk, line_num, true);
         if seen_commits.insert(&hunk.commit_sha) {
-            print_commit_metadata(hunk, commits_with_notes);
+            write_commit_metadata(&mut out, hunk, commits_with_notes);
         }
-        println!("filename {}", hunk.git_filename);
+        let _ = writeln!(out, "filename {}", hunk.git_filename);
     }
+    print_stdout(&out);
 }

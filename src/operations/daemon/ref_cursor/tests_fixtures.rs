@@ -48,7 +48,7 @@ pub(super) fn command_with_worktree(
             .collect(),
         primary_command: args.first().map(|arg| arg.to_string()),
         invoked_command: args.first().map(|arg| arg.to_string()),
-        invoked_args: args.iter().map(|arg| arg.to_string()).collect(),
+        invoked_args: args.iter().skip(1).map(|arg| arg.to_string()).collect(),
         observed_child_commands: Vec::new(),
         index_write: Default::default(),
         index_v2: false,

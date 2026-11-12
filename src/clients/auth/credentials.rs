@@ -129,7 +129,6 @@ impl CredentialStore {
     }
 
     /// Get the backend name (for logging/debugging)
-    #[allow(dead_code)]
     pub fn backend_name(&self) -> &'static str {
         self.backend.name()
     }

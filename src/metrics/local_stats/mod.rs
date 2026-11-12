@@ -63,7 +63,7 @@ fn compute_activity_from_records(
     since_ts: u32,
     period_label: String,
     granularity: BucketGranularity,
-) -> Result<LocalActivityStats, GitAiError> {
+) -> LocalActivityStats {
     let mut total_commits = 0u32;
     let mut total_ai_lines = 0u32;
     let mut total_human_lines = 0u32;
@@ -306,7 +306,7 @@ fn compute_activity_from_records(
         favorite_model: tokens.by_model.first().map(|m| m.model.clone()),
     };
 
-    Ok(LocalActivityStats {
+    LocalActivityStats {
         period_label,
         commits: CommitSummary {
             total: total_commits,
@@ -338,7 +338,7 @@ fn compute_activity_from_records(
         calendar_start,
         calendar_end,
         summary,
-    })
+    }
 }
 
 /// Fetch events once and compute overall activity stats and the per-repo
@@ -351,7 +351,7 @@ pub fn compute_all(
 ) -> Result<(LocalActivityStats, Vec<RepoActivitySummary>), GitAiError> {
     let records = fetch_metric_history(since_ts, repo_filter)?;
     let refs: Vec<&MetricHistoryRecord> = records.iter().collect();
-    let stats = compute_activity_from_records(&refs, since_ts, period_label, granularity)?;
-    let repos = repo_summaries_from_records(&records, since_ts, granularity)?;
+    let stats = compute_activity_from_records(&refs, since_ts, period_label, granularity);
+    let repos = repo_summaries_from_records(&records, since_ts, granularity);
     Ok((stats, repos))
 }

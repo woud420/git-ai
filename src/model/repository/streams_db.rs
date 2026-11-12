@@ -339,10 +339,13 @@ impl StreamsDatabase {
         let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
         let now = Utc::now().timestamp();
         let watermark_value = watermark.serialize();
+        let cursor_type = watermark
+            .as_any()
+            .is::<crate::model::stream_watermark::TimestampCursorWatermark>();
 
         let rows_changed = conn.execute(
-            "UPDATE tracked_streams SET watermark_value = ?1, last_processed_at = ?2 WHERE session_id = ?3 AND stream_kind = ?4 AND stream_path = ?5",
-            params![watermark_value, now, session_id, stream_kind, stream_path],
+            "UPDATE tracked_streams SET watermark_value = ?1, last_processed_at = ?2, watermark_type = CASE WHEN ?6 AND stream_format = 'OpenCodeSqlite' THEN 'TimestampCursor' ELSE watermark_type END WHERE session_id = ?3 AND stream_kind = ?4 AND stream_path = ?5",
+            params![watermark_value, now, session_id, stream_kind, stream_path, cursor_type],
         )
         .map_err(|e| StreamError::Fatal {
             message: format!("Failed to update watermark: {}", e),

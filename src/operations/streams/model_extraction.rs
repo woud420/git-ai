@@ -246,6 +246,37 @@ fn extract_model_from_opencode_sqlite(
         Err(_) => return Ok(None),
     };
 
+    if let Some(session_id) = session_id
+        && crate::operations::streams::agents::opencode::schema::is_v2_session(&conn, session_id)
+    {
+        let limit = crate::config::Config::get()
+            .max_transcript_line_bytes()
+            .min(i64::MAX as usize) as i64;
+        let assistant = conn.query_row(
+            "SELECT CASE WHEN LENGTH(CAST(data AS BLOB)) <= ?2 THEN data END FROM session_message WHERE session_id = ?1 AND type = 'assistant' ORDER BY seq DESC LIMIT 1",
+            rusqlite::params![session_id, limit],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        // A present but oversized assistant must not be attributed to a later selection.
+        if let Ok(data) = assistant {
+            return Ok(data
+                .and_then(|data| serde_json::from_str::<serde_json::Value>(&data).ok())
+                .and_then(|data| {
+                    data.pointer("/model/id")
+                        .and_then(|id| id.as_str())
+                        .map(String::from)
+                }));
+        }
+        let selection = conn.query_row(
+            "SELECT CASE WHEN LENGTH(CAST(model AS BLOB)) <= ?2 THEN model END FROM session_v2 WHERE id = ?1",
+            rusqlite::params![session_id, limit],
+            |row| row.get::<_, Option<String>>(0),
+        ).ok().flatten();
+        return Ok(selection
+            .and_then(|data| serde_json::from_str::<serde_json::Value>(&data).ok())
+            .and_then(|data| data.get("id").and_then(|id| id.as_str()).map(String::from)));
+    }
+
     // OpenCode stores model info in two places depending on message role:
     //   User messages:     data.model.modelID  (nested object)
     //   Assistant messages: data.modelID        (top-level string)

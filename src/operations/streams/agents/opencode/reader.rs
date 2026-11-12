@@ -1,104 +1,97 @@
-use super::open_sqlite_readonly;
+use super::{open_sqlite_readonly, schema};
 use crate::model::stream_types::{StreamBatch, StreamError};
-use crate::model::stream_watermark::TimestampWatermark;
-use chrono::DateTime;
+use crate::model::stream_watermark::TimestampCursorWatermark;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::Path;
 
 pub(super) fn read_batch(
     path: &Path,
-    watermark: &TimestampWatermark,
+    cursor: &TimestampCursorWatermark,
     session_id: &str,
     row_hint: usize,
 ) -> Result<StreamBatch, StreamError> {
     let mut conn = open_sqlite_readonly(path)?;
-    // Planning and materialization must observe the same rows, even if the
-    // agent appends or rewrites a large part while this poll runs.
     let tx = conn.transaction().map_err(|error| StreamError::Fatal {
         message: format!("Failed to start transcript read snapshot: {error}"),
     })?;
-    let watermark_millis = watermark.0.timestamp_millis();
-    let through_updated = super::budget::plan_through(&tx, session_id, watermark_millis, row_hint)?
-        .unwrap_or(watermark_millis);
-    let messages =
-        read_session_messages_through(&tx, session_id, watermark_millis, through_updated)?;
-
-    if messages.is_empty() {
-        return Ok(StreamBatch {
-            events: Vec::new(),
-            new_watermark: Box::new(TimestampWatermark::new(watermark.0)),
-        });
+    let v2 = schema::is_v2_session(&tx, session_id);
+    let has_parts = !v2 || schema::has_table(&tx, "session_part")?;
+    let ids = super::budget::plan_ids(&tx, session_id, cursor, row_hint, v2, has_parts)?;
+    let ids_json = serde_json::to_string(&ids).map_err(|e| StreamError::Fatal {
+        message: format!("Failed to encode selected message IDs: {e}"),
+    })?;
+    let messages = read_messages(&tx, &ids_json, v2)?;
+    let mut parts = if has_parts {
+        read_parts_for_messages(&tx, &ids_json, v2)?
+    } else {
+        HashMap::new()
+    };
+    let mut next = cursor.clone();
+    if let Some((id, updated, _)) = messages.last() {
+        next = TimestampCursorWatermark::new(*updated as f64, id.clone());
     }
-
-    // Read only parts for the selected timestamp range in the same snapshot.
-    let mut parts_by_message =
-        read_parts_for_messages_through(&tx, session_id, watermark_millis, through_updated)?;
-
-    let mut max_updated: i64 = watermark_millis;
-    let mut events = Vec::with_capacity(messages.len());
-
-    for (msg_id, time_updated, msg_data) in messages {
-        if time_updated > max_updated {
-            max_updated = time_updated;
-        }
-
-        // Use .remove() to move parts out of the HashMap instead of cloning via .get()
-        let mut map = serde_json::Map::with_capacity(2);
-        map.insert("message".into(), msg_data);
-        if let Some(parts) = parts_by_message.remove(&msg_id) {
-            map.insert("parts".into(), serde_json::Value::Array(parts));
-        }
-
-        events.push(serde_json::Value::Object(map));
-    }
-
-    let new_watermark_ts = DateTime::from_timestamp_millis(max_updated).unwrap_or(watermark.0);
-    let new_watermark = Box::new(TimestampWatermark::new(new_watermark_ts));
-
+    let events = messages
+        .into_iter()
+        .map(|(id, _, message)| {
+            let mut map = serde_json::Map::new();
+            map.insert("message".into(), message);
+            if let Some(parts) = parts.remove(&id) {
+                map.insert("parts".into(), serde_json::Value::Array(parts));
+            }
+            serde_json::Value::Object(map)
+        })
+        .collect();
     Ok(StreamBatch {
         events,
-        new_watermark,
+        new_watermark: Box::new(next),
     })
 }
 
-/// Read messages from the database, returning each row as a complete JSON object
-/// containing all columns (id, session_id, time_created, time_updated, data).
-fn read_session_messages_through(
+fn read_messages(
     conn: &Connection,
-    session_id: &str,
-    after_updated: i64,
-    through_updated: i64,
+    ids_json: &str,
+    v2: bool,
 ) -> Result<Vec<(String, i64, serde_json::Value)>, StreamError> {
+    let table = if v2 { "session_message" } else { "message" };
+    let extra_columns = if v2 { ", type, seq" } else { "" };
     let mut stmt = conn
-        .prepare(
-            "SELECT id, session_id, time_created, time_updated, data FROM message \
-             WHERE session_id = ? AND time_updated > ? AND time_updated <= ? \
-             ORDER BY time_updated ASC, id ASC",
-        )
+        .prepare(&format!(
+            "SELECT id, session_id, time_created, time_updated, data{extra_columns} FROM {table} \
+             WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY time_updated ASC, id ASC"
+        ))
         .map_err(|e| StreamError::Fatal {
             message: format!("Failed to prepare message query: {}", e),
         })?;
 
     let rows = stmt
-        .query_map(
-            rusqlite::params![session_id, after_updated, through_updated],
-            |row| {
-                let id: String = row.get(0)?;
-                let row_session_id: String = row.get(1)?;
-                let time_created: i64 = row.get(2)?;
-                let time_updated: i64 = row.get(3)?;
-                let data: String = row.get(4)?;
-                Ok((id, row_session_id, time_created, time_updated, data))
-            },
-        )
+        .query_map([ids_json], |row| {
+            let id: String = row.get(0)?;
+            let row_session_id: String = row.get(1)?;
+            let time_created: i64 = row.get(2)?;
+            let time_updated: i64 = row.get(3)?;
+            let data: String = row.get(4)?;
+            let v2_fields = if v2 {
+                Some((row.get::<_, String>(5)?, row.get::<_, i64>(6)?))
+            } else {
+                None
+            };
+            Ok((
+                id,
+                row_session_id,
+                time_created,
+                time_updated,
+                data,
+                v2_fields,
+            ))
+        })
         .map_err(|e| StreamError::Fatal {
             message: format!("Failed to query messages: {}", e),
         })?;
 
     let mut messages = Vec::new();
     for row in rows {
-        let (id, row_session_id, time_created, time_updated, data) =
+        let (id, row_session_id, time_created, time_updated, data, v2_fields) =
             row.map_err(|e| StreamError::Fatal {
                 message: format!("Failed to read message row: {}", e),
             })?;
@@ -125,6 +118,10 @@ fn read_session_messages_through(
             serde_json::Value::Number(time_updated.into()),
         );
         map.insert("data".into(), parsed_data);
+        if let Some((message_type, seq)) = v2_fields {
+            map.insert("type".into(), serde_json::Value::String(message_type));
+            map.insert("seq".into(), serde_json::Value::Number(seq.into()));
+        }
 
         messages.push((id, time_updated, serde_json::Value::Object(map)));
     }
@@ -132,62 +129,70 @@ fn read_session_messages_through(
     Ok(messages)
 }
 
-/// Read parts for the matched messages only, using an IN-subquery to avoid loading
-/// all parts for the entire session. Returns each row as a complete JSON object
-/// containing all columns (id, message_id, session_id, time_created, time_updated, data),
-/// grouped by message_id.
-pub(super) fn read_parts_for_messages_through(
+/// Fetch parts by the selected IDs without repeating the session scan/sort.
+/// Returns native V1 or V2 rows grouped by
+/// message_id, preserving V2's ordinal and call_id instead of inventing a part ID.
+pub(super) fn read_parts_for_messages(
     conn: &Connection,
-    session_id: &str,
-    after_updated: i64,
-    through_updated: i64,
+    ids_json: &str,
+    v2: bool,
 ) -> Result<HashMap<String, Vec<serde_json::Value>>, StreamError> {
+    let (table, identity, extra_columns, order) = if v2 {
+        ("session_part", "ordinal", ", type, call_id", "ordinal ASC")
+    } else {
+        ("part", "id", "", "time_updated ASC, id ASC")
+    };
     let mut stmt = conn
-        .prepare(
-            "SELECT id, message_id, session_id, time_created, time_updated, data FROM part \
-             WHERE message_id IN ( \
-                 SELECT id FROM message WHERE session_id = ? AND time_updated > ? AND time_updated <= ? ORDER BY time_updated ASC, id ASC \
-             ) \
-             ORDER BY message_id ASC, time_updated ASC, id ASC",
-        )
+        .prepare(&format!(
+            "SELECT {identity}, message_id, session_id, time_created, time_updated, data{extra_columns} FROM {table} \
+             WHERE message_id IN (SELECT value FROM json_each(?1)) \
+             ORDER BY message_id ASC, {order}",
+        ))
         .map_err(|e| StreamError::Fatal {
             message: format!("Failed to prepare part query: {}", e),
         })?;
 
     let rows = stmt
-        .query_map(
-            rusqlite::params![session_id, after_updated, through_updated],
-            |row| {
-                let id: String = row.get(0)?;
-                let message_id: String = row.get(1)?;
-                let row_session_id: String = row.get(2)?;
-                let time_created: i64 = row.get(3)?;
-                let time_updated: i64 = row.get(4)?;
-                let data: String = row.get(5)?;
-                Ok((
-                    id,
-                    message_id,
-                    row_session_id,
-                    time_created,
-                    time_updated,
-                    data,
-                ))
-            },
-        )
+        .query_map([ids_json], |row| {
+            let id = if v2 {
+                serde_json::Value::Number(row.get::<_, i64>(0)?.into())
+            } else {
+                serde_json::Value::String(row.get(0)?)
+            };
+            let message_id: String = row.get(1)?;
+            let row_session_id: String = row.get(2)?;
+            let time_created: i64 = row.get(3)?;
+            let time_updated: i64 = row.get(4)?;
+            let data: String = row.get(5)?;
+            let v2_fields = if v2 {
+                Some((row.get::<_, String>(6)?, row.get::<_, Option<String>>(7)?))
+            } else {
+                None
+            };
+            Ok((
+                id,
+                message_id,
+                row_session_id,
+                time_created,
+                time_updated,
+                data,
+                v2_fields,
+            ))
+        })
         .map_err(|e| StreamError::Fatal {
             message: format!("Failed to query parts: {}", e),
         })?;
 
     let mut parts_by_message: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
     for row in rows {
-        let (id, message_id, row_session_id, time_created, time_updated, data) =
-            row.map_err(|e| StreamError::Fatal {
+        let (id, message_id, row_session_id, time_created, time_updated, data, v2_fields) = row
+            .map_err(|e| StreamError::Fatal {
                 message: format!("Failed to read part row: {}", e),
             })?;
 
         if let Ok(parsed_data) = serde_json::from_str::<serde_json::Value>(&data) {
             let mut map = serde_json::Map::with_capacity(6);
-            map.insert("id".into(), serde_json::Value::String(id));
+            map.insert(identity.into(), id);
             map.insert(
                 "message_id".into(),
                 serde_json::Value::String(message_id.clone()),
@@ -205,6 +210,15 @@ pub(super) fn read_parts_for_messages_through(
                 serde_json::Value::Number(time_updated.into()),
             );
             map.insert("data".into(), parsed_data);
+            if let Some((part_type, call_id)) = v2_fields {
+                map.insert("type".into(), serde_json::Value::String(part_type));
+                map.insert(
+                    "call_id".into(),
+                    call_id
+                        .map(serde_json::Value::String)
+                        .unwrap_or(serde_json::Value::Null),
+                );
+            }
             parts_by_message
                 .entry(message_id)
                 .or_default()

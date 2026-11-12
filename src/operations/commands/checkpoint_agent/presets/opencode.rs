@@ -270,6 +270,10 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
                  CREATE TABLE message (id TEXT, session_id TEXT, data TEXT);
+                 CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, model TEXT);
+                 CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT, seq INTEGER, data TEXT);
+                 INSERT INTO session_v2 VALUES ('session-v2', 'parent-v2', '{\"id\":\"selected\"}');
+                 INSERT INTO session_message VALUES ('message-v2', 'session-v2', 'assistant', 1, '{\"model\":{\"id\":\"producing\"}}');
                  INSERT INTO session VALUES ('session-pure', 'parent-session');
                  INSERT INTO message VALUES (
                      'message-1',
@@ -301,6 +305,23 @@ mod tests {
         OpenCodePreset
             .enrich_authorized_events(&input, &mut events)
             .unwrap();
+        let v2_input = input.replace("session-pure", "session-v2");
+        let mut v2_events = OpenCodePreset.parse(&v2_input, "t_test").unwrap();
+        OpenCodePreset
+            .enrich_authorized_events(&v2_input, &mut v2_events)
+            .unwrap();
+        let ParsedHookEvent::PostFileEdit(v2) = &v2_events[0] else {
+            panic!("Expected PostFileEdit")
+        };
+        assert_eq!(v2.context.agent_id.model, "producing");
+        assert_eq!(
+            v2.stream_source
+                .as_ref()
+                .unwrap()
+                .external_parent_session_id
+                .as_deref(),
+            Some("parent-v2")
+        );
         unsafe {
             std::env::remove_var("GIT_AI_OPENCODE_STORAGE_PATH");
         }

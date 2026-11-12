@@ -247,15 +247,19 @@ impl SentryClient {
             .header("X-Sentry-Auth", &auth_header)
             .header("Content-Type", "application/json");
         let body = serde_json::to_string(&event).unwrap_or_default();
-        let sent = crate::clients::http::send_with_body(request, &body)
-            .is_ok_and(|response| (200..300).contains(&response.status_code));
-        self.failed.set(!sent);
+        // Only an unreachable endpoint ends the flush: an event the server
+        // rejects says nothing about the events after it.
+        self.failed
+            .set(crate::clients::http::send_with_body(request, &body).is_err());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::SentryClient;
+    use std::io::Write;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn from_dsn_keeps_port_and_path_prefix() {
@@ -270,26 +274,46 @@ mod tests {
         );
     }
 
-    #[test]
-    fn send_event_skips_the_endpoint_after_its_first_failure() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
+    /// A client whose endpoint answers each connection with `response` (or
+    /// just closes it when empty), and the number of connections it received.
+    fn client_answered_with(response: &'static str) -> (SentryClient, Arc<AtomicUsize>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let connections = std::sync::Arc::new(AtomicUsize::new(0));
+        let connections = Arc::new(AtomicUsize::new(0));
         let counter = connections.clone();
-        // Accept and drop every connection: each request that reaches it fails.
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
+            for mut stream in listener.incoming().flatten() {
                 counter.fetch_add(1, Ordering::SeqCst);
-                drop(stream);
+                if !response.is_empty() {
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
+                    let _ = std::io::copy(&mut stream, &mut std::io::sink());
+                }
             }
         });
-
         let client = SentryClient::from_dsn(&format!("http://key@127.0.0.1:{port}/1")).unwrap();
+        (client, connections)
+    }
+
+    #[test]
+    fn send_event_skips_the_endpoint_after_a_transport_failure() {
+        let (client, connections) = client_answered_with("");
         client.send_event(serde_json::json!({"message": "first"}));
         client.send_event(serde_json::json!({"message": "second"}));
 
         assert!(client.failed.get());
         assert_eq!(connections.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn send_event_keeps_sending_after_a_rejected_event() {
+        let (client, connections) = client_answered_with(
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+        client.send_event(serde_json::json!({"message": "first"}));
+        client.send_event(serde_json::json!({"message": "second"}));
+
+        assert!(!client.failed.get());
+        assert_eq!(connections.load(Ordering::SeqCst), 2);
     }
 }

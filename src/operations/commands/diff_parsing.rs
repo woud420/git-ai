@@ -120,7 +120,7 @@ pub(crate) fn is_binary_diff_section(section_text: &str) -> bool {
 // Internal helpers
 // ============================================================================
 
-pub(super) fn get_diff_text(
+pub(crate) fn get_diff_text(
     repo: &Repository,
     from: &str,
     to: &str,
@@ -142,7 +142,7 @@ pub(super) fn get_diff_text(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-pub(super) fn parse_diff_hunks(diff_text: &str) -> Result<Vec<DiffHunk>, GitAiError> {
+pub(crate) fn parse_diff_hunks(diff_text: &str) -> Result<Vec<DiffHunk>, GitAiError> {
     let mut hunks = Vec::new();
     let mut current_old_file: Option<String> = None;
     let mut current_file = String::new();

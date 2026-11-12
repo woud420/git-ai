@@ -496,9 +496,10 @@ where
                 false,
             );
 
-            let hunks_json = crate::operations::commands::diff::build_diff_artifacts_from_hunks(
+            let hunks_json = crate::operations::commands::diff_attribution::build_diff_artifacts_from_hunks_with_patterns(
                 repo,
                 diff_hunks,
+                &ignore_patterns,
                 &commit_sha,
                 Some(&authorship_log),
             )

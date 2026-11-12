@@ -205,35 +205,48 @@ pub(super) fn output_default_format(
         .or_else(|_| std::env::var("PAGER"))
         .unwrap_or_else(|_| "less".to_string());
 
-    // If pager is set to "cat" or empty, output directly
-    if pager == "cat" || pager.is_empty() {
+    // A pager of "cat" or "" means no pager, as in git.
+    let paged = pager != "cat"
+        && !pager.is_empty()
+        && io::stdout().is_terminal()
+        && run_pager(&pager, &output);
+    if !paged {
         print_stdout(&output);
-    } else if io::stdout().is_terminal() {
-        // Try to use the specified pager
-        match std::process::Command::new(&pager)
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            Ok(mut child) => {
-                if let Some(stdin) = child.stdin.as_mut() {
-                    if stdin.write_all(output.as_bytes()).is_ok() {
-                        let _ = child.wait();
-                    } else {
-                        // Fall back to direct output if pager fails
-                        print_stdout(&output);
-                    }
-                } else {
-                    // Fall back to direct output if pager fails
-                    print_stdout(&output);
-                }
-            }
-            Err(_) => {
-                // Fall back to direct output if pager fails
-                print_stdout(&output);
-            }
-        }
-    } else {
-        // Not a terminal, output directly
-        print_stdout(&output);
+    }
+}
+
+/// Feed `output` to `pager`. Returns false when the pager cannot be started.
+fn run_pager(pager: &str, output: &str) -> bool {
+    // Like git, run the pager through the shell so `GIT_PAGER="less -R"` works.
+    #[cfg(unix)]
+    let mut command = {
+        let mut command = std::process::Command::new("sh");
+        command.arg("-c").arg(pager);
+        command
+    };
+    #[cfg(not(unix))]
+    let mut command = std::process::Command::new(pager);
+    let Ok(mut child) = command.stdin(std::process::Stdio::piped()).spawn() else {
+        return false;
+    };
+    // Taking stdin closes it after the write, so a pager reading to EOF ends.
+    // A write error means the pager quit early (e.g. `q` in less), as in git.
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(output.as_bytes());
+    }
+    let _ = child.wait();
+    true
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    #[test]
+    fn run_pager_passes_arguments_through_the_shell_and_closes_its_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let paged = dir.path().join("paged");
+        let pager = format!("cat > '{}'", paged.display());
+
+        assert!(super::run_pager(&pager, "line 1\nline 2\n"));
+        assert_eq!(std::fs::read_to_string(paged).unwrap(), "line 1\nline 2\n");
     }
 }

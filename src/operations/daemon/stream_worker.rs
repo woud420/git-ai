@@ -372,7 +372,7 @@ impl StreamWorker {
             && self
                 .sweep_trigger_gate
                 .try_mark_sweep_at(Instant::now(), "initial")
-            && let Err(e) = self.run_sweep(Priority::Low).await
+            && let Err(e) = self.run_sweep(Priority::Low)
         {
             tracing::error!(error = %e, "initial sweep failed");
         }
@@ -409,13 +409,13 @@ impl StreamWorker {
                         && self
                             .sweep_trigger_gate
                             .try_mark_sweep_at(Instant::now(), "periodic")
-                        && let Err(e) = self.run_sweep(Priority::Low).await
+                        && let Err(e) = self.run_sweep(Priority::Low)
                     {
                         tracing::error!(error = %e, "sweep failed");
                     }
                 }
                 Some(notification) = self.checkpoint_rx.recv() => {
-                    self.handle_checkpoint_notification(notification).await;
+                    self.handle_checkpoint_notification(notification);
                 }
                 Some(request) = self.sweep_rx.recv() => {
                     self.handle_sweep_request(request, sweep_enabled).await;
@@ -444,7 +444,7 @@ impl StreamWorker {
     async fn handle_sweep_request(&mut self, request: SweepRequest, sweep_enabled: bool) {
         if sweep_enabled {
             tracing::info!(trigger = %request.trigger, "triggered transcript sweep requested");
-            let result = self.run_sweep(request.priority).await;
+            let result = self.run_sweep(request.priority);
             if let Err(e) = &result {
                 tracing::error!(trigger = %request.trigger, error = %e, "triggered sweep failed");
             }
@@ -466,7 +466,7 @@ impl StreamWorker {
         // Checkpoint and sweep requests use separate channels from the drain
         // barrier, so consume ingress that was already queued before the barrier.
         while let Ok(notification) = self.checkpoint_rx.try_recv() {
-            self.handle_checkpoint_notification(notification).await;
+            self.handle_checkpoint_notification(notification);
         }
         while let Ok(sweep_request) = self.sweep_rx.try_recv() {
             self.handle_sweep_request(sweep_request, sweep_enabled)
@@ -491,7 +491,7 @@ impl StreamWorker {
     }
 
     /// Run a sweep across all agents to discover new/behind sessions.
-    async fn run_sweep(&mut self, priority: Priority) -> Result<(), String> {
+    fn run_sweep(&mut self, priority: Priority) -> Result<(), String> {
         use crate::operations::daemon::sweep_coordinator::SweepItem;
 
         let items = self
@@ -903,7 +903,7 @@ impl StreamWorker {
         }
 
         if let Err(e) = self.run_task(&task).await {
-            self.handle_processing_error(task, e).await;
+            self.handle_processing_error(task, e);
         }
     }
 
@@ -932,7 +932,7 @@ impl StreamWorker {
     }
 
     /// Handle a processing error with exponential backoff.
-    async fn handle_processing_error(&mut self, task: ProcessingTask, error: StreamError) {
+    fn handle_processing_error(&mut self, task: ProcessingTask, error: StreamError) {
         match error {
             StreamError::Transient { message, .. } => {
                 // Retry with exponential backoff: 5s, 30s, 5m, 30m
@@ -1189,15 +1189,13 @@ mod scheduling_tests {
     async fn transient_errors_are_stored_as_delayed_retries_not_ready_work() {
         let (_temp, mut worker, _shutdown, _checkpoint_tx) = make_worker();
 
-        worker
-            .handle_processing_error(
-                task("retry", None),
-                StreamError::Transient {
-                    message: "temporary".to_string(),
-                    retry_after: Duration::from_secs(1),
-                },
-            )
-            .await;
+        worker.handle_processing_error(
+            task("retry", None),
+            StreamError::Transient {
+                message: "temporary".to_string(),
+                retry_after: Duration::from_secs(1),
+            },
+        );
 
         assert!(worker.priority_queue.is_empty());
         assert_eq!(worker.delayed_tasks.len(), 1);

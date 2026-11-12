@@ -75,7 +75,7 @@ pub fn build_diff_artifacts_with_note(
     let line_contents = build_line_content_map(&hunks);
 
     let (annotations_by_file, attributions, line_details, prompts, sessions, humans, mut commits) =
-        build_line_attribution_data(repo, from_commit, to_commit, &hunks, options)?;
+        build_line_attribution_data(repo, from_commit, to_commit, &hunks, options);
 
     let json_hunks = build_json_hunks(
         repo,
@@ -175,18 +175,15 @@ pub(super) fn build_line_attribution_data(
     to_commit: &str,
     hunks: &[DiffHunk],
     options: &DiffCommandOptions,
-) -> Result<
-    (
-        BTreeMap<String, BTreeMap<String, Vec<LineRange>>>,
-        HashMap<DiffLineKey, Attribution>,
-        HashMap<DiffLineKey, LineAttributionDetail>,
-        BTreeMap<String, PromptRecord>,
-        BTreeMap<String, SessionRecord>,
-        BTreeMap<String, HumanRecord>,
-        BTreeMap<String, crate::operations::commands::diff::DiffCommitMetadata>,
-    ),
-    GitAiError,
-> {
+) -> (
+    BTreeMap<String, BTreeMap<String, Vec<LineRange>>>,
+    HashMap<DiffLineKey, Attribution>,
+    HashMap<DiffLineKey, LineAttributionDetail>,
+    BTreeMap<String, PromptRecord>,
+    BTreeMap<String, SessionRecord>,
+    BTreeMap<String, HumanRecord>,
+    BTreeMap<String, crate::operations::commands::diff::DiffCommitMetadata>,
+) {
     let mut annotations_by_file: BTreeMap<String, BTreeMap<String, Vec<LineRange>>> =
         BTreeMap::new();
     let mut attributions: HashMap<DiffLineKey, Attribution> = HashMap::new();
@@ -241,7 +238,7 @@ pub(super) fn build_line_attribution_data(
         }
     }
 
-    Ok((
+    (
         annotations_by_file,
         attributions,
         line_details,
@@ -249,7 +246,7 @@ pub(super) fn build_line_attribution_data(
         sessions,
         humans,
         commits,
-    ))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -97,6 +97,7 @@ pub fn file_paths_from_tool_input(data: &Value, cwd: &str) -> Vec<PathBuf> {
         .get("file_path")
         .or_else(|| tool_input.get("filepath"))
         .or_else(|| tool_input.get("path"))
+        .or_else(|| tool_input.get("notebook_path"))
         .and_then(|v| v.as_str())
         && !path.is_empty()
     {

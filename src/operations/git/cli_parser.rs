@@ -164,8 +164,6 @@ pub fn summarize_rebase_args(command_args: &[String]) -> RebaseArgsSummary {
                     | "--exec"
                     | "--empty"
                     | "-C"
-                    | "-S"
-                    | "--gpg-sign"
             );
             if takes_value && !arg.contains('=') {
                 i += 2;

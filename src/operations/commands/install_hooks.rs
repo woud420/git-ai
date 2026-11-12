@@ -482,7 +482,8 @@ pub(crate) fn run_uninstall_cli(args: &[String]) -> Result<UninstallCommandOutco
     let binary_path = get_current_binary_path()?;
     let params = HookInstallerParams { binary_path };
 
-    let statuses = uninstall_agent_hooks(&params, options.dry_run, options.verbose)?;
+    let installers = get_all_installers();
+    let statuses = uninstall_agent_hooks(&installers, &params, options.dry_run, options.verbose)?;
     Ok(UninstallCommandOutcome::Uninstalled(to_hashmap(statuses)))
 }
 

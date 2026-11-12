@@ -332,11 +332,12 @@ pub(crate) fn build_config() -> Config {
     // Build feature flags from file config
     let feature_flags = build_feature_flags(file_cfg.feature_flags);
 
-    // Get API base URL from config, env var, or default
-    let api_base_url = file_cfg
-        .api_base_url
-        .or_else(|| env::var("GIT_AI_API_BASE_URL").ok())
-        .unwrap_or_else(|| DEFAULT_API_BASE_URL.to_string());
+    // Env var wins over the config file, like every other setting
+    let api_base_url = env_or_file(
+        "GIT_AI_API_BASE_URL",
+        file_cfg.api_base_url,
+        DEFAULT_API_BASE_URL.to_string(),
+    );
 
     // Get prompt_storage setting (defaults to "local": prompts stay on this
     // machine unless the user explicitly opts into "notes" or "default"/CAS)

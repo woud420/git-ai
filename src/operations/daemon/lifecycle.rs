@@ -579,9 +579,16 @@ pub(crate) async fn run_daemon(config: DaemonConfig) -> Result<DaemonExitAction,
         }
     }
 
-    remove_socket_if_exists(&config.trace_socket_path)?;
-    remove_socket_if_exists(&config.control_socket_path)?;
-    remove_pid_metadata(&config)?;
+    // The daemon has stopped; a cleanup failure must not lose its exit action.
+    for removal in [
+        remove_socket_if_exists(&config.trace_socket_path),
+        remove_socket_if_exists(&config.control_socket_path),
+        remove_pid_metadata(&config),
+    ] {
+        if let Err(error) = removal {
+            tracing::warn!(%error, "failed to remove daemon file at shutdown");
+        }
+    }
 
     let action = coordinator.shutdown_action();
     tracing::info!(?action, "daemon shutdown complete");

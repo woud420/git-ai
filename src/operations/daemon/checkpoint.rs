@@ -225,7 +225,7 @@ pub fn execute_resolved_checkpoint_from_daemon(
         let checkpoint_create_start = Instant::now();
         let mut checkpoint = Checkpoint::new(kind, combined_hash, author.to_string(), entries);
         checkpoint.timestamp = (resolved.ts / 1000) as u64;
-        checkpoint.line_stats = compute_line_stats(&file_stats)?;
+        checkpoint.line_stats = compute_line_stats(&file_stats);
         checkpoint.trace_id = Some(trace_id);
         checkpoint.delivery_id = checkpoint_request.delivery_id.clone();
 
@@ -971,7 +971,7 @@ pub fn compute_file_line_stats(previous_content: &str, current_content: &str) ->
 /// This avoids redundant diff computation since stats are already computed during entry creation
 fn compute_line_stats(
     file_stats: &[FileLineStats],
-) -> Result<crate::model::working_log::CheckpointLineStats, GitAiError> {
+) -> crate::model::working_log::CheckpointLineStats {
     let mut stats = crate::model::working_log::CheckpointLineStats::default();
 
     // Aggregate line stats from all files
@@ -982,5 +982,5 @@ fn compute_line_stats(
         stats.deletions_sloc += file_stat.deletions_sloc;
     }
 
-    Ok(stats)
+    stats
 }

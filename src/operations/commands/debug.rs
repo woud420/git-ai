@@ -83,6 +83,14 @@ fn parse_debug_options(args: &[String]) -> Result<DebugOptions, String> {
     Ok(options)
 }
 
+fn append_login_user_id(out: &mut String, auth: &crate::clients::auth::state::AuthStatus) {
+    if auth.user_id.is_some() {
+        let _ = writeln!(out, "User ID: <redacted>");
+    } else if matches!(&auth.state, AuthState::LoggedIn | AuthState::RefreshExpired) {
+        let _ = writeln!(out, "User ID: <unavailable>");
+    }
+}
+
 fn debug_progress(message: impl AsRef<str>) {
     eprintln!(
         "[{}] git-ai debug: {}",
@@ -347,14 +355,7 @@ fn build_debug_report(options: DebugOptions) -> String {
             format_unix_timestamp(expires_at)
         );
     }
-    if let Some(user_id) = auth_info.user_id {
-        let _ = writeln!(out, "User ID: {}", user_id);
-    } else if matches!(
-        &auth_info.state,
-        AuthState::LoggedIn | AuthState::RefreshExpired
-    ) {
-        let _ = writeln!(out, "User ID: <unavailable>");
-    }
+    append_login_user_id(&mut out, &auth_info);
     if let Some(email) = auth_info.email {
         let _ = writeln!(out, "Email: {}", email);
     } else if matches!(

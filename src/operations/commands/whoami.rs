@@ -206,10 +206,12 @@ fn author_identity_header_status(api_ctx: &ApiContext) -> String {
         .unwrap_or_else(|| "unavailable (header will be omitted)".to_string())
 }
 
-fn api_key_status(api_key: Option<&str>) -> String {
-    api_key
-        .map(|key| format!("configured ({})", mask_api_key(key)))
-        .unwrap_or_else(|| "unset".to_string())
+fn api_key_status(api_key: Option<&str>) -> &'static str {
+    if api_key.is_some() {
+        "configured"
+    } else {
+        "unset"
+    }
 }
 
 fn login_status(auth: &AuthStatus, api_client: &ApiClient) -> String {
@@ -263,15 +265,6 @@ fn write_metrics_status(out: &mut String, status: &MetricsStatus) {
 
 fn optional_or_unavailable(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("<unavailable>")
-}
-
-/// Like `config::mask_api_key`, except that a short key shows its length.
-fn mask_api_key(key: &str) -> String {
-    let len = key.chars().count();
-    if len <= 8 {
-        return "*".repeat(len);
-    }
-    config::mask_api_key(key)
 }
 
 fn print_help() {
@@ -345,7 +338,9 @@ mod tests {
         let output = render_whoami(&ctx.base_url, &auth, &ctx, &client, Ok(&metrics), true);
 
         assert!(output.contains("API access: connected via API key"));
-        assert!(output.contains("API key: configured (gita...7890)"));
+        assert!(output.contains("API key: configured\n"));
+        assert!(!output.contains("gita..."));
+        assert!(!output.contains("7890"));
         assert!(output.contains("Login: optional (using api key)"));
         assert!(output.contains("Identity: Alice Example <alice@example.com>"));
         assert!(!output.contains("Author identity header"));
@@ -409,13 +404,11 @@ mod tests {
     }
 
     #[test]
-    fn api_key_status_masks_short_keys_per_character() {
-        assert_eq!(api_key_status(Some("abc")), "configured (***)");
-        assert_eq!(api_key_status(Some("12345678")), "configured (********)");
-        assert_eq!(
-            api_key_status(Some("123456789")),
-            "configured (1234...6789)"
-        );
+    fn api_key_status_does_not_disclose_key_content_or_length() {
+        for key in ["", "abc", "12345678", "123456789", "日本語のキーです長い"] {
+            assert_eq!(api_key_status(Some(key)), "configured");
+        }
+        assert_eq!(api_key_status(None), "unset");
     }
 
     #[test]

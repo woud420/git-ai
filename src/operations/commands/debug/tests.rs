@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn login_user_id_is_redacted_without_losing_availability() {
+    let mut auth = crate::clients::auth::state::AuthStatus {
+        backend: "test-backend".to_string(),
+        state: AuthState::LoggedIn,
+        access_token_expires_at: None,
+        refresh_token_expires_at: None,
+        user_id: Some("distinctive-jwt-subject".to_string()),
+        email: None,
+        name: None,
+        personal_org_id: None,
+        orgs: Vec::new(),
+    };
+    let mut out = String::new();
+    append_login_user_id(&mut out, &auth);
+    assert_eq!(out, "User ID: <redacted>\n");
+    assert!(!out.contains("distinctive-jwt-subject"));
+
+    auth.user_id = None;
+    out.clear();
+    append_login_user_id(&mut out, &auth);
+    assert_eq!(out, "User ID: <unavailable>\n");
+
+    auth.state = AuthState::LoggedOut;
+    out.clear();
+    append_login_user_id(&mut out, &auth);
+    assert!(out.is_empty());
+}
+
+#[test]
 fn format_command_for_error_preserves_posix_shell_words() {
     assert_eq!(format_command_for_error("g", &["a b"]), "g 'a b'");
 }

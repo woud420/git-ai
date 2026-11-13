@@ -67,7 +67,7 @@ fn set_and_unset_echo_each_top_level_key() {
             r#"{"transcript_sweep":false}"#,
         ),
         ("api_base_url", url, url, url),
-        ("api_key", "abcdefghijklmnop", "abcd...mnop", "****"),
+        ("api_key", "abcdefghijklmnop", "****", "****"),
         ("prompt_storage", "local", "local", "local"),
         ("default_prompt_storage", "local", "local", "local"),
         ("quiet", "1", "true", "true"),

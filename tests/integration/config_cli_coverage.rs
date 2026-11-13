@@ -409,14 +409,32 @@ fn test_config_registry_preserves_sensitive_alias_and_help_behavior() {
     let set_output = repo
         .git_ai(&["config", "set", "api_key", secret])
         .expect("setting api_key should succeed");
-    assert!(set_output.contains("api-...cret"));
+    assert!(set_output.contains("[api_key]: ****"));
+    assert!(!set_output.contains("api-"));
+    assert!(!set_output.contains("cret"));
     assert!(!set_output.contains(secret));
 
     let get_output = repo
         .git_ai(&["config", "api_key"])
         .expect("reading api_key should succeed");
-    assert!(get_output.contains("api-...cret"));
+    assert!(get_output.contains("****"));
+    assert!(!get_output.contains("api-"));
+    assert!(!get_output.contains("cret"));
     assert!(!get_output.contains(secret));
+
+    let saved: Value = serde_json::from_str(
+        &std::fs::read_to_string(repo.test_home_path().join(".git-ai/config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        saved["api_key"], secret,
+        "redaction must not alter stored credentials"
+    );
+    let all_output = repo
+        .git_ai(&["config"])
+        .expect("reading config should succeed");
+    assert!(!all_output.contains(secret));
+    assert!(!all_output.contains("api-...cret"));
 
     repo.git_ai(&["config", "set", "telemetry_oss", "off"])
         .expect("setting the legacy telemetry key should succeed");

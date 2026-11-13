@@ -369,11 +369,7 @@ pub fn is_random(s: &[u8]) -> bool {
 
     // If no digits, require higher probability threshold
     let contains_num = s.iter().any(|&b| b.is_ascii_digit());
-    if !contains_num && p < 1.0 / 1e4 {
-        return false;
-    }
-
-    true
+    !(!contains_num && p < 1.0 / 1e4)
 }
 
 /// Check if a byte is a valid secret character (alphanumeric or common secret chars).

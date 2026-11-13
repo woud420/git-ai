@@ -31,7 +31,7 @@ class ResolveToolchainTests(unittest.TestCase):
         self.assertEqual(result.stdout, "stable\n")
 
     def test_literal_package_minimum(self):
-        for declared, expected in [("1.93", "1.93.0"), ("1.94.2", "1.94.2")]:
+        for declared, expected in [("1.93", "1.93.0"), ("1.94.2", "1.94.2"), ("1.100", "1.100.0")]:
             for quote in ['"', "'"]:
                 for newline in ["\n", "\r\n"]:
                     with self.subTest(declared=declared, quote=quote, newline=newline):

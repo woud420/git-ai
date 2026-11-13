@@ -299,7 +299,7 @@ darwin-rebuild switch --flake .
 
 ## Development
 
-Enter a development shell with Rust 1.93.0 or newer:
+Enter a development shell with Rust 1.100.0 or newer:
 ```bash
 nix develop github:woud420/git-ai
 ```

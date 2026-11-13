@@ -475,7 +475,7 @@ impl ActorDaemonCoordinator {
                         }
                     };
                     let _ = ingest_result;
-                    let _ = coordinator.queued_trace_payloads.fetch_update(
+                    let _ = coordinator.queued_trace_payloads.try_update(
                         Ordering::Relaxed,
                         Ordering::Relaxed,
                         |current| Some(current.saturating_sub(1)),

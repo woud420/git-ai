@@ -27,7 +27,7 @@ mod help;
 mod jj;
 mod redact;
 use help::print_debug_help;
-use redact::{redact_env_value, redact_git_config_line, redact_url_userinfo};
+use redact::{append_login_user_id, redact_env_value, redact_git_config_line, redact_url_userinfo};
 
 const MIN_GIT_VERSION: GitVersion = GitVersion {
     major: 2,
@@ -81,14 +81,6 @@ fn parse_debug_options(args: &[String]) -> Result<DebugOptions, String> {
         }
     }
     Ok(options)
-}
-
-fn append_login_user_id(out: &mut String, auth: &crate::clients::auth::state::AuthStatus) {
-    if auth.user_id.is_some() {
-        let _ = writeln!(out, "User ID: <redacted>");
-    } else if matches!(&auth.state, AuthState::LoggedIn | AuthState::RefreshExpired) {
-        let _ = writeln!(out, "User ID: <unavailable>");
-    }
 }
 
 fn debug_progress(message: impl AsRef<str>) {

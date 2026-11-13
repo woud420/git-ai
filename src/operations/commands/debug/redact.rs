@@ -127,3 +127,14 @@ pub(super) fn redact_env_value(key: &str, value: &str) -> String {
 
     trimmed.to_string()
 }
+use crate::clients::auth::AuthState;
+use crate::clients::auth::state::AuthStatus;
+use std::fmt::Write as _;
+
+pub(super) fn append_login_user_id(out: &mut String, auth: &AuthStatus) {
+    if auth.user_id.is_some() {
+        let _ = writeln!(out, "User ID: <redacted>");
+    } else if matches!(&auth.state, AuthState::LoggedIn | AuthState::RefreshExpired) {
+        let _ = writeln!(out, "User ID: <unavailable>");
+    }
+}

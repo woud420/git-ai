@@ -8,7 +8,7 @@ use super::pattern::{
     log_array_changes, repository_list_mut, resolve_repository_value, set_repository_array_field,
 };
 use super::spec::resolve_key;
-use crate::config::{UpdateChannel, mask_api_key};
+use crate::config::{REDACTED_VALUE, UpdateChannel};
 use serde_json::Value;
 
 /// Store `value` in `slot` and return it as displayed on its `[key]: value` line.
@@ -105,7 +105,7 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
             "api_base_url" => store(&mut file_config.api_base_url, value.to_string()),
             "api_key" => {
                 file_config.api_key = Some(value.to_string());
-                mask_api_key(value)
+                REDACTED_VALUE.to_string()
             }
             "prompt_storage" => {
                 validate_prompt_storage_value(value)?;

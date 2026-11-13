@@ -1,7 +1,6 @@
 use super::parse::*;
 use super::pattern::*;
 use super::spec::{ConfigMutation, ConfigNesting, ConfigValueKind, config_key_specs, resolve_key};
-use crate::config::mask_api_key;
 use serde_json::Value;
 
 #[test]
@@ -197,37 +196,25 @@ fn test_parse_author_config_object_rejects_non_object() {
 }
 
 #[test]
-fn test_mask_api_key_long() {
-    let key = "abcdefghijklmnop";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "****");
-}
-
-#[test]
-fn test_mask_api_key_short() {
-    let key = "short";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "****");
-}
-
-#[test]
-fn test_mask_api_key_exactly_eight() {
-    let key = "12345678";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "****");
-}
-
-#[test]
-fn test_mask_api_key_nine_chars() {
-    let key = "123456789";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "****");
-}
-
-#[test]
-fn test_mask_api_key_non_ascii() {
-    assert_eq!(mask_api_key("日本語のキーです長い"), "****");
-    assert_eq!(mask_api_key("ключик"), "****");
+fn printable_config_redacts_all_key_content_and_preserves_runtime_value() {
+    let mut config = crate::config::tests::create_test_config(vec![], vec![]);
+    for key in [
+        "",
+        "short",
+        "12345678",
+        "123456789",
+        "abcdefghijklmnop",
+        "日本語のキーです長い",
+    ] {
+        config.api_key = Some(key.to_string());
+        assert_eq!(serde_json::to_value(&config).unwrap()["api_key"], "****");
+        assert_eq!(config.api_key.as_deref(), Some(key));
+    }
+    config.api_key = None;
+    assert_eq!(
+        serde_json::to_value(&config).unwrap()["api_key"],
+        Value::Null
+    );
 }
 
 #[test]

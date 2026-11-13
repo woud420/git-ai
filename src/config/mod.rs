@@ -400,17 +400,18 @@ impl Config {
     }
 }
 
-/// Redact the entire credential, including its length, on every display path.
-pub(crate) fn mask_api_key(_key: &str) -> String {
-    "****".to_string()
-}
+/// Fixed display value that reveals neither credential contents nor length.
+pub(crate) const REDACTED_VALUE: &str = "****";
 
 fn serialize_masked_api_key<S>(api_key: &Option<String>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
     use serde::Serialize;
-    api_key.as_deref().map(mask_api_key).serialize(serializer)
+    api_key
+        .as_ref()
+        .map(|_| REDACTED_VALUE)
+        .serialize(serializer)
 }
 
 fn author_config_cache_key() -> AuthorConfigCacheKey {

@@ -1,6 +1,6 @@
 use super::parse::parse_key_path;
 use super::spec::{config_key_specs, resolve_key};
-use crate::config::{Config, FileConfig, mask_api_key};
+use crate::config::{Config, FileConfig, REDACTED_VALUE};
 use serde_json::{Value, json};
 
 /// The value `git-ai config <name>` prints for a top-level key, or `None` if
@@ -26,7 +26,7 @@ fn top_level_value(name: &str, file_config: &FileConfig, runtime_config: &Config
         // Effective flags, with defaults applied.
         "feature_flags" => json!(runtime_config.get_feature_flags()),
         "api_base_url" => json!(runtime_config.api_base_url()),
-        "api_key" => json!(file_config.api_key.as_deref().map(mask_api_key)),
+        "api_key" => json!(file_config.api_key.as_ref().map(|_| REDACTED_VALUE)),
         "prompt_storage" => json!(runtime_config.prompt_storage()),
         "include_prompts_in_repositories" => patterns(&file_config.include_prompts_in_repositories),
         "default_prompt_storage" => json!(file_config.default_prompt_storage),

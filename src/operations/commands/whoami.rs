@@ -100,7 +100,11 @@ fn render_whoami(
     writeln!(
         out,
         "  API key: {}",
-        api_key_status(api_ctx.api_key.as_deref())
+        if api_ctx.api_key.is_some() {
+            "configured"
+        } else {
+            "unset"
+        }
     )
     .unwrap();
     writeln!(out, "  Login: {}", login_status(auth, api_client)).unwrap();
@@ -204,14 +208,6 @@ fn author_identity_header_status(api_ctx: &ApiContext) -> String {
         .author_identity
         .clone()
         .unwrap_or_else(|| "unavailable (header will be omitted)".to_string())
-}
-
-fn api_key_status(api_key: Option<&str>) -> &'static str {
-    if api_key.is_some() {
-        "configured"
-    } else {
-        "unset"
-    }
 }
 
 fn login_status(auth: &AuthStatus, api_client: &ApiClient) -> String {
@@ -404,11 +400,15 @@ mod tests {
     }
 
     #[test]
-    fn api_key_status_does_not_disclose_key_content_or_length() {
+    fn rendered_status_does_not_disclose_key_content_or_length() {
+        let auth = auth_status(AuthState::LoggedOut);
+        let metrics = metrics_status();
         for key in ["", "abc", "12345678", "123456789", "日本語のキーです長い"] {
-            assert_eq!(api_key_status(Some(key)), "configured");
+            let ctx = api_context(crate::config::DEFAULT_API_BASE_URL, Some(key), None, None);
+            let client = ApiClient::new(ctx.clone());
+            let out = render_whoami(&ctx.base_url, &auth, &ctx, &client, Ok(&metrics), false);
+            assert!(out.contains("API key: configured\n"));
         }
-        assert_eq!(api_key_status(None), "unset");
     }
 
     #[test]

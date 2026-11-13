@@ -4,11 +4,9 @@ use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Pi agent that reads Pi JSONL session files.
 pub struct PiAgent {
@@ -82,10 +80,6 @@ impl Agent for PiAgent {
         self.batch_size
     }
 
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-    }
-
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
         // Discovery happens via presets, not filesystem scanning
         Ok(Vec::new())
@@ -107,15 +101,6 @@ impl Agent for PiAgent {
         )
     }
 
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
-    }
-
     fn streams(&self) -> Vec<StreamDescriptor> {
         vec![StreamDescriptor::identity_transcript(StreamFormat::PiJsonl)]
     }
@@ -128,15 +113,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = PiAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_jsonl_line(i: usize) -> String {
         format!(

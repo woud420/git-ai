@@ -276,6 +276,44 @@ fn test_revert_multiple_commits_restores_each_original_attribution() {
         .assert_committed_lines(crate::lines!["c base".human(), "AI c".ai()]);
 }
 
+/// `git revert A..B` reverts newest-first. Each revert commit must be paired
+/// with the commit it actually reverts: here only `del_a^` still holds the AI
+/// line in a.txt, so pairing the revert of `del_a` with `del_b` loses it.
+#[test]
+fn test_revert_range_pairs_each_revert_with_its_source() {
+    let repo = TestRepo::new();
+    let fa = repo.path().join("a.txt");
+    let fb = repo.path().join("b.txt");
+
+    fs::write(&fa, "a base\n").unwrap();
+    fs::write(&fb, "b base\n").unwrap();
+    repo.stage_all_and_commit("base two files").unwrap();
+
+    fs::write(&fa, "a base\nAI a\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "a.txt"]).unwrap();
+    repo.stage_all_and_commit("add ai a").unwrap();
+    fs::write(&fb, "b base\nAI b\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "b.txt"]).unwrap();
+    repo.stage_all_and_commit("add ai b").unwrap();
+    let add_b = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+
+    fs::write(&fa, "a base\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "a.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("delete ai a").unwrap();
+    fs::write(&fb, "b base\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_known_human", "b.txt"])
+        .unwrap();
+    repo.stage_all_and_commit("delete ai b").unwrap();
+
+    repo.git(&["revert", "--no-edit", &format!("{add_b}..HEAD")])
+        .unwrap();
+    repo.filename("a.txt")
+        .assert_committed_lines(crate::lines!["a base".human(), "AI a".ai()]);
+    repo.filename("b.txt")
+        .assert_committed_lines(crate::lines!["b base".human(), "AI b".ai()]);
+}
+
 #[test]
 fn test_revert_restored_ai_attribution_survives_shifted_line_numbers() {
     let repo = TestRepo::new();

@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::operations::authorship::diff_ai_accepted::diff_ai_accepted_stats;
+use crate::operations::authorship::diff_base::is_empty_tree;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -19,11 +20,6 @@ use crate::operations::git::path_format::unescape_git_path;
 use crate::operations::git::repository::{CommitRange, Repository, parse_numstat_line};
 use std::io::IsTerminal;
 use unicode_normalization::UnicodeNormalization;
-
-/// The git empty tree hash - represents an empty repository state
-/// This is the hash of the empty tree object that git uses internally
-#[doc(hidden)]
-pub const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /// Check if a file path should be ignored based on the provided patterns
 /// Supports both exact matches and glob patterns (e.g., "*.lock", "**/*.generated.js")
@@ -73,22 +69,22 @@ pub fn range_authorship(
             if parts.len() == 2 {
                 (parts[0].to_string(), format!("refs/heads/{}", parts[1]))
             } else {
-                (default_remote.clone(), refname.to_string())
+                (default_remote, refname.to_string())
             }
         } else if refname.starts_with("refs/heads/") {
             // Local branch: refs/heads/branch-name -> default_remote, refs/heads/branch-name
-            (default_remote.clone(), refname.to_string())
+            (default_remote, refname.to_string())
         } else if refname.contains('/') && !refname.starts_with("refs/") {
             // Simple remote format: origin/branch-name -> origin, refs/heads/branch-name
             let parts: Vec<&str> = refname.splitn(2, '/').collect();
             if parts.len() == 2 {
                 (parts[0].to_string(), format!("refs/heads/{}", parts[1]))
             } else {
-                (default_remote.clone(), format!("refs/heads/{}", refname))
+                (default_remote, format!("refs/heads/{}", refname))
             }
         } else {
             // Plain branch name: branch-name -> default_remote, refs/heads/branch-name
-            (default_remote.clone(), format!("refs/heads/{}", refname))
+            (default_remote, format!("refs/heads/{}", refname))
         };
 
         let mut args = repository.global_args_for_exec();
@@ -117,10 +113,7 @@ pub fn range_authorship(
     // Use provided commit SHAs or collect them from the range
     let commit_shas: Vec<String> = match commit_shas {
         Some(shas) => shas,
-        None => commit_range
-            .into_iter()
-            .map(|c| c.id().to_string())
-            .collect(),
+        None => commit_range.into_iter().map(|c| c.id()).collect(),
     };
     let commit_authorship = filter_commits_with_notes(repository, &commit_shas)?;
 
@@ -226,7 +219,7 @@ fn create_authorship_log_for_range(
 
     // Special handling for empty tree: there's no start state to compare against
     // We only need the end state's attributions
-    if start_sha == EMPTY_TREE_HASH {
+    if is_empty_tree(start_sha) {
         tracing::debug!("Start is empty tree - using only end commit attributions");
 
         let repo_clone = repo.clone();
@@ -394,7 +387,7 @@ fn calculate_range_stats_direct(
     ignore_patterns: &[String],
 ) -> Result<CommitStats, GitAiError> {
     let start_sha = commit_range.start_oid.clone();
-    let end_sha = commit_range.end_oid.clone();
+    let end_sha = commit_range.end_oid;
     // Special case: single commit range (start == end)
     if start_sha == end_sha {
         return stats_for_commit_stats(repo, &end_sha, ignore_patterns);

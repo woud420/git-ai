@@ -1,12 +1,34 @@
 use super::parse::{
-    mask_api_key, parse_author_config_object, parse_bool, parse_codex_hooks_format,
+    parse_author_config_object, parse_bool, parse_codex_hooks_format,
     parse_custom_attributes_object, parse_git_ai_hooks_object, parse_hook_command_values,
     parse_key_path, parse_notes_backend_kind, parse_value, validate_feature_flags,
     validate_prompt_storage_value,
 };
-use super::pattern::{log_array_changes, resolve_repository_value, set_repository_array_field};
+use super::pattern::{
+    log_array_changes, repository_list_mut, resolve_repository_value, set_repository_array_field,
+};
 use super::spec::resolve_key;
+use crate::config::{REDACTED_VALUE, UpdateChannel};
 use serde_json::Value;
+
+/// Store `value` in `slot` and return it as displayed on its `[key]: value` line.
+fn store<T: ToString>(slot: &mut Option<T>, value: T) -> String {
+    let shown = value.to_string();
+    *slot = Some(value);
+    shown
+}
+
+/// Parse an integer setting. The error names the key and the expected form.
+fn parse_integer<T: std::str::FromStr>(
+    name: &str,
+    value: &str,
+    expected: &str,
+) -> Result<T, String> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("Invalid {} value '{}'. Expected {}", name, value, expected))
+}
 
 pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result<(), String> {
     let mut file_config = crate::config::load_file_config_public()?;
@@ -15,39 +37,29 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
 
     // Handle top-level keys
     if key_path.len() == 1 {
-        match resolved.spec.name {
-            "git_path" => {
-                file_config.git_path = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[git_path]: {}", value);
-            }
-            "exclude_prompts_in_repositories" => {
-                let added = set_repository_array_field(
-                    &mut file_config.exclude_prompts_in_repositories,
-                    value,
-                    add_mode,
-                )?;
-                crate::config::save_file_config(&file_config)?;
-                log_array_changes(&added, add_mode);
-            }
-            "allowed_repositories" | "allow_repositories" => {
-                let added = set_repository_array_field(
-                    &mut file_config.allowed_repositories,
-                    value,
-                    add_mode,
-                )?;
-                crate::config::save_file_config(&file_config)?;
-                log_array_changes(&added, add_mode);
-            }
-            "exclude_repositories" => {
-                let added = set_repository_array_field(
-                    &mut file_config.exclude_repositories,
-                    value,
-                    add_mode,
-                )?;
-                crate::config::save_file_config(&file_config)?;
-                log_array_changes(&added, add_mode);
-            }
+        let name = resolved.spec.name;
+        if let Some(list) = repository_list_mut(&mut file_config, name) {
+            let added = set_repository_array_field(list, value, add_mode)?;
+            crate::config::save_file_config(&file_config)?;
+            log_array_changes(&added, add_mode);
+            return Ok(());
+        }
+
+        // The transcript and metrics budgets must be positive and, unlike the
+        // other integer settings, are parsed without trimming.
+        let positive_bytes = || {
+            let bytes = value.parse::<usize>().ok().filter(|bytes| *bytes > 0);
+            bytes.ok_or_else(|| {
+                format!(
+                    "Invalid {} value '{}'. Expected a positive integer in bytes",
+                    name, value
+                )
+            })
+        };
+
+        // Each arm validates and stores the value, and yields what is printed.
+        let shown = match name {
+            "git_path" => store(&mut file_config.git_path, value.to_string()),
             "telemetry" => {
                 if !matches!(value.trim(), "on" | "off") {
                     return Err(format!(
@@ -55,42 +67,26 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                         value
                     ));
                 }
-                file_config.telemetry = Some(value.trim().to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[telemetry]: {}", value.trim());
+                store(&mut file_config.telemetry, value.trim().to_string())
             }
-            "telemetry_oss" => {
-                file_config.telemetry_oss = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[telemetry_oss]: {}", value);
-            }
+            "telemetry_oss" => store(&mut file_config.telemetry_oss, value.to_string()),
             "telemetry_enterprise_dsn" => {
-                file_config.telemetry_enterprise_dsn = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[telemetry_enterprise_dsn]: {}", value);
+                store(&mut file_config.telemetry_enterprise_dsn, value.to_string())
             }
             "disable_version_checks" => {
-                let bool_value = parse_bool(value)?;
-                file_config.disable_version_checks = Some(bool_value);
-                crate::config::save_file_config(&file_config)?;
-                println!("[disable_version_checks]: {}", bool_value);
+                store(&mut file_config.disable_version_checks, parse_bool(value)?)
             }
             "disable_auto_updates" => {
-                let bool_value = parse_bool(value)?;
-                file_config.disable_auto_updates = Some(bool_value);
-                crate::config::save_file_config(&file_config)?;
-                println!("[disable_auto_updates]: {}", bool_value);
+                store(&mut file_config.disable_auto_updates, parse_bool(value)?)
             }
             "update_channel" => {
-                // Validate update channel
-                if value != "latest" && value != "next" {
-                    return Err(
-                        "Invalid update_channel value. Expected 'latest' or 'next'".to_string()
-                    );
-                }
-                file_config.update_channel = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[update_channel]: {}", value);
+                let channel = UpdateChannel::from_str(value).ok_or_else(|| {
+                    "Invalid update_channel value. Expected 'latest', 'next', 'enterprise-latest', or 'enterprise-next'".to_string()
+                })?;
+                store(
+                    &mut file_config.update_channel,
+                    channel.as_str().to_string(),
+                )
             }
             "feature_flags" => {
                 if add_mode {
@@ -104,25 +100,16 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                 }
                 validate_feature_flags(&json_value)?;
                 file_config.feature_flags = Some(json_value);
-                crate::config::save_file_config(&file_config)?;
-                println!("[feature_flags]: {}", value);
+                value.to_string()
             }
-            "api_base_url" => {
-                file_config.api_base_url = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[api_base_url]: {}", value);
-            }
+            "api_base_url" => store(&mut file_config.api_base_url, value.to_string()),
             "api_key" => {
                 file_config.api_key = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                let masked = mask_api_key(value);
-                println!("[api_key]: {}", masked);
+                REDACTED_VALUE.to_string()
             }
             "prompt_storage" => {
                 validate_prompt_storage_value(value)?;
-                file_config.prompt_storage = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[prompt_storage]: {}", value);
+                store(&mut file_config.prompt_storage, value.to_string())
             }
             "include_prompts_in_repositories" => {
                 let resolved = resolve_repository_value(value)?;
@@ -143,19 +130,13 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                 for pattern in resolved {
                     println!("[include_prompts_in_repositories]: {}", pattern);
                 }
+                return Ok(());
             }
             "default_prompt_storage" => {
                 validate_prompt_storage_value(value)?;
-                file_config.default_prompt_storage = Some(value.to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[default_prompt_storage]: {}", value);
+                store(&mut file_config.default_prompt_storage, value.to_string())
             }
-            "quiet" => {
-                let bool_value = parse_bool(value)?;
-                file_config.quiet = Some(bool_value);
-                crate::config::save_file_config(&file_config)?;
-                println!("[quiet]: {}", bool_value);
-            }
+            "quiet" => store(&mut file_config.quiet, parse_bool(value)?),
             "author" => {
                 if add_mode {
                     return Err(
@@ -164,118 +145,60 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                     );
                 }
                 let author = parse_author_config_object(value)?;
-                file_config.author = if author.is_empty() {
-                    None
-                } else {
-                    Some(author.clone())
-                };
-                crate::config::save_file_config(&file_config)?;
-                println!(
-                    "[author]: {}",
-                    serde_json::to_string(&author)
-                        .map_err(|e| format!("Failed to serialize author: {}", e))?
-                );
+                let shown = serde_json::to_string(&author)
+                    .map_err(|e| format!("Failed to serialize author: {}", e))?;
+                file_config.author = Some(author).filter(|author| !author.is_empty());
+                shown
             }
             "git_ai_hooks" => {
                 if add_mode {
                     return Err("Cannot use --add with git_ai_hooks at top level. Use dot notation: git_ai_hooks.post_notes_updated".to_string());
                 }
                 file_config.git_ai_hooks = Some(parse_git_ai_hooks_object(value)?);
-                crate::config::save_file_config(&file_config)?;
-                println!("[git_ai_hooks]: {}", value);
+                value.to_string()
             }
             "codex_hooks_format" => {
                 let format = parse_codex_hooks_format(value)?;
-                file_config.codex_hooks_format = Some(format.as_str().to_string());
-                crate::config::save_file_config(&file_config)?;
-                println!("[codex_hooks_format]: {}", format.as_str());
+                store(
+                    &mut file_config.codex_hooks_format,
+                    format.as_str().to_string(),
+                )
             }
-            "allow_superuser" => {
-                let bool_value = parse_bool(value)?;
-                file_config.allow_superuser = Some(bool_value);
-                crate::config::save_file_config(&file_config)?;
-                println!("[allow_superuser]: {}", bool_value);
-            }
-            "transcript_streaming_lookback_days" => {
-                let days = value.trim().parse::<u32>().map_err(|_| {
-                    format!(
-                        "Invalid transcript_streaming_lookback_days value '{}'. Expected a non-negative integer (0 = unlimited)",
-                        value
-                    )
-                })?;
-                file_config.transcript_streaming_lookback_days = Some(days);
-                crate::config::save_file_config(&file_config)?;
-                println!("[transcript_streaming_lookback_days]: {}", days);
-            }
-            "max_checkpoint_file_size_bytes" => {
-                let bytes = value.trim().parse::<usize>().map_err(|_| {
-                    format!(
-                        "Invalid max_checkpoint_file_size_bytes value '{}'. Expected a non-negative integer in bytes",
-                        value
-                    )
-                })?;
-                file_config.max_checkpoint_file_size_bytes = Some(bytes);
-                crate::config::save_file_config(&file_config)?;
-                println!("[max_checkpoint_file_size_bytes]: {}", bytes);
-            }
-            "max_checkpoint_total_size_bytes" => {
-                let bytes = value.trim().parse::<usize>().map_err(|_| {
-                    format!(
-                        "Invalid max_checkpoint_total_size_bytes value '{}'. Expected a non-negative integer in bytes",
-                        value
-                    )
-                })?;
-                file_config.max_checkpoint_total_size_bytes = Some(bytes);
-                crate::config::save_file_config(&file_config)?;
-                println!("[max_checkpoint_total_size_bytes]: {}", bytes);
-            }
-            "max_checkpoint_total_lines" => {
-                let lines = value.trim().parse::<usize>().map_err(|_| {
-                    format!(
-                        "Invalid max_checkpoint_total_lines value '{}'. Expected a non-negative integer in lines",
-                        value
-                    )
-                })?;
-                file_config.max_checkpoint_total_lines = Some(lines);
-                crate::config::save_file_config(&file_config)?;
-                println!("[max_checkpoint_total_lines]: {}", lines);
-            }
-            "max_transcript_line_bytes"
-            | "max_transcript_batch_bytes"
-            | "max_transcript_file_bytes"
-            | "max_metrics_flush_chunk_bytes" => {
-                let bytes = value
-                    .parse::<usize>()
-                    .ok()
-                    .filter(|bytes| *bytes > 0)
-                    .ok_or_else(|| {
-                        format!(
-                            "Invalid {} value '{}'. Expected a positive integer in bytes",
-                            key, value
-                        )
-                    })?;
-                match key {
-                    "max_transcript_line_bytes" => {
-                        file_config.max_transcript_line_bytes = Some(bytes)
-                    }
-                    "max_transcript_batch_bytes" => {
-                        file_config.max_transcript_batch_bytes = Some(bytes)
-                    }
-                    "max_transcript_file_bytes" => {
-                        file_config.max_transcript_file_bytes = Some(bytes)
-                    }
-                    _ => file_config.max_metrics_flush_chunk_bytes = Some(bytes),
-                }
-                crate::config::save_file_config(&file_config)?;
-                println!("[{}]: {}", key, bytes);
-            }
+            "allow_superuser" => store(&mut file_config.allow_superuser, parse_bool(value)?),
+            "transcript_streaming_lookback_days" => store(
+                &mut file_config.transcript_streaming_lookback_days,
+                parse_integer(name, value, "a non-negative integer (0 = unlimited)")?,
+            ),
+            "max_checkpoint_file_size_bytes" => store(
+                &mut file_config.max_checkpoint_file_size_bytes,
+                parse_integer(name, value, "a non-negative integer in bytes")?,
+            ),
+            "max_checkpoint_total_size_bytes" => store(
+                &mut file_config.max_checkpoint_total_size_bytes,
+                parse_integer(name, value, "a non-negative integer in bytes")?,
+            ),
+            "max_checkpoint_total_lines" => store(
+                &mut file_config.max_checkpoint_total_lines,
+                parse_integer(name, value, "a non-negative integer in lines")?,
+            ),
+            "max_transcript_line_bytes" => store(
+                &mut file_config.max_transcript_line_bytes,
+                positive_bytes()?,
+            ),
+            "max_transcript_batch_bytes" => store(
+                &mut file_config.max_transcript_batch_bytes,
+                positive_bytes()?,
+            ),
+            "max_transcript_file_bytes" => store(
+                &mut file_config.max_transcript_file_bytes,
+                positive_bytes()?,
+            ),
+            "max_metrics_flush_chunk_bytes" => store(
+                &mut file_config.max_metrics_flush_chunk_bytes,
+                positive_bytes()?,
+            ),
             "daemon_memory_limit_mb" => {
-                let limit_mb = value.trim().parse::<u64>().map_err(|_| {
-                    format!(
-                        "Invalid daemon_memory_limit_mb value '{}'. Expected a positive integer in MiB",
-                        value
-                    )
-                })?;
+                let limit_mb: u64 = parse_integer(name, value, "a positive integer in MiB")?;
                 if limit_mb == 0 || limit_mb > crate::config::MAX_DAEMON_MEMORY_LIMIT_MB {
                     return Err(format!(
                         "Invalid daemon_memory_limit_mb value '{}'. Expected an integer between 1 and {} MiB",
@@ -283,9 +206,7 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                         crate::config::MAX_DAEMON_MEMORY_LIMIT_MB
                     ));
                 }
-                file_config.daemon_memory_limit_mb = Some(limit_mb);
-                crate::config::save_file_config(&file_config)?;
-                println!("[daemon_memory_limit_mb]: {}", limit_mb);
+                store(&mut file_config.daemon_memory_limit_mb, limit_mb)
             }
             "custom_attributes" => {
                 if add_mode {
@@ -296,12 +217,12 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
                 // is stored as None so the key is omitted from the config file
                 // rather than persisted as a redundant `{}`.
                 file_config.custom_attributes = if attrs.is_empty() { None } else { Some(attrs) };
-                crate::config::save_file_config(&file_config)?;
-                println!("[custom_attributes]: {}", value);
+                value.to_string()
             }
             _ => return Err(format!("Unknown config key: {}", key)),
-        }
-
+        };
+        crate::config::save_file_config(&file_config)?;
+        println!("[{}]: {}", name, shown);
         return Ok(());
     }
 
@@ -322,32 +243,19 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
             return Err("feature_flags must be a JSON object".to_string());
         }
 
-        // Navigate to the nested location
-        let flags_obj = flags.as_object_mut().unwrap();
-
+        // Navigate to the parent of the key, creating objects on the way. A
+        // single-level key (feature_flags.key) has no intermediate segments.
         let nested_key = key_path[1..].join(".");
-        if key_path.len() == 2 {
-            // Simple nested key: feature_flags.key
-            let parsed_value = parse_value(value)?;
-            if add_mode {
-                // For add mode on objects, this is an upsert
-                flags_obj.insert(key_path[1].clone(), parsed_value);
-            } else {
-                flags_obj.insert(key_path[1].clone(), parsed_value);
-            }
-        } else {
-            // Deep nested key: feature_flags.parent.child...
-            let mut current = flags_obj;
-            for segment in &key_path[1..key_path.len() - 1] {
-                current = current
-                    .entry(segment.clone())
-                    .or_insert_with(|| Value::Object(serde_json::Map::new()))
-                    .as_object_mut()
-                    .ok_or_else(|| format!("Cannot navigate through non-object at {}", segment))?;
-            }
-            let parsed_value = parse_value(value)?;
-            current.insert(key_path.last().unwrap().clone(), parsed_value);
+        let mut current = flags.as_object_mut().unwrap();
+        for segment in &key_path[1..key_path.len() - 1] {
+            current = current
+                .entry(segment.clone())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| format!("Cannot navigate through non-object at {}", segment))?;
         }
+        // On an object, --add is an upsert: the same as a plain set.
+        current.insert(key_path.last().unwrap().clone(), parse_value(value));
 
         validate_feature_flags(&flags)?;
         file_config.feature_flags = Some(flags);
@@ -366,27 +274,18 @@ pub(super) fn set_config_value(key: &str, value: &str, add_mode: bool) -> Result
 
         let hook_name = key_path[1].clone();
         let mut hooks = file_config.git_ai_hooks.unwrap_or_default();
-
-        if add_mode {
-            let mut existing_commands = hooks.get(&hook_name).cloned().unwrap_or_default();
-            let commands_to_add = parse_hook_command_values(value)?;
-            existing_commands.extend(commands_to_add.clone());
-            hooks.insert(hook_name.clone(), existing_commands);
-            file_config.git_ai_hooks = Some(hooks);
-            crate::config::save_file_config(&file_config)?;
-            for command in commands_to_add {
-                println!("+ [{}.{}]: {}", key_path[0], hook_name, command);
-            }
-        } else {
-            let commands = parse_hook_command_values(value)?;
-            hooks.insert(hook_name.clone(), commands.clone());
-            file_config.git_ai_hooks = Some(hooks);
-            crate::config::save_file_config(&file_config)?;
-            for command in commands {
-                println!("[{}.{}]: {}", key_path[0], hook_name, command);
-            }
+        let commands = parse_hook_command_values(value)?;
+        let hook_commands = hooks.entry(hook_name.clone()).or_default();
+        if !add_mode {
+            hook_commands.clear();
         }
-
+        hook_commands.extend(commands.iter().cloned());
+        file_config.git_ai_hooks = Some(hooks);
+        crate::config::save_file_config(&file_config)?;
+        let prefix = if add_mode { "+ " } else { "" };
+        for command in commands {
+            println!("{}[{}.{}]: {}", prefix, key_path[0], hook_name, command);
+        }
         return Ok(());
     }
 

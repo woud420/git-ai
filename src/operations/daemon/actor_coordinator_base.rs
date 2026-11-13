@@ -51,7 +51,6 @@ impl ActorDaemonCoordinator {
             family_sequencers_by_family: Mutex::new(HashMap::new()),
             pending_root_slots_by_root: Mutex::new(HashMap::new()),
             commit_file_timestamp_snapshots_by_root: Mutex::new(HashMap::new()),
-            recent_replay_prerequisites_by_family: Mutex::new(HashMap::new()),
             side_effect_errors_by_family: Mutex::new(HashMap::new()),
             error_log_policy: Mutex::new(Default::default()),
             side_effect_exec_locks: Mutex::new(HashMap::new()),
@@ -78,7 +77,6 @@ impl ActorDaemonCoordinator {
             stream_worker: None,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             jj_observer: None,
-            transcript_shutdown_notify: std::sync::OnceLock::new(),
             streams_db: None,
             bash_history_db: None,
             metrics_db: None,
@@ -339,8 +337,8 @@ impl ActorDaemonCoordinator {
         // The ingest worker exits via its select! shutdown arm (watching
         // shutdown_notify); we no longer rely on channel closure to stop it.
         self.shutdown_notify.notify_waiters();
-        if let Some(transcript_shutdown) = self.transcript_shutdown_notify.get() {
-            transcript_shutdown.notify_one();
+        if let Some(stream_worker) = &self.stream_worker {
+            stream_worker.request_shutdown();
         }
         // Hold the condvar mutex so notify_all cannot race with the
         // check-then-wait sequence in daemon_update_check_loop.
@@ -405,9 +403,6 @@ impl ActorDaemonCoordinator {
         // NOTE: Do NOT call normalizer.sweep_orphans() here — it removes ALL
         // pending/deferred roots unconditionally which destroys in-flight trace
         // state.  sweep_orphans() is only safe at daemon shutdown.
-        if let Ok(mut map) = self.recent_replay_prerequisites_by_family.lock() {
-            map.retain(|_, entries| !entries.is_empty());
-        }
         if let Ok(mut map) = self.side_effect_errors_by_family.lock() {
             map.retain(|_, errors| !errors.is_empty());
         }

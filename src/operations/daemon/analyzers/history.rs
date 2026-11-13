@@ -46,11 +46,10 @@ impl CommandAnalyzer for HistoryAnalyzer {
                 }
             }
             "rebase" => {
-                if args.iter().any(|arg| arg == "--abort") {
-                    events.push(SemanticEvent::RebaseAbort {
-                        head: current_head_from_ref_data(cmd, state.refs).unwrap_or_default(),
-                    });
-                } else if let Some((old_head, new_head)) = rebase_change(cmd, state.refs) {
+                // `--abort` restores the original head: nothing to migrate.
+                if !args.iter().any(|arg| arg == "--abort")
+                    && let Some((old_head, new_head)) = rebase_change(cmd, state.refs)
+                {
                     events.push(SemanticEvent::RebaseComplete {
                         old_head,
                         new_head,
@@ -60,9 +59,7 @@ impl CommandAnalyzer for HistoryAnalyzer {
             }
             "cherry-pick" => {
                 if args.iter().any(|arg| arg == "--abort") {
-                    events.push(SemanticEvent::CherryPickAbort {
-                        head: current_head_from_ref_data(cmd, state.refs).unwrap_or_default(),
-                    });
+                    // Restores the original head: nothing to migrate.
                 } else if args.iter().any(|arg| arg == "--no-commit" || arg == "-n") {
                     events.push(SemanticEvent::CherryPickNoCommit {
                         source_commits: cmd.cherry_pick_source_oids.clone(),
@@ -348,7 +345,7 @@ fn explicit_rebase_branch_change(cmd: &NormalizedCommand) -> Option<(String, Str
     let args = command_args(cmd);
     let branch = explicit_rebase_branch_arg(&args)?;
     let branch_ref = if branch.starts_with("refs/") {
-        branch.to_string()
+        branch
     } else {
         format!("refs/heads/{}", branch)
     };

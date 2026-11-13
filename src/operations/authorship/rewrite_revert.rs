@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::clients::git_cli::{exec_git, exec_git_stdin};
+use crate::clients::git_cli::exec_git_stdin;
 use crate::error::GitAiError;
 use crate::model::authorship_log::LineRange;
 use crate::model::authorship_log_serialization::{
@@ -271,8 +271,12 @@ fn added_lines_from_diff_result(
     added
 }
 
-/// Batch `git rev-parse --verify <revspec>...` for many revspecs in one spawn.
-/// Returns a map from input revspec → resolved OID (only successful entries).
+/// Resolve many revspecs with a SINGLE `cat-file --batch-check` spawn (one line
+/// of output per input, "<oid> <type> <size>" or "<spec> missing"). Returns a
+/// map from input revspec → resolved OID (only successful entries).
+///
+/// `rev-parse --verify` is not usable here: it accepts exactly one revision
+/// and fails with "Needed a single revision" for any larger batch.
 fn batch_rev_parse_verify(
     repo: &Repository,
     revspecs: &[String],
@@ -281,42 +285,19 @@ fn batch_rev_parse_verify(
     if revspecs.is_empty() {
         return Ok(out);
     }
-    let mut args = repo.global_args_for_exec();
-    args.push("rev-parse".to_string());
-    args.push("--verify".to_string());
-    for spec in revspecs {
-        args.push(spec.clone());
-    }
-    // rev-parse prints one resolved OID per input line, in order. If every spec
-    // resolves, this single spawn is all we need.
-    if let Ok(output) = exec_git(&args) {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let oids: Vec<&str> = stdout.lines().collect();
-        if oids.len() == revspecs.len() {
-            for (spec, oid) in revspecs.iter().zip(oids) {
-                out.insert(spec.clone(), oid.trim().to_string());
-            }
-            return Ok(out);
-        }
-    }
-    // A bad revspec makes `rev-parse --verify` fail for the whole batch. Resolve
-    // failure-tolerantly with a SINGLE `cat-file --batch-check` spawn (one line
-    // of output per input, "<oid> <type> <size>" or "<spec> missing"), so we
-    // never fall back to per-spec spawning.
     let mut check_args = repo.global_args_for_exec();
     check_args.push("cat-file".to_string());
     check_args.push("--batch-check".to_string());
     let stdin_data = format!("{}\n", revspecs.join("\n"));
-    if let Ok(output) = exec_git_stdin(&check_args, stdin_data.as_bytes()) {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for (spec, line) in revspecs.iter().zip(stdout.lines()) {
-            let mut parts = line.split_whitespace();
-            if let (Some(oid), Some(kind)) = (parts.next(), parts.next())
-                && kind != "missing"
-                && crate::operations::git::oid::is_full_oid(oid)
-            {
-                out.insert(spec.clone(), oid.to_string());
-            }
+    let output = exec_git_stdin(&check_args, stdin_data.as_bytes())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for (spec, line) in revspecs.iter().zip(stdout.lines()) {
+        let mut parts = line.split_whitespace();
+        if let (Some(oid), Some(kind)) = (parts.next(), parts.next())
+            && kind != "missing"
+            && crate::operations::git::oid::is_full_oid(oid)
+        {
+            out.insert(spec.clone(), oid.to_string());
         }
     }
     Ok(out)
@@ -365,5 +346,14 @@ mod tests {
             Some("reverted-commit".to_string())
         );
         assert_eq!(legacy_revert_metric_original_sha(""), None);
+    }
+
+    /// A git failure is an error, not "no revision resolved".
+    #[test]
+    fn batch_rev_parse_verify_reports_a_git_failure() {
+        let tmp = crate::operations::git::test_utils::TmpRepo::new().unwrap();
+        std::fs::remove_dir_all(tmp.path().join(".git")).unwrap();
+
+        assert!(batch_rev_parse_verify(tmp.gitai_repo(), &["HEAD".to_string()]).is_err());
     }
 }

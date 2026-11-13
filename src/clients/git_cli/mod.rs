@@ -29,11 +29,9 @@ pub(crate) fn exec_git_with_timeout(
     args: &[String],
     timeout: Duration,
 ) -> Result<TimedCommandOutput<Vec<u8>>, GitAiError> {
-    let effective_args = args_with_internal_git_profile(
-        &args_with_disabled_hooks_if_needed(args),
-        InternalGitProfile::General,
-    );
+    let effective_args = effective_git_args(args, InternalGitProfile::General);
     spawn_probe_log(&effective_args);
+    // Not `git_command`: the timeout runner sets its own Windows creation flags.
     let mut command = Command::new(config::Config::get().git_cmd());
     command.args(&effective_args);
     apply_internal_git_machine_env(&mut command);
@@ -110,26 +108,47 @@ fn spawn_probe_log(effective_args: &[String]) {
 #[inline]
 fn spawn_probe_log(_effective_args: &[String]) {}
 
-fn exec_git_allow_nonzero_with_profile_and_env(
-    args: &[String],
-    profile: InternalGitProfile,
-    envs: &[(&str, &OsStr)],
-) -> Result<Output, GitAiError> {
-    let effective_args =
-        args_with_internal_git_profile(&args_with_disabled_hooks_if_needed(args), profile);
-    spawn_probe_log(&effective_args);
+/// The args an internal git invocation actually runs with: hooks disabled
+/// when needed, plus the profile's machine-parse options.
+fn effective_git_args(args: &[String], profile: InternalGitProfile) -> Vec<String> {
+    args_with_internal_git_profile(&args_with_disabled_hooks_if_needed(args), profile)
+}
+
+/// A `Command` for the configured git binary running `effective_args`. The
+/// caller applies its own environment and stdio.
+fn git_command(effective_args: &[String]) -> Command {
     let mut cmd = Command::new(config::Config::get().git_cmd());
-    cmd.args(&effective_args);
-    apply_internal_git_machine_env(&mut cmd);
-    for (key, value) in envs {
-        cmd.env(key, value);
-    }
+    cmd.args(effective_args);
 
     #[cfg(windows)]
     {
         if !is_interactive_terminal() {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+    }
+
+    cmd
+}
+
+fn exec_git_allow_nonzero_with_profile_and_env(
+    args: &[String],
+    profile: InternalGitProfile,
+    envs: &[(&str, &OsStr)],
+) -> Result<Output, GitAiError> {
+    exec_effective_git_args(&effective_git_args(args, profile), envs)
+}
+
+/// Run git with already-resolved `effective_args` and return its output
+/// regardless of exit status.
+fn exec_effective_git_args(
+    effective_args: &[String],
+    envs: &[(&str, &OsStr)],
+) -> Result<Output, GitAiError> {
+    spawn_probe_log(effective_args);
+    let mut cmd = git_command(effective_args);
+    apply_internal_git_machine_env(&mut cmd);
+    for (key, value) in envs {
+        cmd.env(key, value);
     }
 
     cmd.output().map_err(GitAiError::IoError)
@@ -140,23 +159,11 @@ fn exec_git_allow_nonzero_with_profile_and_env(
 /// This is used by streaming consumers that cannot call `exec_git*` without
 /// buffering all stdout in memory.
 pub fn spawn_git_stdout(args: &[String]) -> Result<Child, GitAiError> {
-    let effective_args = args_with_internal_git_profile(
-        &args_with_disabled_hooks_if_needed(args),
-        InternalGitProfile::General,
-    );
-    let mut cmd = Command::new(config::Config::get().git_cmd());
-    cmd.args(&effective_args)
-        .stdin(std::process::Stdio::null())
+    let mut cmd = git_command(&effective_git_args(args, InternalGitProfile::General));
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit());
     apply_internal_git_machine_env(&mut cmd);
-
-    #[cfg(windows)]
-    {
-        if !is_interactive_terminal() {
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-    }
 
     cmd.spawn().map_err(GitAiError::IoError)
 }
@@ -166,23 +173,11 @@ pub fn spawn_git_stdout(args: &[String]) -> Result<Child, GitAiError> {
 /// This is used when a command intentionally delegates rendering and paging
 /// behavior to git instead of consuming output internally.
 pub fn spawn_git_passthrough(args: &[String]) -> Result<Child, GitAiError> {
-    let effective_args = args_with_internal_git_profile(
-        &args_with_disabled_hooks_if_needed(args),
-        InternalGitProfile::General,
-    );
-    let mut cmd = Command::new(config::Config::get().git_cmd());
-    cmd.args(&effective_args)
-        .stdin(std::process::Stdio::inherit())
+    let mut cmd = git_command(&effective_git_args(args, InternalGitProfile::General));
+    cmd.stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit());
     apply_internal_git_env(&mut cmd);
-
-    #[cfg(windows)]
-    {
-        if !is_interactive_terminal() {
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-    }
 
     cmd.spawn().map_err(GitAiError::IoError)
 }
@@ -239,9 +234,8 @@ pub fn exec_git_with_profile(
     args: &[String],
     profile: InternalGitProfile,
 ) -> Result<Output, GitAiError> {
-    let effective_args =
-        args_with_internal_git_profile(&args_with_disabled_hooks_if_needed(args), profile);
-    let output = exec_git_allow_nonzero_with_profile(args, profile)?;
+    let effective_args = effective_git_args(args, profile);
+    let output = exec_effective_git_args(&effective_args, &[])?;
 
     if !output.status.success() {
         return Err(git_cli_error(
@@ -268,19 +262,11 @@ type StdinWriterHandle = std::thread::JoinHandle<std::io::Result<()>>;
 
 fn spawn_git_piped(effective_args: &[String]) -> Result<Child, GitAiError> {
     spawn_probe_log(effective_args);
-    let mut cmd = Command::new(config::Config::get().git_cmd());
-    cmd.args(effective_args)
-        .stdin(std::process::Stdio::piped())
+    let mut cmd = git_command(effective_args);
+    cmd.stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     apply_internal_git_machine_env(&mut cmd);
-
-    #[cfg(windows)]
-    {
-        if !is_interactive_terminal() {
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-    }
 
     cmd.spawn().map_err(GitAiError::IoError)
 }
@@ -321,8 +307,7 @@ fn exec_git_with_stdin_writer_and_profile(
     profile: InternalGitProfile,
     write_stdin: impl FnOnce(&mut dyn std::io::Write) -> std::io::Result<()> + Send,
 ) -> Result<Output, GitAiError> {
-    let effective_args =
-        args_with_internal_git_profile(&args_with_disabled_hooks_if_needed(args), profile);
+    let effective_args = effective_git_args(args, profile);
     let mut child = spawn_git_piped(&effective_args)?;
     let stdin = child.stdin.take().expect("git child stdin is piped");
 
@@ -372,22 +357,10 @@ pub fn exec_git_stdin_streaming(
 ) -> Result<(), GitAiError> {
     use std::io::BufRead;
 
-    let effective_args = args_with_internal_git_profile(
-        &args_with_disabled_hooks_if_needed(args),
-        InternalGitProfile::General,
-    );
+    let effective_args = effective_git_args(args, InternalGitProfile::General);
     let (mut child, stdin_handle) = spawn_git_stdin_piped(&effective_args, stdin_data)?;
 
-    // Drain stderr concurrently so the child can never block on a full stderr
-    // pipe while we are still reading stdout.
-    let stderr_handle = child.stderr.take().map(|mut stderr| {
-        std::thread::spawn(move || {
-            use std::io::Read;
-            let mut buf = Vec::new();
-            let _ = stderr.read_to_end(&mut buf);
-            buf
-        })
-    });
+    let stderr_handle = drain_stderr(&mut child);
 
     let stdout = child.stdout.take().expect("child stdout is piped");
     let mut reader = std::io::BufReader::new(stdout);
@@ -431,6 +404,52 @@ pub fn exec_git_stdin_streaming(
     }
 
     Ok(())
+}
+
+/// Drain stderr concurrently so the child can never block on a full stderr
+/// pipe while we are still reading stdout.
+fn drain_stderr(child: &mut Child) -> Option<std::thread::JoinHandle<Vec<u8>>> {
+    child.stderr.take().map(|mut stderr| {
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            let _ = stderr.read_to_end(&mut buf);
+            buf
+        })
+    })
+}
+
+/// Run a git command as a dialogue on its stdin and stdout: `converse` writes
+/// a request, reads the answer, and may base its next request on it. This is
+/// one git process however many exchanges are made. Only for commands that
+/// answer each request as it arrives, such as `cat-file --batch`.
+pub fn exec_git_dialogue<T>(
+    args: &[String],
+    converse: impl FnOnce(&mut dyn std::io::Write, &mut dyn std::io::BufRead) -> Result<T, GitAiError>,
+) -> Result<T, GitAiError> {
+    let effective_args = effective_git_args(args, InternalGitProfile::General);
+    let mut child = spawn_git_piped(&effective_args)?;
+    let stderr_handle = drain_stderr(&mut child);
+    let mut stdin = child.stdin.take().expect("git child stdin is piped");
+    let stdout = child.stdout.take().expect("git child stdout is piped");
+    let mut stdout = std::io::BufReader::new(stdout);
+
+    let result = converse(&mut stdin, &mut stdout);
+    // Closing stdin ends the child. Closing stdout keeps it from blocking on
+    // an answer that was not read.
+    drop(stdin);
+    drop(stdout);
+    let status = child.wait().map_err(GitAiError::IoError)?;
+    let value = result?;
+
+    if !status.success() {
+        let stderr_bytes = stderr_handle
+            .map(|h| h.join().unwrap_or_default())
+            .unwrap_or_default();
+        return Err(git_cli_error(status.code(), &stderr_bytes, effective_args));
+    }
+
+    Ok(value)
 }
 
 /// Helper to execute a git command with data provided on stdin and an explicit profile.

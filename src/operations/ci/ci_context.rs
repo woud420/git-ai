@@ -3,7 +3,7 @@ use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::model::domain::RewriteEvent;
 use crate::operations::authorship::rewrite::handle_rewrite_event;
-use crate::operations::git::notes_api::{read_authorship_v3, read_note};
+use crate::operations::git::notes_api::{commits_with_notes, read_authorship_v3, read_note};
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::refs::{
     AI_AUTHORSHIP_FORK_TRACKING_REF, copy_missing_notes_for_commits_from_ref, ref_exists,
@@ -62,10 +62,7 @@ pub enum CiRunResult {
     /// Skipped: one or more current PR commits already have authorship notes
     SkippedExistingSyncNotes,
     /// Authorship already exists for this commit
-    AlreadyExists {
-        #[allow(dead_code)]
-        authorship_log: AuthorshipLog,
-    },
+    AlreadyExists,
     /// Fork notes were fetched and preserved for a merge commit from a fork
     ForkNotesPreserved,
     /// No AI authorship to track (pre-git-ai commits or human-only code)
@@ -115,22 +112,13 @@ impl CiContext {
             } => {
                 println!("Working repository is in {}", self.repo.path().display());
 
-                if options.skip_fetch_notes {
-                    println!("Skipping authorship history fetch");
-                } else {
-                    println!("Fetching authorship history");
-                    // Ensure we have the full authorship history before checking for existing notes
-                    fetch_authorship_notes(&self.repo, "origin")?;
-                    println!("Fetched authorship history");
-                }
+                self.fetch_authorship_unless_skipped(options)?;
 
                 // Check if authorship already exists for this commit
                 match read_authorship_v3(&self.repo, merge_commit_sha) {
-                    Ok(existing_log) => {
+                    Ok(_) => {
                         println!("{} already has authorship", merge_commit_sha);
-                        return Ok(CiRunResult::AlreadyExists {
-                            authorship_log: existing_log,
-                        });
+                        return Ok(CiRunResult::AlreadyExists);
                     }
                     Err(e) => {
                         if read_note(&self.repo, merge_commit_sha).is_some() {
@@ -181,13 +169,7 @@ impl CiContext {
                                 "Using existing local authorship notes (no additional fork notes fetched)"
                             );
                         }
-                        if options.skip_push {
-                            println!("Skipping authorship push (--skip-push). Done.");
-                        } else {
-                            println!("Pushing authorship...");
-                            self.repo.push_authorship("origin")?;
-                            println!("Pushed authorship. Done.");
-                        }
+                        self.push_authorship_unless_skipped(options)?;
                         return Ok(CiRunResult::ForkNotesPreserved);
                     }
                     println!(
@@ -215,13 +197,7 @@ impl CiContext {
                                 "Imported {} fork authorship notes for PR commits",
                                 fork_notes_imported
                             );
-                            if options.skip_push {
-                                println!("Skipping authorship push (--skip-push). Done.");
-                            } else {
-                                println!("Pushing authorship...");
-                                self.repo.push_authorship("origin")?;
-                                println!("Pushed authorship. Done.");
-                            }
+                            self.push_authorship_unless_skipped(options)?;
                             return Ok(CiRunResult::ForkNotesPreserved);
                         }
                     }
@@ -373,13 +349,7 @@ impl CiContext {
                             );
                             return Ok(CiRunResult::NoAuthorshipAvailable);
                         }
-                        if options.skip_push {
-                            println!("Skipping authorship push (--skip-push). Done.");
-                        } else {
-                            println!("Pushing authorship...");
-                            self.repo.push_authorship("origin")?;
-                            println!("Pushed authorship. Done.");
-                        }
+                        self.push_authorship_unless_skipped(options)?;
                         Ok(CiRunResult::AuthorshipRewritten { authorship_log })
                     }
                     Err(e) => {
@@ -403,13 +373,7 @@ impl CiContext {
             } => {
                 println!("Working repository is in {}", self.repo.path().display());
 
-                if options.skip_fetch_notes {
-                    println!("Skipping authorship history fetch");
-                } else {
-                    println!("Fetching authorship history");
-                    fetch_authorship_notes(&self.repo, "origin")?;
-                    println!("Fetched authorship history");
-                }
+                self.fetch_authorship_unless_skipped(options)?;
 
                 if previous_head_sha == head_sha {
                     println!(
@@ -535,7 +499,7 @@ impl CiContext {
                     RewriteEvent::NonFastForward {
                         old_tip: previous_head_sha.to_string(),
                         new_tip: head_sha.to_string(),
-                        onto: Some(resolved_base_sha.clone()),
+                        onto: Some(resolved_base_sha),
                     },
                 )?;
                 println!("Rewrote authorship.");
@@ -548,19 +512,36 @@ impl CiContext {
                     return Ok(CiRunResult::NoAuthorshipAvailable);
                 }
 
-                if options.skip_push {
-                    println!("Skipping authorship push (--skip-push). Done.");
-                } else {
-                    println!("Pushing authorship...");
-                    self.repo.push_authorship("origin")?;
-                    println!("Pushed authorship. Done.");
-                }
+                self.push_authorship_unless_skipped(options)?;
 
                 Ok(CiRunResult::SyncAuthorshipRewritten {
                     commit_count: notes_after,
                 })
             }
         }
+    }
+
+    /// Fetch the full authorship history from origin unless `--skip-fetch-notes`.
+    fn fetch_authorship_unless_skipped(&self, options: CiRunOptions) -> Result<(), GitAiError> {
+        if options.skip_fetch_notes {
+            println!("Skipping authorship history fetch");
+        } else {
+            println!("Fetching authorship history");
+            fetch_authorship_notes(&self.repo, "origin")?;
+            println!("Fetched authorship history");
+        }
+        Ok(())
+    }
+
+    fn push_authorship_unless_skipped(&self, options: CiRunOptions) -> Result<(), GitAiError> {
+        if options.skip_push {
+            println!("Skipping authorship push (--skip-push). Done.");
+        } else {
+            println!("Pushing authorship...");
+            self.repo.push_authorship("origin")?;
+            println!("Pushed authorship. Done.");
+        }
+        Ok(())
     }
 
     pub fn teardown(&self) -> Result<(), GitAiError> {
@@ -683,10 +664,7 @@ impl CiContext {
     fn has_notes_for_any_commit(&self, commit_shas: &[String]) -> Result<bool, GitAiError> {
         // Backend-aware: on the HTTP backend notes live in the notes-db cache,
         // so a refs/notes/ai-only check would always report "no notes".
-        Ok(
-            !crate::operations::git::notes_api::commits_with_notes(&self.repo, commit_shas)?
-                .is_empty(),
-        )
+        Ok(!commits_with_notes(&self.repo, commit_shas)?.is_empty())
     }
 
     fn original_pr_commits(
@@ -773,31 +751,34 @@ impl CiContext {
         merge_commit_sha: &str,
         expected_count: usize,
     ) -> Vec<String> {
+        if expected_count == 0 {
+            return Vec::new();
+        }
+        // One first-parent walk printing `<sha> <parents...>` per commit. The
+        // SHAs are full even when a caller like `git-ai ci local merge` passes
+        // an abbreviated `merge_commit_sha`, so they stay comparable to the
+        // 40-char SHAs produced by `git rev-list` elsewhere.
+        let mut args = self.repo.global_args_for_exec();
+        args.extend([
+            "rev-list".to_string(),
+            "--first-parent".to_string(),
+            "--parents".to_string(),
+            format!("--max-count={expected_count}"),
+            merge_commit_sha.to_string(),
+            "--".to_string(),
+        ]);
+        let Ok(output) = exec_git(&args) else {
+            return vec![merge_commit_sha.to_string()];
+        };
+
         let mut commits = Vec::new();
-        // Resolve to a full SHA up front so the entries are comparable to the
-        // full 40-char SHAs produced by `git rev-list`. Callers like
-        // `git-ai ci local merge` may pass an abbreviated `merge_commit_sha`; the
-        // remaining entries already come from parent ids, which are full.
-        let mut current_sha = self
-            .repo
-            .revparse_single(merge_commit_sha)
-            .map(|obj| obj.id())
-            .unwrap_or_else(|_| merge_commit_sha.to_string());
-
-        for _ in 0..expected_count {
-            commits.push(current_sha.clone());
-
-            // Get the parent of current commit
-            match self.repo.find_commit(current_sha.clone()) {
-                Ok(commit) => {
-                    let parents: Vec<_> = commit.parents().collect();
-                    if parents.len() != 1 {
-                        // Not a linear chain (merge commit or root), stop here
-                        break;
-                    }
-                    current_sha = parents[0].id().to_string();
-                }
-                Err(_) => break,
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let mut shas = line.split_whitespace();
+            let Some(commit) = shas.next() else { break };
+            commits.push(commit.to_string());
+            if shas.count() != 1 {
+                // Not a linear chain (merge commit or root), stop here
+                break;
             }
         }
 
@@ -832,10 +813,8 @@ fn commits_in_range_oldest_first(
 }
 
 fn count_commits_with_authorship_notes(repo: &Repository, commits: &[String]) -> usize {
-    commits
-        .iter()
-        .filter(|sha| read_note(repo, sha).is_some())
-        .count()
+    // Batched and backend-aware; a failed lookup counts as no notes, as before.
+    commits_with_notes(repo, commits).map_or(0, |noted| noted.len())
 }
 
 fn ensure_commit_available_for_sync(
@@ -928,104 +907,5 @@ fn commit_is_ancestor(
 mod patch_id_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::operations::git::test_utils::TmpRepo;
-
-    #[test]
-    fn test_ci_event_debug() {
-        let event = CiEvent::Merge {
-            merge_commit_sha: "abc123".to_string(),
-            head_ref: "feature".to_string(),
-            head_sha: "def456".to_string(),
-            base_ref: "main".to_string(),
-            base_sha: "ghi789".to_string(),
-            fork_clone_url: None,
-        };
-
-        let debug_str = format!("{:?}", event);
-        assert!(debug_str.contains("Merge"));
-        assert!(debug_str.contains("abc123"));
-        assert!(debug_str.contains("feature"));
-    }
-
-    #[test]
-    fn test_ci_run_result_debug() {
-        let result = CiRunResult::SkippedSimpleMerge;
-        let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("SkippedSimpleMerge"));
-
-        let result2 = CiRunResult::SkippedFastForward;
-        let debug_str2 = format!("{:?}", result2);
-        assert!(debug_str2.contains("SkippedFastForward"));
-
-        let result3 = CiRunResult::NoAuthorshipAvailable;
-        let debug_str3 = format!("{:?}", result3);
-        assert!(debug_str3.contains("NoAuthorshipAvailable"));
-    }
-
-    #[test]
-    fn commit_is_ancestor_returns_false_for_unrelated_histories() {
-        let repo = TmpRepo::new().expect("test repo");
-        repo.write_file("main.txt", "main", false)
-            .expect("write main");
-        let main_sha = repo.commit_all("main commit").expect("main commit");
-
-        repo.git_command(&["switch", "--orphan", "unrelated"])
-            .expect("orphan branch");
-        repo.git_command(&["rm", "-rf", "--ignore-unmatch", "."])
-            .expect("clear tree");
-        repo.write_file("unrelated.txt", "unrelated", false)
-            .expect("write unrelated");
-        let unrelated_sha = repo
-            .commit_all("unrelated commit")
-            .expect("unrelated commit");
-
-        assert!(
-            !commit_is_ancestor(repo.gitai_repo(), &main_sha, &unrelated_sha)
-                .expect("unrelated histories should not error")
-        );
-    }
-
-    #[test]
-    fn commit_is_ancestor_errors_for_invalid_descendant() {
-        let repo = TmpRepo::new().expect("test repo");
-        repo.write_file("main.txt", "main", false)
-            .expect("write main");
-        let main_sha = repo.commit_all("main commit").expect("main commit");
-
-        assert!(commit_is_ancestor(repo.gitai_repo(), &main_sha, "not-a-sha").is_err());
-    }
-
-    #[test]
-    fn sync_fetch_uses_blobless_only_for_named_promisor_remote() {
-        let repo = TmpRepo::new().expect("test repo");
-
-        assert!(
-            !sync_fetch_remote_supports_lazy_blobs(repo.gitai_repo(), "origin")
-                .expect("missing promisor config should be false")
-        );
-
-        repo.git_command(&["config", "remote.origin.promisor", "true"])
-            .expect("set promisor config");
-        assert!(
-            sync_fetch_remote_supports_lazy_blobs(repo.gitai_repo(), "origin")
-                .expect("named promisor remote should allow blobless fetch")
-        );
-
-        assert!(
-            !sync_fetch_remote_supports_lazy_blobs(
-                repo.gitai_repo(),
-                "https://github.com/acme/repo.git"
-            )
-            .expect("direct URL should not use blobless fetch")
-        );
-        assert!(
-            !sync_fetch_remote_supports_lazy_blobs(
-                repo.gitai_repo(),
-                "git@github.com:acme/repo.git"
-            )
-            .expect("direct SSH URL should not use blobless fetch")
-        );
-    }
-}
+#[path = "ci_context_tests.rs"]
+mod tests;

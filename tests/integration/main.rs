@@ -123,7 +123,6 @@ mod package_manager_upgrade;
 mod packaging_contract;
 mod pending_ai_edit_suppression;
 mod performance;
-mod performance_targets;
 mod pi;
 mod post_commit_unit;
 mod pre_commit_unit;

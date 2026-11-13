@@ -2254,13 +2254,17 @@ fn test_diff_json_deleted_hunks_line_level_exact_mapping() {
         .stage_all_and_commit("Delete exact target lines")
         .unwrap();
 
+    let spawn_log = repo.test_home_path().join("diff-metadata-spawns.log");
     let json_output = repo
-        .git_ai(&[
-            "diff",
-            &deletion_commit.commit_sha,
-            "--json",
-            "--blame-deletions",
-        ])
+        .git_ai_with_env(
+            &[
+                "diff",
+                &deletion_commit.commit_sha,
+                "--json",
+                "--blame-deletions",
+            ],
+            &[("GIT_AI_SPAWN_LOG", spawn_log.to_str().unwrap())],
+        )
         .expect("diff --json --blame-deletions should succeed");
     let json: Value = serde_json::from_str(&json_output).expect("diff JSON should parse");
 
@@ -2325,6 +2329,89 @@ fn test_diff_json_deleted_hunks_line_level_exact_mapping() {
             .as_str()
             .expect("msg should be string"),
         "Delete exact target lines"
+    );
+    for commit in [&source_commit, &deletion_commit] {
+        let metadata = &commits[&commit.commit_sha];
+        assert_eq!(metadata["author"], "Test User <test@example.com>");
+        assert_eq!(metadata["full_msg"], metadata["msg"]);
+        assert!(
+            metadata["authored_time"]
+                .as_str()
+                .is_some_and(|time| time.contains('T')),
+            "authored_time should be ISO 8601: {metadata}"
+        );
+        assert!(metadata["authorship_note"].is_string(), "{metadata}");
+    }
+
+    // One log resolves blame abbreviations, and one reads metadata for all
+    // referenced commits without a `git show` per commit.
+    let spawns = std::fs::read_to_string(&spawn_log).expect("read diff spawn log");
+    assert_eq!(
+        spawns.lines().filter(|line| *line == "log").count(),
+        2,
+        "spawns:\n{spawns}"
+    );
+    assert!(
+        spawns.lines().filter(|line| *line == "show").count() < commits.len(),
+        "spawns:\n{spawns}"
+    );
+}
+
+/// One note that cannot be read must not cost the other commits theirs, and
+/// must not send every commit through its own `git notes show`.
+#[test]
+fn test_diff_json_unreadable_note_keeps_other_notes_without_per_commit_reads() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("notes.txt");
+    file.set_contents(crate::lines!["one".ai(), "two".ai(), "three".ai()]);
+    let first = repo.stage_all_and_commit("first").unwrap();
+    file.replace_at(0, "ONE".ai());
+    let second = repo.stage_all_and_commit("second").unwrap();
+    file.replace_at(1, "TWO".ai());
+    let third = repo.stage_all_and_commit("third").unwrap();
+
+    // Make the second commit's note a gitlink: an entry that is not a blob.
+    let index = repo.test_home_path().join("notes-index");
+    let env = [("GIT_INDEX_FILE", index.to_str().unwrap())];
+    repo.git_og_with_env(&["read-tree", "refs/notes/ai"], &env)
+        .unwrap();
+    let note_paths = repo.git_og_with_env(&["ls-files"], &env).unwrap();
+    let note_path = note_paths
+        .lines()
+        .find(|path| path.replace('/', "") == second.commit_sha)
+        .expect("second commit should have a note");
+    let gitlink = format!("160000,{},{note_path}", second.commit_sha);
+    repo.git_og_with_env(&["update-index", "--cacheinfo", &gitlink], &env)
+        .unwrap();
+    let tree = repo.git_og_with_env(&["write-tree"], &env).unwrap();
+    let notes_commit = repo
+        .git_og(&["commit-tree", tree.trim(), "-m", "unreadable note"])
+        .unwrap();
+    repo.git_og(&["update-ref", "refs/notes/ai", notes_commit.trim()])
+        .unwrap();
+
+    let spawn_log = repo.test_home_path().join("diff-notes-spawns.log");
+    let range = format!("{}..{}", first.commit_sha, third.commit_sha);
+    let json_output = repo
+        .git_ai_with_env(
+            &["diff", &range, "--json", "--blame-deletions"],
+            &[("GIT_AI_SPAWN_LOG", spawn_log.to_str().unwrap())],
+        )
+        .expect("diff --json should succeed");
+    let json: Value = serde_json::from_str(&json_output).expect("diff JSON should parse");
+
+    let commits = json["commits"]
+        .as_object()
+        .expect("commits should be object");
+    for readable in [&first, &third] {
+        let note = &commits[&readable.commit_sha]["authorship_note"];
+        assert!(note.is_string(), "readable note was dropped: {commits:?}");
+    }
+    assert!(commits[&second.commit_sha]["authorship_note"].is_null());
+    let spawns = std::fs::read_to_string(&spawn_log).expect("read diff spawn log");
+    assert!(
+        !spawns.lines().any(|line| line == "notes"),
+        "spawns:\n{spawns}"
     );
 }
 

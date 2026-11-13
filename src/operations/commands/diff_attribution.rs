@@ -27,26 +27,6 @@ use crate::operations::commands::diff_parsing::{
 // Public API
 // ============================================================================
 
-/// Overlay attribution on diff hunks, returning a per-line attribution map.
-///
-/// This is a convenience wrapper around [`build_diff_artifacts`] for callers
-/// that only need the attribution map.
-pub fn overlay_diff_attributions(
-    repo: &Repository,
-    from_commit: &str,
-    to_commit: &str,
-    hunks: &[DiffHunk],
-) -> Result<HashMap<DiffLineKey, Attribution>, GitAiError> {
-    let (_, attributions, _, _, _, _, _) = build_line_attribution_data(
-        repo,
-        from_commit,
-        to_commit,
-        hunks,
-        &DiffCommandOptions::default(),
-    )?;
-    Ok(attributions)
-}
-
 /// Build [`DiffBuildArtifacts`] for the diff between `from_commit` and `to_commit`.
 pub fn build_diff_artifacts(
     repo: &Repository,
@@ -95,7 +75,7 @@ pub fn build_diff_artifacts_with_note(
     let line_contents = build_line_content_map(&hunks);
 
     let (annotations_by_file, attributions, line_details, prompts, sessions, humans, mut commits) =
-        build_line_attribution_data(repo, from_commit, to_commit, &hunks, options)?;
+        build_line_attribution_data(repo, from_commit, to_commit, &hunks, options);
 
     let json_hunks = build_json_hunks(
         repo,
@@ -213,18 +193,15 @@ pub(super) fn build_line_attribution_data(
     to_commit: &str,
     hunks: &[DiffHunk],
     options: &DiffCommandOptions,
-) -> Result<
-    (
-        BTreeMap<String, BTreeMap<String, Vec<LineRange>>>,
-        HashMap<DiffLineKey, Attribution>,
-        HashMap<DiffLineKey, LineAttributionDetail>,
-        BTreeMap<String, PromptRecord>,
-        BTreeMap<String, SessionRecord>,
-        BTreeMap<String, HumanRecord>,
-        BTreeMap<String, crate::operations::commands::diff::DiffCommitMetadata>,
-    ),
-    GitAiError,
-> {
+) -> (
+    BTreeMap<String, BTreeMap<String, Vec<LineRange>>>,
+    HashMap<DiffLineKey, Attribution>,
+    HashMap<DiffLineKey, LineAttributionDetail>,
+    BTreeMap<String, PromptRecord>,
+    BTreeMap<String, SessionRecord>,
+    BTreeMap<String, HumanRecord>,
+    BTreeMap<String, crate::operations::commands::diff::DiffCommitMetadata>,
+) {
     let mut annotations_by_file: BTreeMap<String, BTreeMap<String, Vec<LineRange>>> =
         BTreeMap::new();
     let mut attributions: HashMap<DiffLineKey, Attribution> = HashMap::new();
@@ -279,7 +256,7 @@ pub(super) fn build_line_attribution_data(
         }
     }
 
-    Ok((
+    (
         annotations_by_file,
         attributions,
         line_details,
@@ -287,7 +264,7 @@ pub(super) fn build_line_attribution_data(
         sessions,
         humans,
         commits,
-    ))
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -380,8 +357,7 @@ fn apply_blame_for_side(
 
     let mut line_to_commit: HashMap<u32, String> = HashMap::new();
     for blame_hunk in &analysis.blame_hunks {
-        crate::operations::commands::diff_json_builder::ensure_commit_metadata(
-            repo,
+        crate::operations::commands::diff_json_builder::reference_commit(
             &blame_hunk.commit_sha,
             commits,
         );

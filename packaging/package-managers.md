@@ -20,6 +20,8 @@ brew install --HEAD woud420/git-ai/git-ai
 ```
 
 Homebrew builds the current fork `main` with Rust and its locked dependencies.
+The source formula uses Homebrew's `rustup` to download Rust 1.100.0 into its
+temporary build directory, without changing your Rust toolchains or default.
 This works before the first binary release and supports macOS and Linux on
 x86_64 and ARM64. Homebrew 7 may require trusting the formula first:
 `brew trust --formula woud420/git-ai/git-ai`.

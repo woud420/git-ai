@@ -1,4 +1,3 @@
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
@@ -149,21 +148,14 @@ impl ActorDaemonCoordinator {
     ///
     /// Sequence numbers are allocated only after `enqueue_trace_payload` has
     /// reserved queue capacity, so the `processed_trace_ingest_seq` watermark
-    /// used by checkpoint drain waits advances without unqueued gaps.
+    /// used by checkpoint drain waits advances without unqueued gaps, and
+    /// read-only invocations never perturb the ingest sequence counter.
+    ///
+    /// Along the way this tracks the trace2 root metadata needed for ordering
+    /// and the read-only fast path. It deliberately does not read mutable
+    /// repository state or inject daemon-derived repository/ref snapshots
+    /// into the trace payload.
     pub(crate) fn prepare_trace_payload_for_ingest(&self, payload: &mut Value) -> bool {
-        // Check read-only status BEFORE allocating a sequence number so that
-        // read-only invocations never perturb the ingest sequence counter.
-        let is_read_only = self.track_trace_payload_for_ingest(payload);
-        if is_read_only {
-            return false;
-        }
-        true
-    }
-
-    /// Tracks trace2 root metadata needed for ordering and read-only fast paths.
-    /// This deliberately does not read mutable repository state or inject
-    /// daemon-derived repository/ref snapshots into the trace payload.
-    pub(crate) fn track_trace_payload_for_ingest(&self, payload: &mut Value) -> bool {
         let event = payload
             .get("event")
             .and_then(Value::as_str)
@@ -175,30 +167,45 @@ impl ActorDaemonCoordinator {
             .unwrap_or_default()
             .to_string();
         if sid.is_empty() {
-            return false;
+            return true;
         }
 
         let root = trace_root_sid(&sid).to_string();
         let argv = trace_payload_argv(payload);
-        let worktree_hint = trace_payload_worktree_hint(payload);
-        let started_at_ns = trace_payload_time_ns(payload);
+        let has_own_argv = !argv.is_empty();
         let early_primary =
-            trace_payload_primary_command(payload).or_else(|| trace_argv_primary_command(&argv));
+            trace_payload_cmd_name(payload).or_else(|| trace_argv_primary_command(&argv));
         let event_is_read_only =
             trace_invocation_is_definitely_read_only(early_primary.as_deref(), &argv);
+        let root_start = event == "start" && sid == root;
+        // Only a root's own start frame records when the root began.
+        let started_at_ns = if root_start {
+            trace_payload_time_ns(payload)
+        } else {
+            None
+        };
+        // Nothing reads the repository of a read-only root: its frames are
+        // never queued and the family fences skip it. The root's own start
+        // frame settles that here; later frames learn it under the lock.
+        let worktree_hint = if root_start && has_own_argv && event_is_read_only {
+            None
+        } else {
+            trace_payload_worktree_hint(payload)
+        };
 
         let mut ingress = match self.trace_ingress_state.lock() {
             Ok(guard) => guard,
-            Err(_) => return false,
+            Err(_) => return true,
         };
         if sid != root && ingress.completed_roots.contains(&root) {
-            return true;
+            return false;
         }
+        let known_read_only_root = ingress.root_definitely_read_only.contains(&root);
         ingress
             .root_last_activity_ns
             .insert(root.clone(), now_unix_nanos() as u64);
 
-        if event == "start" && sid == root {
+        if root_start {
             ingress.roots_seen_own_start.insert(root.clone());
             let started_at_ns = started_at_ns.unwrap_or_else(now_unix_nanos);
             ingress
@@ -207,33 +214,33 @@ impl ActorDaemonCoordinator {
                 .or_insert(started_at_ns);
         }
 
-        if let Some(worktree) = worktree_hint.clone() {
+        if !known_read_only_root && let Some(worktree) = worktree_hint.clone() {
             if let Some(common_dir) = common_dir_for_worktree(&worktree) {
-                let family =
-                    crate::operations::git::canonicalize::canonicalize_or_self(&common_dir);
-                ingress
-                    .root_families
-                    .insert(root.clone(), family.to_string_lossy().to_string());
+                let family = git_backend::family_key_for_common_dir(&common_dir).0;
+                ingress.root_families.insert(root.clone(), family);
             }
             ingress.root_worktrees.insert(root.clone(), worktree);
         }
 
-        if event == "start" && sid == root && !argv.is_empty() {
-            ingress.root_argv.insert(root.clone(), argv.clone());
+        let effective_argv = if has_own_argv {
+            argv.as_slice()
+        } else {
+            ingress
+                .root_argv
+                .get(&root)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+        };
+        let effective_primary =
+            early_primary.or_else(|| trace_argv_primary_command(effective_argv));
+        let command_mutates_refs =
+            trace_invocation_may_mutate_refs(effective_primary.as_deref(), effective_argv);
+        if root_start && has_own_argv {
             if event_is_read_only {
                 ingress.root_definitely_read_only.insert(root.clone());
             }
+            ingress.root_argv.insert(root.clone(), argv);
         }
-
-        let effective_argv = if argv.is_empty() {
-            ingress.root_argv.get(&root).cloned().unwrap_or_default()
-        } else {
-            argv
-        };
-        let effective_primary =
-            early_primary.or_else(|| trace_argv_primary_command(&effective_argv));
-        let command_mutates_refs =
-            trace_invocation_may_mutate_refs(effective_primary.as_deref(), &effective_argv);
         if let Some(primary) = effective_primary.as_deref() {
             ingress
                 .root_mutating
@@ -277,14 +284,22 @@ impl ActorDaemonCoordinator {
                 .insert(root.clone(), offsets);
         }
 
-        let read_only_root =
-            event_is_read_only || ingress.root_definitely_read_only.contains(&root);
-        let inherited = (
-            ingress.root_argv.get(&root).cloned(),
-            ingress.root_started_at_ns.get(&root).copied(),
-            ingress.root_reflog_start_offsets.get(&root).cloned(),
-            ingress.root_worktrees.get(&root).cloned(),
-        );
+        let read_only_root = event_is_read_only || known_read_only_root;
+        // The caller drops read-only frames, so only a frame that will be
+        // queued inherits its root's context, and one that carries its own
+        // argv never takes the root's.
+        let inherited = (!read_only_root).then(|| {
+            (
+                ingress
+                    .root_argv
+                    .get(&root)
+                    .filter(|_| !has_own_argv)
+                    .cloned(),
+                ingress.root_started_at_ns.get(&root).copied(),
+                ingress.root_reflog_start_offsets.get(&root).cloned(),
+                ingress.root_worktrees.get(&root).cloned(),
+            )
+        });
         if terminal {
             ingress.root_worktrees.remove(&root);
             ingress.root_families.remove(&root);
@@ -299,7 +314,9 @@ impl ActorDaemonCoordinator {
 
         drop(ingress);
 
-        if let Some(object) = payload.as_object_mut() {
+        if let Some(inherited) = inherited
+            && let Some(object) = payload.as_object_mut()
+        {
             if object.get("argv").is_none()
                 && let Some(root_argv) = inherited.0
             {
@@ -334,6 +351,6 @@ impl ActorDaemonCoordinator {
             }
         }
 
-        read_only_root
+        !read_only_root
     }
 }

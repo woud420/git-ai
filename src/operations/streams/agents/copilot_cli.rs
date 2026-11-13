@@ -2,8 +2,7 @@ use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -34,10 +33,6 @@ impl Default for CopilotCliAgent {
 }
 
 impl Agent for CopilotCliAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::session_state_base_dir().into_iter().collect()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,
@@ -58,10 +53,6 @@ impl Agent for CopilotCliAgent {
 
     fn batch_size_hint(&self) -> usize {
         self.batch_size
-    }
-
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
     }
 
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
@@ -121,15 +112,6 @@ impl Agent for CopilotCliAgent {
         (id, parent_id, None)
     }
 
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
-    }
-
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
         for line in
             crate::operations::streams::reader::read_leading_jsonl_lines(stream_path, 5).ok()?
@@ -167,15 +149,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = CopilotCliAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_event_line(i: usize) -> String {
         format!(

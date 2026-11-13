@@ -36,7 +36,7 @@ per-repository daemon; attribution work does not run in Git's critical path.
 
 Use [Homebrew or Chocolatey](packaging/package-managers.md); build from source until fork releases exist.
 The installers support macOS and Linux on x86_64 or ARM64, and Windows on x64
-or ARM64. Install Rust 1.93.0 or newer and Git first, then clone this
+or ARM64. Install Rust 1.100.0 or newer and Git first, then clone this
 repository and run the commands for your platform. Do not use `sudo` or an
 elevated Windows shell.
 

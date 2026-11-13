@@ -7,6 +7,7 @@
 use crate::model::attribution::{
     Attribution, LineAttribution, ceil_char_boundary, floor_char_boundary,
 };
+use crate::model::authorship_log::is_ai_author_id;
 use crate::model::working_log::CheckpointKind;
 
 /// Helper struct to track line boundaries in content
@@ -29,17 +30,9 @@ impl LineBoundaries {
         // Handle last line if it doesn't end with newline
         if start < content.len() {
             line_ranges.push((start, content.len()));
-        } else if start == content.len() && content.is_empty() {
-            // Empty file - no lines
-        } else if start == content.len() && !content.is_empty() {
-            // File ends with newline, last line is already added
         }
 
         LineBoundaries { line_ranges }
-    }
-
-    fn line_count(&self) -> u32 {
-        self.line_ranges.len() as u32
     }
 
     fn get_line_range(&self, line_num: u32) -> Option<(usize, usize)> {
@@ -117,11 +110,6 @@ pub fn attributions_to_line_attributions_for_checkpoint(
     }
 
     let boundaries = LineBoundaries::new(content);
-    let line_count = boundaries.line_count();
-
-    if line_count == 0 {
-        return Vec::new();
-    }
 
     let mut sorted_indices: Vec<usize> = (0..attributions.len()).collect();
     sorted_indices.sort_by_key(|&idx| (attributions[idx].start, attributions[idx].end, idx));
@@ -130,15 +118,10 @@ pub fn attributions_to_line_attributions_for_checkpoint(
     let mut active_indices: Vec<usize> = Vec::new();
 
     // For each line, determine the dominant author using a sweep over overlapping ranges.
-    let mut line_authors: Vec<Option<(String, Option<String>)>> =
-        Vec::with_capacity(line_count as usize);
+    let mut line_authors: Vec<(String, Option<String>)> =
+        Vec::with_capacity(boundaries.line_ranges.len());
 
-    for line_num in 1..=line_count {
-        let Some((line_start, line_end)) = boundaries.get_line_range(line_num) else {
-            line_authors.push(Some((CheckpointKind::Human.to_str(), None)));
-            continue;
-        };
-
+    for &(line_start, line_end) in &boundaries.line_ranges {
         while next_idx < sorted_indices.len()
             && attributions[sorted_indices[next_idx]].start < line_end
         {
@@ -163,7 +146,7 @@ pub fn attributions_to_line_attributions_for_checkpoint(
             content,
             is_ai_checkpoint,
         );
-        line_authors.push(Some((author, overrode)));
+        line_authors.push((author, overrode));
     }
 
     // Merge consecutive lines with the same author
@@ -220,19 +203,15 @@ fn find_dominant_author_for_line_candidates(
         // h_<hash> IDs are known-human attestations; treat them like "human" for
         // whitespace-inclusion purposes so their newline ranges don't bleed into
         // adjacent lines during an AI checkpoint.
-        let is_ai_author = attribution.author_id != CheckpointKind::Human.to_str()
-            && !attribution.author_id.starts_with("h_");
-        let include_ai_whitespace = is_ai_checkpoint && is_ai_author;
+        let include_ai_whitespace = is_ai_checkpoint && is_ai_author_id(&attribution.author_id);
+        // An attribution covering only whitespace is discarded.
         if has_non_whitespace || is_line_empty || is_deletion_marker || include_ai_whitespace {
             candidate_attrs.push(attribution);
-        } else {
-            // If the attribution is only whitespace, discard it
-            continue;
         }
     }
 
     if candidate_attrs.is_empty() {
-        return (CheckpointKind::Human.to_str(), None);
+        return (CheckpointKind::Human.to_str().to_string(), None);
     }
 
     // Choose the author with the latest timestamp (keep first match on ties).
@@ -247,10 +226,10 @@ fn find_dominant_author_for_line_candidates(
     let mut last_human_edit: Option<&Attribution> = None;
     for attr in &candidate_attrs {
         // Both legacy "human" and KnownHuman h_<hash> IDs are human edits.
-        if attr.author_id == CheckpointKind::Human.to_str() || attr.author_id.starts_with("h_") {
-            last_human_edit = Some(attr);
-        } else {
+        if is_ai_author_id(&attr.author_id) {
             last_ai_edit = Some(attr);
+        } else {
+            last_human_edit = Some(attr);
         }
     }
     let overrode = match (last_ai_edit, last_human_edit) {
@@ -268,64 +247,21 @@ fn find_dominant_author_for_line_candidates(
 
 /// Merge consecutive lines with the same author into LineAttribution ranges
 fn merge_consecutive_line_attributions(
-    line_authorship: Vec<Option<(String, Option<String>)>>,
+    line_authorship: Vec<(String, Option<String>)>,
 ) -> Vec<LineAttribution> {
-    let mut result = Vec::new();
-    let line_count = line_authorship.len();
-
-    let mut current_authorship: Option<(String, Option<String>)> = None;
-    let mut current_start: u32 = 0;
-
-    for (idx, authorship) in line_authorship.into_iter().enumerate() {
+    let mut result: Vec<LineAttribution> = Vec::new();
+    for (idx, (author_id, overrode)) in line_authorship.into_iter().enumerate() {
         let line_num = (idx + 1) as u32;
-
-        match (&current_authorship, authorship) {
-            (None, None) => {
-                // No attribution for this line, continue
-            }
-            (None, Some(new_author)) => {
-                // Start a new line attribution
-                current_authorship = Some(new_author);
-                current_start = line_num;
-            }
-            (Some(_), None) => {
-                // End current attribution
-                if let Some(authorship) = current_authorship.take() {
-                    result.push(LineAttribution::new(
-                        current_start,
-                        line_num - 1,
-                        authorship.0,
-                        authorship.1,
-                    ));
-                }
-            }
-            (Some(curr), Some(new_authorship)) => {
-                if curr == &new_authorship {
-                    // Continue current attribution
-                } else {
-                    // End current, start new
-                    result.push(LineAttribution::new(
-                        current_start,
-                        line_num - 1,
-                        curr.0.clone(),
-                        curr.1.clone(),
-                    ));
-                    current_authorship = Some(new_authorship);
-                    current_start = line_num;
-                }
-            }
+        if let Some(last) = result.last_mut()
+            && last.author_id == author_id
+            && last.overrode == overrode
+        {
+            last.end_line = line_num;
+        } else {
+            result.push(LineAttribution::new(
+                line_num, line_num, author_id, overrode,
+            ));
         }
     }
-
-    // Close final attribution if any
-    if let Some(authorship) = current_authorship {
-        result.push(LineAttribution::new(
-            current_start,
-            line_count as u32,
-            authorship.0,
-            authorship.1,
-        ));
-    }
-
     result
 }

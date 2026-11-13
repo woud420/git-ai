@@ -1,6 +1,8 @@
 use crate::error::GitAiError;
 use crate::model::domain::{Confidence, FamilyKey, FamilyState, NormalizedCommand, RefChange};
-use crate::operations::daemon::analyzers::{command_args, normalized_args};
+use crate::operations::daemon::analyzers::{
+    command_args, normalized_args, stash_args, stash_subcommand,
+};
 use crate::operations::daemon::parsed_invocation_for_normalized_command;
 use crate::operations::git::cli_parser::{
     explicit_rebase_branch_arg, parse_git_cli_args, summarize_rebase_args,
@@ -59,6 +61,8 @@ mod tests_rebase_cherry_pick;
 mod tests_reflog_rebase;
 #[cfg(test)]
 mod tests_reset_update_ref;
+#[cfg(test)]
+mod tests_span_walk;
 
 #[cfg(test)]
 mod tests_continuation;

@@ -55,29 +55,22 @@ impl RefCursor {
                 )
             },
         );
-        self.consume_entry(&first)?;
-
-        let failed = cmd.exit_code != 0;
-        if failed {
+        if cmd.exit_code != 0 {
+            self.consume_entry(&first)?;
             cmd.ref_changes = changes;
             return Ok(());
         }
+        self.mark_entry_consumed(&first);
 
         let mut consumed_finish = rebase_reflog_action_is(&first.message, "finish");
-        let mut next_start = first.end_offset;
+        let rest = if consumed_finish {
+            Vec::new()
+        } else {
+            Self::entries_after(&first)?
+        };
+        let mut rest = rest.iter();
         while !consumed_finish {
-            let Some(next) = self.find_head_entry_after(
-                cmd.worktree.as_deref(),
-                next_start,
-                &["rebase"],
-                ExpectedTransition {
-                    old_oids: [new.clone()].into_iter().collect(),
-                    new_oid: None,
-                    messages: HashSet::new(),
-                    allow_identity: false,
-                },
-            )?
-            else {
+            let Some(next) = self.next_span_entry(&mut rest, &new, &["rebase"]) else {
                 break;
             };
             if rebase_reflog_action_is(&next.message, "start") {
@@ -107,7 +100,6 @@ impl RefCursor {
             );
             new = next.new.clone();
             consumed_finish = rebase_reflog_action_is(&next.message, "finish");
-            next_start = next.end_offset;
             crate::observability::wltrace::record(
                 "ref_cursor.rebase.entry_consumed",
                 &next.path,
@@ -120,9 +112,10 @@ impl RefCursor {
                     )
                 },
             );
-            self.consume_entry(&next)?;
-            changes.push(entry_to_ref_change(&next));
+            self.mark_entry_consumed(next);
+            changes.push(entry_to_ref_change(next));
         }
+        self.compact_consumed_entries(&first.key, &first.path, &first.reference)?;
 
         self.consume_common_refs_matching_transition(&old, &new, &mut changes)?;
         self.consume_rebase_finish_branch_ref(cmd.worktree.as_deref(), &new, state, &mut changes)?;
@@ -292,31 +285,26 @@ impl RefCursor {
         let mut changes = vec![entry_to_ref_change(&first)];
         let mut consumed_finish = pull_reflog_action_state(&first.message, action).is_none()
             || pull_reflog_action_is(&first.message, action, "finish");
-        let mut next_start = first.end_offset;
-        self.consume_entry(&first)?;
+        self.mark_entry_consumed(&first);
 
+        let rest = if consumed_finish {
+            Vec::new()
+        } else {
+            Self::entries_after(&first)?
+        };
+        let mut rest = rest.iter();
         while !consumed_finish
-            && let Some(next) = self.find_head_entry_after(
-                cmd.worktree.as_deref(),
-                next_start,
-                message_prefixes,
-                ExpectedTransition {
-                    old_oids: [new.clone()].into_iter().collect(),
-                    new_oid: None,
-                    messages: HashSet::new(),
-                    allow_identity: false,
-                },
-            )?
+            && let Some(next) = self.next_span_entry(&mut rest, &new, message_prefixes)
         {
             if pull_reflog_action_starts_new_command(&next.message, action) {
                 break;
             }
             new = next.new.clone();
             consumed_finish = pull_reflog_action_is(&next.message, action, "finish");
-            next_start = next.end_offset;
-            self.consume_entry(&next)?;
-            changes.push(entry_to_ref_change(&next));
+            self.mark_entry_consumed(next);
+            changes.push(entry_to_ref_change(next));
         }
+        self.compact_consumed_entries(&first.key, &first.path, &first.reference)?;
 
         self.consume_common_refs_matching_transition(&old, &new, &mut changes)?;
         self.consume_pull_finish_branch_ref(

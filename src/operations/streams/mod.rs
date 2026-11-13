@@ -34,10 +34,9 @@
 //! };
 //! db.insert_stream(&stream)?;
 //!
-//! // Process transcript and update watermark
-//! let mut watermark = ByteOffsetWatermark::new(0);
+//! // Process transcript and store the watermark the reader returned
 //! // ... read and process transcript ...
-//! watermark.advance(1024, 10);
+//! let watermark = ByteOffsetWatermark::new(1024);
 //! db.update_watermark("session-123", "transcript", "/path/to/file", &watermark)?;
 //! ```
 

@@ -1,9 +1,12 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::resolve_editor_cli;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
 use crate::operations::mdm::hook_installer::{
     HookCheckResult, HookInstaller, HookInstallerParams, InstallResult,
 };
+use crate::operations::mdm::hooks_merge::{
+    MissingBehavior, edit_settings_json, parse_json, upsert_singleton_hook,
+};
+use crate::operations::mdm::hooks_merge_flat::has_flat_hook;
 use crate::operations::mdm::paths::{home_dir, normalize_windows_path_for_shell};
 use crate::operations::mdm::version::{
     MIN_CODE_VERSION, get_editor_version, parse_version, version_meets_requirement,
@@ -145,43 +148,22 @@ impl HookInstaller for GitHubCopilotInstaller {
         let pre_desired = Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_PRE_TOOL_CMD);
         let post_desired = Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_POST_TOOL_CMD);
 
-        let has_pre_installed = existing
-            .get("hooks")
-            .and_then(|h| h.get("PreToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().any(Self::is_github_copilot_checkpoint_hook))
-            .unwrap_or(false);
-
-        let has_post_installed = existing
-            .get("hooks")
-            .and_then(|h| h.get("PostToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().any(Self::is_github_copilot_checkpoint_hook))
-            .unwrap_or(false);
-
-        let has_pre_up_to_date = existing
-            .get("hooks")
-            .and_then(|h| h.get("PreToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .any(|hook| Self::hook_has_desired_command(hook, &pre_desired))
+        let installed = |hook_name| {
+            has_flat_hook(
+                &existing,
+                hook_name,
+                Self::is_github_copilot_checkpoint_hook,
+            )
+        };
+        let up_to_date = |hook_name, desired: &Value| {
+            has_flat_hook(&existing, hook_name, |hook| {
+                Self::hook_has_desired_command(hook, desired)
             })
-            .unwrap_or(false);
-
-        let has_post_up_to_date = existing
-            .get("hooks")
-            .and_then(|h| h.get("PostToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .any(|hook| Self::hook_has_desired_command(hook, &post_desired))
-            })
-            .unwrap_or(false);
+        };
 
         Ok(HookCheckResult::installed(
-            has_pre_installed || has_post_installed,
-            has_pre_up_to_date && has_post_up_to_date,
+            installed("PreToolUse") || installed("PostToolUse"),
+            up_to_date("PreToolUse", &pre_desired) && up_to_date("PostToolUse", &post_desired),
         ))
     }
 
@@ -190,128 +172,65 @@ impl HookInstaller for GitHubCopilotInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let hooks_path = Self::hooks_path();
+        let desired_hooks = [
+            (
+                "PreToolUse",
+                Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_PRE_TOOL_CMD),
+            ),
+            (
+                "PostToolUse",
+                Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_POST_TOOL_CMD),
+            ),
+        ];
 
-        if !dry_run && let Some(dir) = hooks_path.parent() {
-            fs::create_dir_all(dir)?;
-        }
+        let diff = edit_settings_json(
+            &Self::hooks_path(),
+            dry_run,
+            MissingBehavior::TreatAsEmpty,
+            parse_json,
+            |merged| {
+                if !merged.is_object() {
+                    *merged = json!({});
+                }
+                let mut hooks_obj = match merged.get("hooks") {
+                    Some(hooks) if hooks.is_object() => hooks.clone(),
+                    _ => json!({}),
+                };
 
-        let existing_content = if hooks_path.exists() {
-            fs::read_to_string(&hooks_path)?
-        } else {
-            String::new()
-        };
+                for (hook_name, desired_hook) in desired_hooks {
+                    let mut existing_hooks = hooks_obj
+                        .get(hook_name)
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
 
-        let existing: Value = if existing_content.trim().is_empty() {
-            json!({})
-        } else {
-            serde_json::from_str(&existing_content)?
-        };
+                    upsert_singleton_hook(
+                        &mut existing_hooks,
+                        desired_hook,
+                        Self::is_github_copilot_checkpoint_hook,
+                        |existing, desired| {
+                            if !Self::hook_has_desired_command(existing, &desired) {
+                                *existing = Self::merge_checkpoint_hook(existing, &desired);
+                            }
+                        },
+                    );
 
-        let desired: Value = json!({
-            "hooks": {
-                "PreToolUse": [
-                    Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_PRE_TOOL_CMD)
-                ],
-                "PostToolUse": [
-                    Self::checkpoint_hook(&params.binary_path, GITHUB_COPILOT_POST_TOOL_CMD)
-                ]
-            }
-        });
-
-        let mut merged = existing.clone();
-        if !merged.is_object() {
-            merged = json!({});
-        }
-
-        let mut hooks_obj = match merged.get("hooks") {
-            Some(v) if v.is_object() => v.clone(),
-            Some(_) => json!({}),
-            None => json!({}),
-        };
-
-        for hook_name in &["PreToolUse", "PostToolUse"] {
-            let desired_hook = desired
-                .get("hooks")
-                .and_then(|h| h.get(*hook_name))
-                .and_then(|v| v.as_array())
-                .and_then(|arr| arr.first())
-                .cloned();
-            let Some(desired_hook) = desired_hook else {
-                continue;
-            };
-
-            let mut existing_hooks = hooks_obj
-                .get(*hook_name)
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-
-            let mut found_idx = None;
-            let mut needs_update = false;
-
-            for (idx, existing_hook) in existing_hooks.iter().enumerate() {
-                if Self::is_github_copilot_checkpoint_hook(existing_hook) && found_idx.is_none() {
-                    found_idx = Some(idx);
-                    if !Self::hook_has_desired_command(existing_hook, &desired_hook) {
-                        needs_update = true;
+                    if let Some(obj) = hooks_obj.as_object_mut() {
+                        obj.insert(hook_name.to_string(), Value::Array(existing_hooks));
                     }
                 }
-            }
 
-            match found_idx {
-                Some(idx) => {
-                    if needs_update {
-                        existing_hooks[idx] =
-                            Self::merge_checkpoint_hook(&existing_hooks[idx], &desired_hook);
-                    }
-
-                    let keep_idx = idx;
-                    let mut current_idx = 0;
-                    existing_hooks.retain(|hook| {
-                        if current_idx == keep_idx {
-                            current_idx += 1;
-                            true
-                        } else if Self::is_github_copilot_checkpoint_hook(hook) {
-                            current_idx += 1;
-                            false
-                        } else {
-                            current_idx += 1;
-                            true
-                        }
-                    });
+                if let Some(root) = merged.as_object_mut() {
+                    root.insert("hooks".to_string(), hooks_obj);
                 }
-                None => existing_hooks.push(desired_hook.clone()),
-            }
-
-            if let Some(obj) = hooks_obj.as_object_mut() {
-                obj.insert(hook_name.to_string(), Value::Array(existing_hooks));
-            }
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
+            },
+        )?;
 
         if !dry_run {
-            let legacy_path = Self::legacy_hooks_path();
-            if legacy_path.exists() {
-                let _ = fs::remove_file(&legacy_path);
-            }
+            let _ = fs::remove_file(Self::legacy_hooks_path());
         }
 
-        if existing == merged {
-            return Ok(None);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(&hooks_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(&hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+        Ok(diff)
     }
 
     fn uninstall_hooks(
@@ -320,56 +239,26 @@ impl HookInstaller for GitHubCopilotInstaller {
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
         if !dry_run {
-            let legacy_path = Self::legacy_hooks_path();
-            if legacy_path.exists() {
-                let _ = fs::remove_file(&legacy_path);
-            }
+            let _ = fs::remove_file(Self::legacy_hooks_path());
         }
 
-        let hooks_path = Self::hooks_path();
-
-        if !hooks_path.exists() {
-            return Ok(None);
-        }
-
-        let existing_content = fs::read_to_string(&hooks_path)?;
-        let existing: Value = serde_json::from_str(&existing_content)?;
-
-        let mut merged = existing.clone();
-        let mut hooks_obj = match merged.get("hooks").cloned() {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-
-        let mut changed = false;
-
-        for hook_name in &["PreToolUse", "PostToolUse"] {
-            if let Some(hooks_array) = hooks_obj.get_mut(*hook_name).and_then(|v| v.as_array_mut())
-            {
-                let original_len = hooks_array.len();
-                hooks_array.retain(|hook| !Self::is_github_copilot_checkpoint_hook(hook));
-                if hooks_array.len() != original_len {
-                    changed = true;
+        edit_settings_json(
+            &Self::hooks_path(),
+            dry_run,
+            MissingBehavior::NoOp,
+            parse_json,
+            |merged| {
+                for hook_name in ["PreToolUse", "PostToolUse"] {
+                    if let Some(hooks) = merged
+                        .get_mut("hooks")
+                        .and_then(|hooks| hooks.get_mut(hook_name))
+                        .and_then(|hooks| hooks.as_array_mut())
+                    {
+                        hooks.retain(|hook| !Self::is_github_copilot_checkpoint_hook(hook));
+                    }
                 }
-            }
-        }
-
-        if !changed {
-            return Ok(None);
-        }
-
-        if let Some(root) = merged.as_object_mut() {
-            root.insert("hooks".to_string(), hooks_obj);
-        }
-
-        let new_content = serde_json::to_string_pretty(&merged)?;
-        let diff_output = generate_diff(&hooks_path, &existing_content, &new_content);
-
-        if !dry_run {
-            write_atomic(&hooks_path, new_content.as_bytes())?;
-        }
-
-        Ok(Some(diff_output))
+            },
+        )
     }
 
     fn install_extras(

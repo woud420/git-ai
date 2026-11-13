@@ -8,6 +8,7 @@ use crate::model::checkpoint_request::{
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Sentinel session_id for shared stream watermark rows.
 /// Shared streams (e.g., a global OTEL SQLite DB) don't belong to any session —
@@ -21,8 +22,6 @@ pub type PathResolverFn = Box<dyn Fn(&Path) -> Option<PathBuf> + Send + Sync>;
 pub enum PathResolverKind {
     /// Same path as the session's stream_path
     Identity,
-    /// Same directory, different filename
-    Sibling { filename: &'static str },
     /// Custom resolution function
     Custom(PathResolverFn),
 }
@@ -66,9 +65,6 @@ impl StreamDescriptor {
     pub fn resolve_path(&self, stream_path: &Path) -> Option<PathBuf> {
         match &self.path_resolver {
             PathResolverKind::Identity => Some(stream_path.to_path_buf()),
-            PathResolverKind::Sibling { filename } => {
-                stream_path.parent().map(|p| p.join(filename))
-            }
             PathResolverKind::Custom(f) => f(stream_path),
         }
     }
@@ -98,15 +94,6 @@ impl StreamDescriptor {
 /// Combines sweep discovery and incremental reading in one interface.
 /// Agents that don't support sweeping return `SweepStrategy::None`.
 pub trait Agent: Send + Sync {
-    /// Daemon-owned roots used for sweep discovery and bounded checkpoint validation.
-    ///
-    /// Checkpoint IPC must never turn an arbitrary caller-supplied path into a
-    /// host read. Checkpoint validation resolves one claimed candidate beneath
-    /// these roots; it must not require a full `discover_sessions` sweep.
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
     /// Validate one checkpoint-provided stream candidate without sweeping agent storage.
     ///
     /// Implementations must bind the external session ID to a host-visible candidate
@@ -118,8 +105,11 @@ pub trait Agent: Send + Sync {
         Err(checkpoint_stream_denied())
     }
 
-    /// Returns the sweep strategy for this agent.
-    fn sweep_strategy(&self) -> SweepStrategy;
+    /// Returns the sweep strategy for this agent: by default, the worker's
+    /// 30-minute periodic sweep.
+    fn sweep_strategy(&self) -> SweepStrategy {
+        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
+    }
 
     /// Discover all sessions in the agent's storage.
     ///
@@ -173,15 +163,17 @@ pub trait Agent: Send + Sync {
 
     /// Extract the event timestamp as seconds since Unix epoch.
     ///
-    /// Every agent MUST provide a concrete timestamp for each event. Agents with
-    /// per-event timestamps in JSON should parse them; agents without should fall
-    /// back to file metadata (birthtime for first event, mtime for others).
+    /// Every event gets a concrete timestamp. The default parses the event's
+    /// `timestamp` field and falls back to file metadata (birthtime for the
+    /// first event, mtime for others); agents with other layouts override it.
     fn extract_event_timestamp(
         &self,
         event: &serde_json::Value,
         file_meta: &std::fs::Metadata,
         is_first_event: bool,
-    ) -> u32;
+    ) -> u32 {
+        super::timestamp::event_timestamp_or_file_time(event, file_meta, is_first_event)
+    }
 
     /// Extract the per-event session identifier from a raw event.
     ///
@@ -367,6 +359,17 @@ mod tests {
         assert!(!descriptor.shared);
         assert!(descriptor.watermark_type_resolver.is_none());
         assert!(descriptor.format_resolver.is_none());
+    }
+
+    #[test]
+    fn every_registered_agent_sweeps_on_the_default_period() {
+        for (name, agent) in get_all_agents() {
+            assert_eq!(
+                agent.sweep_strategy(),
+                SweepStrategy::Periodic(Duration::from_secs(30 * 60)),
+                "{name}"
+            );
+        }
     }
 
     #[test]

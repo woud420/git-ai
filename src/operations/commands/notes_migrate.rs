@@ -18,8 +18,8 @@ use crate::model::api_types::{NoteEntry, NotesUploadRequest};
 use crate::model::repository::notes_db::NotesDatabase;
 use crate::operations::git::cat_file::{BatchReadPolicy, batch_read_blob_contents_with_policy};
 use crate::operations::git::find_repository;
+use crate::operations::git::refs::list_all_notes;
 use crate::operations::git::repository::resolve_api_author_identity;
-use std::collections::HashMap;
 
 /// Entry point for `git-ai notes migrate`.
 pub fn handle_notes_migrate(args: &[String]) {
@@ -156,27 +156,22 @@ fn migrate_sqlite_to_git_notes(
 }
 
 /// Read every note in `refs/notes/ai` as `(commit_sha, content)` pairs.
+///
+/// Commits whose notes have identical content share one blob, so entries are
+/// built per listed note, not per blob.
 fn read_all_ref_notes(
     repo: &crate::operations::git::repository::Repository,
 ) -> Result<Vec<(String, String)>, GitAiError> {
-    let note_pairs = list_notes(repo)?;
-    if note_pairs.is_empty() {
-        return Ok(Vec::new());
-    }
-    let blob_to_commit: HashMap<String, String> = note_pairs
-        .iter()
-        .map(|(blob, commit)| (blob.clone(), commit.clone()))
-        .collect();
+    let note_pairs = list_all_notes(repo, "refs/notes/ai")?;
     let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
     let blob_contents =
         batch_read_blob_contents_with_policy(repo, &blob_shas, BatchReadPolicy::Tolerant)?;
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for (blob_sha, content) in &blob_contents {
-        if let Some(commit_sha) = blob_to_commit.get(blob_sha) {
-            entries.push((commit_sha.clone(), content.clone()));
-        }
-    }
-    Ok(entries)
+    Ok(note_pairs
+        .into_iter()
+        .filter_map(|(blob_sha, commit_sha)| {
+            Some((commit_sha, blob_contents.get(&blob_sha)?.clone()))
+        })
+        .collect())
 }
 
 /// Bulk-upload `refs/notes/ai` to the remote HTTP backend and warm the cache.
@@ -186,7 +181,7 @@ fn migrate_refs_to_http(
     cfg: &Config,
     force: bool,
 ) {
-    // 3. Build the API client.
+    // Build the API client.
     let Some(backend_url) = cfg.notes_backend_url().map(str::to_string) else {
         eprintln!(
             "error: notes_backend.backend_url is not configured.\n\
@@ -208,44 +203,17 @@ fn migrate_refs_to_http(
 
     eprintln!("Listing notes from refs/notes/ai ...");
 
-    // 4. List notes: `git notes --ref=ai list` → "blob_sha commit_sha\n" lines.
-    let note_pairs = match list_notes(repo) {
-        Ok(pairs) => pairs,
+    let mut entries = match read_all_ref_notes(repo) {
+        Ok(entries) => entries,
         Err(e) => {
-            eprintln!("error: failed to list notes: {}", e);
+            eprintln!("error: failed to read notes: {}", e);
             std::process::exit(1);
         }
     };
 
-    if note_pairs.is_empty() {
+    if entries.is_empty() {
         eprintln!("No notes found in refs/notes/ai. Nothing to migrate.");
         return;
-    }
-
-    eprintln!("Found {} note(s). Reading content ...", note_pairs.len());
-
-    // 5. Bulk-read note content via `git cat-file --batch`.
-    let blob_to_commit: HashMap<String, String> = note_pairs
-        .iter()
-        .map(|(blob, commit)| (blob.clone(), commit.clone()))
-        .collect();
-
-    let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
-    let blob_contents =
-        match batch_read_blob_contents_with_policy(repo, &blob_shas, BatchReadPolicy::Tolerant) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("error: failed to read note content: {}", e);
-                std::process::exit(1);
-            }
-        };
-
-    // Build (commit_sha, content) pairs.
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for (blob_sha, content) in &blob_contents {
-        if let Some(commit_sha) = blob_to_commit.get(blob_sha) {
-            entries.push((commit_sha.clone(), content.clone()));
-        }
     }
 
     // Skip entries already confirmed synced (enables safe re-run after interruption).
@@ -276,7 +244,7 @@ fn migrate_refs_to_http(
         entries.len()
     );
 
-    // 6. Upload in chunks of 50 and cache locally.
+    // Upload in chunks of 50 and cache locally.
     let mut total_uploaded = 0usize;
     let mut total_failed = 0usize;
     let mut cached_entries: Vec<(String, String)> = Vec::new();
@@ -331,7 +299,7 @@ fn migrate_refs_to_http(
         }
     }
 
-    // 8. Summary.
+    // Summary.
     eprintln!();
     if total_failed == 0 {
         eprintln!(
@@ -347,48 +315,6 @@ fn migrate_refs_to_http(
             std::process::exit(1);
         }
     }
-}
-
-/// Run `git notes --ref=ai list` and return `(blob_sha, commit_sha)` pairs.
-fn list_notes(
-    repo: &crate::operations::git::repository::Repository,
-) -> Result<Vec<(String, String)>, GitAiError> {
-    use crate::clients::git_cli::exec_git;
-
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "notes".to_string(),
-        "--ref=ai".to_string(),
-        "list".to_string(),
-    ]);
-
-    let output = exec_git(&args)
-        .map_err(|e| GitAiError::Generic(format!("git notes --ref=ai list failed: {}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // `git notes list` exits non-zero when there are no notes — treat as empty.
-        if stderr.contains("No notes found") || output.stdout.is_empty() {
-            return Ok(Vec::new());
-        }
-        return Err(GitAiError::Generic(format!(
-            "git notes --ref=ai list exited {}: {}",
-            output.status, stderr
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pairs: Vec<(String, String)> = stdout
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.split_whitespace();
-            let blob_sha = parts.next()?.to_string();
-            let commit_sha = parts.next()?.to_string();
-            Some((blob_sha, commit_sha))
-        })
-        .collect();
-
-    Ok(pairs)
 }
 
 fn print_help() {
@@ -415,322 +341,5 @@ fn print_help() {
 // --- Tests ---
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::repository::notes_db::NotesDatabase;
-    use crate::operations::git::test_utils::TmpRepo;
-    use tempfile::NamedTempFile;
-
-    /// Helper to create real commits in a TmpRepo. Returns the commit SHA.
-    /// Parents are tracked implicitly via `HEAD`, so callers no longer need to
-    /// pass them explicitly.
-    fn make_commit(repo: &TmpRepo, filename: &str, content: &str, message: &str) -> String {
-        repo.write_file(filename, content, false)
-            .expect("write file");
-        repo.commit_all(message).expect("commit")
-    }
-
-    /// Add a git note to `refs/notes/ai` for the given commit SHA.
-    fn add_git_note(repo: &TmpRepo, commit_sha: &str, note: &str) {
-        repo.git_command(&["notes", "--ref=ai", "add", "-f", "-m", note, commit_sha])
-            .expect("git notes add");
-    }
-
-    fn read_note_blobs(
-        repo: &crate::operations::git::repository::Repository,
-        blob_shas: &[String],
-    ) -> Result<HashMap<String, String>, GitAiError> {
-        batch_read_blob_contents_with_policy(repo, blob_shas, BatchReadPolicy::Tolerant)
-    }
-
-    /// Integration test:
-    ///   1. Create a TmpRepo with several commits and git notes.
-    ///   2. Start a mockito server to accept the upload.
-    ///   3. Call `handle_notes_migrate` logic directly (list + cat-file + upload + cache).
-    ///   4. Verify all notes appear in `notes-db` with `synced = 1`.
-    ///   5. Verify the mock upload endpoint was called.
-    #[test]
-    #[serial_test::serial(notes_db_env)]
-    fn migration_uploads_notes_and_caches_with_synced_1() {
-        // Isolated notes-db.
-        let tmp_db = NamedTempFile::new().expect("tmp notes-db");
-        unsafe {
-            std::env::set_var("GIT_AI_TEST_NOTES_DB_PATH", tmp_db.path());
-        }
-
-        // --- Build repo with commits and notes ---
-        let repo = TmpRepo::new().expect("TmpRepo::new");
-
-        let sha1 = make_commit(&repo, "file1.txt", "hello", "commit 1");
-        let sha2 = make_commit(&repo, "file2.txt", "world", "commit 2");
-        let sha3 = make_commit(&repo, "file3.txt", "foo", "commit 3");
-
-        // Add git notes for each commit.
-        add_git_note(&repo, &sha1, "note-content-1");
-        add_git_note(&repo, &sha2, "note-content-2");
-        add_git_note(&repo, &sha3, "note-content-3");
-
-        // --- Mock upload endpoint ---
-        let mut server = mockito::Server::new();
-        let upload_response = serde_json::json!({
-            "success_count": 3,
-            "failure_count": 0
-        })
-        .to_string();
-        let _mock = server
-            .mock("POST", "/worker/notes/upload")
-            .with_status(200)
-            .with_header("content-type", "application/json")
-            .with_body(&upload_response)
-            .create();
-
-        let server_url = server.url();
-        unsafe {
-            std::env::set_var("GIT_AI_NOTES_BACKEND_URL", &server_url);
-            std::env::set_var("GIT_AI_API_KEY", "migrate-test-key");
-        }
-
-        // --- Run the migration core logic ---
-        let note_pairs = list_notes(repo.gitai_repo()).expect("list_notes");
-        assert_eq!(note_pairs.len(), 3, "should list 3 notes");
-
-        let blob_to_commit: HashMap<String, String> = note_pairs
-            .iter()
-            .map(|(b, c)| (b.clone(), c.clone()))
-            .collect();
-        let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
-
-        let blob_contents =
-            read_note_blobs(repo.gitai_repo(), &blob_shas).expect("read_note_blobs");
-        assert_eq!(blob_contents.len(), 3, "should read 3 blob contents");
-
-        let mut entries: Vec<(String, String)> = Vec::new();
-        for (blob_sha, content) in &blob_contents {
-            if let Some(commit_sha) = blob_to_commit.get(blob_sha) {
-                entries.push((commit_sha.clone(), content.clone()));
-            }
-        }
-        assert_eq!(entries.len(), 3);
-
-        // Upload to the mock server.
-        let cfg = crate::config::Config::fresh();
-        let backend_url = cfg
-            .notes_backend_url()
-            .expect("test should configure notes_backend.backend_url")
-            .to_string();
-        let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
-        let client = ApiClient::new(ctx);
-
-        let note_entries: Vec<NoteEntry> = entries
-            .iter()
-            .map(|(sha, content)| NoteEntry {
-                commit_sha: sha.clone(),
-                content: content.clone(),
-            })
-            .collect();
-        let request = NotesUploadRequest {
-            entries: note_entries,
-        };
-        let response = client.upload_notes(request).expect("upload_notes");
-        assert_eq!(response.success_count, 3);
-        assert_eq!(response.failure_count, 0);
-
-        // Cache locally with synced = 1.
-        let db = NotesDatabase::global().expect("global db");
-        {
-            let mut lock = db.lock().expect("lock");
-            lock.cache_synced_notes(&entries)
-                .expect("cache_synced_notes");
-        }
-
-        // --- Verify all three notes are in notes-db with synced = 1 ---
-        let lock = db.lock().expect("lock for verify");
-        let shas = [sha1.as_str(), sha2.as_str(), sha3.as_str()];
-        for sha in &shas {
-            let content = lock.get_note(sha).expect("get_note");
-            assert!(content.is_some(), "note for {} should be in notes-db", sha);
-        }
-
-        // None of them should appear in dequeue_pending (synced = 1).
-        drop(lock);
-        let mut lock = db.lock().expect("lock for dequeue");
-        let pending = lock.dequeue_pending(10).expect("dequeue_pending");
-        let migrated_pending: Vec<_> = pending
-            .iter()
-            .filter(|p| shas.contains(&p.commit_sha.as_str()))
-            .collect();
-        assert!(
-            migrated_pending.is_empty(),
-            "migrated notes must not appear in dequeue_pending: {:?}",
-            migrated_pending
-                .iter()
-                .map(|p| &p.commit_sha)
-                .collect::<Vec<_>>()
-        );
-
-        // --- Verify the mock was called ---
-        _mock.assert();
-
-        // Cleanup.
-        unsafe {
-            std::env::remove_var("GIT_AI_TEST_NOTES_DB_PATH");
-            std::env::remove_var("GIT_AI_API_KEY");
-            std::env::remove_var("GIT_AI_NOTES_BACKEND_URL");
-        }
-    }
-
-    /// Unit test: `list_notes` returns empty when there are no notes.
-    #[test]
-    fn list_notes_returns_empty_for_repo_without_notes() {
-        let repo = TmpRepo::new().expect("TmpRepo::new");
-        // Create a commit so HEAD exists (list_notes on an empty repo might error differently).
-        repo.write_file("a.txt", "a", false).expect("write file");
-        repo.commit_all("c").expect("commit");
-
-        let pairs = list_notes(repo.gitai_repo()).expect("list_notes");
-        assert!(
-            pairs.is_empty(),
-            "no notes should be listed for a fresh repo"
-        );
-    }
-
-    /// Unit test: the tolerant shared reader returns an empty map for empty input.
-    #[test]
-    fn read_note_blobs_empty_input() {
-        let repo = TmpRepo::new().expect("TmpRepo::new");
-        let result = read_note_blobs(repo.gitai_repo(), &[]).expect("read_note_blobs");
-        assert!(result.is_empty());
-    }
-
-    /// Integration test: `--force` re-uploads notes that are already cached as synced.
-    ///   1. Create notes and cache them as synced=1 in notes-db.
-    ///   2. Without --force: verify entries are filtered out.
-    ///   3. With --force: verify all entries pass through for upload.
-    #[test]
-    #[serial_test::serial(notes_db_env)]
-    fn force_flag_bypasses_synced_cache_filter() {
-        use std::collections::HashSet;
-
-        let tmp_db = NamedTempFile::new().expect("tmp notes-db");
-        unsafe {
-            std::env::set_var("GIT_AI_TEST_NOTES_DB_PATH", tmp_db.path());
-        }
-
-        let repo = TmpRepo::new().expect("TmpRepo::new");
-
-        let sha1 = make_commit(&repo, "file1.txt", "a", "commit 1");
-        let sha2 = make_commit(&repo, "file2.txt", "b", "commit 2");
-
-        add_git_note(&repo, &sha1, "note-1");
-        add_git_note(&repo, &sha2, "note-2");
-
-        // Read notes from repo.
-        let note_pairs = list_notes(repo.gitai_repo()).expect("list_notes");
-        let blob_to_commit: HashMap<String, String> = note_pairs
-            .iter()
-            .map(|(b, c)| (b.clone(), c.clone()))
-            .collect();
-        let blob_shas: Vec<String> = note_pairs.iter().map(|(b, _)| b.clone()).collect();
-        let blob_contents =
-            read_note_blobs(repo.gitai_repo(), &blob_shas).expect("read_note_blobs");
-
-        let entries: Vec<(String, String)> = blob_contents
-            .iter()
-            .filter_map(|(blob_sha, content)| {
-                blob_to_commit
-                    .get(blob_sha)
-                    .map(|commit_sha| (commit_sha.clone(), content.clone()))
-            })
-            .collect();
-        assert_eq!(entries.len(), 2);
-
-        // Pre-cache all entries as synced=1.
-        let db = NotesDatabase::global().expect("global db");
-        {
-            let mut lock = db.lock().expect("lock");
-            lock.cache_synced_notes(&entries)
-                .expect("cache_synced_notes");
-        }
-
-        // Without force: filtering should remove all entries.
-        {
-            let mut filtered = entries.clone();
-            let lock = db.lock().expect("lock");
-            let all_shas: Vec<&str> = filtered.iter().map(|(s, _)| s.as_str()).collect();
-            let synced = lock.get_synced_shas(&all_shas).expect("get_synced_shas");
-            filtered.retain(|(sha, _)| !synced.contains(sha));
-            assert!(
-                filtered.is_empty(),
-                "without --force, all synced entries should be filtered out"
-            );
-        }
-
-        // With force: no filtering applied, all entries remain.
-        {
-            let forced_entries = entries.clone();
-            // force=true means we skip the retain logic entirely
-            assert_eq!(
-                forced_entries.len(),
-                2,
-                "with --force, all entries should remain for upload"
-            );
-
-            // Verify we can upload them to a new backend.
-            let mut server = mockito::Server::new();
-            let upload_response = serde_json::json!({
-                "success_count": 2,
-                "failure_count": 0
-            })
-            .to_string();
-            let mock = server
-                .mock("POST", "/worker/notes/upload")
-                .with_status(200)
-                .with_header("content-type", "application/json")
-                .with_body(&upload_response)
-                .create();
-
-            let server_url = server.url();
-            unsafe {
-                std::env::set_var("GIT_AI_NOTES_BACKEND_URL", &server_url);
-                std::env::set_var("GIT_AI_API_KEY", "force-test-key");
-            }
-
-            let cfg = crate::config::Config::fresh();
-            let backend_url = cfg.notes_backend_url().unwrap().to_string();
-            let ctx = ApiContext::new(Some(backend_url), resolve_api_author_identity);
-            let client = ApiClient::new(ctx);
-
-            let note_entries: Vec<NoteEntry> = forced_entries
-                .iter()
-                .map(|(sha, content)| NoteEntry {
-                    commit_sha: sha.clone(),
-                    content: content.clone(),
-                })
-                .collect();
-            let request = NotesUploadRequest {
-                entries: note_entries,
-            };
-            let response = client.upload_notes(request).expect("upload_notes");
-            assert_eq!(response.success_count, 2);
-            mock.assert();
-        }
-
-        // Verify commit shas are what we expect.
-        let lock = db.lock().expect("lock for final verify");
-        let shas_set: HashSet<&str> = [sha1.as_str(), sha2.as_str()].into_iter().collect();
-        for sha in &shas_set {
-            assert!(
-                lock.get_note(sha).expect("get_note").is_some(),
-                "note for {} should remain in cache",
-                sha
-            );
-        }
-        drop(lock);
-
-        unsafe {
-            std::env::remove_var("GIT_AI_TEST_NOTES_DB_PATH");
-            std::env::remove_var("GIT_AI_API_KEY");
-            std::env::remove_var("GIT_AI_NOTES_BACKEND_URL");
-        }
-    }
-}
+#[path = "notes_migrate_tests.rs"]
+mod tests;

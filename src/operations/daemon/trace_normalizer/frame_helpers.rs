@@ -1,7 +1,6 @@
-use crate::error::GitAiError;
 use crate::operations::daemon::trace_helpers::{
-    rfc3339_to_unix_nanos, trace_argv_primary_command, trace_token_is_git_executable,
-    trace_token_is_git_executable_ascii_case_insensitive,
+    rfc3339_to_unix_nanos, trace_args_after_command, trace_argv_primary_command,
+    trace_token_is_git_executable, trace_token_is_git_executable_ascii_case_insensitive,
 };
 use crate::operations::git::cli_parser::parse_git_cli_args;
 use crate::operations::git::repo_state::worktree_root_for_path;
@@ -17,10 +16,10 @@ pub(super) fn trace_debug_lifecycle(message: &str) {
     }
 }
 
-pub(super) fn payload_timestamp_ns(payload: &Value) -> Result<u128, GitAiError> {
+pub(super) fn payload_timestamp_ns(payload: &Value) -> u128 {
     for key in ["ts", "time_ns", "time"] {
         if let Some(time) = payload.get(key).and_then(Value::as_u64) {
-            return Ok(time as u128);
+            return time as u128;
         }
     }
     if let Some(time) = payload
@@ -28,12 +27,12 @@ pub(super) fn payload_timestamp_ns(payload: &Value) -> Result<u128, GitAiError> 
         .and_then(Value::as_str)
         .and_then(rfc3339_to_unix_nanos)
     {
-        return Ok(time);
+        return time;
     }
     if let Some(seconds) = payload.get("t_abs").and_then(Value::as_f64) {
-        return Ok((seconds * 1_000_000_000_f64) as u128);
+        return (seconds * 1_000_000_000_f64) as u128;
     }
-    Ok(crate::model::clock::now_nanos())
+    crate::model::clock::now_nanos()
 }
 
 pub(super) fn payload_worktree(payload: &Value) -> Option<PathBuf> {
@@ -100,18 +99,10 @@ pub(super) fn canonical_invocation(
     if let Some(command) = primary_command.filter(|value| !value.trim().is_empty()) {
         return (
             Some(command.to_string()),
-            args_after_command(tokens, command),
+            trace_args_after_command(tokens, command),
         );
     }
     (None, Vec::new())
-}
-
-pub(super) fn args_after_command(argv: &[String], command: &str) -> Vec<String> {
-    argv.iter()
-        .position(|arg| arg == command)
-        .and_then(|idx| argv.get(idx + 1..))
-        .map(|args| args.to_vec())
-        .unwrap_or_default()
 }
 
 pub(super) fn is_internal_cmd_name(name: &str) -> bool {
@@ -128,16 +119,6 @@ pub(super) fn worktree_from_argv(argv: &[String]) -> Option<PathBuf> {
         idx += 1;
     }
     None
-}
-
-pub(super) fn command_may_mutate_refs(primary_command: Option<&str>, raw_argv: &[String]) -> bool {
-    primary_command.is_some_and(|command| {
-        let (_invoked_command, invoked_args) = canonical_invocation(raw_argv, Some(command));
-        crate::operations::git::command_classification::git_invocation_may_mutate_repo_state(
-            command,
-            &invoked_args,
-        )
-    })
 }
 
 pub(super) fn select_primary_command(

@@ -47,48 +47,6 @@ fn test_blame_after_merge_with_ai_contributions() {
     ]);
 }
 
-// #[test]
-// fn test_blame_after_rebase_with_ai_contributions() {
-//     let tmp_dir = tempdir().unwrap();
-//     let repo_path = tmp_dir.path().to_path_buf();
-
-//     // Create initial repository with base commit
-//     let (mut tmp_repo, mut lines, mut alphabet) =
-//         TmpRepo::new_with_base_commit(repo_path.clone()).unwrap();
-
-//     // Create a feature branch
-//     tmp_repo.create_branch("feature").unwrap();
-
-//     // Make changes on feature branch (add lines at the end)
-//     lines
-//         .append("REBASE FEATURE LINE 1\nREBASE FEATURE LINE 2\n")
-//         .unwrap();
-//     tmp_repo.trigger_checkpoint_with_ai("Claude", Some("claude-3-sonnet"), Some("cursor")).unwrap();
-//     tmp_repo
-//         .commit_with_message("feature branch changes")
-//         .unwrap();
-
-//     // Switch back to the default branch and make different changes (insert in middle)
-//     let default_branch = tmp_repo.get_default_branch().unwrap();
-//     tmp_repo.switch_branch(&default_branch).unwrap();
-//     lines
-//         .insert_at(15 * 2, "REBASE MAIN LINE 1\nREBASE MAIN LINE 2\n")
-//         .unwrap();
-//     tmp_repo
-//         .trigger_checkpoint_with_author("test_user")
-//         .unwrap();
-//     tmp_repo.commit_with_message("main branch changes").unwrap();
-
-//     // Switch back to feature and rebase onto the default branch
-//     tmp_repo.switch_branch("feature").unwrap();
-//     let default_branch = tmp_repo.get_default_branch().unwrap();
-//     tmp_repo.rebase_onto("feature", &default_branch).unwrap();
-
-//     // Test blame after rebase
-//     let blame = tmp_repo.blame_for_file(&lines, Some((30, 36))).unwrap();
-//     assert_debug_snapshot!(blame);
-// }
-
 #[test]
 #[ignore] // TODO: Fix this when we bring move back. Our test rig isn't handling trailing empty lines
 fn test_blame_after_complex_merge_scenario() {
@@ -149,53 +107,6 @@ fn test_blame_after_complex_merge_scenario() {
         "FEATURE B LINE 2".ai(),
     ]);
 }
-
-// #[test]
-// fn test_blame_after_rebase_chain() {
-//     let tmp_dir = tempdir().unwrap();
-//     let repo_path = tmp_dir.path().to_path_buf();
-
-//     // Create initial repository with base commit
-//     let (mut tmp_repo, mut lines, mut alphabet) =
-//         TmpRepo::new_with_base_commit(repo_path.clone()).unwrap();
-
-//     // Create a feature branch
-//     tmp_repo.create_branch("feature").unwrap();
-
-//     // Make multiple commits on feature branch
-//     lines.append("REBASE CHAIN 1\n").unwrap();
-//     tmp_repo.trigger_checkpoint_with_ai("Claude", Some("claude-3-sonnet"), Some("cursor")).unwrap();
-//     tmp_repo.commit_with_message("feature commit 1").unwrap();
-
-//     lines.append("REBASE CHAIN 2\n").unwrap();
-//     tmp_repo.trigger_checkpoint_with_author("GPT-4").unwrap();
-//     tmp_repo.commit_with_message("feature commit 2").unwrap();
-
-//     // Switch back to the default branch and make changes
-//     let default_branch = tmp_repo.get_default_branch().unwrap();
-//     tmp_repo.switch_branch(&default_branch).unwrap();
-//     lines.append("MAIN CHAIN 1\n").unwrap();
-//     tmp_repo
-//         .trigger_checkpoint_with_author("test_user")
-//         .unwrap();
-//     tmp_repo.commit_with_message("main commit 1").unwrap();
-
-//     lines.append("MAIN CHAIN 2\n").unwrap();
-//     tmp_repo
-//         .trigger_checkpoint_with_author("test_user")
-//         .unwrap();
-//     tmp_repo.commit_with_message("main commit 2").unwrap();
-
-//     // Switch back to feature and rebase onto the default branch
-//     tmp_repo.switch_branch("feature").unwrap();
-//     let default_branch = tmp_repo.get_default_branch().unwrap();
-//     tmp_repo.rebase_onto("feature", &default_branch).unwrap();
-
-//     // Test blame after rebase chain
-//     let blame = tmp_repo.blame_for_file(&lines, None).unwrap();
-//     println!("blame: {:?}", blame);
-//     assert_debug_snapshot!(blame);
-// }
 
 #[test]
 fn test_blame_after_merge_conflict_resolution() {

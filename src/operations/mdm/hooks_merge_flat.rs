@@ -6,6 +6,23 @@
 
 use serde_json::{Value, json};
 
+/// Whether `settings["hooks"][hook_name]` has an entry accepted by `is_match`.
+pub fn has_flat_hook(settings: &Value, hook_name: &str, is_match: impl Fn(&Value) -> bool) -> bool {
+    settings
+        .get("hooks")
+        .and_then(|hooks| hooks.get(hook_name))
+        .and_then(|entries| entries.as_array())
+        .is_some_and(|entries| entries.iter().any(is_match))
+}
+
+/// Whether `entry["command"]` is a string accepted by `is_checkpoint`.
+pub fn has_command(entry: &Value, is_checkpoint: impl Fn(&str) -> bool) -> bool {
+    entry
+        .get("command")
+        .and_then(|command| command.as_str())
+        .is_some_and(is_checkpoint)
+}
+
 /// Ensure a git-ai command exists in each of `hook_names`' arrays under
 /// `merged["hooks"]` (setting `merged["version"]` to `1` if absent). Replaces
 /// the first `is_checkpoint` match if it differs from `desired_command` or
@@ -74,13 +91,7 @@ pub fn remove_command_hooks_flat(
 
     for hook_name in hook_names {
         if let Some(entries) = hooks_obj.get_mut(*hook_name).and_then(|v| v.as_array_mut()) {
-            entries.retain(|entry| {
-                entry
-                    .get("command")
-                    .and_then(|c| c.as_str())
-                    .map(|cmd| !is_checkpoint(cmd))
-                    .unwrap_or(true)
-            });
+            entries.retain(|entry| !has_command(entry, is_checkpoint));
         }
     }
 

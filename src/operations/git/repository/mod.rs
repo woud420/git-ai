@@ -20,20 +20,22 @@ mod identity;
 mod object_reads;
 mod policy;
 
+/// Maximum number of pathspec arguments to pass on the command line.
+/// Beyond this threshold, we run git without pathspecs and post-filter
+/// in Rust to avoid OS `ARG_MAX` / E2BIG errors.
+pub const MAX_PATHSPEC_ARGS: usize = 1000;
+
 pub use commits::{Commit, CommitRange, CommitRangeIterator, Object, Parents};
 pub use core::Repository;
 pub(crate) use diff::{parse_diff_added_lines, parse_numstat_line, probe_configured_git_version};
 pub use diff::{parse_diff_added_lines_with_insertions, parse_git_version};
 pub(crate) use discovery::batch_read_paths_at_treeishes;
-pub use discovery::{
-    find_repository, find_repository_for_file, find_repository_in_path, group_files_by_repository,
-    resolve_command_base_dir,
-};
+pub use discovery::{find_repository, find_repository_in_path, resolve_command_base_dir};
 pub use discovery_no_exec::{
     config_get_str_for_path_no_git_exec, discover_repository_in_path_no_git_exec,
     from_bare_repository, worktree_storage_ai_dir,
 };
-pub use git_objects::{Blob, Reference, References, Tree, TreeEntry};
+pub use git_objects::{Blob, Reference, Tree, TreeEntry};
 pub use identity::{
     GitAuthorIdentity, GitConfigIdentityResolution, GitIdentityResolution,
     current_git_committer_identity_resolution, global_git_config_committer_identity,

@@ -34,7 +34,10 @@ fn should_retry_ref_enrichment(cmd: &NormalizedCommand) -> bool {
 
 fn command_can_move_head(cmd: &NormalizedCommand) -> bool {
     match cmd.primary_command.as_deref() {
-        Some("commit") => !has_command_arg(cmd, "--dry-run"),
+        // `--short`, `--porcelain` and `--long` imply `--dry-run` (git-commit(1)).
+        Some("commit") => !["--dry-run", "--short", "--porcelain", "--long"]
+            .iter()
+            .any(|arg| has_command_arg(cmd, arg)),
         Some("cherry-pick") => !["--abort", "--no-commit", "--quit", "-n"]
             .iter()
             .any(|arg| has_command_arg(cmd, arg)),
@@ -58,6 +61,7 @@ async fn enrich_command_with_retries(
     cmd: &mut NormalizedCommand,
     state: &FamilyState,
 ) -> Result<HashMap<String, String>, GitAiError> {
+    let pending_cherry_pick_sources = ref_cursor.pending_cherry_pick_sources();
     let mut command_start_refs = ref_cursor.enrich_command(cmd, state)?;
 
     // Git emits trace2 asynchronously, and the daemon can reach this actor
@@ -70,6 +74,11 @@ async fn enrich_command_with_retries(
     if should_retry_ref_enrichment(cmd) {
         for delay in COMMIT_REF_ENRICHMENT_RETRY_DELAYS {
             tokio::time::sleep(*delay).await;
+            // Every pass must start from the sources the command started
+            // with: the previous pass already consumed them, which would
+            // leave `--continue`/`--skip` without sources and cut their HEAD
+            // span down to a single row.
+            ref_cursor.restore_pending_cherry_pick_sources(&pending_cherry_pick_sources);
             command_start_refs = ref_cursor.enrich_command(cmd, state)?;
             if has_head_ref_change(cmd) {
                 break;
@@ -187,7 +196,6 @@ pub fn spawn_family_actor(family_key: FamilyKey) -> FamilyActorHandle {
                                 &command_start_refs,
                                 canonical_worktree,
                             )
-                            .map(|(applied, _)| applied)
                         });
                     let _ = respond_to.send(result);
                 }

@@ -6,11 +6,9 @@ use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::mdm::paths::gemini_config_dir;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Gemini agent that discovers conversations from Gemini CLI session storage.
 ///
@@ -80,10 +78,6 @@ impl Default for GeminiAgent {
 }
 
 impl Agent for GeminiAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::session_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,
@@ -113,10 +107,6 @@ impl Agent for GeminiAgent {
         self.batch_size
     }
 
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-    }
-
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
         Ok(discover_path_sessions(
             "gemini",
@@ -141,15 +131,6 @@ impl Agent for GeminiAgent {
         )
     }
 
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
-    }
-
     fn streams(&self) -> Vec<StreamDescriptor> {
         vec![StreamDescriptor::identity_transcript(
             StreamFormat::GeminiJsonl,
@@ -165,15 +146,6 @@ mod tests {
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
     };
     use serial_test::serial;
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = GeminiAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     #[test]
     #[serial]

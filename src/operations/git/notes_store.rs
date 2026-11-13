@@ -20,8 +20,10 @@
 //!   this is an intentional store→daemon side-effect documented in persistence-model.md.
 
 use crate::error::GitAiError;
+use crate::model::repository::notes_db::NotesDatabase;
 use crate::operations::git::repository::Repository;
 use std::collections::{HashMap, HashSet};
+use std::sync::MutexGuard;
 
 /// Per-backend storage primitives for authorship notes.
 ///
@@ -52,17 +54,25 @@ pub(crate) trait AuthorshipNoteStore {
 }
 
 // ---------------------------------------------------------------------------
-// Shared db-read helpers (both Sqlite and Http read through the same db path)
+// Shared db helpers (both Sqlite and Http go through the same db path)
 // ---------------------------------------------------------------------------
 
+/// Lock the global notes database for a write or search that must report
+/// failure. The best-effort read helpers below swallow errors instead.
+fn lock_notes_db() -> Result<MutexGuard<'static, NotesDatabase>, GitAiError> {
+    NotesDatabase::global()?
+        .lock()
+        .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))
+}
+
 pub(in crate::operations::git) fn db_read_note(commit_sha: &str) -> Option<String> {
-    let db = crate::model::repository::notes_db::NotesDatabase::global().ok()?;
+    let db = NotesDatabase::global().ok()?;
     let db_lock = db.lock().ok()?;
     db_lock.get_note(commit_sha).ok().flatten()
 }
 
 pub(in crate::operations::git) fn db_read_notes(commit_shas: &[String]) -> HashMap<String, String> {
-    let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global() else {
+    let Ok(db) = NotesDatabase::global() else {
         return HashMap::new();
     };
     let Ok(db_lock) = db.lock() else {
@@ -107,7 +117,7 @@ impl SqliteNoteStore {
             .iter()
             .map(|(sha, content)| (sha.clone(), content.clone()))
             .collect();
-        if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
+        if let Ok(db) = NotesDatabase::global()
             && let Ok(mut db_lock) = db.lock()
         {
             let _ = db_lock.cache_synced_notes(&entries);
@@ -117,19 +127,11 @@ impl SqliteNoteStore {
 
 impl AuthorshipNoteStore for SqliteNoteStore {
     fn write_note(&self, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-        let mut db_lock = db
-            .lock()
-            .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-        db_lock.upsert_local_note(commit_sha, content)
+        lock_notes_db()?.upsert_local_note(commit_sha, content)
     }
 
     fn write_notes_batch(&self, entries: &[(String, String)]) -> Result<(), GitAiError> {
-        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-        let mut db_lock = db
-            .lock()
-            .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-        db_lock.upsert_local_notes_batch(entries)
+        lock_notes_db()?.upsert_local_notes_batch(entries)
     }
 
     fn read_note(&self, commit_sha: &str) -> Option<String> {
@@ -148,11 +150,7 @@ impl AuthorshipNoteStore for SqliteNoteStore {
     }
 
     fn search_notes(&self, pattern: &str) -> Result<Vec<String>, GitAiError> {
-        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-        let db_lock = db
-            .lock()
-            .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-        db_lock.search_notes_content(pattern)
+        lock_notes_db()?.search_notes_content(pattern)
     }
 }
 
@@ -212,7 +210,7 @@ impl HttpNoteStore {
                         continue;
                     }
                     let entries: Vec<(String, String)> = response.notes.into_iter().collect();
-                    if let Ok(db) = crate::model::repository::notes_db::NotesDatabase::global()
+                    if let Ok(db) = NotesDatabase::global()
                         && let Ok(mut lock) = db.lock()
                     {
                         let _ = lock.cache_synced_notes(&entries);
@@ -231,23 +229,14 @@ impl HttpNoteStore {
 
 impl AuthorshipNoteStore for HttpNoteStore {
     fn write_note(&self, commit_sha: &str, content: &str) -> Result<(), GitAiError> {
-        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-        let mut db_lock = db
-            .lock()
-            .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-        db_lock.upsert_note(commit_sha, content)?;
-        drop(db_lock);
+        // The lock guard is a temporary: released before the flush is kicked.
+        lock_notes_db()?.upsert_note(commit_sha, content)?;
         crate::operations::daemon::telemetry_handle::submit_notes();
         Ok(())
     }
 
     fn write_notes_batch(&self, entries: &[(String, String)]) -> Result<(), GitAiError> {
-        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-        let mut db_lock = db
-            .lock()
-            .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-        db_lock.upsert_notes_batch(entries)?;
-        drop(db_lock);
+        lock_notes_db()?.upsert_notes_batch(entries)?;
         crate::operations::daemon::telemetry_handle::submit_notes();
         Ok(())
     }
@@ -284,11 +273,7 @@ impl AuthorshipNoteStore for HttpNoteStore {
     }
 
     fn search_notes(&self, pattern: &str) -> Result<Vec<String>, GitAiError> {
-        let db = crate::model::repository::notes_db::NotesDatabase::global()?;
-        let db_lock = db
-            .lock()
-            .map_err(|e| GitAiError::Generic(format!("notes-db lock: {}", e)))?;
-        db_lock.search_notes_content(pattern)
+        lock_notes_db()?.search_notes_content(pattern)
     }
 }
 

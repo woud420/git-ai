@@ -113,7 +113,7 @@ fn append_started_log(
 
     let entry = StartedGitInvocationLogEntry {
         command: parsed.command.clone(),
-        command_args: parsed.command_args.clone(),
+        command_args: parsed.command_args,
         cwd: Some(cwd.to_string_lossy().to_string()),
         test_sync_session: test_sync_session.map(str::to_string),
     };

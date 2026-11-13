@@ -1,12 +1,11 @@
 use super::daemon_config::test_completion_log_path;
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
 use crate::operations::git::repo_state::common_dir_for_worktree;
 use futures::StreamExt;
 use serde_json::Value;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 
@@ -126,9 +125,7 @@ impl ActorDaemonCoordinator {
         let started_at_ns = trace_payload_root_started_at_ns(payload)
             .or_else(|| trace_payload_time_ns(payload))
             .unwrap_or_else(now_unix_nanos);
-        let family = crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
-            .to_string_lossy()
-            .to_string();
+        let family = git_backend::family_key_for_common_dir(&common_dir).0;
         self.append_pending_root_entry(&family, root_sid, started_at_ns)
     }
 
@@ -335,27 +332,6 @@ impl ActorDaemonCoordinator {
         Ok(map
             .get(family)
             .and_then(|errors| errors.iter().next_back().map(|(_, error)| error.clone())))
-    }
-
-    pub(crate) fn record_recent_replay_prerequisite(
-        &self,
-        family: &str,
-        prerequisite: RecentReplayPrerequisite,
-    ) -> Result<(), GitAiError> {
-        const MAX_RECENT_REPLAY_PREREQUISITES_PER_FAMILY: usize = 256;
-
-        let mut map = self
-            .recent_replay_prerequisites_by_family
-            .lock()
-            .map_err(|_| PersistenceError::LockPoisoned {
-                what: "recent replay prerequisites map",
-            })?;
-        let entries = map.entry(family.to_string()).or_insert_with(VecDeque::new);
-        entries.push_back(prerequisite);
-        while entries.len() > MAX_RECENT_REPLAY_PREREQUISITES_PER_FAMILY {
-            let _ = entries.pop_front();
-        }
-        Ok(())
     }
 
     pub(crate) fn maybe_append_test_completion_log(

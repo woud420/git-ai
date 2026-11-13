@@ -39,7 +39,7 @@ pub fn handle_git_ai(args: &[String]) {
     // per-PID log files.
     //
     // Skip for commands that must work without a running background service
-    // (help, version, config, d management, debug, upgrade) so users can
+    // (help, version, config, d management, debug, upgrade, uninstall) so users can
     // always diagnose and recover from a broken state.
     let needs_daemon =
         crate::cli::daemon_preconnect::command_requires_daemon_preconnect(args[0].as_str());
@@ -54,9 +54,6 @@ pub fn handle_git_ai(args: &[String]) {
                     "error: failed to connect to git-ai background service: {}",
                     err
                 );
-                if args[0].as_str() == "checkpoint" {
-                    std::process::exit(0);
-                }
                 std::process::exit(1);
             }
         }
@@ -115,7 +112,7 @@ pub fn handle_git_ai(args: &[String]) {
         "checkpoint" => {
             if let Some(t) = perf_entry {
                 eprintln!(
-                    "[perf] checkpoint: entry_overhead={:.1}ms (binary startup + clap + dispatch)",
+                    "[perf] checkpoint: entry_overhead={:.1}ms (binary startup + dispatch)",
                     t.elapsed().as_secs_f64() * 1000.0
                 );
             }
@@ -126,7 +123,7 @@ pub fn handle_git_ai(args: &[String]) {
             if is_interactive_terminal() {
                 log_message("log", "info", None)
             }
-            exit_with_log_status(status);
+            crate::cli::git_handlers::exit_with_status(status);
         }
         "blame" => {
             handle_ai_blame(&args[1..]);
@@ -823,28 +820,15 @@ fn handle_stats(args: &[String]) {
                 i += 1;
             }
             "--ignore" => {
-                // Collect all arguments after --ignore until we hit another flag or commit SHA
+                // Collect all arguments after --ignore until we hit another flag or a commit range.
                 // This supports shell glob expansion: `--ignore *.lock` expands to `--ignore Cargo.lock package.lock`
                 i += 1;
-                let mut found_pattern = false;
-                while i < args.len() {
-                    let arg = &args[i];
-                    // Stop if we hit another flag
-                    if arg.starts_with("--") {
-                        break;
-                    }
-                    // Stop if this looks like a commit SHA or range (contains ..)
-                    if arg.contains("..")
-                        || (commit_sha.is_none() && !found_pattern && arg.len() >= 7)
-                    {
-                        // Could be a commit SHA, stop collecting patterns
-                        break;
-                    }
-                    ignore_patterns.push(arg.clone());
-                    found_pattern = true;
+                let first_pattern = i;
+                while i < args.len() && !args[i].starts_with("--") && !args[i].contains("..") {
+                    ignore_patterns.push(args[i].clone());
                     i += 1;
                 }
-                if !found_pattern {
+                if i == first_pattern {
                     eprintln!("--ignore requires at least one pattern argument");
                     std::process::exit(1);
                 }
@@ -965,14 +949,7 @@ fn synthesize_hook_input_from_cli_args(
             let mut paths: Vec<String> = remaining_args
                 .iter()
                 .filter(|a| !a.starts_with("--"))
-                .map(|s| {
-                    let p = std::path::Path::new(s.as_str());
-                    if p.is_absolute() {
-                        s.clone()
-                    } else {
-                        cwd.join(p).to_string_lossy().to_string()
-                    }
-                })
+                .map(|arg| absolute_path_arg(&cwd, arg))
                 .collect();
             if paths.is_empty() {
                 crate::operations::commands::checkpoint_agent::orchestrator::
@@ -1007,23 +984,15 @@ fn synthesize_hook_input_from_cli_args(
                         i += 2;
                     }
                     "--" => {
-                        files.extend(remaining_args[i + 1..].iter().map(|s| {
-                            let p = std::path::Path::new(s.as_str());
-                            if p.is_absolute() {
-                                s.clone()
-                            } else {
-                                cwd.join(p).to_string_lossy().to_string()
-                            }
-                        }));
+                        files.extend(
+                            remaining_args[i + 1..]
+                                .iter()
+                                .map(|arg| absolute_path_arg(&cwd, arg)),
+                        );
                         break;
                     }
                     arg if !arg.starts_with("--") => {
-                        let p = std::path::Path::new(arg);
-                        if p.is_absolute() {
-                            files.push(arg.to_string());
-                        } else {
-                            files.push(cwd.join(p).to_string_lossy().to_string());
-                        }
+                        files.push(absolute_path_arg(&cwd, arg));
                         i += 1;
                     }
                     _ => {
@@ -1042,6 +1011,15 @@ fn synthesize_hook_input_from_cli_args(
         }
         _ => String::new(),
     })
+}
+
+fn absolute_path_arg(cwd: &std::path::Path, arg: &str) -> String {
+    let path = std::path::Path::new(arg);
+    if path.is_absolute() {
+        arg.to_string()
+    } else {
+        cwd.join(path).to_string_lossy().to_string()
+    }
 }
 
 fn discover_dirty_files_from_status(cwd: &std::path::Path) -> Vec<String> {
@@ -1074,36 +1052,13 @@ fn discover_dirty_files_from_status(cwd: &std::path::Path) -> Vec<String> {
             if raw_file.is_empty() {
                 return None;
             }
-            let unescaped = crate::operations::git::path_format::unescape_git_path(raw_file);
-            let mut file = unescaped.as_str();
-            // Renames show as "old_name -> new_name"; take only the new name
-            if let Some(arrow_pos) = file.find(" -> ") {
-                file = &file[arrow_pos + 4..];
-            }
-            let p = std::path::Path::new(file);
-            if p.is_absolute() {
-                Some(file.to_string())
-            } else {
-                Some(repo_root.join(p).to_string_lossy().to_string())
-            }
+            // Renames show as "old_name -> new_name"; take only the new name.
+            // Each side is quoted separately, so split before unescaping.
+            let raw_file = raw_file
+                .split_once(" -> ")
+                .map_or(raw_file, |(_, new_name)| new_name);
+            let file = crate::operations::git::path_format::unescape_git_path(raw_file);
+            Some(absolute_path_arg(&repo_root, &file))
         })
         .collect()
-}
-
-/// Exit mirroring the child's termination status, re-raising the original
-/// signal on Unix so the calling shell sees the correct termination reason
-/// (e.g. SIGPIPE from `git ai log | head`).
-fn exit_with_log_status(status: std::process::ExitStatus) -> ! {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if let Some(sig) = status.signal() {
-            unsafe {
-                libc::signal(sig, libc::SIG_DFL);
-                libc::raise(sig);
-            }
-            unreachable!();
-        }
-    }
-    std::process::exit(status.code().unwrap_or(1));
 }

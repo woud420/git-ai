@@ -1,6 +1,6 @@
 use crate::error::GitAiError;
-use crate::model::authorship_log::PromptRecord;
-use crate::operations::git::notes_api::{read_authorship, search_notes};
+use crate::model::authorship_log::{PromptRecord, metadata_key};
+use crate::operations::git::notes_api::{read_authorship, read_authorship_v3_batch, search_notes};
 use crate::operations::git::repository::Repository;
 
 /// Find a prompt in the repository history
@@ -48,7 +48,7 @@ pub fn find_prompt_in_commit(
     // Fall back to sessions map (session IDs start with "s_")
     // Strip ::t_ trace suffix if present — attestation hashes use s_xxx::t_yyy but session keys are just s_xxx
     let session_key = if prompt_id.starts_with("s_") {
-        prompt_id.split("::").next().unwrap_or(prompt_id)
+        metadata_key(prompt_id)
     } else {
         prompt_id
     };
@@ -72,7 +72,7 @@ pub fn find_prompt_in_history(
     // Strip ::t_ trace suffix for session lookups — attestation hashes use s_xxx::t_yyy
     // but session keys in metadata are just s_xxx
     let session_key = if prompt_id.starts_with("s_") {
-        prompt_id.split("::").next().unwrap_or(prompt_id)
+        metadata_key(prompt_id)
     } else {
         prompt_id
     };
@@ -89,9 +89,10 @@ pub fn find_prompt_in_history(
     }
 
     // Iterate through commits, looking for the prompt and counting occurrences
+    let logs = read_authorship_v3_batch(repo, &shas).unwrap_or_default();
     let mut found_count = 0;
     for sha in &shas {
-        if let Some(authorship_log) = read_authorship(repo, sha) {
+        if let Some(authorship_log) = logs.get(sha) {
             // Check prompts map first
             if let Some(prompt) = authorship_log.metadata.prompts.get(prompt_id) {
                 if found_count == offset {

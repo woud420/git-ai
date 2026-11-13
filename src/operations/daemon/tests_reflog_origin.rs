@@ -140,3 +140,41 @@ async fn mv_is_ordered_without_collecting_reflog_offsets() {
     assert_eq!(ingress.root_mutating.get("mv-root"), Some(&true));
     assert!(!ingress.root_reflog_start_offsets.contains_key("mv-root"));
 }
+
+#[tokio::test]
+async fn read_only_roots_do_not_resolve_their_repository() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("target");
+    seed_reflog(&target);
+    let coord = ActorDaemonCoordinator::new();
+    let frames = |sid: &str, command: &str| {
+        [
+            json!({"event": "start", "sid": sid, "argv": ["git", "-C", target, command]}),
+            json!({"event": "def_repo", "sid": sid, "repo": 1, "worktree": target}),
+        ]
+    };
+    // An IDE-style status names its repository on both frames; neither is
+    // queued and nothing reads a read-only root's repository context.
+    for mut frame in frames("reader", "status") {
+        let received = frame.clone();
+        assert!(!coord.prepare_trace_payload_for_ingest(&mut frame));
+        assert_eq!(frame, received, "a dropped frame is left as received");
+    }
+    let [mut start, mut def_repo] = frames("writer", "commit");
+    assert!(coord.prepare_trace_payload_for_ingest(&mut start));
+    assert!(coord.prepare_trace_payload_for_ingest(&mut def_repo));
+    // A queued frame inherits the root's argv unless it carries its own.
+    assert!(start.get(TRACE_ROOT_ARGV_FIELD).is_none());
+    assert_eq!(def_repo[TRACE_ROOT_ARGV_FIELD], start["argv"]);
+    assert!(def_repo[TRACE_ROOT_STARTED_AT_NS_FIELD].is_u64());
+    let ingress = coord.trace_ingress_state.lock().unwrap();
+    assert!(ingress.root_definitely_read_only.contains("reader"));
+    assert!(!ingress.root_families.contains_key("reader"));
+    assert!(!ingress.root_worktrees.contains_key("reader"));
+    let family = target.join(".git").canonicalize().unwrap();
+    assert_eq!(
+        ingress.root_families.get("writer").map(String::as_str),
+        family.to_str()
+    );
+    assert_eq!(ingress.root_worktrees.get("writer"), Some(&target));
+}

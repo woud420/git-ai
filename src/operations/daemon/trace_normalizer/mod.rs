@@ -12,7 +12,7 @@ mod frame_helpers;
 mod index_write;
 mod transport_targets;
 
-use frame_helpers::{command_may_mutate_refs, payload_timestamp_ns, select_primary_command};
+use frame_helpers::{payload_timestamp_ns, select_primary_command};
 
 #[cfg(test)]
 mod tests_bisect;
@@ -67,13 +67,6 @@ pub struct DeferredRootExit {
     pub is_atexit: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct OrphanTraceRoot {
-    pub root_sid: String,
-    pub raw_argv: Vec<String>,
-    pub deferred_exit_only: bool,
-}
-
 pub struct TraceNormalizer<B: GitBackend> {
     pub(super) backend: Arc<B>,
     pub(super) state: TraceNormalizerState,
@@ -115,77 +108,19 @@ impl<B: GitBackend> TraceNormalizer<B> {
         self.mark_completed_root_with_limit(root_sid, COMPLETED_ROOT_RETENTION_LIMIT);
     }
 
-    pub fn remove_pending_root(&mut self, root_sid: &str) -> Option<PendingTraceCommand> {
-        let removed = self.state.pending.remove(root_sid);
-        if removed.is_some() {
-            let _ = self.state.sid_to_worktree.remove(root_sid);
-            let _ = self.state.sid_to_family.remove(root_sid);
-            let _ = self.state.prestart_root_cmd_names.remove(root_sid);
-        }
-        removed
-    }
-
-    pub fn sweep_orphans(&mut self) -> Vec<OrphanTraceRoot> {
-        let mut removed = Vec::new();
-
-        let pending_roots = self.state.pending.keys().cloned().collect::<Vec<_>>();
-        for root_sid in pending_roots {
-            if let Some(pending) = self.remove_pending_root(&root_sid) {
-                removed.push(OrphanTraceRoot {
-                    root_sid,
-                    raw_argv: pending.raw_argv,
-                    deferred_exit_only: false,
-                });
-            }
-        }
-
-        let deferred_roots = self
-            .state
-            .deferred_exits
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        for root_sid in deferred_roots {
-            self.state.deferred_exits.remove(&root_sid);
-            let _ = self.state.sid_to_worktree.remove(&root_sid);
-            let _ = self.state.sid_to_family.remove(&root_sid);
-            let _ = self.state.prestart_root_cmd_names.remove(&root_sid);
-            removed.push(OrphanTraceRoot {
-                root_sid,
-                raw_argv: Vec::new(),
-                deferred_exit_only: true,
-            });
-        }
-
-        removed
-    }
-
-    pub fn sweep_orphans_for_roots(&mut self, roots: &[String]) -> Vec<OrphanTraceRoot> {
-        let mut removed = Vec::new();
-
+    /// Drops the state of roots whose connection closed before `atexit`.
+    pub fn sweep_orphans_for_roots(&mut self, roots: &[String]) {
         for root_sid in roots {
-            if let Some(pending) = self.remove_pending_root(root_sid) {
-                removed.push(OrphanTraceRoot {
-                    root_sid: root_sid.clone(),
-                    raw_argv: pending.raw_argv,
-                    deferred_exit_only: false,
-                });
-                continue;
-            }
-
-            if self.state.deferred_exits.remove(root_sid).is_some() {
-                let _ = self.state.sid_to_worktree.remove(root_sid);
-                let _ = self.state.sid_to_family.remove(root_sid);
-                let _ = self.state.prestart_root_cmd_names.remove(root_sid);
-                removed.push(OrphanTraceRoot {
-                    root_sid: root_sid.clone(),
-                    raw_argv: Vec::new(),
-                    deferred_exit_only: true,
-                });
+            let pending = self.state.pending.remove(root_sid).is_some();
+            // A non-atexit `exit` seen after `start` is deferred while the
+            // command stays pending, so one root can own both entries.
+            let deferred_exit = self.state.deferred_exits.remove(root_sid).is_some();
+            if pending || deferred_exit {
+                self.state.sid_to_worktree.remove(root_sid);
+                self.state.sid_to_family.remove(root_sid);
+                self.state.prestart_root_cmd_names.remove(root_sid);
             }
         }
-
-        removed
     }
 
     pub(super) fn resolve_primary_hint(
@@ -215,38 +150,27 @@ impl<B: GitBackend> TraceNormalizer<B> {
         Ok(selected)
     }
 
-    pub(super) fn refresh_pending_mutation_capture(
-        &mut self,
-        root_sid: &str,
-    ) -> Result<(), GitAiError> {
-        let (primary_hint, raw_argv) = {
-            let pending = match self.state.pending.get(root_sid) {
-                Some(pending) => pending,
-                None => return Ok(()),
-            };
-
-            let (Some(worktree), Some(family)) =
-                (pending.worktree.as_deref(), pending.family_key.as_ref())
-            else {
-                return Ok(());
-            };
-
-            (
-                self.resolve_primary_hint(
-                    pending.root_cmd_name.as_deref(),
-                    &pending.observed_child_commands,
-                    &pending.raw_argv,
-                    Some(worktree),
-                    Some(family),
-                )?,
-                pending.raw_argv.clone(),
-            )
-        };
-        if !command_may_mutate_refs(primary_hint.as_deref(), &raw_argv) {
+    /// Resolves the root's alias hint once its repository is known and drops
+    /// the result; finalization resolves it again. The early lookup stays
+    /// because it is observable: an alias-config failure is reported on this
+    /// frame, and the backend's stale-while-revalidate alias cache is warmed
+    /// before finalization reads it.
+    pub(super) fn warm_pending_alias_resolution(&self, root_sid: &str) -> Result<(), GitAiError> {
+        let Some(pending) = self.state.pending.get(root_sid) else {
             return Ok(());
-        }
-        // Ref transitions are resolved by the family cursor after normalization.
-        // Avoid any live snapshotting here to keep normalization race-free.
+        };
+        let (Some(worktree), Some(family)) =
+            (pending.worktree.as_deref(), pending.family_key.as_ref())
+        else {
+            return Ok(());
+        };
+        self.resolve_primary_hint(
+            pending.root_cmd_name.as_deref(),
+            &pending.observed_child_commands,
+            &pending.raw_argv,
+            Some(worktree),
+            Some(family),
+        )?;
         Ok(())
     }
 
@@ -277,7 +201,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
         if self.is_completed_root(&root_sid) {
             return Ok(None);
         }
-        let ts = payload_timestamp_ns(payload)?;
+        let ts = payload_timestamp_ns(payload);
 
         if let Some(pending) = self.state.pending.get_mut(&root_sid) {
             pending.bisect_checkout.observe(payload, sid, &root_sid, ts);
@@ -300,7 +224,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
                 self.capture_transport_target(payload, sid, &root_sid);
                 Ok(None)
             }
-            "def_param" => self.handle_def_param(payload, &root_sid),
             "exec" => Ok(None),
             "exit" => self.handle_exit(payload, sid, &root_sid, ts, false),
             "atexit" => self.handle_exit(payload, sid, &root_sid, ts, true),

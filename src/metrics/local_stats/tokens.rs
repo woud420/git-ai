@@ -23,6 +23,15 @@ pub(super) struct TokenAccum {
     pub(super) cache_creation: u64,
 }
 
+impl std::ops::AddAssign<&TokenAccum> for TokenAccum {
+    fn add_assign(&mut self, other: &TokenAccum) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_read += other.cache_read;
+        self.cache_creation += other.cache_creation;
+    }
+}
+
 /// Per-session codex accumulator. Codex reports *cumulative* session totals on
 /// each `token_count` event, so we track the max of each raw field. The model
 /// name arrives on a separate event (`payload.model`), captured when seen.
@@ -79,11 +88,7 @@ fn shorten_model(model: &str) -> String {
 fn cost_for_message_slice(entries: impl Iterator<Item = (String, TokenAccum)>) -> f64 {
     let mut model_totals: HashMap<String, TokenAccum> = HashMap::new();
     for (model, acc) in entries {
-        let e = model_totals.entry(model).or_default();
-        e.input += acc.input;
-        e.output += acc.output;
-        e.cache_read += acc.cache_read;
-        e.cache_creation += acc.cache_creation;
+        *model_totals.entry(model).or_default() += &acc;
     }
     model_totals
         .iter()
@@ -127,11 +132,7 @@ pub(super) fn build_token_summary(
                 .or_insert(0.0) += estimate_cost(&acc, pricing);
         }
 
-        let entry = model_tokens.entry(short.clone()).or_default();
-        entry.input += acc.input;
-        entry.output += acc.output;
-        entry.cache_read += acc.cache_read;
-        entry.cache_creation += acc.cache_creation;
+        *model_tokens.entry(short.clone()).or_default() += &acc;
 
         if !sid.is_empty() {
             model_session_ids
@@ -165,10 +166,7 @@ pub(super) fn build_token_summary(
                 .or_insert(0.0) += estimate_cost(&mapped, pricing);
         }
 
-        let entry = model_tokens.entry(short.clone()).or_default();
-        entry.input += mapped.input;
-        entry.output += mapped.output;
-        entry.cache_read += mapped.cache_read;
+        *model_tokens.entry(short.clone()).or_default() += &mapped;
         model_session_ids
             .entry(short.clone())
             .or_default()

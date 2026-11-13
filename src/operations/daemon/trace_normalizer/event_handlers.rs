@@ -1,7 +1,7 @@
 use crate::error::GitAiError;
-use crate::model::domain::{CommandScope, Confidence, FamilyKey, NormalizedCommand};
+use crate::model::domain::{CommandScope, Confidence, NormalizedCommand};
 use crate::observability;
-use crate::operations::daemon::git_backend::GitBackend;
+use crate::operations::daemon::git_backend::{GitBackend, family_key_for_common_dir};
 use crate::operations::daemon::trace_helpers::{
     daemon_worktree_from_repo_path, def_repo_is_secondary, trace_argv_primary_command,
     trace_payload_argv,
@@ -44,11 +44,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
 
         let family_key = if let Some(worktree) = worktree.as_deref() {
             if let Some(common_dir) = common_dir_for_worktree(worktree) {
-                let family = FamilyKey::new(
-                    crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
-                        .to_string_lossy()
-                        .to_string(),
-                );
+                let family = family_key_for_common_dir(&common_dir);
                 self.state
                     .sid_to_family
                     .insert(root_sid.to_string(), family.clone());
@@ -106,14 +102,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
                 .insert(root_sid.to_string(), deferred);
         }
 
-        Ok(None)
-    }
-
-    pub(super) fn handle_def_param(
-        &mut self,
-        _payload: &Value,
-        _root_sid: &str,
-    ) -> Result<Option<NormalizedCommand>, GitAiError> {
         Ok(None)
     }
 
@@ -190,13 +178,9 @@ impl<B: GitBackend> TraceNormalizer<B> {
             .sid_to_worktree
             .insert(root_sid.to_string(), repo.clone());
 
-        let family = common_dir_for_repo_path(&repo).map(|common_dir| {
-            FamilyKey::new(
-                crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
-                    .to_string_lossy()
-                    .to_string(),
-            )
-        });
+        let family = common_dir_for_repo_path(&repo)
+            .as_deref()
+            .map(family_key_for_common_dir);
         if let Some(family) = family.as_ref() {
             self.state
                 .sid_to_family
@@ -211,7 +195,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
                 pending.family_key = Some(family.clone());
             }
         }
-        self.refresh_pending_mutation_capture(root_sid)?;
+        self.warm_pending_alias_resolution(root_sid)?;
         Ok(None)
     }
 
@@ -259,14 +243,14 @@ impl<B: GitBackend> TraceNormalizer<B> {
                     .insert(root_sid.to_string(), cmd);
                 return Ok(None);
             }
-            self.refresh_pending_mutation_capture(root_sid)?;
+            self.warm_pending_alias_resolution(root_sid)?;
             return Ok(None);
         }
 
         if let Some(pending) = self.state.pending.get_mut(root_sid) {
             pending.observed_child_commands.push(cmd);
         }
-        self.refresh_pending_mutation_capture(root_sid)?;
+        self.warm_pending_alias_resolution(root_sid)?;
         Ok(None)
     }
 
@@ -279,8 +263,6 @@ impl<B: GitBackend> TraceNormalizer<B> {
         is_atexit: bool,
     ) -> Result<Option<NormalizedCommand>, GitAiError> {
         if sid != root_sid {
-            let _ = payload;
-            let _ = finished_at_ns;
             return Ok(None);
         }
         if self.is_completed_root(root_sid) {
@@ -380,13 +362,9 @@ impl<B: GitBackend> TraceNormalizer<B> {
         if pending.family_key.is_none()
             && let Some(worktree) = pending.worktree.as_deref()
         {
-            pending.family_key = common_dir_for_worktree(worktree).map(|common_dir| {
-                FamilyKey::new(
-                    crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
-                        .to_string_lossy()
-                        .to_string(),
-                )
-            });
+            pending.family_key = common_dir_for_worktree(worktree)
+                .as_deref()
+                .map(family_key_for_common_dir);
         }
 
         let mut primary_command = self.resolve_primary_hint(
@@ -466,11 +444,7 @@ impl<B: GitBackend> TraceNormalizer<B> {
             let mut last_error: Option<(PathBuf, GitAiError)> = None;
             for candidate in candidates {
                 if let Some(common_dir) = common_dir_for_repo_path(&candidate) {
-                    let resolved_family = FamilyKey::new(
-                        crate::operations::git::canonicalize::canonicalize_or_self(&common_dir)
-                            .to_string_lossy()
-                            .to_string(),
-                    );
+                    let resolved_family = family_key_for_common_dir(&common_dir);
                     pending.worktree = Some(candidate);
                     family_key = Some(resolved_family.clone());
                     scope = CommandScope::Family(resolved_family);

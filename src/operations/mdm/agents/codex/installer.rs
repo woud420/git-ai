@@ -1,14 +1,13 @@
 use crate::config::{CodexHooksFormat, Config};
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::binary_exists;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, join_diffs, read_optional, write_atomic};
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::paths::codex_home_dir;
-use serde_json::json;
+use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml::Value as TomlValue;
-use toml::map::Map;
 
 use super::CodexInstaller;
 
@@ -25,6 +24,66 @@ impl CodexInstaller {
 
     pub(super) fn desired_command(binary_path: &Path) -> String {
         format!("{} {}", binary_path.display(), super::CODEX_CHECKPOINT_CMD)
+    }
+}
+
+// --- Steps shared by check, install and uninstall ---
+
+impl CodexInstaller {
+    /// The `(config.toml, hooks.json)` an install in `HooksJson` format produces.
+    fn hooks_json_format_desired_state(
+        config: &TomlValue,
+        hooks_json: &JsonValue,
+        binary_path: &Path,
+    ) -> Result<(TomlValue, JsonValue), GitAiError> {
+        // config_with_hooks_feature_enabled also drops a git-ai `notify`.
+        let (config_without_inline_hooks, _) = Self::remove_inline_hooks_from_config(config)?;
+        Ok((
+            Self::config_with_hooks_feature_enabled(&config_without_inline_hooks)?,
+            Self::hooks_json_with_installed_hooks(hooks_json, binary_path)?,
+        ))
+    }
+
+    /// Write `new_content` to `path` unless `dry_run`; returns its diff.
+    fn write_with_diff(
+        path: &Path,
+        old_content: &str,
+        new_content: &str,
+        dry_run: bool,
+    ) -> Result<String, GitAiError> {
+        if !dry_run {
+            write_atomic(path, new_content.as_bytes())?;
+        }
+        Ok(generate_diff(path, old_content, new_content))
+    }
+
+    fn write_config(
+        config: &TomlValue,
+        old_content: &str,
+        dry_run: bool,
+    ) -> Result<String, GitAiError> {
+        let new_content = toml::to_string_pretty(config).map_err(|e| {
+            GitAiError::Generic(format!("Failed to serialize Codex config.toml: {e}"))
+        })?;
+        Self::write_with_diff(&Self::config_path(), old_content, &new_content, dry_run)
+    }
+
+    /// Write a hooks.json that had its git-ai entries stripped, deleting the
+    /// file instead once no hooks are left in it.
+    fn write_cleaned_hooks_json(
+        cleaned_hooks: &JsonValue,
+        old_content: &str,
+        dry_run: bool,
+    ) -> Result<String, GitAiError> {
+        let path = Self::hooks_json_path();
+        if Self::hooks_json_has_any_entries(cleaned_hooks) {
+            let new_content = serde_json::to_string_pretty(cleaned_hooks)?;
+            return Self::write_with_diff(&path, old_content, &new_content, dry_run);
+        }
+        if !dry_run {
+            fs::remove_file(&path)?;
+        }
+        Ok(generate_diff(&path, old_content, ""))
     }
 }
 
@@ -51,28 +110,15 @@ impl HookInstaller for CodexInstaller {
             return Ok(HookCheckResult::tool_not_installed());
         }
 
-        let config_path = Self::config_path();
-        let config = if config_path.exists() {
-            Self::parse_config_toml(&fs::read_to_string(&config_path)?)?
-        } else {
-            TomlValue::Table(Map::new())
-        };
-        let hooks_json_path = Self::hooks_json_path();
-        let hooks_json = if hooks_json_path.exists() {
-            Self::parse_hooks_json(&fs::read_to_string(&hooks_json_path)?)?
-        } else {
-            json!({})
-        };
+        // Both parsers read a missing (empty) file as an empty document.
+        let config =
+            Self::parse_config_toml(&read_optional(&Self::config_path())?.unwrap_or_default())?;
+        let hooks_json =
+            Self::parse_hooks_json(&read_optional(&Self::hooks_json_path())?.unwrap_or_default())?;
 
         if Config::fresh().codex_hooks_format() == CodexHooksFormat::HooksJson {
-            let config_without_notify =
-                Self::remove_notify_if_git_ai(&config)?.unwrap_or(config.clone());
-            let (config_without_inline_hooks, _) =
-                Self::remove_inline_hooks_from_config(&config_without_notify)?;
-            let desired_config =
-                Self::config_with_hooks_feature_enabled(&config_without_inline_hooks)?;
-            let desired_hooks_json =
-                Self::hooks_json_with_installed_hooks(&hooks_json, &params.binary_path)?;
+            let (desired_config, desired_hooks_json) =
+                Self::hooks_json_format_desired_state(&config, &hooks_json, &params.binary_path)?;
             let has_json_hooks = Self::hooks_json_has_git_ai_entries(&hooks_json);
             let hooks_installed = Self::config_hooks_feature_enabled(&config) && has_json_hooks;
             let hooks_up_to_date = config == desired_config && hooks_json == desired_hooks_json;
@@ -101,131 +147,64 @@ impl HookInstaller for CodexInstaller {
         params: &HookInstallerParams,
         dry_run: bool,
     ) -> Result<Option<String>, GitAiError> {
-        let config_path = Self::config_path();
         let hooks_json_path = Self::hooks_json_path();
 
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let existing_config_content = if config_path.exists() {
-            fs::read_to_string(&config_path)?
-        } else {
-            String::new()
-        };
-
+        let existing_config_content = read_optional(&Self::config_path())?.unwrap_or_default();
         let existing_config = Self::parse_config_toml(&existing_config_content)?;
 
-        let existing_hooks_content = if hooks_json_path.exists() {
-            fs::read_to_string(&hooks_json_path)?
-        } else {
-            String::new()
-        };
+        let existing_hooks_content = read_optional(&hooks_json_path)?.unwrap_or_default();
         let existing_hooks = Self::parse_hooks_json(&existing_hooks_content)?;
-
-        if Config::fresh().codex_hooks_format() == CodexHooksFormat::HooksJson {
-            let config_without_notify =
-                Self::remove_notify_if_git_ai(&existing_config)?.unwrap_or(existing_config.clone());
-            let (config_without_inline_hooks, _) =
-                Self::remove_inline_hooks_from_config(&config_without_notify)?;
-            let merged_config =
-                Self::config_with_hooks_feature_enabled(&config_without_inline_hooks)?;
-            let merged_hooks =
-                Self::hooks_json_with_installed_hooks(&existing_hooks, &params.binary_path)?;
-
-            let config_changed = existing_config != merged_config;
-            let hooks_json_changed = existing_hooks != merged_hooks;
-            if !config_changed && !hooks_json_changed {
-                return Ok(None);
-            }
-
-            let mut diff_output = Vec::new();
-
-            if config_changed {
-                let new_config_content = toml::to_string_pretty(&merged_config).map_err(|e| {
-                    GitAiError::Generic(format!("Failed to serialize Codex config.toml: {e}"))
-                })?;
-                diff_output.push(generate_diff(
-                    &config_path,
-                    &existing_config_content,
-                    &new_config_content,
-                ));
-                if !dry_run {
-                    write_atomic(&config_path, new_config_content.as_bytes())?;
-                }
-            }
-
-            if hooks_json_changed {
-                let new_hooks_content = serde_json::to_string_pretty(&merged_hooks)?;
-                diff_output.push(generate_diff(
-                    &hooks_json_path,
-                    &existing_hooks_content,
-                    &new_hooks_content,
-                ));
-                if !dry_run {
-                    write_atomic(&hooks_json_path, new_hooks_content.as_bytes())?;
-                }
-            }
-
-            return Ok(Some(diff_output.join("\n")));
-        }
-
-        let merged_config =
-            Self::config_with_installed_hooks(&existing_config, &params.binary_path)?;
-
-        // Check if legacy hooks.json needs migration
-        let (hooks_json_changed, existing_hooks_content) = if hooks_json_path.exists() {
-            let (_cleaned_hooks, changed) = Self::remove_codex_hooks_from_json(&existing_hooks)?;
-            (changed, existing_hooks_content)
-        } else {
-            (false, String::new())
-        };
-
-        let config_changed = existing_config != merged_config;
-        if !config_changed && !hooks_json_changed {
-            return Ok(None);
-        }
 
         let mut diff_output = Vec::new();
 
-        // Write config.toml FIRST (contains the replacement inline hooks)
-        if config_changed {
-            let new_config_content = toml::to_string_pretty(&merged_config).map_err(|e| {
-                GitAiError::Generic(format!("Failed to serialize Codex config.toml: {e}"))
-            })?;
-            diff_output.push(generate_diff(
-                &config_path,
-                &existing_config_content,
-                &new_config_content,
-            ));
-            if !dry_run {
-                write_atomic(&config_path, new_config_content.as_bytes())?;
-            }
-        }
+        if Config::fresh().codex_hooks_format() == CodexHooksFormat::HooksJson {
+            let (merged_config, merged_hooks) = Self::hooks_json_format_desired_state(
+                &existing_config,
+                &existing_hooks,
+                &params.binary_path,
+            )?;
 
-        // THEN clean up legacy hooks.json (safe: config.toml already has the hooks)
-        if hooks_json_changed {
-            let existing_hooks = Self::parse_hooks_json(&existing_hooks_content)?;
-            let (cleaned_hooks, _) = Self::remove_codex_hooks_from_json(&existing_hooks)?;
-            if Self::hooks_json_has_any_entries(&cleaned_hooks) {
-                let new_hooks_content = serde_json::to_string_pretty(&cleaned_hooks)?;
-                diff_output.push(generate_diff(
+            if existing_config != merged_config {
+                diff_output.push(Self::write_config(
+                    &merged_config,
+                    &existing_config_content,
+                    dry_run,
+                )?);
+            }
+            if existing_hooks != merged_hooks {
+                diff_output.push(Self::write_with_diff(
                     &hooks_json_path,
                     &existing_hooks_content,
-                    &new_hooks_content,
-                ));
-                if !dry_run {
-                    write_atomic(&hooks_json_path, new_hooks_content.as_bytes())?;
-                }
-            } else {
-                diff_output.push(generate_diff(&hooks_json_path, &existing_hooks_content, ""));
-                if !dry_run {
-                    fs::remove_file(&hooks_json_path)?;
-                }
+                    &serde_json::to_string_pretty(&merged_hooks)?,
+                    dry_run,
+                )?);
+            }
+        } else {
+            let merged_config =
+                Self::config_with_installed_hooks(&existing_config, &params.binary_path)?;
+            // A legacy hooks.json still holding git-ai entries needs migration.
+            let (cleaned_hooks, hooks_json_changed) =
+                Self::remove_codex_hooks_from_json(&existing_hooks)?;
+
+            // Write config.toml FIRST (contains the replacement inline hooks)
+            if existing_config != merged_config {
+                diff_output.push(Self::write_config(
+                    &merged_config,
+                    &existing_config_content,
+                    dry_run,
+                )?);
+            }
+            // THEN clean up legacy hooks.json (safe: config.toml already has the hooks)
+            if hooks_json_changed {
+                diff_output.push(Self::write_cleaned_hooks_json(
+                    &cleaned_hooks,
+                    &existing_hooks_content,
+                    dry_run,
+                )?);
             }
         }
 
-        Ok(Some(diff_output.join("\n")))
+        Ok(join_diffs(diff_output))
     }
 
     fn uninstall_hooks(
@@ -239,11 +218,7 @@ impl HookInstaller for CodexInstaller {
             return Ok(None);
         }
 
-        let existing_config_content = if config_path.exists() {
-            fs::read_to_string(&config_path)?
-        } else {
-            String::new()
-        };
+        let existing_config_content = read_optional(&config_path)?.unwrap_or_default();
         let existing_config = Self::parse_config_toml(&existing_config_content)?;
 
         // Remove inline hooks from config.toml
@@ -254,59 +229,29 @@ impl HookInstaller for CodexInstaller {
         let merged_config = Self::remove_feature_flags(&config_without_hooks)?;
 
         // Check if legacy hooks.json needs cleanup
-        let (hooks_json_changed, existing_hooks_content) = if hooks_json_path.exists() {
-            let content = fs::read_to_string(&hooks_json_path)?;
-            let existing_hooks = Self::parse_hooks_json(&content)?;
-            let (_cleaned_hooks, changed) = Self::remove_codex_hooks_from_json(&existing_hooks)?;
-            (changed, content)
-        } else {
-            (false, String::new())
-        };
-
-        let config_changed = merged_config != existing_config;
-        if !config_changed && !inline_hooks_changed && !hooks_json_changed {
-            return Ok(None);
-        }
+        let existing_hooks_content = read_optional(&hooks_json_path)?.unwrap_or_default();
+        let (cleaned_hooks, hooks_json_changed) =
+            Self::remove_codex_hooks_from_json(&Self::parse_hooks_json(&existing_hooks_content)?)?;
 
         let mut diff_output = Vec::new();
 
         // Write config.toml changes first
-        if config_changed || inline_hooks_changed {
-            let new_config_content = toml::to_string_pretty(&merged_config).map_err(|e| {
-                GitAiError::Generic(format!("Failed to serialize Codex config.toml: {e}"))
-            })?;
-            diff_output.push(generate_diff(
-                &config_path,
+        if merged_config != existing_config || inline_hooks_changed {
+            diff_output.push(Self::write_config(
+                &merged_config,
                 &existing_config_content,
-                &new_config_content,
-            ));
-            if !dry_run {
-                write_atomic(&config_path, new_config_content.as_bytes())?;
-            }
+                dry_run,
+            )?);
         }
-
         // Then clean up legacy hooks.json
         if hooks_json_changed {
-            let existing_hooks = Self::parse_hooks_json(&existing_hooks_content)?;
-            let (cleaned_hooks, _) = Self::remove_codex_hooks_from_json(&existing_hooks)?;
-            if Self::hooks_json_has_any_entries(&cleaned_hooks) {
-                let new_hooks_content = serde_json::to_string_pretty(&cleaned_hooks)?;
-                diff_output.push(generate_diff(
-                    &hooks_json_path,
-                    &existing_hooks_content,
-                    &new_hooks_content,
-                ));
-                if !dry_run {
-                    write_atomic(&hooks_json_path, new_hooks_content.as_bytes())?;
-                }
-            } else {
-                diff_output.push(generate_diff(&hooks_json_path, &existing_hooks_content, ""));
-                if !dry_run {
-                    fs::remove_file(&hooks_json_path)?;
-                }
-            }
+            diff_output.push(Self::write_cleaned_hooks_json(
+                &cleaned_hooks,
+                &existing_hooks_content,
+                dry_run,
+            )?);
         }
 
-        Ok(Some(diff_output.join("\n")))
+        Ok(join_diffs(diff_output))
     }
 }

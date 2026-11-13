@@ -1,5 +1,6 @@
 use crate::error::GitAiError;
-use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log::{LineRange, metadata_key};
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, should_ignore_file_with_matcher,
 };
@@ -79,7 +80,18 @@ pub fn stats_command(
     Ok(())
 }
 
+/// Print the stats bar when stdout is interactive; returns what it rendered.
 pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> String {
+    let output = stats_terminal_output(stats, is_interactive);
+    if is_interactive {
+        print!("{output}");
+    }
+    output
+}
+
+/// The stats bar and its percentage line. `is_interactive` only selects the
+/// terminal hyperlink on the untracked label.
+pub fn stats_terminal_output(stats: &CommitStats, is_interactive: bool) -> String {
     let mut output = String::new();
 
     // Set maximum bar width to 40 characters
@@ -97,17 +109,11 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
 
         output.push_str(&progress_bar);
         output.push('\n');
-        if is_interactive {
-            println!("{}", progress_bar);
-        }
 
         // Show "(no additions)" message below the bar
         let no_additions_msg = format!("     \x1b[90m{:^40}\x1b[0m", "(no additions)");
         output.push_str(&no_additions_msg);
         output.push('\n');
-        if is_interactive {
-            println!("{}", no_additions_msg);
-        }
         // No percentage line or AI stats for deletion-only commits
         return output;
     }
@@ -178,9 +184,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
     // Print the stats
     output.push_str(&progress_bar);
     output.push('\n');
-    if is_interactive {
-        println!("{}", progress_bar);
-    }
 
     // Percentage line: three anchors (human / untracked / AI) when untracked is visible,
     // two anchors (human / AI) otherwise.
@@ -207,9 +210,6 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
         );
         output.push_str(&percentage_line);
         output.push('\n');
-        if is_interactive {
-            println!("{}", percentage_line);
-        }
     } else {
         let percentage_line = format!(
             "     {:<3}{:>33}{:>3}%",
@@ -219,111 +219,7 @@ pub fn write_stats_to_terminal(stats: &CommitStats, is_interactive: bool) -> Str
         );
         output.push_str(&percentage_line);
         output.push('\n');
-        if is_interactive {
-            println!("{}", percentage_line);
-        }
     }
-
-    output
-}
-
-#[allow(dead_code)]
-pub fn write_stats_to_markdown(stats: &CommitStats) -> String {
-    let mut output = String::new();
-
-    // Set maximum bar width to 20 characters
-    let bar_width: usize = 20;
-
-    // Handle deletion-only commits (no additions)
-    if stats.git_diff_added_lines == 0 && stats.git_diff_deleted_lines > 0 {
-        output.push_str("(no additions)");
-        output.push('\n');
-        return output;
-    }
-
-    // Calculate total additions for the progress bar
-    let total_additions = stats.git_diff_added_lines;
-
-    // Human additions: known-human attested + unattested
-    let pure_human = stats.human_additions + stats.unknown_additions;
-    // AI = AI lines accepted
-    let pure_ai = stats.ai_accepted;
-
-    // Calculate percentages for display
-    let pure_human_percentage = if total_additions > 0 {
-        ((pure_human as f64 / total_additions as f64) * 100.0).round() as u32
-    } else {
-        0
-    };
-    let ai_percentage = if total_additions > 0 {
-        ((pure_ai as f64 / total_additions as f64) * 100.0).round() as u32
-    } else {
-        0
-    };
-
-    // Calculate bar sizes
-    let pure_human_bars = if total_additions > 0 {
-        let calculated =
-            ((pure_human as f64 / total_additions as f64) * bar_width as f64).round() as usize;
-        // Ensure at least 1 block if value > 0
-        if pure_human > 0 && calculated == 0 {
-            1
-        } else {
-            calculated
-        }
-    } else {
-        0
-    };
-
-    let ai_bars = if total_additions > 0 {
-        let calculated =
-            ((pure_ai as f64 / total_additions as f64) * bar_width as f64).round() as usize;
-        // Ensure at least 1 block if value > 0
-        if pure_ai > 0 && calculated == 0 {
-            1
-        } else {
-            calculated
-        }
-    } else {
-        0
-    };
-
-    output.push_str("Stats powered by [Git AI](https://github.com/git-ai-project/git-ai)\n\n");
-    // Build the fenced code block
-    output.push_str("```text\n");
-
-    // Human line: dark blocks for human, light blocks for rest
-    output.push_str("🧠 you    ");
-    output.push_str(&"█".repeat(pure_human_bars));
-    output.push_str(&"░".repeat(bar_width.saturating_sub(pure_human_bars)));
-    output.push_str(&format!("  {}%\n", pure_human_percentage));
-
-    // AI line: light blocks for non-ai, dark blocks for ai
-    output.push_str("🤖 ai     ");
-    output.push_str(&"░".repeat(bar_width.saturating_sub(ai_bars)));
-    output.push_str(&"█".repeat(ai_bars));
-    output.push_str(&format!("  {}%\n", ai_percentage));
-
-    output.push_str("```");
-
-    // Add details section
-    output.push_str("\n\n<details>\n");
-    output.push_str("<summary>More stats</summary>\n\n");
-
-    // Find top model by accepted lines
-    if !stats.tool_model_breakdown.is_empty()
-        && let Some((model_name, model_stats)) = stats
-            .tool_model_breakdown
-            .iter()
-            .max_by_key(|(_, stats)| stats.ai_accepted)
-    {
-        output.push_str(&format!(
-            "- Top model: {} ({} accepted lines)\n",
-            model_name, model_stats.ai_accepted
-        ));
-    }
-
-    output.push_str("\n</details>");
 
     output
 }
@@ -399,43 +295,24 @@ pub fn stats_for_commit_stats_with_authorship(
     let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
     let parent_count = commit_obj.parent_count()?;
 
-    if parent_count > 1 {
-        return stats_for_commit_stats_from_hunks(
-            repo,
-            commit_sha,
-            ignore_patterns,
-            &[],
-            authorship_log,
-        );
-    }
-
-    let parent_sha = if parent_count == 0 {
-        None
+    let is_merge_commit = parent_count > 1;
+    let hunks = if is_merge_commit {
+        Vec::new()
     } else {
-        Some(commit_obj.parent(0)?.id())
+        let from_ref = if parent_count == 0 {
+            empty_tree_for(commit_sha).to_string()
+        } else {
+            commit_obj.parent(0)?.id()
+        };
+        crate::operations::commands::diff::get_diff_with_line_numbers(repo, &from_ref, commit_sha)?
     };
 
-    stats_for_commit_stats_with_parent_and_authorship(
-        repo,
-        commit_sha,
-        parent_sha.as_deref(),
+    Ok(stats_for_commit_stats_from_hunks_with_merge_flag(
         ignore_patterns,
+        &hunks,
         authorship_log,
-    )
-}
-
-pub fn stats_for_commit_stats_with_parent_and_authorship(
-    repo: &Repository,
-    commit_sha: &str,
-    parent_sha: Option<&str>,
-    ignore_patterns: &[String],
-    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
-) -> Result<CommitStats, GitAiError> {
-    use crate::operations::commands::diff::get_diff_with_line_numbers;
-
-    let from_ref = parent_sha.unwrap_or("4b825dc642cb6eb9a060e54bf8d69288fbee4904");
-    let hunks = get_diff_with_line_numbers(repo, from_ref, commit_sha)?;
-    stats_for_commit_stats_from_hunks(repo, commit_sha, ignore_patterns, &hunks, authorship_log)
+        is_merge_commit,
+    ))
 }
 
 #[doc(hidden)]
@@ -490,7 +367,7 @@ pub fn accepted_lines_from_attestations(
 
             // Session entries (s_ prefix): look up in sessions map
             if entry.hash.starts_with("s_") {
-                let session_key = entry.hash.split("::").next().unwrap_or(&entry.hash);
+                let session_key = metadata_key(&entry.hash);
                 if let Some(session_record) = log.metadata.sessions.get(session_key) {
                     let tool_model = format!(
                         "{}::{}",
@@ -523,27 +400,8 @@ pub fn line_range_overlap_len(range: &LineRange, added_lines: &[u32]) -> u32 {
     }
 }
 
-/// Like `stats_for_commit_stats` but accepts pre-computed diff hunks and authorship log,
-/// avoiding redundant git subprocess calls in the post-commit hook path.
-pub fn stats_for_commit_stats_from_hunks(
-    repo: &Repository,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-    hunks: &[crate::operations::commands::diff::DiffHunk],
-    authorship_log: Option<&crate::model::authorship_log_serialization::AuthorshipLog>,
-) -> Result<CommitStats, GitAiError> {
-    let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
-    let parent_count = commit_obj.parent_count()?;
-    let is_merge_commit = parent_count > 1;
-
-    Ok(stats_for_commit_stats_from_hunks_with_merge_flag(
-        ignore_patterns,
-        hunks,
-        authorship_log,
-        is_merge_commit,
-    ))
-}
-
+/// Stats from pre-computed diff hunks and authorship log; the caller already
+/// knows whether the commit is a merge, so no git subprocess runs here.
 pub(crate) fn stats_for_commit_stats_from_hunks_with_merge_flag(
     ignore_patterns: &[String],
     hunks: &[crate::operations::commands::diff::DiffHunk],
@@ -589,263 +447,6 @@ pub(crate) fn stats_for_commit_stats_from_hunks_with_merge_flag(
     )
 }
 
-/// Get git diff statistics between commit and its parent
-/// Uses the same diff engine as git ai diff to properly handle renames
-pub fn get_git_diff_stats(
-    repo: &Repository,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-) -> Result<(u32, u32), GitAiError> {
-    use crate::operations::commands::diff::get_diff_with_line_numbers;
-
-    let commit_obj = repo.revparse_single(commit_sha)?.peel_to_commit()?;
-    let parent_count = commit_obj.parent_count()?;
-
-    // For merge commits, return (0, 0) to match the behavior of `git show --numstat`
-    // which shows a combined diff (typically 0 lines for clean merges)
-    if parent_count > 1 {
-        return Ok((0, 0));
-    }
-
-    let from_ref = if parent_count == 0 {
-        "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()
-    } else {
-        commit_obj.parent(0)?.id()
-    };
-
-    // Use the diff engine which properly handles renames with --find-renames=1%
-    let hunks = get_diff_with_line_numbers(repo, &from_ref, commit_sha)?;
-
-    let ignore_matcher = build_ignore_matcher(ignore_patterns);
-    let mut added_lines = 0u32;
-    let mut deleted_lines = 0u32;
-
-    for hunk in hunks {
-        if should_ignore_file_with_matcher(&hunk.file_path, &ignore_matcher) {
-            continue;
-        }
-        added_lines += hunk.added_lines.len() as u32;
-        deleted_lines += hunk.deleted_lines.len() as u32;
-    }
-
-    Ok((added_lines, deleted_lines))
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use insta::assert_debug_snapshot;
-
-    #[test]
-    fn test_terminal_stats_display() {
-        // Test with mixed human/AI stats
-        let stats = CommitStats {
-            human_additions: 50,
-            unknown_additions: 0,
-            ai_additions: 100,
-            ai_accepted: 25,
-            git_diff_deleted_lines: 15,
-            git_diff_added_lines: 80,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let mixed_output = write_stats_to_terminal(&stats, false);
-        assert_debug_snapshot!(mixed_output);
-
-        // Test with AI-only stats
-        let ai_stats = CommitStats {
-            human_additions: 0,
-            unknown_additions: 0,
-            ai_additions: 100,
-            ai_accepted: 95,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 100,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let ai_only_output = write_stats_to_terminal(&ai_stats, false);
-        assert_debug_snapshot!(ai_only_output);
-
-        // Test with human-only stats
-        let human_stats = CommitStats {
-            human_additions: 75,
-            unknown_additions: 0,
-            ai_additions: 0,
-            ai_accepted: 0,
-            git_diff_deleted_lines: 10,
-            git_diff_added_lines: 75,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let human_only_output = write_stats_to_terminal(&human_stats, false);
-        assert_debug_snapshot!(human_only_output);
-
-        // Test with minimal human contribution (should get at least 2 blocks)
-        let minimal_human_stats = CommitStats {
-            human_additions: 2,
-            unknown_additions: 0,
-            ai_additions: 100,
-            ai_accepted: 95,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 102,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let minimal_human_output = write_stats_to_terminal(&minimal_human_stats, false);
-        assert_debug_snapshot!(minimal_human_output);
-
-        // Test with deletion-only commit (no additions)
-        let deletion_only_stats = CommitStats {
-            human_additions: 0,
-            unknown_additions: 0,
-            ai_additions: 0,
-            ai_accepted: 0,
-            git_diff_deleted_lines: 25,
-            git_diff_added_lines: 0,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let deletion_only_output = write_stats_to_terminal(&deletion_only_stats, false);
-        assert_debug_snapshot!(deletion_only_output);
-
-        // --- New test cases for untracked segment ---
-
-        // 18% human / 22% untracked / 60% AI — matches the design example
-        let untracked_stats = CommitStats {
-            human_additions: 180,
-            unknown_additions: 220,
-            ai_additions: 600,
-            ai_accepted: 462,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 1000,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-        let with_untracked_output = write_stats_to_terminal(&untracked_stats, false);
-        assert_debug_snapshot!(with_untracked_output);
-
-        // untracked exactly at the 1% threshold — should NOT show untracked segment
-        let threshold_stats = CommitStats {
-            human_additions: 49,
-            unknown_additions: 1,
-            ai_additions: 50,
-            ai_accepted: 50,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 100,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-        let untracked_at_threshold_output = write_stats_to_terminal(&threshold_stats, false);
-        assert_debug_snapshot!(untracked_at_threshold_output);
-
-        // untracked just above 1% threshold (~2%) — should show untracked segment
-        let above_threshold_stats = CommitStats {
-            human_additions: 97,
-            unknown_additions: 2,
-            ai_additions: 0,
-            ai_accepted: 0,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 99,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-        let untracked_just_above_output = write_stats_to_terminal(&above_threshold_stats, false);
-        assert_debug_snapshot!(untracked_just_above_output);
-
-        // 100% untracked — entire bar is · chars
-        let all_untracked_stats = CommitStats {
-            human_additions: 0,
-            unknown_additions: 100,
-            ai_additions: 0,
-            ai_accepted: 0,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 100,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-        let all_untracked_output = write_stats_to_terminal(&all_untracked_stats, false);
-        assert_debug_snapshot!(all_untracked_output);
-
-        // OSC 8 hyperlink emitted when is_interactive = true
-        // Not a snapshot test — asserts presence of the escape sequence directly.
-        let hyperlink_output = write_stats_to_terminal(&untracked_stats, true);
-        assert!(
-            hyperlink_output.contains("\x1b]8;;https://usegitai.com/docs/cli/untracked\x1b\\"),
-            "Expected OSC 8 hyperlink in interactive output, got: {:?}",
-            hyperlink_output
-        );
-        assert!(
-            hyperlink_output.contains("untracked"),
-            "Expected 'untracked' label in interactive output"
-        );
-    }
-
-    #[test]
-    fn test_markdown_stats_display() {
-        // Test with mixed human/AI stats
-        let stats = CommitStats {
-            human_additions: 50,
-            unknown_additions: 0,
-            ai_additions: 100,
-            ai_accepted: 25,
-            git_diff_deleted_lines: 15,
-            git_diff_added_lines: 80,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let mixed_output = write_stats_to_markdown(&stats);
-        assert_debug_snapshot!(mixed_output);
-
-        // Test with AI-only stats
-        let ai_stats = CommitStats {
-            human_additions: 0,
-            unknown_additions: 0,
-            ai_additions: 100,
-            ai_accepted: 95,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 100,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let ai_only_output = write_stats_to_markdown(&ai_stats);
-        assert_debug_snapshot!(ai_only_output);
-
-        // Test with human-only stats
-        let human_stats = CommitStats {
-            human_additions: 75,
-            unknown_additions: 0,
-            ai_additions: 0,
-            ai_accepted: 0,
-            git_diff_deleted_lines: 10,
-            git_diff_added_lines: 75,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let human_only_output = write_stats_to_markdown(&human_stats);
-        assert_debug_snapshot!(human_only_output);
-
-        // Test with minimal human contribution (should get at least 2 blocks)
-        let minimal_human_stats = CommitStats {
-            human_additions: 2,
-            unknown_additions: 0,
-            ai_additions: 100,
-            ai_accepted: 95,
-            git_diff_deleted_lines: 0,
-            git_diff_added_lines: 102,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let minimal_human_output = write_stats_to_markdown(&minimal_human_stats);
-        assert_debug_snapshot!(minimal_human_output);
-
-        // Test with deletion-only commit (no additions)
-        let deletion_only_stats = CommitStats {
-            human_additions: 0,
-            unknown_additions: 0,
-            ai_additions: 0,
-            ai_accepted: 0,
-            git_diff_deleted_lines: 25,
-            git_diff_added_lines: 0,
-            tool_model_breakdown: BTreeMap::new(),
-        };
-
-        let deletion_only_output = write_stats_to_markdown(&deletion_only_stats);
-        assert_debug_snapshot!(deletion_only_output);
-    }
-}
+#[path = "stats_tests.rs"]
+mod tests;

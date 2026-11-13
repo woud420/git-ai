@@ -4,10 +4,12 @@
 //! parser while retaining a single Git process for an arbitrary batch.
 
 use std::collections::HashMap;
+use std::io::{BufRead, Write};
 
-use crate::clients::git_cli::exec_git_stdin;
+use crate::clients::git_cli::{exec_git_dialogue, exec_git_stdin};
 use crate::error::GitAiError;
 use crate::operations::git::config_access_retry::with_config_access_retry;
+use crate::operations::git::fast_reader::{DIRECTORY_MODE, tree_entry};
 use crate::operations::git::repository::Repository;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -136,6 +138,131 @@ fn found_object_header(header: &str) -> Option<(&str, usize)> {
     Some((object_type, size.parse().ok()?))
 }
 
+/// A path to read in a tree-ish: `(treeish, path)`.
+type PathRequest = (String, String);
+
+/// The object spec to send for each request of a batch read on stdin.
+///
+/// Batch input is newline-framed (`-z` needs Git 2.38), so `<treeish>:<path>`
+/// cannot carry a path that holds a newline. Those requests are rewritten by
+/// [`newline_path_spec`], all in one `git cat-file --batch` dialogue: one
+/// extra process whatever the number of requests and their nesting, none
+/// when no path holds a newline. A request that names nothing is left out.
+pub(crate) fn batch_path_specs<'a>(
+    repo: &Repository,
+    requests: &'a [PathRequest],
+) -> Result<Vec<(&'a PathRequest, String)>, GitAiError> {
+    let (with_newline, plain): (Vec<_>, Vec<_>) =
+        requests.iter().partition(|(_, path)| path.contains('\n'));
+    let mut specs: Vec<_> = plain
+        .into_iter()
+        .map(|request| (request, format!("{}:{}", request.0, request.1)))
+        .collect();
+    if with_newline.is_empty() {
+        return Ok(specs);
+    }
+
+    let mut args = repo.global_args_for_exec();
+    args.extend(["cat-file".to_string(), "--batch".to_string()]);
+    exec_git_dialogue(&args, |stdin, stdout| {
+        for request in with_newline {
+            if let Some(spec) = newline_path_spec(stdin, stdout, request)? {
+                specs.push((request, spec));
+            }
+        }
+        Ok(())
+    })?;
+    Ok(specs)
+}
+
+/// A spec for `<treeish>:<path>` without the newlines `path` holds, or `None`
+/// when the path names nothing.
+///
+/// Each path component holding a newline is looked up in the raw content of
+/// its parent tree, and the spec continues from that entry's OID.
+fn newline_path_spec(
+    stdin: &mut dyn Write,
+    stdout: &mut dyn BufRead,
+    (treeish, path): &PathRequest,
+) -> Result<Option<String>, GitAiError> {
+    let mut object = treeish.clone();
+    let mut path = path.as_str();
+    while let Some(newline) = path.find('\n') {
+        let start = path[..newline].rfind('/').map_or(0, |slash| slash + 1);
+        let end = path[newline..]
+            .find('/')
+            .map_or(path.len(), |slash| newline + slash);
+        let parent = match start {
+            0 => format!("{object}^{{tree}}"),
+            _ => format!("{object}:{}", &path[..start - 1]),
+        };
+        let entry = read_raw_object(stdin, stdout, &parent)?
+            .filter(|parent| parent.kind == "tree")
+            .and_then(|parent| {
+                tree_entry(&parent.content, &path[start..end], parent.oid.len() / 2)
+            });
+        let Some((mode, oid)) = entry else {
+            return Ok(None);
+        };
+        path = path.get(end + 1..).unwrap_or_default();
+        if path.is_empty() {
+            return Ok(Some(oid));
+        }
+        // Only a directory has entries below it. A gitlink names a commit,
+        // and that commit's tree is not part of this one.
+        if mode != DIRECTORY_MODE {
+            return Ok(None);
+        }
+        object = oid;
+    }
+    Ok(Some(format!("{object}:{path}")))
+}
+
+/// An object as `git cat-file --batch` prints it.
+struct RawObject {
+    oid: String,
+    kind: String,
+    content: Vec<u8>,
+}
+
+/// Asks a `git cat-file --batch` dialogue for `spec`, which must not hold a
+/// newline. `None` when Git cannot resolve it.
+fn read_raw_object(
+    stdin: &mut dyn Write,
+    stdout: &mut dyn BufRead,
+    spec: &str,
+) -> Result<Option<RawObject>, GitAiError> {
+    writeln!(stdin, "{spec}")?;
+    stdin.flush()?;
+
+    // `<spec> missing`, or `<oid> <type> <size>` followed by the content and
+    // a newline.
+    let mut header = String::new();
+    stdout.read_line(&mut header)?;
+    let header = header.trim_end_matches('\n');
+    if header.ends_with(" missing") {
+        return Ok(None);
+    }
+    let mut fields = header.split(' ');
+    let (Some(oid), Some(kind), Some(Ok(size))) = (
+        fields.next(),
+        fields.next(),
+        fields.next().map(str::parse::<usize>),
+    ) else {
+        return Err(GitAiError::Generic(format!(
+            "Malformed cat-file --batch answer: {header}"
+        )));
+    };
+    let mut content = vec![0; size + 1];
+    stdout.read_exact(&mut content)?;
+    content.truncate(size);
+    Ok(Some(RawObject {
+        oid: oid.to_string(),
+        kind: kind.to_string(),
+        content,
+    }))
+}
+
 #[cfg(test)]
 fn parse_batch_output(data: &[u8]) -> Result<HashMap<String, String>, GitAiError> {
     parse_batch_output_with_policy(data, BatchReadPolicy::Strict)
@@ -238,278 +365,5 @@ fn parse_batch_output_with_policy(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::operations::git::test_utils::TmpRepo;
-
-    #[test]
-    fn parses_empty_output() {
-        assert!(parse_batch_output(b"").unwrap().is_empty());
-    }
-
-    #[test]
-    fn skips_missing_objects() {
-        assert!(parse_batch_output(b"abc123 missing\n").unwrap().is_empty());
-    }
-
-    #[test]
-    fn tolerant_policy_skips_missing_objects() {
-        let data = b"abc123 missing\ndef456 blob 5\nworld\n";
-
-        let result = parse_batch_output_with_policy(data, BatchReadPolicy::Tolerant).unwrap();
-
-        assert_eq!(result.get("def456"), Some(&"world".to_string()));
-        assert!(!result.contains_key("abc123"));
-    }
-
-    #[test]
-    fn utf8_policy_keeps_valid_neighbors_and_rejects_broken_framing() {
-        let data = b"missing missing\nbad blob 2\n\xffx\ngood blob 5\nhello\n";
-        let result = parse_batch_output_with_policy(data, BatchReadPolicy::ValidUtf8).unwrap();
-        assert_eq!(
-            result,
-            HashMap::from([("good".to_owned(), "hello".to_owned())])
-        );
-        for malformed in [b"bad blob invalid\n".as_slice(), b"bad blob 20\npartial\n"] {
-            assert!(parse_batch_output_with_policy(malformed, BatchReadPolicy::ValidUtf8).is_err());
-        }
-    }
-
-    #[test]
-    fn parses_single_blob() {
-        let result = parse_batch_output(b"abc123 blob 11\nhello world\n").unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result.get("abc123"), Some(&"hello world".to_string()));
-    }
-
-    #[test]
-    fn parses_multiple_blobs() {
-        let data = b"abc123 blob 5\nhello\ndef456 blob 5\nworld\n";
-        let result = parse_batch_output(data).unwrap();
-
-        assert_eq!(result.len(), 2);
-        assert_eq!(result.get("abc123"), Some(&"hello".to_string()));
-        assert_eq!(result.get("def456"), Some(&"world".to_string()));
-    }
-
-    #[test]
-    fn preserves_embedded_newlines() {
-        let result = parse_batch_output(b"abc123 blob 12\nhello\nworld\n\n").unwrap();
-
-        assert_eq!(result.get("abc123"), Some(&"hello\nworld\n".to_string()));
-    }
-
-    #[test]
-    fn duplicate_oid_keeps_last_record() {
-        let data = b"abc123 blob 3\none\nabc123 blob 3\ntwo\n";
-        let result = parse_batch_output(data).unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result.get("abc123"), Some(&"two".to_string()));
-    }
-
-    #[test]
-    fn decodes_blob_content_lossily() {
-        let result = parse_batch_output(b"abc123 blob 2\n\xffx\n").unwrap();
-
-        assert_eq!(result.get("abc123"), Some(&"\u{fffd}x".to_string()));
-    }
-
-    #[test]
-    fn preserves_truncated_content_error() {
-        let error = parse_batch_output(b"abc123 blob 20\nhello").unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "Generic error: Malformed cat-file --batch output: truncated content"
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_size() {
-        let error = parse_batch_output(b"abc123 blob notanumber\n").unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "Generic error: Invalid size in cat-file output: invalid digit found in string"
-        );
-    }
-
-    #[test]
-    fn tolerant_policy_keeps_legacy_invalid_size_behavior() {
-        let result =
-            parse_batch_output_with_policy(b"abc123 blob notanumber\n", BatchReadPolicy::Tolerant)
-                .unwrap();
-
-        assert_eq!(result.get("abc123"), Some(&String::new()));
-    }
-
-    #[test]
-    fn tolerant_policy_returns_partial_results_for_truncated_content() {
-        let data = b"abc123 blob 5\nhello\ndef456 blob 20\npartial";
-
-        let result = parse_batch_output_with_policy(data, BatchReadPolicy::Tolerant).unwrap();
-
-        assert_eq!(result.get("abc123"), Some(&"hello".to_string()));
-        assert!(!result.contains_key("def456"));
-    }
-
-    #[test]
-    fn tolerant_policy_skips_invalid_utf8_content() {
-        let result = parse_batch_output_with_policy(
-            b"abc123 blob 2\n\xffx\ndef456 blob 5\nworld\n",
-            BatchReadPolicy::Tolerant,
-        )
-        .unwrap();
-
-        assert!(!result.contains_key("abc123"));
-        assert_eq!(result.get("def456"), Some(&"world".to_string()));
-    }
-
-    #[test]
-    fn preserves_unvalidated_object_type_and_oid() {
-        let result = parse_batch_output(b"not-an-oid tree 3\none\n").unwrap();
-
-        assert_eq!(result.get("not-an-oid"), Some(&"one".to_string()));
-    }
-
-    #[test]
-    fn skips_malformed_header() {
-        assert!(parse_batch_output(b"abc123\n").unwrap().is_empty());
-    }
-
-    #[test]
-    fn skips_header_without_object_size() {
-        assert!(parse_batch_output(b"abc123 blob\n").unwrap().is_empty());
-    }
-
-    #[test]
-    fn ignores_trailing_header_without_newline() {
-        assert!(parse_batch_output(b"abc123 blob 3").unwrap().is_empty());
-    }
-
-    #[test]
-    fn rejects_non_utf8_header() {
-        let error = parse_batch_output(b"\xff blob 1\nx\n").unwrap_err();
-
-        assert!(matches!(error, GitAiError::Utf8Error(_)));
-    }
-
-    #[test]
-    fn empty_read_does_not_require_objects() {
-        let repo = TmpRepo::new().unwrap();
-
-        assert!(
-            batch_read_blob_contents(repo.gitai_repo(), &[])
-                .unwrap()
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn reads_duplicate_real_git_objects() {
-        let repo = TmpRepo::new().unwrap();
-        repo.write_file("blob.txt", "hello\nworld\n", false)
-            .unwrap();
-        let oid = repo
-            .git_command(&["hash-object", "-w", "blob.txt"])
-            .unwrap()
-            .trim()
-            .to_string();
-
-        let result =
-            batch_read_blob_contents(repo.gitai_repo(), &[oid.clone(), oid.clone()]).unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result.get(&oid), Some(&"hello\nworld\n".to_string()));
-    }
-
-    #[test]
-    fn preserves_missing_object_error() {
-        let repo = TmpRepo::new().unwrap();
-        let missing_oid = "0000000000000000000000000000000000000000".to_string();
-
-        let error = batch_read_blob_contents(repo.gitai_repo(), std::slice::from_ref(&missing_oid))
-            .unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            format!(
-                "Generic error: missing git blob object referenced by authorship note: {missing_oid}"
-            )
-        );
-    }
-
-    #[test]
-    fn tolerant_read_allows_missing_objects() {
-        let repo = TmpRepo::new().unwrap();
-        repo.write_file("blob.txt", "hello\n", false).unwrap();
-        let oid = repo
-            .git_command(&["hash-object", "-w", "blob.txt"])
-            .unwrap()
-            .trim()
-            .to_string();
-        let missing_oid = "0000000000000000000000000000000000000000".to_string();
-
-        let result = batch_read_blob_contents_with_policy(
-            repo.gitai_repo(),
-            &[oid.clone(), missing_oid.clone()],
-            BatchReadPolicy::Tolerant,
-        )
-        .unwrap();
-
-        assert_eq!(result.get(&oid), Some(&"hello\n".to_string()));
-        assert!(!result.contains_key(&missing_oid));
-    }
-
-    #[test]
-    fn named_batch_keeps_request_order_and_framing() {
-        let data = b"HEAD:gone with spaces missing\nabc tree 3\nxyz\ndef blob 2\n\xffx\n";
-        assert_eq!(
-            parse_named_batch_output(data, 3).unwrap(),
-            vec![None, None, Some("\u{fffd}x".to_string())]
-        );
-        for (data, expected) in [
-            (b"abc blob 2\nhi\n".as_slice(), 2),
-            (b"abc blob 2\nhi\nx missing\n", 1),
-            (b"abc blob 9\nhi\n", 1),
-        ] {
-            assert!(parse_named_batch_output(data, expected).is_err());
-        }
-    }
-
-    #[test]
-    fn reads_paths_at_treeishes_skipping_missing_paths_and_trees() {
-        let repo = TmpRepo::new().unwrap();
-        repo.write_file("a.txt", "one\n", false).unwrap();
-        repo.write_file("dir/b c.txt", "spaced\n", false).unwrap();
-        let first = repo.commit_all("first").unwrap();
-        repo.write_file("a.txt", "two\n", false).unwrap();
-        let second = repo.commit_all("second").unwrap();
-        let request = |treeish: &str, path: &str| (treeish.to_string(), path.to_string());
-        let requests = [
-            request(&first, "a.txt"),
-            request(&second, "a.txt"),
-            request(&second, "dir"),
-            request(&second, "dir/b c.txt"),
-            request(&first, "dir/b c.txt"),
-            request(&second, "gone missing"),
-            request(&second, "a.txt"),
-        ];
-
-        let contents = crate::operations::git::repository::batch_read_paths_at_treeishes(
-            repo.gitai_repo(),
-            &requests,
-        )
-        .unwrap();
-
-        let expected = HashMap::from([
-            (request(&first, "a.txt"), "one\n".to_string()),
-            (request(&second, "a.txt"), "two\n".to_string()),
-            (request(&second, "dir/b c.txt"), "spaced\n".to_string()),
-            (request(&first, "dir/b c.txt"), "spaced\n".to_string()),
-        ]);
-        assert_eq!(contents, expected);
-    }
-}
+#[path = "cat_file_tests.rs"]
+mod tests;

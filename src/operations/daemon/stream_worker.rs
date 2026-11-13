@@ -9,7 +9,8 @@ use crate::model::authorship_log_serialization::generate_session_id;
 use crate::model::checkpoint_request::StreamFormat as CheckpointStreamFormat;
 use crate::model::repository::streams_db::{StreamRecord, StreamsDatabase};
 use crate::model::stream_types::StreamError;
-use crate::model::stream_watermark::{WatermarkStrategy, WatermarkType};
+#[cfg(test)]
+use crate::model::stream_watermark::WatermarkType;
 use crate::operations::daemon::telemetry_worker::DaemonTelemetryWorkerHandle;
 use crate::operations::streams::agent::{SHARED_STREAM_SESSION_ID, StreamDescriptor};
 use crate::operations::streams::sweep::StreamFormat;
@@ -25,7 +26,11 @@ use tokio::time::{Duration, interval};
 mod checkpoint_notification;
 #[cfg(test)]
 mod checkpoint_notification_tests;
+#[cfg(test)]
+mod drain_tests;
 mod process_session;
+#[cfg(test)]
+mod scheduling_tests;
 
 const TRIGGERED_SWEEP_COOLDOWN: Duration = Duration::from_secs(30);
 
@@ -191,9 +196,17 @@ pub struct StreamWorkerHandle {
     sweep_tx: tokio::sync::mpsc::UnboundedSender<SweepRequest>,
     drain_tx: tokio::sync::mpsc::UnboundedSender<DrainRequest>,
     sweep_trigger_gate: SweepTriggerGate,
+    shutdown_notify: Arc<Notify>,
+    shutdown_flag: Arc<AtomicBool>,
 }
 
 impl StreamWorkerHandle {
+    /// Stop sessions in progress at their next batch, then drain and exit the worker.
+    pub(crate) fn request_shutdown(&self) {
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+        self.shutdown_notify.notify_one();
+    }
+
     /// Notify the worker that a checkpoint was recorded.
     #[allow(clippy::too_many_arguments)]
     pub fn notify_checkpoint(
@@ -262,10 +275,11 @@ impl StreamWorkerHandle {
         })
     }
 
-    /// Request that the worker drain all immediate processing tasks.
+    /// Request that the worker drain all ready processing tasks.
     ///
     /// Returns after the worker has finished processing all currently-enqueued
-    /// immediate-priority tasks and any that are already in flight.
+    /// ready tasks and any that are already in flight. Tasks backing off after
+    /// a transient failure keep their retry schedule.
     pub async fn drain(&self) -> Result<(), String> {
         let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
         self.drain_tx
@@ -287,6 +301,8 @@ impl StreamWorkerHandle {
             sweep_tx,
             drain_tx,
             sweep_trigger_gate: SweepTriggerGate::new(),
+            shutdown_notify: Arc::new(Notify::new()),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -368,7 +384,7 @@ impl StreamWorker {
             && self
                 .sweep_trigger_gate
                 .try_mark_sweep_at(Instant::now(), "initial")
-            && let Err(e) = self.run_sweep(Priority::Low).await
+            && let Err(e) = self.run_sweep(Priority::Low)
         {
             tracing::error!(error = %e, "initial sweep failed");
         }
@@ -393,7 +409,6 @@ impl StreamWorker {
                 _ = self.shutdown_notify.notified() => {
                     tracing::info!("transcript worker received shutdown signal");
                     self.drain_immediate_tasks().await;
-                    self.shutdown_flag.store(true, Ordering::Relaxed);
                     break;
                 }
                 _ = async {}, if has_ready_task => {
@@ -405,13 +420,13 @@ impl StreamWorker {
                         && self
                             .sweep_trigger_gate
                             .try_mark_sweep_at(Instant::now(), "periodic")
-                        && let Err(e) = self.run_sweep(Priority::Low).await
+                        && let Err(e) = self.run_sweep(Priority::Low)
                     {
                         tracing::error!(error = %e, "sweep failed");
                     }
                 }
                 Some(notification) = self.checkpoint_rx.recv() => {
-                    self.handle_checkpoint_notification(notification).await;
+                    self.handle_checkpoint_notification(notification);
                 }
                 Some(request) = self.sweep_rx.recv() => {
                     self.handle_sweep_request(request, sweep_enabled).await;
@@ -440,7 +455,7 @@ impl StreamWorker {
     async fn handle_sweep_request(&mut self, request: SweepRequest, sweep_enabled: bool) {
         if sweep_enabled {
             tracing::info!(trigger = %request.trigger, "triggered transcript sweep requested");
-            let result = self.run_sweep(request.priority).await;
+            let result = self.run_sweep(request.priority);
             if let Err(e) = &result {
                 tracing::error!(trigger = %request.trigger, error = %e, "triggered sweep failed");
             }
@@ -462,18 +477,16 @@ impl StreamWorker {
         // Checkpoint and sweep requests use separate channels from the drain
         // barrier, so consume ingress that was already queued before the barrier.
         while let Ok(notification) = self.checkpoint_rx.try_recv() {
-            self.handle_checkpoint_notification(notification).await;
+            self.handle_checkpoint_notification(notification);
         }
         while let Ok(sweep_request) = self.sweep_rx.try_recv() {
             self.handle_sweep_request(sweep_request, sweep_enabled)
                 .await;
         }
 
-        // Process immediate priority tasks that are already queued.
-        self.drain_immediate_tasks().await;
-
-        // Continue processing newly promoted tasks until there is no ready
-        // work and no in-flight processing.
+        // Process ready tasks, immediate priority first, until there is no
+        // ready work and no in-flight processing. Failures keep their normal
+        // retry handling: a drain outside shutdown must not consume a retry.
         while !self.priority_queue.is_empty() || !self.in_flight.is_empty() {
             self.process_next_task().await;
         }
@@ -489,7 +502,7 @@ impl StreamWorker {
     }
 
     /// Run a sweep across all agents to discover new/behind sessions.
-    async fn run_sweep(&mut self, priority: Priority) -> Result<(), String> {
+    fn run_sweep(&mut self, priority: Priority) -> Result<(), String> {
         use crate::operations::daemon::sweep_coordinator::SweepItem;
 
         let items = self
@@ -702,11 +715,14 @@ impl StreamWorker {
                 }
             }
 
-            // Ensure the subagent session exists in the DB
-            if let Err(e) = self.ensure_subagent_session(
+            // Ensure the subagent session exists in the DB. A subagent
+            // transcript is an ordinary Claude transcript stream.
+            if let Err(e) = self.ensure_stream_session(
                 &session_id,
+                "claude",
+                &StreamDescriptor::identity_transcript(StreamFormat::ClaudeJsonl),
                 &canonical,
-                &external_session_id,
+                Some(&external_session_id),
                 external_parent_session_id.as_deref(),
                 notification.repo_work_dir.as_deref(),
             ) {
@@ -819,48 +835,6 @@ impl StreamWorker {
         matches!(tool, "copilot" | "github-copilot") && stream.stream_kind == "otel_traces"
     }
 
-    fn ensure_subagent_session(
-        &self,
-        session_id: &str,
-        path: &Path,
-        external_session_id: &str,
-        external_parent_session_id: Option<&str>,
-        repo_work_dir: Option<&Path>,
-    ) -> Result<(), StreamError> {
-        let path_str = path.display().to_string();
-        if self
-            .streams_db
-            .get_stream(session_id, "transcript", &path_str)?
-            .is_some()
-        {
-            return Ok(());
-        }
-
-        use crate::model::stream_watermark::ByteOffsetWatermark;
-
-        let initial_watermark = ByteOffsetWatermark::new(0);
-        let record = StreamRecord {
-            session_id: session_id.to_string(),
-            stream_kind: "transcript".to_string(),
-            tool: "claude".to_string(),
-            stream_path: path_str,
-            stream_format: StreamFormat::ClaudeJsonl,
-            watermark_type: WatermarkType::ByteOffset,
-            watermark_value: initial_watermark.serialize(),
-            external_session_id: external_session_id.to_string(),
-            external_parent_session_id: external_parent_session_id.map(|s| s.to_string()),
-            first_seen_at: chrono::Utc::now().timestamp(),
-            last_processed_at: 0,
-            last_known_size: 0,
-            last_modified: None,
-            processing_errors: 0,
-            last_error: None,
-            repo_work_dir: repo_work_dir.map(|p| p.display().to_string()),
-        };
-
-        self.streams_db.insert_stream(&record)
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn ensure_stream_session(
         &self,
@@ -939,50 +913,40 @@ impl StreamWorker {
             return;
         }
 
-        // Mark as in-flight
-        self.in_flight
-            .insert((task.canonical_path.clone(), task.stream_kind.clone()));
+        if let Err(e) = self.run_task(&task, self.shutdown_flag.clone()).await {
+            self.handle_processing_error(task, e);
+        }
+    }
 
-        // Process the session (spawn blocking to avoid blocking the worker loop)
+    /// Run one task on the blocking pool (so the worker loop stays responsive),
+    /// tracking it as in-flight meanwhile. A panic is reported as a fatal error.
+    async fn run_task(
+        &mut self,
+        task: &ProcessingTask,
+        shutdown_flag: Arc<AtomicBool>,
+    ) -> Result<(), StreamError> {
+        let in_flight_key = (task.canonical_path.clone(), task.stream_kind.clone());
+        self.in_flight.insert(in_flight_key.clone());
+
         let db = self.streams_db.clone();
         let telemetry = self.telemetry_handle.clone();
-        let shutdown_flag = self.shutdown_flag.clone();
         let task_clone = task.clone();
-
         let result = tokio::task::spawn_blocking(move || {
             Self::process_session_blocking(&db, &telemetry, &task_clone, &shutdown_flag)
         })
         .await;
 
-        // Remove from in-flight
-        self.in_flight
-            .remove(&(task.canonical_path.clone(), task.stream_kind.clone()));
-
-        // Handle result
-        match result {
-            Ok(Ok(())) => {
-                // Success - task is done
-            }
-            Ok(Err(e)) => {
-                // Error - handle retry logic
-                self.handle_processing_error(task, e).await;
-            }
-            Err(e) => {
-                // Panic in spawn_blocking
-                tracing::error!(error = %e, session_id = %task.session_id, "task panicked");
-                self.handle_processing_error(
-                    task,
-                    StreamError::Fatal {
-                        message: format!("task panicked: {}", e),
-                    },
-                )
-                .await;
-            }
-        }
+        self.in_flight.remove(&in_flight_key);
+        result.unwrap_or_else(|e| {
+            tracing::error!(error = %e, session_id = %task.session_id, "task panicked");
+            Err(StreamError::Fatal {
+                message: format!("task panicked: {}", e),
+            })
+        })
     }
 
     /// Handle a processing error with exponential backoff.
-    async fn handle_processing_error(&mut self, task: ProcessingTask, error: StreamError) {
+    fn handle_processing_error(&mut self, task: ProcessingTask, error: StreamError) {
         match error {
             StreamError::Transient { message, .. } => {
                 // Retry with exponential backoff: 5s, 30s, 5m, 30m
@@ -1022,7 +986,7 @@ impl StreamWorker {
                 );
 
                 // Re-queue with updated retry count and next_retry_at
-                let mut retried_task = task.clone();
+                let mut retried_task = task;
                 retried_task.retry_count = retry_count;
                 retried_task.next_retry_at = Some(std::time::Instant::now() + delay);
                 self.delayed_tasks.push(retried_task);
@@ -1069,31 +1033,12 @@ impl StreamWorker {
 
         tracing::info!(tasks = immediate_tasks.len(), "draining immediate tasks");
 
-        // Process immediate tasks
+        // Nothing runs after shutdown, so failures are logged rather than retried.
+        // The worker's shutdown flag is already set; the drain runs to completion.
         for task in immediate_tasks {
-            self.in_flight
-                .insert((task.canonical_path.clone(), task.stream_kind.clone()));
-            let db = self.streams_db.clone();
-            let telemetry = self.telemetry_handle.clone();
-            let shutdown_flag = self.shutdown_flag.clone();
-            let task_clone = task.clone();
-
-            let result = tokio::task::spawn_blocking(move || {
-                Self::process_session_blocking(&db, &telemetry, &task_clone, &shutdown_flag)
-            })
-            .await;
-
-            self.in_flight
-                .remove(&(task.canonical_path.clone(), task.stream_kind.clone()));
-
-            match result {
-                Err(e) => {
-                    tracing::error!(error = %e, session_id = %task.session_id, "drain task panicked");
-                }
-                Ok(Err(e)) => {
-                    tracing::error!(error = %e, session_id = %task.session_id, "drain task processing error");
-                }
-                Ok(Ok(())) => {}
+            let not_stopping = Arc::new(AtomicBool::new(false));
+            if let Err(e) = self.run_task(&task, not_stopping).await {
+                tracing::error!(error = %e, session_id = %task.session_id, "drain task processing error");
             }
         }
     }
@@ -1129,8 +1074,8 @@ impl StreamWorker {
 pub fn spawn_stream_worker(
     streams_db: Arc<StreamsDatabase>,
     telemetry_handle: DaemonTelemetryWorkerHandle,
-    shutdown_notify: Arc<Notify>,
 ) -> StreamWorkerHandle {
+    let shutdown_notify = Arc::new(Notify::new());
     let (checkpoint_tx, checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
     let (sweep_tx, sweep_rx) = tokio::sync::mpsc::unbounded_channel();
     let (drain_tx, drain_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1140,8 +1085,8 @@ pub fn spawn_stream_worker(
     let worker = StreamWorker::new(
         streams_db,
         telemetry_handle,
-        shutdown_notify,
-        shutdown_flag,
+        shutdown_notify.clone(),
+        shutdown_flag.clone(),
         checkpoint_rx,
         sweep_rx,
         drain_rx,
@@ -1157,190 +1102,8 @@ pub fn spawn_stream_worker(
         sweep_tx,
         drain_tx,
         sweep_trigger_gate,
-    }
-}
-
-#[cfg(test)]
-mod scheduling_tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    fn make_worker() -> (
-        TempDir,
-        StreamWorker,
-        Arc<Notify>,
-        tokio::sync::mpsc::UnboundedSender<CheckpointNotification>,
-    ) {
-        let temp = TempDir::new().unwrap();
-        let db = Arc::new(StreamsDatabase::open(temp.path().join("streams.db")).unwrap());
-        let (checkpoint_tx, checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_sweep_tx, sweep_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (_drain_tx, drain_rx) = tokio::sync::mpsc::unbounded_channel();
-        let shutdown = Arc::new(Notify::new());
-        let shutdown_flag = Arc::new(AtomicBool::new(false));
-        let telemetry = DaemonTelemetryWorkerHandle::new_noop();
-        let sweep_trigger_gate = SweepTriggerGate::new();
-        assert!(sweep_trigger_gate.try_mark_sweep_at(Instant::now(), "test"));
-        let worker = StreamWorker::new(
-            db,
-            telemetry,
-            shutdown.clone(),
-            shutdown_flag,
-            checkpoint_rx,
-            sweep_rx,
-            drain_rx,
-            sweep_trigger_gate,
-        );
-        (temp, worker, shutdown, checkpoint_tx)
-    }
-
-    fn task(session_id: &str, next_retry_at: Option<std::time::Instant>) -> ProcessingTask {
-        ProcessingTask {
-            priority: Priority::Immediate,
-            session_id: session_id.to_string(),
-            stream_kind: "transcript".to_string(),
-            tool: "test".to_string(),
-            trace_id: None,
-            tool_use_id: None,
-            canonical_path: PathBuf::from(format!("/test/{session_id}")),
-            repo_work_dir: None,
-            retry_count: 0,
-            next_retry_at,
-        }
-    }
-
-    #[test]
-    fn promotes_only_ready_delayed_tasks() {
-        let (_temp, mut worker, _shutdown, _checkpoint_tx) = make_worker();
-        let now = std::time::Instant::now();
-        worker.delayed_tasks.push(task("ready", Some(now)));
-        worker
-            .delayed_tasks
-            .push(task("future", Some(now + Duration::from_secs(5))));
-
-        worker.promote_ready_delayed_tasks(now);
-
-        assert_eq!(worker.priority_queue.len(), 1);
-        assert_eq!(worker.priority_queue.peek().unwrap().session_id, "ready");
-        assert_eq!(worker.delayed_tasks.len(), 1);
-        assert_eq!(worker.delayed_tasks[0].session_id, "future");
-    }
-
-    #[test]
-    fn next_delayed_task_at_returns_earliest_retry_deadline() {
-        let (_temp, mut worker, _shutdown, _checkpoint_tx) = make_worker();
-        let now = std::time::Instant::now();
-        let later = now + Duration::from_secs(30);
-        let earlier = now + Duration::from_secs(5);
-        worker.delayed_tasks.push(task("later", Some(later)));
-        worker.delayed_tasks.push(task("earlier", Some(earlier)));
-
-        assert_eq!(worker.next_delayed_task_at(), Some(earlier));
-    }
-
-    #[test]
-    fn take_immediate_tasks_preserves_low_priority_tasks() {
-        let (_temp, mut worker, _shutdown, _checkpoint_tx) = make_worker();
-        let immediate = task("immediate", None);
-        let mut queued_low = task("queued-low", None);
-        queued_low.priority = Priority::Low;
-        let mut delayed_low = task("delayed-low", None);
-        delayed_low.priority = Priority::Low;
-
-        worker.priority_queue.push(immediate.clone());
-        worker.priority_queue.push(queued_low.clone());
-        worker.delayed_tasks.push(delayed_low.clone());
-
-        assert_eq!(worker.take_immediate_tasks(), vec![immediate]);
-        assert_eq!(worker.priority_queue.into_vec(), vec![queued_low]);
-        assert_eq!(worker.delayed_tasks, vec![delayed_low]);
-    }
-
-    #[tokio::test]
-    async fn transient_errors_are_stored_as_delayed_retries_not_ready_work() {
-        let (_temp, mut worker, _shutdown, _checkpoint_tx) = make_worker();
-
-        worker
-            .handle_processing_error(
-                task("retry", None),
-                StreamError::Transient {
-                    message: "temporary".to_string(),
-                    retry_after: Duration::from_secs(1),
-                },
-            )
-            .await;
-
-        assert!(worker.priority_queue.is_empty());
-        assert_eq!(worker.delayed_tasks.len(), 1);
-        assert_eq!(worker.delayed_tasks[0].session_id, "retry");
-        assert_eq!(worker.delayed_tasks[0].retry_count, 1);
-        assert!(worker.delayed_tasks[0].next_retry_at.is_some());
-    }
-
-    #[tokio::test]
-    async fn shutdown_wakes_idle_worker() {
-        let (_temp, worker, shutdown, _checkpoint_tx) = make_worker();
-        let handle = tokio::spawn(worker.run());
-        tokio::task::yield_now().await;
-
-        shutdown.notify_one();
-
-        tokio::time::timeout(Duration::from_secs(1), handle)
-            .await
-            .expect("idle worker should exit promptly after shutdown notification")
-            .expect("worker task should not panic");
-    }
-
-    #[tokio::test]
-    async fn shutdown_wakes_worker_sleeping_until_future_retry() {
-        let (_temp, mut worker, shutdown, _checkpoint_tx) = make_worker();
-        worker.delayed_tasks.push(task(
-            "future-retry",
-            Some(std::time::Instant::now() + Duration::from_secs(60 * 60)),
-        ));
-        let handle = tokio::spawn(worker.run());
-        tokio::task::yield_now().await;
-
-        shutdown.notify_one();
-
-        tokio::time::timeout(Duration::from_secs(1), handle)
-            .await
-            .expect("retry-sleeping worker should exit promptly after shutdown notification")
-            .expect("worker task should not panic");
-    }
-
-    #[tokio::test]
-    async fn drain_processes_queued_checkpoint_notifications_before_completing() {
-        let (temp, mut worker, _shutdown, checkpoint_tx) = make_worker();
-        checkpoint_tx
-            .send(CheckpointNotification {
-                session_id: "session".to_string(),
-                tool: "unknown".to_string(),
-                trace_id: "trace".to_string(),
-                tool_use_id: None,
-                stream_path: temp.path().join("transcript.jsonl"),
-                stream_format: CheckpointStreamFormat::ClaudeJsonl,
-                repo_work_dir: Some(temp.path().to_path_buf()),
-                external_session_id: "external".to_string(),
-                external_parent_session_id: None,
-            })
-            .unwrap();
-        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
-
-        worker
-            .handle_drain_request(
-                DrainRequest {
-                    completion: completion_tx,
-                },
-                false,
-            )
-            .await;
-
-        completion_rx.await.unwrap();
-        assert!(
-            worker.checkpoint_rx.is_empty(),
-            "drain must process checkpoint notifications queued before the barrier"
-        );
+        shutdown_notify,
+        shutdown_flag,
     }
 }
 
@@ -1529,6 +1292,10 @@ mod subagent_sweep_tests {
         assert_eq!(rec1.external_session_id, "agent-sub1");
         assert_eq!(rec1.external_parent_session_id.as_deref(), Some("sess-abc"));
         assert_eq!(rec1.tool, "claude");
+        assert_eq!(rec1.stream_format, StreamFormat::ClaudeJsonl);
+        assert_eq!(rec1.watermark_type, WatermarkType::ByteOffset);
+        assert_eq!(rec1.watermark_value, "0");
+        assert_eq!(rec1.repo_work_dir, Some(tmp.path().display().to_string()));
 
         let rec2 = db
             .get_stream(

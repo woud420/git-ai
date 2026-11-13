@@ -28,7 +28,7 @@ impl TraceNormalizerWorker {
 
     pub(crate) async fn sweep_orphan(&self, root_sid: String) -> Result<(), GitAiError> {
         self.run(move |normalizer| {
-            let _ = normalizer.sweep_orphans_for_roots(&[root_sid]);
+            normalizer.sweep_orphans_for_roots(&[root_sid]);
             Ok(())
         })
         .await

@@ -28,9 +28,8 @@ use daemon_log_upload::{
 };
 pub(crate) use daemon_log_upload::{EmergencyLogUploadStatus, upload_emergency_daemon_log};
 use metrics_flush::{
-    METRICS_UPLOAD_AVAILABLE, count_pending_metrics_for_await, flush_metrics,
-    flush_pending_metrics, metrics_store, spawn_metrics_metadata_backfill,
-    store_metrics_in_db_with,
+    METRICS_UPLOAD_AVAILABLE, count_pending_metrics_for_await, flush_pending_metrics,
+    metrics_store, spawn_metrics_metadata_backfill, store_metrics_in_db_with,
 };
 use notes_flush::{flush_notes_for_await, flush_notes_with};
 use sentry_posthog::flush_sentry_and_posthog;
@@ -53,7 +52,7 @@ type InternalDbHandle =
 /// Result of a telemetry flush cycle.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FlushStatus {
-    /// Approximate buffered + pending metrics still awaiting upload.
+    /// Approximate number of metrics still awaiting upload.
     pub metrics_remaining: usize,
     /// Approximate number of notes still eligible for upload.
     pub notes_remaining: usize,
@@ -177,42 +176,21 @@ impl DaemonTelemetryWorkerHandle {
     /// Returns the current number of metrics waiting for upload.
     ///
     /// Used by the transcript worker for backpressure: if SQLite pending rows
-    /// or the legacy in-memory buffer are above a threshold, the worker yields
-    /// to let the flush loop drain them. Returns `usize::MAX` when the buffer
-    /// lock is contended, so callers default to "wait" rather than "push more".
+    /// are above a threshold, the worker yields to let the flush loop drain
+    /// them. Returns `usize::MAX` when the metrics DB lock is contended, so
+    /// callers default to "wait" rather than "push more".
     pub fn metrics_buffer_len(&self) -> usize {
-        let buffered = self
-            .buffer
-            .try_lock()
-            .map(|buf| buf.metrics.len())
-            .unwrap_or(usize::MAX);
-        if buffered == usize::MAX {
-            return usize::MAX;
-        }
-
         if !METRICS_UPLOAD_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed) {
-            return buffered;
+            return 0;
         }
 
-        let pending = match metrics_store(self.stores) {
+        match metrics_store(self.stores) {
             Ok(db) => match db.try_lock() {
                 Ok(db) => db.count_retryable().unwrap_or(usize::MAX),
                 Err(_) => usize::MAX,
             },
             Err(_) => 0,
-        };
-        buffered.saturating_add(pending)
-    }
-
-    /// Persist metrics directly from an existing blocking worker.
-    ///
-    /// Transcript sweeps can emit many batches in a tight loop. Routing those
-    /// through the async telemetry entrypoint creates one fire-and-forget
-    /// `spawn_blocking` task per batch, so a fast producer can retain many raw
-    /// transcript events while SQLite writes catch up. This path keeps the
-    /// producer coupled to the metrics DB write and bounds peak memory.
-    pub fn persist_metrics_blocking(&self, events: &[MetricEvent]) -> Result<Vec<i64>, GitAiError> {
-        store_metrics_in_db_with(metrics_store(self.stores), events)
+        }
     }
 
     /// Flush pending notes synchronously (for the FlushNotes control-request arm).
@@ -237,16 +215,6 @@ impl DaemonTelemetryWorkerHandle {
             && let Err(e) = store_metrics_in_db_with(metrics_store(self.stores), &metric_events)
         {
             tracing::warn!(%e, "telemetry: failed to persist daemon metrics locally");
-        }
-    }
-
-    /// Submit CAS records synchronously (best-effort, non-blocking).
-    ///
-    /// Used by daemon-owned post-commit paths that cannot route through the
-    /// control socket because the daemon cannot connect to itself.
-    pub fn submit_cas_sync(&self, records: Vec<CasSyncPayload>) {
-        if let Ok(mut buf) = self.buffer.try_lock() {
-            buf.ingest_cas(records);
         }
     }
 
@@ -313,24 +281,6 @@ fn split_metric_envelopes(
     }
 
     (buffered_envelopes, metric_events)
-}
-
-/// Submit CAS records from within the daemon process (sync, best-effort).
-/// Returns true if the handle was available and records were submitted.
-pub fn submit_daemon_internal_cas(records: Vec<CasSyncPayload>) -> bool {
-    if let Some(handle) = DAEMON_INTERNAL_TELEMETRY.get() {
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let handle = handle.clone();
-            runtime.spawn(async move {
-                handle.submit_cas(records).await;
-            });
-        } else {
-            handle.submit_cas_sync(records);
-        }
-        true
-    } else {
-        false
-    }
 }
 
 /// Submit daemon diagnostic events from within the daemon process.
@@ -513,11 +463,6 @@ fn flush_telemetry_batch(
 ) -> Vec<DaemonLogEvent> {
     let config = crate::config::Config::get();
     let distinct_id = get_or_create_distinct_id();
-
-    // Flush metrics (always processed — uploaded or stored in SQLite)
-    if !batch.metrics.is_empty() {
-        flush_metrics(&batch.metrics, stores);
-    }
 
     // Flush Sentry events (errors, performance, messages)
     let has_sentry_or_posthog =

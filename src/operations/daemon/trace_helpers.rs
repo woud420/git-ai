@@ -51,7 +51,6 @@ pub fn def_repo_is_secondary(payload: &Value) -> bool {
 
 pub fn trace_payload_worktree_hint(payload: &Value) -> Option<PathBuf> {
     let normalize = |path: PathBuf| worktree_root_for_path(&path).unwrap_or(path);
-    let argv = trace_payload_argv(payload);
     let event = payload
         .get("event")
         .and_then(Value::as_str)
@@ -83,6 +82,7 @@ pub fn trace_payload_worktree_hint(payload: &Value) -> Option<PathBuf> {
     {
         return Some(normalize(PathBuf::from(path)));
     }
+    let argv = trace_payload_argv(payload);
     if let Some(cwd) = payload.get("cwd").and_then(Value::as_str)
         && let Some(base_dir) = trace_payload_command_base_dir(payload, &argv, Path::new(cwd))
     {
@@ -110,9 +110,6 @@ pub fn trace_payload_worktree_hint(payload: &Value) -> Option<PathBuf> {
             return None;
         }
         idx += 1;
-    }
-    if argv.is_empty() {
-        return None;
     }
     None
 }
@@ -349,13 +346,17 @@ pub fn trace_invocation_command_args(
         return parsed.command_args;
     }
 
-    let Some(primary) = primary_command else {
-        return Vec::new();
-    };
-    invocation
+    primary_command
+        .map(|primary| trace_args_after_command(invocation, primary))
+        .unwrap_or_default()
+}
+
+/// The tokens that follow the first occurrence of `command`.
+pub fn trace_args_after_command(tokens: &[String], command: &str) -> Vec<String> {
+    tokens
         .iter()
-        .position(|arg| arg == primary)
-        .and_then(|idx| invocation.get(idx + 1..))
+        .position(|token| token == command)
+        .and_then(|idx| tokens.get(idx + 1..))
         .map(|args| args.to_vec())
         .unwrap_or_default()
 }

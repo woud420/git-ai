@@ -11,6 +11,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 mod git_path_environment;
+mod notes_backend;
+mod output;
 mod transcript_budgets;
 
 /// Parse the JSON emitted by `git-ai config <key>` into a serde value.
@@ -147,6 +149,24 @@ fn test_config_transcript_streaming_lookback_days_set_get_unset() {
         get_json(&repo, "transcript_streaming_lookback_days"),
         Value::Number(7.into())
     );
+}
+
+#[test]
+fn test_config_update_channel_accepts_every_runtime_channel() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+
+    // Every channel the runtime honors in config.json is settable.
+    for channel in ["latest", "next", "enterprise-latest", "enterprise-next"] {
+        repo.git_ai(&["config", "set", "update_channel", channel])
+            .unwrap_or_else(|e| panic!("set update_channel {channel} failed: {e}"));
+        assert_eq!(get_json(&repo, "update_channel"), channel);
+    }
+
+    assert!(
+        repo.git_ai(&["config", "set", "update_channel", "bogus"])
+            .is_err()
+    );
+    assert_eq!(get_json(&repo, "update_channel"), "enterprise-next");
 }
 
 #[test]
@@ -389,14 +409,32 @@ fn test_config_registry_preserves_sensitive_alias_and_help_behavior() {
     let set_output = repo
         .git_ai(&["config", "set", "api_key", secret])
         .expect("setting api_key should succeed");
-    assert!(set_output.contains("api-...cret"));
+    assert!(set_output.contains("[api_key]: ****"));
+    assert!(!set_output.contains("api-"));
+    assert!(!set_output.contains("cret"));
     assert!(!set_output.contains(secret));
 
     let get_output = repo
         .git_ai(&["config", "api_key"])
         .expect("reading api_key should succeed");
-    assert!(get_output.contains("api-...cret"));
+    assert!(get_output.contains("****"));
+    assert!(!get_output.contains("api-"));
+    assert!(!get_output.contains("cret"));
     assert!(!get_output.contains(secret));
+
+    let saved: Value = serde_json::from_str(
+        &std::fs::read_to_string(repo.test_home_path().join(".git-ai/config.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        saved["api_key"], secret,
+        "redaction must not alter stored credentials"
+    );
+    let all_output = repo
+        .git_ai(&["config"])
+        .expect("reading config should succeed");
+    assert!(!all_output.contains(secret));
+    assert!(!all_output.contains("api-...cret"));
 
     repo.git_ai(&["config", "set", "telemetry_oss", "off"])
         .expect("setting the legacy telemetry key should succeed");

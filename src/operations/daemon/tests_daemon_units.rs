@@ -200,29 +200,15 @@ fn test_rebase_command(
         family_key: Some(crate::model::domain::FamilyKey("/repo/.git".to_string())),
         worktree: Some(PathBuf::from("/repo")),
         root_sid: "rebase-test".to_string(),
-        trace_derived: false,
         raw_argv: std::iter::once("git")
             .chain(std::iter::once("rebase"))
             .chain(invoked_args.iter().copied())
             .map(str::to_string)
             .collect(),
-        primary_command: Some("rebase".to_string()),
-        invoked_command: Some("rebase".to_string()),
         invoked_args: invoked_args.iter().map(|arg| (*arg).to_string()).collect(),
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
-        reflog_start_offsets: HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
         ref_changes,
         confidence: crate::model::domain::Confidence::High,
+        ..crate::operations::daemon::tests_fixtures::normalized_command("rebase", &[])
     }
 }
 

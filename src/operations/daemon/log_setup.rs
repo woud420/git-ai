@@ -24,7 +24,7 @@ unsafe extern "system" {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonPidMeta {
     pid: u32,
-    started_at_ns: u128,
+    pub(crate) started_at_ns: u128,
 }
 
 pub fn now_unix_nanos() -> u128 {

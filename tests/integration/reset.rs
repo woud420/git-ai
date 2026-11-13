@@ -395,6 +395,45 @@ fn test_reset_with_new_files() {
     new_file.assert_lines_and_blame(crate::lines!["// AI created this".ai()]);
 }
 
+/// Regression: a file renamed inside the undone range keeps its attribution.
+/// The note of the commit that added the lines is keyed by the old path, while
+/// the content that survives the reset lives at the new path.
+#[test]
+fn test_reset_follows_rename_inside_undone_range() {
+    let repo = TestRepo::new();
+    let mut base_file = repo.filename("base.txt");
+    base_file.set_contents(crate::lines!["existing"]);
+    let base = repo.stage_all_and_commit("Base").unwrap();
+
+    let mut file = repo.filename("foo.rs");
+    file.set_contents(crate::lines![
+        "fn human() {}",
+        "fn ai_one() {}".ai(),
+        "fn ai_two() {}".ai(),
+    ]);
+    repo.stage_all_and_commit("Add foo.rs").unwrap();
+    file.assert_lines_and_blame(crate::lines![
+        "fn human() {}".human(),
+        "fn ai_one() {}".ai(),
+        "fn ai_two() {}".ai(),
+    ]);
+
+    // Pure rename, no checkpoint.
+    repo.git(&["mv", "foo.rs", "bar.rs"]).unwrap();
+    repo.commit("Rename foo.rs to bar.rs").unwrap();
+
+    repo.git(&["reset", &base.commit_sha])
+        .expect("reset --mixed should succeed");
+    repo.stage_all_and_commit("Re-commit renamed file").unwrap();
+
+    let mut renamed = repo.filename("bar.rs");
+    renamed.assert_lines_and_blame(crate::lines![
+        "fn human() {}".human(),
+        "fn ai_one() {}".ai(),
+        "fn ai_two() {}".ai(),
+    ]);
+}
+
 /// Test git reset with file deletions in unwound commit
 #[test]
 fn test_reset_with_deleted_files() {

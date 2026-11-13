@@ -113,6 +113,14 @@ fn submit_daemon_internal_telemetry_waits_without_runtime() {
     assert_eq!(guard.messages.len(), 1);
 }
 
+#[tokio::test]
+async fn transcript_backpressure_does_not_wait_on_the_telemetry_buffer_lock() {
+    let handle = DaemonTelemetryWorkerHandle::new_noop();
+    let _busy_buffer = handle.buffer.lock().await;
+
+    assert_eq!(handle.metrics_buffer_len(), 0);
+}
+
 #[test]
 fn telemetry_buffer_caps_daemon_logs_to_latest_events() {
     use buffer::MAX_BUFFERED_EVENTS_PER_KIND;

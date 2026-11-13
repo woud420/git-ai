@@ -1,3 +1,4 @@
+use crate::repos::test_file::ExpectedLineExt;
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use crate::test_utils::DurationStatistics;
 use git_ai::model::working_log::CheckpointKind;
@@ -160,6 +161,111 @@ fn bench_checkpoint_correctness_after_optimization() {
         "Correctness verified: checkpoint took {:.1}ms, {} entries",
         checkpoint_dur.as_secs_f64() * 1000.0,
         last.entries.len()
+    );
+}
+
+/// A file's first checkpoint on a base commit diffs against HEAD. Reading HEAD
+/// must not cost Git processes per file once its objects are packed.
+#[test]
+fn first_touch_checkpoint_git_process_count_does_not_grow_with_packed_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut counts = Vec::new();
+    for file_count in [2, 8] {
+        let log_path = temp.path().join(format!("spawns-{file_count}.log"));
+        let repo =
+            TestRepo::new_with_daemon_env(&[("GIT_AI_SPAWN_LOG", log_path.to_str().unwrap())]);
+        let files: Vec<_> = (0..file_count).map(|i| format!("file-{i}.txt")).collect();
+        for file in &files {
+            fs::write(repo.path().join(file), "base\n").unwrap();
+        }
+        repo.stage_all_and_commit("base files").unwrap();
+        // Loose objects are read without Git; pack them all.
+        repo.git_og(&["repack", "-a", "-d", "-q"]).unwrap();
+        repo.sync_daemon();
+        for file in &files {
+            fs::write(repo.path().join(file), "base\nAI line\n").unwrap();
+        }
+        fs::write(&log_path, "").unwrap();
+        repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
+        repo.sync_daemon();
+        let commands = fs::read_to_string(&log_path).unwrap();
+        println!("checkpoint daemon Git processes for {file_count} files: {commands:?}");
+        counts.push(commands.lines().count());
+
+        repo.stage_all_and_commit("AI edits").unwrap();
+        for file in &files {
+            repo.filename(file)
+                .assert_committed_lines(crate::lines!["base".unattributed_human(), "AI line".ai()]);
+        }
+    }
+    assert_eq!(
+        counts[0], counts[1],
+        "checkpoint Git process count must be independent of file count"
+    );
+}
+
+/// A tracked file may be named with a newline. Once HEAD is packed its
+/// content must still be the baseline of the file's first checkpoint, or the
+/// AI is credited with every line the file already had.
+#[cfg(not(windows))]
+#[test]
+fn first_touch_checkpoint_of_a_packed_file_named_with_a_newline_keeps_its_lines() {
+    let repo = TestRepo::new();
+    let file = "new\nline.txt";
+    fs::write(repo.path().join(file), "base\n").unwrap();
+    repo.stage_all_and_commit("base file").unwrap();
+    repo.git_og(&["repack", "-a", "-d", "-q"]).unwrap();
+    repo.sync_daemon();
+
+    fs::write(repo.path().join(file), "base\nAI line\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
+
+    let status = repo.git_ai(&["status", "--json"]).unwrap();
+    let status: serde_json::Value =
+        serde_json::from_str(&crate::test_utils::extract_json_object(&status)).unwrap();
+    assert_eq!(
+        status["checkpoints"][0]["additions"], 1,
+        "only the added line is the AI's: {status}"
+    );
+}
+
+/// Reading a packed HEAD file below directories named with a newline must
+/// not cost a Git process per such directory.
+#[cfg(not(windows))]
+#[test]
+fn first_touch_checkpoint_git_process_count_does_not_grow_with_newline_nesting() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut counts = Vec::new();
+    for depth in [1, 4] {
+        let log_path = temp.path().join(format!("spawns-{depth}.log"));
+        let repo =
+            TestRepo::new_with_daemon_env(&[("GIT_AI_SPAWN_LOG", log_path.to_str().unwrap())]);
+        let directory: String = (0..depth)
+            .map(|level| format!("new\ndir-{level}/"))
+            .collect();
+        let file = repo.path().join(format!("{directory}file.txt"));
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "base\n").unwrap();
+        repo.stage_all_and_commit("base file").unwrap();
+        repo.git_og(&["repack", "-a", "-d", "-q"]).unwrap();
+        repo.sync_daemon();
+
+        fs::write(&file, "base\nAI line\n").unwrap();
+        fs::write(&log_path, "").unwrap();
+        repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
+        repo.sync_daemon();
+        let commands = fs::read_to_string(&log_path).unwrap();
+        println!("checkpoint daemon Git processes at depth {depth}: {commands:?}");
+        counts.push(commands.lines().count());
+
+        let status = repo.git_ai(&["status", "--json"]).unwrap();
+        let status: serde_json::Value =
+            serde_json::from_str(&crate::test_utils::extract_json_object(&status)).unwrap();
+        assert_eq!(status["checkpoints"][0]["additions"], 1, "{status}");
+    }
+    assert_eq!(
+        counts[0], counts[1],
+        "checkpoint Git process count must be independent of path depth"
     );
 }
 

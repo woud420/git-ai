@@ -1,19 +1,21 @@
 mod pending;
 
+use crate::cli::fail::print_stdout;
 use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::authorship::ignore::{
     IgnoreMatcher, build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
 use crate::operations::authorship::stats::{
-    CommitStats, stats_from_authorship_log, write_stats_to_terminal,
+    CommitStats, stats_from_authorship_log, stats_terminal_output,
 };
 use crate::operations::authorship::virtual_attribution::VirtualAttributions;
 use crate::operations::git::find_repository;
 use crate::operations::git::path_format::unescape_git_path;
+use crate::operations::git::repository::MAX_PATHSPEC_ARGS;
 use crate::operations::git::repository::{Repository, parse_numstat_line};
-use crate::operations::git::status::MAX_PATHSPEC_ARGS;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,8 +74,14 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
 
     let default_user_name = repo.effective_author_identity().formatted_or_unknown();
 
-    let head = repo.head()?;
-    let head_sha = head.target()?;
+    // Before the first commit, checkpoints are stored under "initial" and the
+    // working tree is compared with the empty tree.
+    let (head_sha, head_rev) = match repo.head()?.target() {
+        Ok(sha) => (sha.clone(), sha),
+        // There is no commit id to take the object format from yet, so this
+        // is the SHA-1 empty tree.
+        Err(_) => ("initial".to_string(), empty_tree_for("").to_string()),
+    };
 
     let working_log = repo.storage.working_log_for_base_commit(&head_sha)?;
     let checkpoints = working_log.read_all_checkpoints()?;
@@ -90,7 +98,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
                 checkpoints: if diff_only { None } else { Some(vec![]) },
             };
             let json_str = serde_json::to_string(&output)?;
-            println!("{}", json_str);
+            print_stdout(&format!("{json_str}\n"));
         } else if !checkpoint_processing_pending {
             eprintln!(
                 "No checkpoints recorded since last commit ({})",
@@ -138,7 +146,7 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
     let working_va = VirtualAttributions::from_just_working_log(
         repo.clone(),
         head_sha.clone(),
-        Some(default_user_name.clone()),
+        Some(default_user_name),
     )?;
 
     let mut pathspecs: HashSet<String> = checkpoints
@@ -155,15 +163,15 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
 
     let (authorship_log, initial, _) = working_va.to_authorship_log_and_initial_working_log(
         &repo,
-        &head_sha,
-        &head_sha,
+        &head_rev,
+        &head_rev,
         Some(&pathspecs),
         None,
     )?;
 
     // Get actual git diff stats between HEAD and working directory (like post_commit does)
     let (total_additions, total_deletions) =
-        get_working_dir_diff_stats(&repo, Some(&pathspecs), &ignore_matcher)?;
+        get_working_dir_diff_stats(&repo, &head_rev, Some(&pathspecs), &ignore_matcher)?;
 
     // For status (uncommitted changes), the AI attributions are in `initial` (uncommitted),
     // not in authorship_log.attestations (which is for committed changes).
@@ -190,17 +198,17 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
             },
         };
         let json_str = serde_json::to_string(&output)?;
-        println!("{}", json_str);
+        print_stdout(&format!("{json_str}\n"));
         return Ok(());
     }
 
-    write_stats_to_terminal(&stats, true);
+    print_stdout(&stats_terminal_output(&stats, true));
 
     if diff_only {
         return Ok(());
     }
 
-    println!();
+    let mut out = String::from("\n");
     for cp in &checkpoint_infos {
         let add_str = if cp.additions > 0 {
             format!("+{}", cp.additions)
@@ -219,11 +227,12 @@ fn run_status(json: bool, diff_only: bool) -> Result<(), GitAiError> {
         );
 
         if cp.is_human {
-            println!("\x1b[90m{}\x1b[0m", line);
+            out.push_str(&format!("\x1b[90m{}\x1b[0m\n", line));
         } else {
-            println!("{}", line);
+            out.push_str(&format!("{}\n", line));
         }
     }
+    print_stdout(&out);
 
     Ok(())
 }
@@ -250,13 +259,14 @@ fn format_time_ago(timestamp: u64) -> String {
 /// This mirrors the logic in stats.rs get_git_diff_stats but for uncommitted changes
 fn get_working_dir_diff_stats(
     repo: &Repository,
+    head_rev: &str,
     pathspecs: Option<&HashSet<String>>,
     ignore_matcher: &IgnoreMatcher,
 ) -> Result<(u32, u32), GitAiError> {
     let mut args = repo.global_args_for_exec();
     args.push("diff".to_string());
     args.push("--numstat".to_string());
-    args.push("HEAD".to_string());
+    args.push(head_rev.to_string());
 
     // Add pathspecs if provided to scope the diff to specific files. Pass them
     // as CLI args only when they are below the E2BIG threshold and ASCII; Git
@@ -267,11 +277,9 @@ fn get_working_dir_diff_stats(
             return Ok((0, 0));
         }
         if needs_working_dir_post_filter(paths) {
-            // Disable rename detection so git reports renames as separate
-            // delete + add entries with clean filenames. Without this,
-            // numstat outputs "old => new" arrow notation in the filename
-            // field, which won't match pathspec entries.
-            args.push("--no-renames".to_string());
+            // The NumstatParse profile disables rename detection, so renames
+            // come back as delete + add entries with plain filenames that
+            // match pathspec entries.
             true
         } else {
             args.push("--".to_string());

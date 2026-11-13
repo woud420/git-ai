@@ -2,7 +2,9 @@ use super::diff_utils::collect_committed_hunks;
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
-use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
+use crate::model::authorship_log::{
+    HumanRecord, LineRange, PromptRecord, SessionRecord, metadata_key,
+};
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
 use crate::operations::git::repository::Repository;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -185,11 +187,7 @@ impl VirtualAttributions {
         let mut initial_sessions: BTreeMap<String, SessionRecord> = BTreeMap::new();
         for author_id in &referenced_prompts {
             if author_id.starts_with("s_") {
-                let session_key = author_id
-                    .split("::")
-                    .next()
-                    .unwrap_or(author_id)
-                    .to_string();
+                let session_key = metadata_key(author_id).to_string();
                 if let Some(record) = self.sessions.get(&session_key) {
                     initial_sessions.insert(session_key, record.clone());
                 }

@@ -1,5 +1,6 @@
 use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
+use crate::operations::commands::whoami::format_org;
 use crate::operations::daemon::attribution_self_check::run_attribution_self_check;
 use crate::operations::daemon::self_check::{
     DiagnosticCheckResult, DiagnosticStatus, GitDiagnosticTarget,
@@ -24,7 +25,9 @@ use std::time::Duration;
 mod context;
 mod help;
 mod jj;
+mod redact;
 use help::print_debug_help;
+use redact::{append_login_user_id, redact_env_value, redact_git_config_line, redact_url_userinfo};
 
 const MIN_GIT_VERSION: GitVersion = GitVersion {
     major: 2,
@@ -279,7 +282,7 @@ fn build_debug_report(options: DebugOptions) -> String {
         if !repository_info.remotes.is_empty() {
             let _ = writeln!(out, "Remotes:");
             for (name, url) in repository_info.remotes {
-                let _ = writeln!(out, "  {} = {}", name, url);
+                let _ = writeln!(out, "  {} = {}", name, redact_url_userinfo(&url));
             }
         }
     }
@@ -344,14 +347,7 @@ fn build_debug_report(options: DebugOptions) -> String {
             format_unix_timestamp(expires_at)
         );
     }
-    if let Some(user_id) = auth_info.user_id {
-        let _ = writeln!(out, "User ID: {}", user_id);
-    } else if matches!(
-        &auth_info.state,
-        AuthState::LoggedIn | AuthState::RefreshExpired
-    ) {
-        let _ = writeln!(out, "User ID: <unavailable>");
-    }
+    append_login_user_id(&mut out, &auth_info);
     if let Some(email) = auth_info.email {
         let _ = writeln!(out, "Email: {}", email);
     } else if matches!(
@@ -373,16 +369,8 @@ fn build_debug_report(options: DebugOptions) -> String {
     }
     if !auth_info.orgs.is_empty() {
         let _ = writeln!(out, "Organizations:");
-        for org in auth_info.orgs {
-            let org_id = org.org_id.unwrap_or_else(|| "<unknown-id>".to_string());
-            let org_slug = org.org_slug.unwrap_or_else(|| "<unknown-slug>".to_string());
-            let org_name = org.org_name.unwrap_or_else(|| "<unknown-name>".to_string());
-            let role = org.role.unwrap_or_else(|| "<unknown-role>".to_string());
-            let _ = writeln!(
-                out,
-                "  - {} ({}) [{}] role={}",
-                org_slug, org_name, org_id, role
-            );
+        for org in &auth_info.orgs {
+            let _ = writeln!(out, "  - {}", format_org(org));
         }
     }
     let _ = writeln!(out);
@@ -1273,88 +1261,6 @@ fn collect_git_config_dump(git_cmd: &str) -> GitConfigDump {
     }
 }
 
-fn redact_git_config_line(line: &str) -> String {
-    if !line.contains('\t') {
-        if let Some((key, value)) = line.split_once('=')
-            && should_redact_key_value(key, value)
-        {
-            return format!("{}=[REDACTED]", key);
-        }
-        return line.to_string();
-    }
-
-    let mut parts = line.splitn(3, '\t');
-    let first = match parts.next() {
-        Some(v) => v,
-        None => return line.to_string(),
-    };
-    let second = match parts.next() {
-        Some(v) => v,
-        None => return line.to_string(),
-    };
-
-    match parts.next() {
-        // 3-field format: scope \t origin \t key=value
-        // (from `git config --list --show-origin --show-scope`)
-        Some(key_value) => {
-            let (key, value) = match key_value.split_once('=') {
-                Some((key, value)) => (key, value),
-                None => return line.to_string(),
-            };
-            if should_redact_key_value(key, value) {
-                format!("{}\t{}\t{}=[REDACTED]", first, second, key)
-            } else {
-                line.to_string()
-            }
-        }
-        // 2-field format: origin \t key=value
-        // (from `git config --list --show-origin` without --show-scope)
-        None => {
-            let (key, value) = match second.split_once('=') {
-                Some((key, value)) => (key, value),
-                None => return line.to_string(),
-            };
-            if should_redact_key_value(key, value) {
-                format!("{}\t{}=[REDACTED]", first, key)
-            } else {
-                line.to_string()
-            }
-        }
-    }
-}
-
-fn should_redact_key_value(key: &str, value: &str) -> bool {
-    let key_lower = key.to_lowercase();
-    let value_lower = value.to_lowercase();
-
-    let sensitive_key_markers = [
-        "password",
-        "passwd",
-        "token",
-        "secret",
-        "oauth",
-        "authorization",
-        "apikey",
-        "api_key",
-        "extraheader",
-    ];
-
-    if sensitive_key_markers
-        .iter()
-        .any(|marker| key_lower.contains(marker))
-    {
-        return true;
-    }
-
-    if key_lower.starts_with("url.") {
-        return true;
-    }
-
-    sensitive_key_markers
-        .iter()
-        .any(|marker| value_lower.contains(marker))
-}
-
 fn collect_git_ai_config_dump() -> Result<String, String> {
     let runtime = config::Config::get();
     let mut out = String::new();
@@ -1397,242 +1303,5 @@ fn is_debug_git_env_key(key: &str) -> bool {
     key.starts_with("GIT_AI_") || key.starts_with("GITAI_") || key.starts_with("GIT_")
 }
 
-fn redact_env_value(key: &str, value: &str) -> String {
-    let key_lower = key.to_lowercase();
-    let sensitive_markers = ["token", "secret", "password", "key"];
-    if sensitive_markers
-        .iter()
-        .any(|marker| key_lower.contains(marker))
-    {
-        return "[REDACTED]".to_string();
-    }
-
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return "<empty>".to_string();
-    }
-
-    if trimmed.len() > 200 {
-        let truncated: String = trimmed.chars().take(200).collect();
-        return format!("{}...[truncated]", truncated);
-    }
-
-    trimmed.to_string()
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn format_command_for_error_preserves_posix_shell_words() {
-        assert_eq!(format_command_for_error("g", &["a b"]), "g 'a b'");
-    }
-
-    #[test]
-    fn test_redact_git_config_line_redacts_sensitive_key() {
-        let line =
-            "global\tfile:/Users/me/.gitconfig\thttp.https://example.com/.extraheader=AUTH token";
-        let redacted = redact_git_config_line(line);
-        assert_eq!(
-            redacted,
-            "global\tfile:/Users/me/.gitconfig\thttp.https://example.com/.extraheader=[REDACTED]"
-        );
-    }
-
-    #[test]
-    fn test_redact_git_config_line_keeps_non_sensitive_key() {
-        let line = "global\tfile:/Users/me/.gitconfig\tcore.editor=vim";
-        let redacted = redact_git_config_line(line);
-        assert_eq!(redacted, line);
-    }
-
-    #[test]
-    fn test_redact_git_config_line_two_field_format_redacts_sensitive() {
-        // `git config --list --show-origin` (without --show-scope) produces 2-tab fields
-        let line =
-            "file:/Users/me/.gitconfig\thttp.https://example.com/.extraheader=BEARER secret123";
-        let redacted = redact_git_config_line(line);
-        assert_eq!(
-            redacted,
-            "file:/Users/me/.gitconfig\thttp.https://example.com/.extraheader=[REDACTED]"
-        );
-    }
-
-    #[test]
-    fn test_redact_git_config_line_two_field_format_keeps_non_sensitive() {
-        let line = "file:/Users/me/.gitconfig\tcore.editor=vim";
-        let redacted = redact_git_config_line(line);
-        assert_eq!(redacted, line);
-    }
-
-    #[test]
-    fn test_format_bytes() {
-        assert_eq!(format_bytes(1024), "1.00 KB (1024 bytes)");
-    }
-
-    #[test]
-    fn test_is_debug_git_env_key_matches_git_prefixes() {
-        assert!(is_debug_git_env_key("GIT_AI_DEBUG"));
-        assert!(is_debug_git_env_key("GITAI_TEST_DB_PATH"));
-        assert!(is_debug_git_env_key("GIT_DIR"));
-        assert!(is_debug_git_env_key("GIT_TRACE2_EVENT"));
-        assert!(!is_debug_git_env_key("GITHUB_TOKEN"));
-        assert!(!is_debug_git_env_key("PATH"));
-    }
-
-    #[test]
-    fn test_collect_git_environment_entries_sorts_and_redacts() {
-        let entries = collect_git_environment_entries(vec![
-            ("OTHER".to_string(), "ignored".to_string()),
-            ("GIT_DIR".to_string(), ".git".to_string()),
-            ("GITAI_TEST_DB_PATH".to_string(), "/tmp/db".to_string()),
-            ("GIT_AI_API_KEY".to_string(), "secret".to_string()),
-        ]);
-
-        assert_eq!(
-            entries,
-            vec![
-                "GITAI_TEST_DB_PATH=/tmp/db",
-                "GIT_AI_API_KEY=[REDACTED]",
-                "GIT_DIR=.git",
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_git_version_handles_platform_suffixes() {
-        assert_eq!(
-            parse_git_version("git version 2.54.0.windows.1"),
-            Some(GitVersion {
-                major: 2,
-                minor: 54,
-                patch: 0
-            })
-        );
-        assert_eq!(
-            parse_git_version("git version 2.39.5 (Apple Git-154)"),
-            Some(GitVersion {
-                major: 2,
-                minor: 39,
-                patch: 5
-            })
-        );
-    }
-
-    #[test]
-    fn test_parse_git_version_accepts_minimum_version() {
-        assert!(parse_git_version("git version 2.22.0").unwrap() >= MIN_GIT_VERSION);
-        assert!(parse_git_version("git version 2.21.9").unwrap() < MIN_GIT_VERSION);
-    }
-
-    #[test]
-    fn test_select_lookup_path_prefers_existing_path() {
-        let exe = env::current_exe().unwrap();
-        let output = format!("/definitely/not/git\n{}\n", exe.display());
-
-        assert_eq!(
-            select_lookup_path(&output).unwrap(),
-            exe.display().to_string()
-        );
-    }
-
-    #[test]
-    fn test_select_lookup_path_falls_back_to_first_non_empty_line() {
-        assert_eq!(
-            select_lookup_path("\n git: aliased to hub \n").unwrap(),
-            "git: aliased to hub"
-        );
-    }
-
-    #[test]
-    fn test_realpath_for_display_canonicalizes_existing_path() {
-        let exe = env::current_exe().unwrap();
-        let expected = fs::canonicalize(&exe).unwrap();
-
-        assert_eq!(
-            realpath_for_display(&exe.display().to_string()),
-            expected.display().to_string()
-        );
-    }
-
-    #[test]
-    fn test_capture_result_preserves_partial_timeout_output() {
-        let timeout = Duration::from_millis(300);
-        let output = crate::process_timeout::partial_output_fixture(timeout).unwrap();
-        let err = capture_result("partial-output fixture", timeout, output).unwrap_err();
-
-        assert!(err.contains("timed out after 0.3s"), "{err}");
-        assert!(
-            err.contains("sent kill to child process")
-                || err.contains("failed to kill child process"),
-            "{err}"
-        );
-        assert!(err.contains("; stdout before timeout: out"), "{err}");
-        assert!(err.contains("; stderr before timeout: err"), "{err}");
-    }
-
-    #[test]
-    fn test_parse_debug_options_accepts_skip_trace2_checks() {
-        let options = parse_debug_options(&[SKIP_TRACE2_CHECKS_FLAG.to_string()]).unwrap();
-        assert!(options.skip_trace2_checks);
-    }
-
-    #[test]
-    fn test_parse_debug_options_rejects_unknown_arg() {
-        let err = parse_debug_options(&["--wat".to_string()]).unwrap_err();
-        assert!(err.contains("unknown debug argument: --wat"), "{err}");
-    }
-
-    #[test]
-    fn test_append_git_committer_identity_includes_effective_author() {
-        let identity = GitCommitterIdentityInfo {
-            global_config: Ok(GitConfigIdentityResolution {
-                raw_name: Some("Git User".to_string()),
-                raw_email: Some("git@example.com".to_string()),
-                identity: GitAuthorIdentity {
-                    name: Some("Git User".to_string()),
-                    email: Some("git@example.com".to_string()),
-                },
-            }),
-            repository: RepositoryCommitterIdentity::InRepository(GitIdentityResolution {
-                raw_git_var: Some("Git User <git@example.com> 1234567890 +0000".to_string()),
-                identity: GitAuthorIdentity {
-                    name: Some("Git User".to_string()),
-                    email: Some("git@example.com".to_string()),
-                },
-            }),
-            author_config: config::AuthorConfig {
-                name: Some("Config User".to_string()),
-                email: None,
-            },
-        };
-
-        let mut out = String::new();
-        append_git_committer_identity(&mut out, &identity);
-
-        assert!(out.contains("Git AI author config override:"), "{out}");
-        assert!(out.contains("  author.name: Config User"), "{out}");
-        assert!(out.contains("  author.email: <unset>"), "{out}");
-        assert!(out.contains("Git AI effective author identity:"), "{out}");
-        assert!(
-            out.contains("  Formatted: Config User <git@example.com>"),
-            "{out}"
-        );
-    }
-
-    #[test]
-    fn test_command_output_to_result_formats_diagnostics_without_stderr() {
-        let err = command_output_to_result(TimedCommandOutput {
-            status: Some(1),
-            stdout: String::new(),
-            stderr: String::new(),
-            timed_out: false,
-            diagnostics: vec!["output collection did not finish".to_string()],
-            wait_error: None,
-        })
-        .unwrap_err();
-
-        assert_eq!(err, "exit code 1: output collection did not finish");
-    }
-}
+mod tests;

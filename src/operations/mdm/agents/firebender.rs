@@ -1,12 +1,13 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-use crate::operations::mdm::hooks_merge::{MissingBehavior, edit_settings_json};
+use crate::operations::mdm::hooks_merge::{
+    MissingBehavior, check_settings_hooks, edit_settings_json, parse_json,
+};
 use crate::operations::mdm::hooks_merge_flat::{
-    remove_command_hooks_flat, upsert_command_hooks_flat,
+    has_command, has_flat_hook, remove_command_hooks_flat, upsert_command_hooks_flat,
 };
 use crate::operations::mdm::paths::home_dir;
-use serde_json::{Value, json};
-use std::fs;
+use serde_json::Value;
 use std::path::PathBuf;
 
 const FIREBENDER_CHECKPOINT_CMD: &str = "checkpoint firebender --hook-input stdin";
@@ -46,48 +47,15 @@ impl HookInstaller for FirebenderInstaller {
             return Ok(HookCheckResult::tool_not_installed());
         }
 
-        let hooks_path = Self::hooks_path();
-        if !hooks_path.exists() {
-            return Ok(HookCheckResult::installed_without_hooks());
-        }
-
-        let content = fs::read_to_string(&hooks_path)?;
-        let existing: Value = serde_json::from_str(&content).unwrap_or_else(|_| json!({}));
-
-        let has_pre = existing
-            .get("hooks")
-            .and_then(|h| h.get("preToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter().any(|item| {
-                    item.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(Self::is_firebender_checkpoint_command)
-                        .unwrap_or(false)
-                        && item.get("matcher").is_none()
+        check_settings_hooks(&Self::hooks_path(), parse_json, |existing| {
+            let installed = FIREBENDER_HOOK_NAMES.iter().all(|hook_name| {
+                has_flat_hook(existing, hook_name, |item| {
+                    has_command(item, Self::is_firebender_checkpoint_command)
+                        && !Self::needs_matcher_strip(item)
                 })
-            })
-            .unwrap_or(false);
-
-        let has_post = existing
-            .get("hooks")
-            .and_then(|h| h.get("postToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter().any(|item| {
-                    item.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(Self::is_firebender_checkpoint_command)
-                        .unwrap_or(false)
-                        && item.get("matcher").is_none()
-                })
-            })
-            .unwrap_or(false);
-
-        Ok(HookCheckResult::installed(
-            has_pre && has_post,
-            has_pre && has_post,
-        ))
+            });
+            (installed, installed)
+        })
     }
 
     fn install_hooks(
@@ -105,7 +73,7 @@ impl HookInstaller for FirebenderInstaller {
             &Self::hooks_path(),
             dry_run,
             MissingBehavior::TreatAsEmpty,
-            |content| Ok(serde_json::from_str(content)?),
+            parse_json,
             |merged| {
                 upsert_command_hooks_flat(
                     merged,
@@ -127,7 +95,7 @@ impl HookInstaller for FirebenderInstaller {
             &Self::hooks_path(),
             dry_run,
             MissingBehavior::NoOp,
-            |content| Ok(serde_json::from_str(content)?),
+            parse_json,
             |merged| {
                 remove_command_hooks_flat(
                     merged,
@@ -143,7 +111,9 @@ impl HookInstaller for FirebenderInstaller {
 mod tests {
     use super::*;
     use crate::operations::mdm::test_env::with_temp_home;
+    use serde_json::json;
     use serial_test::serial;
+    use std::fs;
 
     fn create_test_binary_path() -> PathBuf {
         PathBuf::from("/usr/local/bin/git-ai")

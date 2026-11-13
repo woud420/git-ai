@@ -210,6 +210,53 @@ fn test_interactive_rebase_edit_amend_preserves_notes() {
     ]);
 }
 
+/// An interactive rebase that stops on `edit` exits 0 before it finishes; the
+/// later `--continue` must still carry attribution for every rebased commit.
+#[test]
+fn test_interactive_rebase_edit_stop_then_continue_keeps_every_commit_note() {
+    let repo = TestRepo::new();
+    let mut base = repo.filename("base.txt");
+    base.set_contents(crate::lines!["base".human()]);
+    repo.stage_all_and_commit("base").unwrap();
+    let main_branch = repo.current_branch();
+
+    repo.git(&["checkout", "-b", "feature"]).unwrap();
+    let mut files = Vec::new();
+    for name in ["one.txt", "two.txt", "three.txt"] {
+        let mut file = repo.filename(name);
+        file.set_contents(crate::lines![format!("ai {name}").ai()]);
+        repo.stage_all_and_commit(name).unwrap();
+        files.push((name, file));
+    }
+
+    repo.git(&["checkout", &main_branch]).unwrap();
+    let mut other = repo.filename("other.txt");
+    other.set_contents(crate::lines!["other".human()]);
+    repo.stage_all_and_commit("main moves").unwrap();
+    repo.git(&["checkout", "feature"]).unwrap();
+
+    repo.git_with_env(
+        &["rebase", "-i", &main_branch],
+        &[(
+            "GIT_SEQUENCE_EDITOR",
+            "perl -i -pe 's/^pick/edit/ if $. == 1'",
+        )],
+        None,
+    )
+    .unwrap();
+    repo.git(&["rebase", "--continue"]).unwrap();
+
+    for (index, (name, file)) in files.iter_mut().enumerate() {
+        let rev = format!("HEAD~{}", 2 - index);
+        let sha = repo.git(&["rev-parse", &rev]).unwrap().trim().to_string();
+        assert!(
+            repo.read_authorship_note(&sha).is_some(),
+            "rebased commit for {name} should keep its note"
+        );
+        file.assert_lines_and_blame(crate::lines![format!("ai {name}").ai()]);
+    }
+}
+
 crate::reuse_tests_in_worktree!(
     test_pull_rebase_autostash_ff_preserves_uncommitted_ai_attribution,
     test_rebase_no_verify_preserves_attribution,

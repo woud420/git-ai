@@ -2,11 +2,11 @@
 //! rely on. Also hosts Git version and numstat parsing shared by Git-facing
 //! callers, and the public `parse_diff_added_lines_with_insertions` entry point.
 
+use super::MAX_PATHSPEC_ARGS;
 use super::core::Repository;
 use crate::clients::git_cli::{InternalGitProfile, exec_git, exec_git_with_profile};
 use crate::error::GitAiError;
 use crate::operations::git::path_format::parse_diff_path_from_header_line;
-use crate::operations::git::status::MAX_PATHSPEC_ARGS;
 use std::collections::{HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 
@@ -56,7 +56,7 @@ impl Repository {
         let output = exec_git_with_profile(&args, InternalGitProfile::PatchParse)?;
         let diff_output = String::from_utf8_lossy(&output.stdout);
 
-        let (mut result, _deleted_count) = parse_diff_added_lines(&diff_output)?;
+        let mut result = parse_diff_added_lines_internal(&diff_output).all_lines;
 
         if needs_post_filter && let Some(paths) = pathspecs {
             let nfc_paths: HashSet<String> = paths.iter().map(|s| s.nfc().collect()).collect();
@@ -85,7 +85,8 @@ impl Repository {
         let output = exec_git_with_profile(&args, InternalGitProfile::PatchParse)?;
         let diff_output = String::from_utf8_lossy(&output.stdout);
 
-        parse_diff_added_lines(&diff_output)
+        let parsed = parse_diff_added_lines_internal(&diff_output);
+        Ok((parsed.all_lines, parsed.total_deleted))
     }
 
     /// Get list of changed files between two refs using `git diff --name-only`
@@ -271,6 +272,17 @@ struct ActiveDiffHunk {
     is_pure_insertion: bool,
 }
 
+/// Parse git diff output to extract added line numbers per file
+///
+/// Parses unified diff format hunk headers like:
+/// @@ -10,2 +15,5 @@
+///
+/// This means: old file line 10 (2 lines), new file line 15 (5 lines)
+/// We extract the "new file" line numbers to know which lines were added.
+///
+/// Also counts the deleted lines across all hunks so that callers can
+/// estimate the cost of a deletion-heavy commit without a second git
+/// invocation.
 fn parse_diff_added_lines_internal(diff_output: &str) -> ParsedDiffAddedLines {
     let mut result: HashMap<String, Vec<u32>> = HashMap::new();
     let mut insertion_lines: HashMap<String, Vec<u32>> = HashMap::new();

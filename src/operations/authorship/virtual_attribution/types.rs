@@ -73,37 +73,6 @@ impl VirtualAttributions {
         }
     }
 
-    pub fn new_with_prompts(
-        repo: Repository,
-        base_commit: String,
-        attributions: HashMap<String, (Vec<Attribution>, Vec<LineAttribution>)>,
-        file_contents: HashMap<String, String>,
-        prompts: BTreeMap<String, BTreeMap<String, PromptRecord>>,
-        ts: u128,
-    ) -> Self {
-        VirtualAttributions {
-            repo,
-            base_commit,
-            attributions,
-            file_contents,
-            prompts,
-            ts,
-            blame_start_commit: None,
-            humans: BTreeMap::new(), // TODO(known-human): propagate humans from caller when rebase path is wired (Task 12)
-            initial_only_prompt_ids: HashSet::new(),
-            sessions: BTreeMap::new(),
-        }
-    }
-
-    /// Get both character and line attributions for a file
-    #[allow(dead_code)]
-    pub fn get_attributions(
-        &self,
-        file_path: &str,
-    ) -> Option<&(Vec<Attribution>, Vec<LineAttribution>)> {
-        self.attributions.get(file_path)
-    }
-
     /// Get just character-level attributions for a file
     pub fn get_char_attributions(&self, file_path: &str) -> Option<&Vec<Attribution>> {
         self.attributions

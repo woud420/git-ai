@@ -1,4 +1,3 @@
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
@@ -16,18 +15,6 @@ impl ActorDaemonCoordinator {
         let worktree = match cmd.worktree.as_ref() {
             Some(w) => w,
             None => return Ok(()),
-        };
-
-        let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-
-        // For rebase --skip/--continue that completes successfully, the trace2 data only shows
-        // HEAD moving from onto → new_tip (a fast-forward). The real old_tip (original branch tip
-        // before rebase started) was stored when the initial rebase failed. Use it here.
-        let is_rebase_cmd = cmd.primary_command.as_deref() == Some("rebase");
-        let pending_original_head = if is_rebase_cmd {
-            self.take_pending_rebase_original_head_for_worktree(worktree)?
-        } else {
-            None
         };
 
         // Collect branch ref changes (skip notes, tags, etc.)
@@ -54,6 +41,27 @@ impl ActorDaemonCoordinator {
                 branch_changes = head_changes;
             }
         }
+
+        let is_rebase_cmd = cmd.primary_command.as_deref() == Some("rebase");
+        // `--edit-todo` and `--show-current-patch` leave a stopped rebase stopped, so
+        // its original head stays pending for the command that finishes it.
+        let takes_pending_rebase = is_rebase_cmd && !rebase_stays_stopped(cmd);
+        // Nothing to rewrite: skip repository discovery (a git spawn) for commands
+        // such as fetch, push or tag. Rebase still consults its pending state below.
+        if branch_changes.is_empty() && !takes_pending_rebase {
+            return Ok(());
+        }
+
+        let repo = find_repository_in_path(&worktree.to_string_lossy())?;
+
+        // For rebase --skip/--continue that completes successfully, the trace2 data only shows
+        // HEAD moving from onto → new_tip (a fast-forward). The real old_tip (original branch tip
+        // before rebase started) was stored when the initial rebase failed. Use it here.
+        let pending_original_head = if takes_pending_rebase {
+            self.take_pending_rebase_original_head_for_worktree(worktree)?
+        } else {
+            None
+        };
 
         if branch_changes.is_empty() && pending_original_head.is_none() {
             return Ok(());
@@ -118,7 +126,7 @@ impl ActorDaemonCoordinator {
                         Some(&range),
                     )?;
                 repo.storage.rename_working_log(&original_head, &new_tip)?;
-                let conflict_base = rebase_onto.clone();
+                let conflict_base = rebase_onto;
                 let metric_context = process_conflict_resolution_working_logs(
                     &repo,
                     &new_tip,

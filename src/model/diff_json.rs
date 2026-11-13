@@ -1,16 +1,15 @@
 //! JSON DTO for per-file diff output (`git-ai diff --json`).
 //!
-//! This is a pure serialization shape shared between the diff command
-//! (which produces it) and the API layer (which converts it to
-//! [`crate::model::api_types::ApiFileRecord`]). It lives in `model` so the
-//! domain does not have to reach up into `operations::commands::diff`.
+//! This is a pure serialization shape produced by the diff command. It lives
+//! in `model` so the domain does not have to reach up into
+//! `operations::commands::diff`.
 
 use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Per-file diff information in JSON output
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FileDiffJson {
     /// Annotations mapping prompt hash to line ranges
     /// Line ranges are serialized as JSON tuples: [start, end] or single number
@@ -30,7 +29,7 @@ pub struct DiffLineKey {
 }
 
 /// JSON output format for `git-ai diff --json`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DiffJson {
     /// Per-file diff information with annotations
     pub files: BTreeMap<String, FileDiffJson>,
@@ -93,7 +92,7 @@ pub struct DiffJsonHunk {
     pub human_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DiffCommitMetadata {
     pub authored_time: String,
     pub msg: String,

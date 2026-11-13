@@ -1,6 +1,5 @@
 // Existing Generic diagnostics are persisted through FamilyStatus.last_error;
 // keep their Display text byte-stable across side-effect changes.
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::operations::daemon::cherry_pick_helpers::{
@@ -81,11 +80,11 @@ impl ActorDaemonCoordinator {
             .await?;
 
         if matches!(cmd.primary_command.as_deref(), Some("checkout" | "switch")) {
-            self.handle_checkout_switch(family, cmd)?;
+            apply_checkout_switch_working_log_side_effect(cmd)?;
         }
 
         if primary == "bisect" {
-            self.handle_bisect(family, cmd)?;
+            Self::handle_bisect(cmd)?;
         }
 
         if saw_pull_event || super::merge_fast_forward::has_explicit_fast_forward_transition(cmd) {
@@ -168,7 +167,7 @@ impl ActorDaemonCoordinator {
         // `checkout/switch --merge` exits with code 1 when it produces
         // conflict markers but HEAD still moves to the target branch.  We must not
         // return early here — fall through so apply_checkout_switch_working_log_side_effect
-        // and recent_checkout_switch_prerequisite_from_command can migrate the working log.
+        // can migrate the working log.
         let is_merge_checkout =
             matches!(cmd.primary_command.as_deref(), Some("checkout" | "switch")) && {
                 let p = parsed_invocation_for_normalized_command(cmd);
@@ -310,11 +309,13 @@ impl ActorDaemonCoordinator {
         let is_skip = cherry_pick_command_has_flag(cmd, "--skip");
         let mut source_oids = cmd.cherry_pick_source_oids.clone();
         let mut source_oids_from_daemon_pending = false;
+        // Discovered at most once (a rev-parse spawn), and only when needed.
+        let mut repo = None;
         if source_oids.is_empty()
             && (!new_commits.is_empty() || cherry_pick_state_exists_for_worktree(worktree))
         {
-            let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-            source_oids = resolve_explicit_cherry_pick_sources_for_side_effect(&repo, cmd)?;
+            let repo = repo.insert(find_repository_in_path(&worktree.to_string_lossy())?);
+            source_oids = resolve_explicit_cherry_pick_sources_for_side_effect(repo, cmd)?;
         }
         if source_oids.is_empty() && (is_continue || is_skip) {
             source_oids = self.pending_cherry_pick_sources_for_worktree(worktree)?;
@@ -327,7 +328,10 @@ impl ActorDaemonCoordinator {
             .cloned()
             .collect::<Vec<_>>();
         if !new_commits.is_empty() && !applied_source_oids.is_empty() {
-            let repo = find_repository_in_path(&worktree.to_string_lossy())?;
+            let repo = match repo {
+                Some(repo) => repo,
+                None => find_repository_in_path(&worktree.to_string_lossy())?,
+            };
             let original_head = cherry_pick_original_head(cmd).ok_or_else(|| {
                 super::state_error::state_error(
                     std::io::ErrorKind::InvalidData,
@@ -403,7 +407,7 @@ impl ActorDaemonCoordinator {
                         &cmd.index_write,
                     )?;
                 }
-                crate::model::domain::SemanticEvent::CloneCompleted { .. } => {
+                crate::model::domain::SemanticEvent::CloneCompleted => {
                     apply_clone_notes_sync_side_effect(&worktree, cmd)?;
                 }
                 crate::model::domain::SemanticEvent::PushCompleted { .. } => {

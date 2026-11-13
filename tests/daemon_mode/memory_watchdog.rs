@@ -9,6 +9,18 @@ use super::*;
 #[serial]
 #[cfg(not(windows))]
 fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
+    assert_emergency_shutdown_without_drain("25");
+}
+
+#[test]
+#[serial]
+#[cfg(not(windows))]
+fn daemon_memory_slow_polling_does_not_count_toward_shutdown_deadline() {
+    assert_emergency_shutdown_without_drain("150");
+}
+
+#[cfg(not(windows))]
+fn assert_emergency_shutdown_without_drain(poll_ms: &str) {
     let mut mock_api = MockApiServer::start();
     let mut repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
     repo.patch_git_ai_config(|patch| {
@@ -26,7 +38,7 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
                 "GIT_AI_TEST_DAEMON_CURRENT_RSS_MB_SEQUENCE",
                 sample_sequence.as_str(),
             ),
-            ("GIT_AI_TEST_DAEMON_MEMORY_POLL_MS", "25"),
+            ("GIT_AI_TEST_DAEMON_MEMORY_POLL_MS", poll_ms),
             ("GIT_AI_API_BASE_URL", mock_api.base_url()),
             ("GIT_AI_API_KEY", "test-api-key"),
         ],
@@ -48,18 +60,34 @@ fn daemon_memory_threshold_logs_uploads_and_aborts_without_draining() {
         })],
     );
 
-    let started = std::time::Instant::now();
-    let status = daemon.child.wait().expect("wait for emergency daemon stop");
+    // The threshold is reached only after the scripted RSS samples have been
+    // polled. Measure shutdown from its diagnostic, not from before those polls.
+    let threshold_deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if daemon
+            .diagnostic_contents()
+            .contains("memory emergency threshold reached")
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < threshold_deadline,
+            "memory emergency threshold was not reached"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let shutdown_deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        assert!(
+            Instant::now() < shutdown_deadline,
+            "memory emergency shutdown waited on in-flight work"
+        );
+        if let Some(status) = daemon.child.try_wait().expect("poll emergency daemon stop") {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
     assert!(!status.success(), "85% threshold should abort the daemon");
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "memory emergency shutdown waited on in-flight work"
-    );
-    let logs = daemon.diagnostic_contents();
-    assert!(
-        logs.contains("memory emergency threshold reached"),
-        "missing emergency memory diagnostic:\n{logs}"
-    );
     let requests = mock_api.collect_requests();
     assert!(
         requests

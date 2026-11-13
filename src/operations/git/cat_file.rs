@@ -62,6 +62,80 @@ pub(crate) fn batch_read_blob_contents_with_policy(
     Ok(results)
 }
 
+/// Reads each `treeish:path` name in one `git cat-file --batch`, in request order.
+/// An entry is `None` when the name is missing or is not a blob.
+pub(crate) fn batch_read_blobs_by_name(
+    repo: &Repository,
+    names: &[String],
+) -> Result<Vec<Option<String>>, GitAiError> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut args = repo.global_args_for_exec();
+    args.push("cat-file".to_string());
+    args.push("--batch".to_string());
+
+    let stdin_data = names.join("\n") + "\n";
+    let output = with_config_access_retry(
+        || exec_git_stdin(&args, stdin_data.as_bytes()),
+        std::thread::sleep,
+    )?;
+    parse_named_batch_output(&output.stdout, names.len())
+}
+
+/// Parses one record per requested name, failing unless the output holds exactly that many.
+fn parse_named_batch_output(
+    data: &[u8],
+    expected: usize,
+) -> Result<Vec<Option<String>>, GitAiError> {
+    let record_count_error = |found: usize| {
+        GitAiError::Generic(format!(
+            "git cat-file returned {found} records for {expected} path requests"
+        ))
+    };
+    let mut results = Vec::with_capacity(expected);
+    let mut pos = 0usize;
+    while results.len() < expected {
+        let Some(header_len) = data[pos..].iter().position(|&b| b == b'\n') else {
+            return Err(record_count_error(results.len()));
+        };
+        let header = std::str::from_utf8(&data[pos..pos + header_len])?;
+        pos += header_len + 1;
+        let Some((object_type, size)) = found_object_header(header) else {
+            results.push(None);
+            continue;
+        };
+        let content_end = pos + size;
+        if content_end > data.len() {
+            return Err(GitAiError::Generic(
+                "Malformed cat-file --batch output: truncated content".to_string(),
+            ));
+        }
+        results.push(
+            (object_type == "blob")
+                .then(|| String::from_utf8_lossy(&data[pos..content_end]).into_owned()),
+        );
+        pos = content_end + usize::from(data.get(content_end) == Some(&b'\n'));
+    }
+    if pos != data.len() {
+        return Err(GitAiError::Generic(format!(
+            "git cat-file returned more records than {expected} path requests"
+        )));
+    }
+    Ok(results)
+}
+
+/// Type and size from `<oid> <type> <size>`; `None` for `<name> missing` and other notices.
+fn found_object_header(header: &str) -> Option<(&str, usize)> {
+    let mut parts = header.split(' ');
+    let (oid, object_type, size) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || oid.is_empty() || !oid.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some((object_type, size.parse().ok()?))
+}
+
 #[cfg(test)]
 fn parse_batch_output(data: &[u8]) -> Result<HashMap<String, String>, GitAiError> {
     parse_batch_output_with_policy(data, BatchReadPolicy::Strict)
@@ -387,5 +461,55 @@ mod tests {
 
         assert_eq!(result.get(&oid), Some(&"hello\n".to_string()));
         assert!(!result.contains_key(&missing_oid));
+    }
+
+    #[test]
+    fn named_batch_keeps_request_order_and_framing() {
+        let data = b"HEAD:gone with spaces missing\nabc tree 3\nxyz\ndef blob 2\n\xffx\n";
+        assert_eq!(
+            parse_named_batch_output(data, 3).unwrap(),
+            vec![None, None, Some("\u{fffd}x".to_string())]
+        );
+        for (data, expected) in [
+            (b"abc blob 2\nhi\n".as_slice(), 2),
+            (b"abc blob 2\nhi\nx missing\n", 1),
+            (b"abc blob 9\nhi\n", 1),
+        ] {
+            assert!(parse_named_batch_output(data, expected).is_err());
+        }
+    }
+
+    #[test]
+    fn reads_paths_at_treeishes_skipping_missing_paths_and_trees() {
+        let repo = TmpRepo::new().unwrap();
+        repo.write_file("a.txt", "one\n", false).unwrap();
+        repo.write_file("dir/b c.txt", "spaced\n", false).unwrap();
+        let first = repo.commit_all("first").unwrap();
+        repo.write_file("a.txt", "two\n", false).unwrap();
+        let second = repo.commit_all("second").unwrap();
+        let request = |treeish: &str, path: &str| (treeish.to_string(), path.to_string());
+        let requests = [
+            request(&first, "a.txt"),
+            request(&second, "a.txt"),
+            request(&second, "dir"),
+            request(&second, "dir/b c.txt"),
+            request(&first, "dir/b c.txt"),
+            request(&second, "gone missing"),
+            request(&second, "a.txt"),
+        ];
+
+        let contents = crate::operations::git::repository::batch_read_paths_at_treeishes(
+            repo.gitai_repo(),
+            &requests,
+        )
+        .unwrap();
+
+        let expected = HashMap::from([
+            (request(&first, "a.txt"), "one\n".to_string()),
+            (request(&second, "a.txt"), "two\n".to_string()),
+            (request(&second, "dir/b c.txt"), "spaced\n".to_string()),
+            (request(&first, "dir/b c.txt"), "spaced\n".to_string()),
+        ]);
+        assert_eq!(contents, expected);
     }
 }

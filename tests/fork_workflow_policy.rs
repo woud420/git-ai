@@ -109,6 +109,9 @@ const REQUIRED_MAKE_INTERFACE: &[&str] = &[
     "sysctl -n hw.ncpu",
 ];
 const GNU_MAKE_SETUP_ACTION: &str = ".github/actions/setup-gnu-make/action.yml";
+/// Owner-selected compiler floor (ENG-553). Every minimum-version surface must
+/// agree on this value, so a whole-repository rollback cannot pass silently.
+const REPOSITORY_RUST_MINIMUM: &str = "1.100.0";
 const GNU_MAKE_SETUP_USE: &str = "uses: ./.github/actions/setup-gnu-make";
 const GNU_MAKE_WORKFLOWS: &[(&str, usize)] = &[
     (".github/workflows/e2e-tests.yml", 1),
@@ -1232,6 +1235,10 @@ fn repository_declares_one_rust_minimum() {
     } else {
         declared.to_string()
     };
+    assert_eq!(
+        msrv, REPOSITORY_RUST_MINIMUM,
+        "Cargo.toml rust-version must match the selected repository minimum"
+    );
     let documented_rust = regex::Regex::new(r"Rust\s+`?(?:>=\s*)?(\d+\.\d+(?:\.\d+)?)").unwrap();
     for (relative, contents) in [
         ("AGENTS.md", agents.as_str()),

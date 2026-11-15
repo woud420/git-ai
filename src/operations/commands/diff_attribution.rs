@@ -18,8 +18,7 @@ use crate::operations::commands::diff::{
     Attribution, DiffBuildArtifacts, DiffCommandOptions, DiffHunk, DiffLineKey, LineSide,
 };
 use crate::operations::commands::diff_json_builder::{
-    build_json_hunks, build_json_hunks_without_commit_metadata, extract_session_id,
-    load_commit_metadata,
+    build_json_hunks, extract_session_id, load_commit_metadata,
 };
 use crate::operations::commands::diff_note_attribution::build_line_attribution_from_note;
 use crate::operations::commands::diff_parsing::{
@@ -81,13 +80,13 @@ pub fn build_diff_artifacts_with_note(
         build_line_attribution_data(repo, from_commit, to_commit, &hunks, options);
 
     let json_hunks = build_json_hunks(
-        repo,
         &hunks,
         &line_details,
         &line_contents,
         to_commit,
         &mut commits,
-    )?;
+    );
+    load_commit_metadata(repo, &mut commits);
 
     Ok(DiffBuildArtifacts {
         attributions,
@@ -155,7 +154,7 @@ pub(crate) fn build_diff_artifacts_without_commit_metadata(
             )
         };
 
-    let json_hunks = build_json_hunks_without_commit_metadata(
+    let json_hunks = build_json_hunks(
         &hunks,
         &line_details,
         &line_contents,

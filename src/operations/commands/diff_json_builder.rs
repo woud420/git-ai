@@ -152,29 +152,9 @@ pub(crate) fn merge_missing_prompts_and_sessions_from_authorship_note(
 // JSON hunk building
 // ============================================================================
 
+/// Build JSON hunks, recording every referenced commit in `commits` with
+/// default metadata for [`load_commit_metadata`] to fill in.
 pub fn build_json_hunks(
-    repo: &Repository,
-    diff_hunks: &[DiffHunk],
-    line_details: &HashMap<DiffLineKey, LineAttributionDetail>,
-    line_contents: &HashMap<DiffLineKey, String>,
-    diff_to_commit: &str,
-    commits: &mut BTreeMap<String, DiffCommitMetadata>,
-) -> Result<Vec<DiffJsonHunk>, GitAiError> {
-    let hunks = build_json_hunks_without_commit_metadata(
-        diff_hunks,
-        line_details,
-        line_contents,
-        diff_to_commit,
-        commits,
-    );
-    load_commit_metadata(repo, commits);
-
-    Ok(hunks)
-}
-
-/// [`build_json_hunks`] without [`load_commit_metadata`]: every referenced
-/// commit is in `commits`, with default metadata.
-pub(crate) fn build_json_hunks_without_commit_metadata(
     diff_hunks: &[DiffHunk],
     line_details: &HashMap<DiffLineKey, LineAttributionDetail>,
     line_contents: &HashMap<DiffLineKey, String>,

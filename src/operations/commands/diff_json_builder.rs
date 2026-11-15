@@ -366,7 +366,10 @@ pub(crate) fn reference_commit(
 /// Fill in metadata for every referenced commit with one `git log` and one
 /// batched note read. Commits git cannot resolve (such as the all-zero commit
 /// of uncommitted lines) are dropped from the map.
-pub(crate) fn load_commit_metadata(repo: &Repository, commits: &mut BTreeMap<String, DiffCommitMetadata>) {
+pub(crate) fn load_commit_metadata(
+    repo: &Repository,
+    commits: &mut BTreeMap<String, DiffCommitMetadata>,
+) {
     let commit_shas: Vec<String> = std::mem::take(commits).into_keys().collect();
     if commit_shas.is_empty() {
         return;

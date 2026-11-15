@@ -80,9 +80,11 @@ pub(super) fn spawn(command: &mut Command) -> io::Result<(Child, Job)> {
 }
 
 fn resume_initial_thread(process_id: u32) -> io::Result<()> {
-    // Rust 1.93 does not expose Child's primary thread handle on stable. A
-    // suspended fresh process has one initial thread; fail closed if injected
-    // threads make that identity ambiguous instead of resuming the wrong one.
+    // Rust 1.100 stabilizes `ChildExt::main_thread_handle`, which names the
+    // primary thread directly. This snapshot lookup stays until replacing it
+    // gets its own reviewed change. A suspended fresh process has one initial
+    // thread; fail closed if injected threads make that identity ambiguous
+    // instead of resuming the wrong one.
     let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
     if raw == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());

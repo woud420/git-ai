@@ -281,6 +281,16 @@ impl<'a> Commit<'a> {
 
     // Return an iterator over the parents of this commit.
     pub fn parents(&self) -> Parents<'a> {
+        let reader =
+            crate::operations::git::fast_reader::FastObjectReader::new(&self.repo.git_common_dir);
+        if let Some(parent_oids) = reader.try_read_commit_parents(&self.oid) {
+            return Parents {
+                repo: self.repo,
+                parent_oids,
+                index: 0,
+            };
+        }
+
         // Use `git show -s --format=%P <oid>` to get whitespace-separated parent OIDs
         let mut args = self.repo.global_args_for_exec();
         args.push("show".to_string());

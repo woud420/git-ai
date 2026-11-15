@@ -209,6 +209,47 @@ impl<'a> FastObjectReader<'a> {
         }
     }
 
+    /// Read a loose commit object's parent OIDs, in order.
+    ///
+    /// Returns None when git could report other parents than the object
+    /// records: in a shallow clone, with grafts, or with replace refs.
+    pub fn try_read_commit_parents(&self, commit_oid: &str) -> Option<Vec<String>> {
+        if self.parents_may_be_rewritten() {
+            return None;
+        }
+        let data = self.decompress_object(commit_oid)?;
+        let null_pos = data.iter().position(|&b| b == 0)?;
+        if !data.starts_with(b"commit ") {
+            return None;
+        }
+        let mut lines = data[null_pos + 1..].split(|&b| b == b'\n');
+        lines.next()?.strip_prefix(b"tree ")?;
+        let mut parents = Vec::new();
+        for line in lines {
+            let Some(oid) = line.strip_prefix(b"parent ") else {
+                break;
+            };
+            let oid = std::str::from_utf8(oid).ok()?;
+            if !is_full_oid(oid) {
+                return None;
+            }
+            parents.push(oid.to_string());
+        }
+        Some(parents)
+    }
+
+    fn parents_may_be_rewritten(&self) -> bool {
+        let dir = self.common_dir;
+        std::env::var_os("GIT_REPLACE_REF_BASE").is_some()
+            || dir.join("shallow").exists()
+            || dir.join("info").join("grafts").exists()
+            || dir.join("reftable").exists()
+            || fs::read_dir(dir.join("refs").join("replace"))
+                .is_ok_and(|mut entries| entries.next().is_some())
+            || fs::read_to_string(dir.join("packed-refs"))
+                .is_ok_and(|packed| packed.contains(" refs/replace/"))
+    }
+
     /// Traverse a tree (and subtrees) to find the blob OID at the given path.
     ///
     /// For "src/main.rs", reads the root tree, finds "src" subtree, reads it,

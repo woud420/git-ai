@@ -310,15 +310,14 @@ where
                 false,
             );
 
-            let hunks_json = crate::operations::commands::diff_attribution::build_diff_artifacts_from_hunks_with_patterns(
-                repo,
+            // Only the hunks are recorded, so commit metadata is never loaded.
+            let artifacts = crate::operations::commands::diff_attribution::build_diff_artifacts_without_commit_metadata(
                 diff_hunks,
                 &ignore_patterns,
                 &commit_sha,
                 Some(&authorship_log),
-            )
-            .ok()
-            .and_then(|artifacts| serde_json::to_string(&artifacts.json_hunks).ok());
+            );
+            let hunks_json = serde_json::to_string(&artifacts.json_hunks).ok();
 
             // Record metrics only when we have full stats.
             // Store the recorded parent as `base_commit_sha`, not `<commit>^`.

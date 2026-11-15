@@ -6,6 +6,7 @@ use super::core::Repository;
 use super::git_objects::Tree;
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
+use crate::operations::authorship::diff_base::is_empty_tree;
 
 pub struct Object<'a> {
     pub(super) repo: &'a Repository,
@@ -104,11 +105,9 @@ impl<'a> CommitRange<'a> {
     }
 
     pub fn is_valid(&self) -> Result<(), GitAiError> {
-        const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-
         // Check that both commits exist
         // Skip validation for empty tree hash - it's a special git object that may not exist in the repo
-        if self.start_oid != EMPTY_TREE_HASH {
+        if !is_empty_tree(&self.start_oid) {
             self.repo.find_commit(self.start_oid.clone())?;
         }
         self.repo.find_commit(self.end_oid.clone())?;
@@ -116,7 +115,7 @@ impl<'a> CommitRange<'a> {
         // Check that both commits exist on the refname
         // Use git merge-base --is-ancestor <commit> <refname>
         // Skip merge-base check for empty tree hash since it's not part of commit history
-        if self.start_oid != EMPTY_TREE_HASH
+        if !is_empty_tree(&self.start_oid)
             && !self
                 .repo
                 .is_ancestor(&self.start_oid, &self.refname)
@@ -141,7 +140,7 @@ impl<'a> CommitRange<'a> {
 
         // Check that start is an ancestor of end (direct path between them)
         // Skip for empty tree hash - it's not part of the commit DAG
-        if self.start_oid != EMPTY_TREE_HASH
+        if !is_empty_tree(&self.start_oid)
             && !self
                 .repo
                 .is_ancestor(&self.start_oid, &self.end_oid)
@@ -243,13 +242,6 @@ pub struct Commit<'a> {
     pub(super) oid: String,
 }
 
-/// Construct a [`Commit`] from within the `repository` module tree. Used by
-/// sibling modules (e.g. `Reference::peel_to_commit`) that resolve commit OIDs
-/// but cannot name `Commit`'s private fields across module boundaries directly.
-pub(super) fn make_commit<'a>(repo: &'a Repository, oid: String) -> Commit<'a> {
-    Commit { repo, oid }
-}
-
 impl<'a> Commit<'a> {
     pub fn id(&self) -> String {
         self.oid.clone()
@@ -313,100 +305,8 @@ impl<'a> Commit<'a> {
 
     // Get the number of parents of this commit.
     // Use the parents iterator to return an iterator over all parents.
-    #[allow(dead_code)]
     pub fn parent_count(&self) -> Result<usize, GitAiError> {
         Ok(self.parents().count())
-    }
-
-    // Get the short "summary" of the git commit message. The returned message is the summary of the commit, comprising the first paragraph of the message with whitespace trimmed and squashed. None may be returned if an error occurs or if the summary is not valid utf-8.
-    pub fn summary(&self) -> Result<String, GitAiError> {
-        let mut args = self.repo.global_args_for_exec();
-        args.push("show".to_string());
-        args.push("-s".to_string());
-        args.push("--no-notes".to_string());
-        args.push("--encoding=UTF-8".to_string());
-        args.push("--format=%s".to_string());
-        args.push(self.oid.clone());
-        let output = exec_git(&args)?;
-        Ok(String::from_utf8(output.stdout)?.trim().to_string())
-    }
-
-    // Get the body of the git commit message (everything after the first paragraph).
-    // Returns an empty string if there is no body.
-    pub fn body(&self) -> Result<String, GitAiError> {
-        let mut args = self.repo.global_args_for_exec();
-        args.push("show".to_string());
-        args.push("-s".to_string());
-        args.push("--no-notes".to_string());
-        args.push("--encoding=UTF-8".to_string());
-        args.push("--format=%b".to_string());
-        args.push(self.oid.clone());
-        let output = exec_git(&args)?;
-        Ok(String::from_utf8(output.stdout)?.trim().to_string())
-    }
-
-    /// Find the first parent that exists on the specified refname
-    ///
-    /// This is useful for merge commits where we want to find the parent on a specific branch
-    /// (e.g., main) rather than just taking the first parent, which might not be correct in
-    /// complex merge histories with back-and-forth merges.
-    ///
-    /// # Arguments
-    /// * `refname` - The reference name to search for (e.g., "main", "refs/heads/main")
-    ///
-    /// # Returns
-    /// The first parent commit that is reachable from the specified refname
-    pub fn parent_on_refname(&self, refname: &str) -> Result<Commit<'a>, GitAiError> {
-        // Normalize the refname to fully qualified form
-        let fq_refname = {
-            let mut rp_args = self.repo.global_args_for_exec();
-            rp_args.push("rev-parse".to_string());
-            rp_args.push("--verify".to_string());
-            rp_args.push("--symbolic-full-name".to_string());
-            rp_args.push(refname.to_string());
-
-            match exec_git(&rp_args) {
-                Ok(output) => {
-                    let s = String::from_utf8(output.stdout).unwrap_or_default();
-                    let s = s.trim();
-                    if s.is_empty() {
-                        if refname.starts_with("refs/") {
-                            refname.to_string()
-                        } else {
-                            format!("refs/heads/{}", refname)
-                        }
-                    } else {
-                        s.to_string()
-                    }
-                }
-                Err(_) => {
-                    if refname.starts_with("refs/") {
-                        refname.to_string()
-                    } else {
-                        format!("refs/heads/{}", refname)
-                    }
-                }
-            }
-        };
-
-        // Iterate through parents and find the first one that's on the refname
-        for parent in self.parents() {
-            let parent_sha = parent.id();
-
-            if self
-                .repo
-                .is_ancestor(&parent_sha, &fq_refname)
-                .unwrap_or(false)
-            {
-                return Ok(parent);
-            }
-        }
-
-        // If no parent is on the refname, return an error
-        Err(GitAiError::Generic(format!(
-            "No parent of commit {} is reachable from refname {}",
-            self.oid, refname
-        )))
     }
 }
 

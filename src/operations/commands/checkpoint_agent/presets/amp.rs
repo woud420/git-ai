@@ -110,7 +110,6 @@ impl AgentPreset for AmpPreset {
 
         // Determine session_id: thread_id preferred, falls back to tool_use_id
         let session_id = thread_id
-            .clone()
             .or(tool_use_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
 
@@ -148,7 +147,7 @@ impl AgentPreset for AmpPreset {
                 context,
                 file_paths,
                 dirty_files: None,
-                tool_use_id: tool_use_id.clone(),
+                tool_use_id,
             }),
             (false, true) => ParsedHookEvent::PostBashCall(PostBashCall {
                 context,
@@ -161,7 +160,7 @@ impl AgentPreset for AmpPreset {
                 file_paths,
                 dirty_files: None,
                 stream_source: None,
-                tool_use_id: tool_use_id.clone(),
+                tool_use_id,
             }),
         };
 
@@ -189,11 +188,32 @@ impl AgentPreset for AmpPreset {
         .ok()
         .flatten()
         .unwrap_or_else(|| "unknown".to_string());
+        // The Amp plugin sends no thread_id, so bind file edits to the thread
+        // file's stem, which stream validation expects as the session id. Bash
+        // events keep theirs: pre and post snapshots are matched by session id.
+        let thread_session_id = hook_input
+            .thread_id
+            .is_none()
+            .then(|| {
+                path.file_stem()
+                    .map(|stem| stem.to_string_lossy().to_string())
+            })
+            .flatten();
 
         for event in events {
+            let is_bash = matches!(
+                event,
+                ParsedHookEvent::PreBashCall(_) | ParsedHookEvent::PostBashCall(_)
+            );
             let Some(context) = event.preset_context_mut() else {
                 continue;
             };
+            if let Some(id) = &thread_session_id
+                && !is_bash
+            {
+                context.agent_id.id = id.clone();
+                context.external_session_id = id.clone();
+            }
             context.agent_id.model = model.clone();
             context.metadata.insert(
                 "transcript_path".to_string(),

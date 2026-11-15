@@ -3,7 +3,7 @@ use crate::model::domain::{
     AnalysisResult, CommandClass, Confidence, NormalizedCommand, SemanticEvent, StashOpKind,
 };
 use crate::operations::daemon::analyzers::{
-    AnalysisView, CommandAnalyzer, command_args, normalized_args,
+    AnalysisView, CommandAnalyzer, command_args, stash_args, stash_subcommand,
 };
 
 #[derive(Default)]
@@ -36,9 +36,8 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
                 }
             }
             "stash" => {
-                let stash_args = stash_command_args(cmd);
                 events.push(SemanticEvent::StashOperation {
-                    kind: infer_stash_kind(&stash_args),
+                    kind: infer_stash_kind(cmd),
                     head: current_head_for_workspace_command(cmd, state.refs),
                 });
             }
@@ -91,18 +90,8 @@ impl CommandAnalyzer for WorkspaceAnalyzer {
     }
 }
 
-fn stash_command_args(cmd: &NormalizedCommand) -> Vec<String> {
-    let args = normalized_args(&cmd.raw_argv);
-    if let Some(index) = args.iter().position(|arg| arg == "stash")
-        && let Some(stash_args) = args.get(index + 1..)
-    {
-        return stash_args.to_vec();
-    }
-    command_args(cmd)
-}
-
-fn infer_stash_kind(args: &[String]) -> StashOpKind {
-    match args.first().map(String::as_str).unwrap_or("push") {
+fn infer_stash_kind(cmd: &NormalizedCommand) -> StashOpKind {
+    match stash_subcommand(&stash_args(cmd)) {
         "push" | "save" => StashOpKind::Push,
         "apply" => StashOpKind::Apply,
         "pop" => StashOpKind::Pop,

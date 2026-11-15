@@ -133,14 +133,9 @@ pub(super) fn parse_bool(value: &str) -> Result<bool, String> {
     }
 }
 
-pub(super) fn parse_value(value: &str) -> Result<Value, String> {
-    // Try to parse as JSON first
-    if let Ok(json_value) = serde_json::from_str::<Value>(value) {
-        return Ok(json_value);
-    }
-
-    // Otherwise treat as string
-    Ok(Value::String(value.to_string()))
+/// A value parsed as JSON, or else taken as a plain string.
+pub(super) fn parse_value(value: &str) -> Value {
+    serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
 }
 
 pub(super) fn parse_author_config_object(value: &str) -> Result<AuthorConfig, String> {
@@ -155,22 +150,14 @@ pub(super) fn parse_author_config_object(value: &str) -> Result<AuthorConfig, St
         .map_err(|e| format!("Invalid author config: {}", e))
 }
 
-/// Mask an API key for display (show first 4 and last 4 chars if long enough)
-pub(super) fn mask_api_key(key: &str) -> String {
-    if key.len() > 8 {
-        format!("{}...{}", &key[..4], &key[key.len() - 4..])
-    } else {
-        "****".to_string()
-    }
-}
-
 /// Parse notes backend kind from a string value
 pub(super) fn parse_notes_backend_kind(value: &str) -> Result<NotesBackendKind, String> {
     match value.trim().to_lowercase().as_str() {
+        "sqlite" => Ok(NotesBackendKind::Sqlite),
         "git_notes" | "git-notes" => Ok(NotesBackendKind::GitNotes),
         "http" => Ok(NotesBackendKind::Http),
         _ => Err(format!(
-            "Invalid notes_backend.kind '{}'. Expected 'git_notes' or 'http'",
+            "Invalid notes_backend.kind '{}'. Expected 'sqlite', 'git_notes', or 'http'",
             value
         )),
     }

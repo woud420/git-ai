@@ -418,6 +418,32 @@ fn test_diff_only_no_changes_omits_checkpoints() {
     assert_eq!(diff_only.stats.git_diff_deleted_lines, 0);
 }
 
+/// Status counts the AI lines of a checkpointed file that is not in HEAD yet
+/// (git diff does not report untracked files), and nothing for a checkpointed
+/// tracked file whose content is back to what HEAD has.
+#[test]
+fn test_status_counts_ai_lines_of_untracked_checkpointed_files() {
+    let repo = TestRepo::new();
+
+    repo.write_file("tracked.txt", "base\n");
+    repo.stage_all_and_commit("initial").unwrap();
+
+    repo.write_file("src/new.txt", "one\ntwo\nthree\n");
+    repo.git_ai(&["checkpoint", "mock_ai", "src/new.txt"])
+        .unwrap();
+
+    repo.write_file("tracked.txt", "AI rewrite\n");
+    repo.git_ai(&["checkpoint", "mock_ai", "tracked.txt"])
+        .unwrap();
+    repo.write_file("tracked.txt", "base\n");
+
+    let status = status_json(&repo);
+    assert_eq!(
+        status.stats.ai_accepted, 3,
+        "only the three lines of the untracked file are uncommitted AI lines"
+    );
+}
+
 crate::reuse_tests_in_worktree!(
     test_working_dir_diff_stats_single_file_checkpoint,
     test_working_dir_diff_stats_exclusion_by_checkpoint,
@@ -430,4 +456,5 @@ crate::reuse_tests_in_worktree!(
     test_status_preserves_lowercase_agent_identifier,
     test_diff_only_omits_checkpoints_but_keeps_stats,
     test_diff_only_no_changes_omits_checkpoints,
+    test_status_counts_ai_lines_of_untracked_checkpointed_files,
 );

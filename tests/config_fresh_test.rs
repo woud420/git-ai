@@ -221,6 +221,21 @@ fn test_config_fresh_respects_env_vars() {
     let config3 = Config::fresh();
     assert_eq!(config3.api_base_url(), "https://usegitai.com");
 
+    // Like every other setting, the env var wins over the config file
+    let file_config = git_ai::config::FileConfig {
+        api_base_url: Some("https://file.example.com".to_string()),
+        ..Default::default()
+    };
+    save_file_config(&file_config).expect("Failed to save config");
+    assert_eq!(Config::fresh().api_base_url(), "https://file.example.com");
+    unsafe {
+        env::set_var("GIT_AI_API_BASE_URL", "https://env-var.example.com");
+    }
+    assert_eq!(
+        Config::fresh().api_base_url(),
+        "https://env-var.example.com"
+    );
+
     // Restore original GIT_AI_API_BASE_URL (home guard restores home vars via Drop)
     unsafe {
         if let Some(api_url) = original_api_url {

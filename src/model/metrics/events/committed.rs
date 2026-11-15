@@ -9,11 +9,8 @@ pub mod committed_pos {
 
     // Array fields (parallel arrays, index 0 = "all" aggregate, index 1+ = per tool/model)
     pub const TOOL_MODEL_PAIRS: usize = 3;
-    pub const MIXED_ADDITIONS: usize = 4;
     pub const AI_ADDITIONS: usize = 5;
     pub const AI_ACCEPTED: usize = 6;
-    pub const TOTAL_AI_ADDITIONS: usize = 7;
-    pub const TOTAL_AI_DELETIONS: usize = 8;
     // Position 9 was time_waiting_for_ai (removed)
 
     // New scalar fields

@@ -1,9 +1,9 @@
-use super::blame_loader::file_exists_in_commit;
 use crate::error::GitAiError;
 use crate::model::authorship_log::LineRange;
 use crate::model::imara_diff_utils::{
     content_eq_ignoring_line_endings, normalize_line_endings, split_lines_with_terminators,
 };
+use crate::operations::authorship::diff_base::empty_tree_for;
 use crate::operations::git::repository::{Repository, batch_read_paths_at_treeishes};
 use std::collections::{HashMap, HashSet};
 
@@ -19,8 +19,8 @@ pub(super) fn collect_committed_hunks(
     // Handle initial commit (no parent)
     if parent_sha == "initial" {
         // For initial commit, use git diff against the empty tree
-        let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"; // Git's empty tree hash
-        let added_lines = repo.diff_added_lines(empty_tree, commit_sha, pathspecs)?;
+        let added_lines =
+            repo.diff_added_lines(empty_tree_for(commit_sha), commit_sha, pathspecs)?;
 
         for (file_path, lines) in added_lines {
             if !lines.is_empty() {
@@ -113,15 +113,17 @@ pub(super) fn collect_unstaged_hunks(
     if let Some(paths) = pathspecs
         && let Ok(workdir) = repo.workdir()
     {
-        for pathspec in paths {
-            // Skip if we already found this file in git diff
-            if unstaged_hunks.contains_key(pathspec) {
-                continue;
-            }
+        // Skip files we already found in git diff
+        let candidates: Vec<&String> = paths
+            .iter()
+            .filter(|pathspec| !unstaged_hunks.contains_key(*pathspec))
+            .collect();
+        let committed = files_in_commit(repo, commit_sha, &candidates)?;
 
+        for pathspec in candidates {
             // Check if file exists in the commit - if it does, it's tracked and git diff should handle it
             // Only process truly untracked files (files that don't exist in the commit tree)
-            if file_exists_in_commit(repo, commit_sha, pathspec).unwrap_or(false) {
+            if committed.contains(pathspec) {
                 continue;
             }
 
@@ -145,6 +147,41 @@ pub(super) fn collect_unstaged_hunks(
     }
 
     Ok((unstaged_hunks, pure_insertion_hunks))
+}
+
+/// The subset of `paths` that are files in `commit_sha`'s tree, from one
+/// batched read instead of a tree lookup per path. The caller's path may be
+/// NFC or NFD while the tree stores the opposite form, so both normalisations
+/// are tried.
+fn files_in_commit<'a>(
+    repo: &Repository,
+    commit_sha: &str,
+    paths: &[&'a String],
+) -> Result<HashSet<&'a String>, GitAiError> {
+    use unicode_normalization::UnicodeNormalization;
+
+    let spellings = |path: &str| -> Vec<(String, String)> {
+        let mut spellings = vec![path.to_string()];
+        if !path.is_ascii() {
+            spellings.extend([path.nfc().collect::<String>(), path.nfd().collect()]);
+        }
+        spellings
+            .into_iter()
+            .map(|spelling| (commit_sha.to_string(), spelling))
+            .collect()
+    };
+
+    let requests: Vec<(String, String)> = paths.iter().flat_map(|path| spellings(path)).collect();
+    let found = batch_read_paths_at_treeishes(repo, &requests)?;
+    Ok(paths
+        .iter()
+        .copied()
+        .filter(|path| {
+            spellings(path)
+                .iter()
+                .any(|request| found.contains_key(request))
+        })
+        .collect())
 }
 
 #[allow(clippy::type_complexity)]
@@ -258,4 +295,32 @@ pub(super) fn batch_file_contents(
         map.entry(req.clone()).or_default();
     }
     Ok(map)
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+    use crate::operations::git::test_utils::TmpRepo;
+
+    /// A checkpointed path that `git diff` does not report is untracked only
+    /// if HEAD lacks it. A file named with a newline must not make the lookup
+    /// fail and turn its unchanged, committed neighbours into untracked files.
+    #[test]
+    fn committed_file_named_with_a_newline_does_not_make_its_batch_untracked() {
+        let tmp = TmpRepo::new().unwrap();
+        tmp.write_file("new\nline.txt", "one\ntwo\n", false)
+            .unwrap();
+        tmp.write_file("plain.txt", "plain\n", false).unwrap();
+        let commit = tmp.commit_all("base").unwrap();
+        tmp.write_file("untracked.txt", "new\n", false).unwrap();
+        let paths = ["new\nline.txt", "plain.txt", "untracked.txt"].map(String::from);
+
+        let (unstaged, insertions) =
+            collect_unstaged_hunks(tmp.gitai_repo(), &commit, Some(&HashSet::from(paths))).unwrap();
+
+        let untracked =
+            HashMap::from([("untracked.txt".to_string(), vec![LineRange::Range(1, 1)])]);
+        assert_eq!(unstaged, untracked);
+        assert_eq!(insertions, untracked);
+    }
 }

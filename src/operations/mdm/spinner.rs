@@ -28,16 +28,6 @@ impl Spinner {
         self.pb.finish_and_clear();
     }
 
-    #[allow(dead_code)]
-    pub fn update_message(&self, message: &str) {
-        self.pb.set_message(message.to_string());
-    }
-
-    #[allow(dead_code)]
-    pub async fn wait_for(&self, duration_ms: u64) {
-        tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
-    }
-
     pub fn success(&self, message: &str) {
         // Clear spinner and show success with green checkmark and bold green text
         self.pb.finish_and_clear();
@@ -122,13 +112,6 @@ mod tests {
     fn test_spinner_skipped_output() {
         let spinner = Spinner::new("Processing");
         spinner.skipped("Operation skipped");
-    }
-
-    #[test]
-    fn test_spinner_update_message() {
-        let spinner = Spinner::new("Initial message");
-        spinner.update_message("Updated message");
-        spinner.success("Done");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use super::{Agent, formats, invalid_config};
 use crate::error::GitAiError;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, read_optional, write_atomic};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,14 +14,6 @@ struct Ownership {
 
 pub(super) fn state_path(config: &Path) -> PathBuf {
     config.with_file_name(".git-ai-sandbox-socket.json")
-}
-
-fn read_optional(path: &Path) -> Result<Option<String>, GitAiError> {
-    match fs::read_to_string(path) {
-        Ok(content) => Ok(Some(content)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
-    }
 }
 
 pub(super) fn update(

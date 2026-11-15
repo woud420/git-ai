@@ -1,44 +1,30 @@
 use super::*;
-use crate::model::domain::{CommandScope, Confidence};
-use crate::model::domain::{NormalizedCommand, SemanticEvent};
+use crate::model::domain::{Confidence, NormalizedCommand, SemanticEvent};
 use crate::operations::daemon::analyzers::mv_carryover::event;
+use crate::operations::daemon::tests_fixtures::normalized_command;
 use std::collections::HashMap;
 
 fn fixture() -> (NormalizedCommand, HashMap<String, String>) {
     let worktree = std::env::temp_dir().join("mv-root");
     let head = "a".repeat(40);
     let cmd = NormalizedCommand {
-        scope: CommandScope::Global,
-        family_key: None,
         worktree: Some(worktree.clone()),
         root_sid: "move".into(),
         trace_derived: true,
-        raw_argv: vec![
-            "git".into(),
-            "-C".into(),
-            worktree.to_str().unwrap().into(),
-            "mv".into(),
-            "--".into(),
-            "nested/file.txt".into(),
-            ".".into(),
-        ],
-        primary_command: Some("mv".into()),
-        invoked_command: Some("mv".into()),
-        invoked_args: Vec::new(),
-        observed_child_commands: Vec::new(),
-        transport_targets: None,
-        index_v2: false,
-        bisect_checkout: None,
         index_write: IndexWriteEvidence::Exact(worktree.join(".git/index.lock")),
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
-        reflog_start_offsets: HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        ref_changes: Vec::new(),
         confidence: Confidence::High,
+        ..normalized_command(
+            "mv",
+            &[
+                "git",
+                "-C",
+                worktree.to_str().unwrap(),
+                "mv",
+                "--",
+                "nested/file.txt",
+                ".",
+            ],
+        )
     };
     (cmd, HashMap::from([("HEAD".into(), head)]))
 }

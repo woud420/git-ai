@@ -1,7 +1,7 @@
 use crate::error::GitAiError;
 use crate::model::checkpoint_request::CheckpointRequest;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -158,21 +158,6 @@ pub struct PendingCherryPickNoCommit {
     pub(crate) head: String,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-#[doc(hidden)]
-pub enum RecentReplayPrerequisite {
-    CheckoutSwitchRename {
-        target_head: String,
-        old_head: String,
-    },
-    CheckoutSwitchMerge {
-        target_head: String,
-        old_head: String,
-        final_state: HashMap<String, String>,
-    },
-}
-
 #[derive(Debug, Default, Clone)]
 #[doc(hidden)]
 pub struct TraceIngressState {
@@ -223,8 +208,6 @@ pub struct ActorDaemonCoordinator {
     pub(crate) pending_root_slots_by_root: Mutex<HashMap<String, PendingRootSlot>>,
     pub(crate) commit_file_timestamp_snapshots_by_root:
         Mutex<HashMap<String, CommitFileTimestampSnapshotHandles>>,
-    pub(crate) recent_replay_prerequisites_by_family:
-        Mutex<HashMap<String, VecDeque<RecentReplayPrerequisite>>>,
     pub(crate) side_effect_errors_by_family: Mutex<HashMap<String, BTreeMap<u64, String>>>,
     pub(crate) error_log_policy: Mutex<super::error_log_policy::ErrorLogPolicy>,
     pub(crate) side_effect_exec_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
@@ -251,7 +234,6 @@ pub struct ActorDaemonCoordinator {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) jj_observer: Option<Arc<super::jj_observer::Observer>>,
     pub(crate) stream_worker: Option<crate::operations::daemon::stream_worker::StreamWorkerHandle>,
-    pub(crate) transcript_shutdown_notify: std::sync::OnceLock<Arc<tokio::sync::Notify>>,
     pub(crate) streams_db: Option<Arc<crate::model::repository::streams_db::StreamsDatabase>>,
     // Resolved once at daemon init; None in unit-test constructions (global() is the fallback).
     pub(crate) bash_history_db: Option<

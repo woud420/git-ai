@@ -256,24 +256,6 @@ pub fn config_get_str_for_path_no_git_exec(
         .map(|cfg| cfg.string(key).map(|cow| cow.to_string()))
 }
 
-pub(super) fn repository_object_hash_kind_for_path_no_git_exec(
-    path: &Path,
-) -> Result<gix_index::hash::Kind, GitAiError> {
-    match config_get_str_for_path_no_git_exec(path, "extensions.objectformat")?
-        .as_deref()
-        .map(str::trim)
-    {
-        None | Some("") | Some("sha1") => Ok(gix_index::hash::Kind::Sha1),
-        Some("sha256") => Err(GitAiError::Generic(
-            "SHA-256 repositories are not supported while reading the git index".to_string(),
-        )),
-        Some(other) => Err(GitAiError::Generic(format!(
-            "Unsupported git object format '{}' while reading index",
-            other
-        ))),
-    }
-}
-
 #[allow(dead_code)]
 pub fn from_bare_repository(git_dir: &Path) -> Result<Repository, GitAiError> {
     let workdir = git_dir
@@ -296,12 +278,6 @@ pub fn from_bare_repository(git_dir: &Path) -> Result<Repository, GitAiError> {
         storage,
         git_dir: git_dir.to_path_buf(),
         git_common_dir: git_dir.to_path_buf(),
-        pre_command_base_commit: None,
-        pre_command_refname: None,
-        pre_reset_target_commit: None,
-        pre_update_ref_refname: None,
-        pre_update_ref_old_target: None,
-        pre_update_ref_affects_checked_out_branch: None,
         workdir,
         canonical_workdir,
         cached_author_identity: std::sync::OnceLock::new(),
@@ -334,12 +310,6 @@ pub(super) fn repository_from_discovered_paths(
         storage,
         git_dir: git_dir.to_path_buf(),
         git_common_dir: git_common_dir.to_path_buf(),
-        pre_command_base_commit: None,
-        pre_command_refname: None,
-        pre_reset_target_commit: None,
-        pre_update_ref_refname: None,
-        pre_update_ref_old_target: None,
-        pre_update_ref_affects_checked_out_branch: None,
         workdir: workdir.to_path_buf(),
         canonical_workdir,
         cached_author_identity: std::sync::OnceLock::new(),

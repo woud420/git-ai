@@ -41,7 +41,9 @@ pub(crate) fn decode(value: &str) -> Result<PathBuf, JjObserverError> {
     };
     let bytes: Vec<_> = value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| (digit(pair[0]) << 4) | digit(pair[1]))
         .collect();
     let path = PathBuf::from(std::ffi::OsString::from_vec(bytes));

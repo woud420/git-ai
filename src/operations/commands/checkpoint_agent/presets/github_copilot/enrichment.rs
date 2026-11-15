@@ -98,15 +98,9 @@ fn enrich_native_events(data: &serde_json::Value, events: &mut [ParsedHookEvent]
     };
     let format = super::transcript_format(path);
     let session_id = super::extract_session_id(data);
-    let sweep_format = match format {
-        StreamFormat::CopilotEventStreamJsonl => {
-            crate::operations::streams::sweep::StreamFormat::CopilotEventStreamJsonl
-        }
-        _ => crate::operations::streams::sweep::StreamFormat::CopilotSessionJson,
-    };
     let Some(model) = model_extraction::extract_model_from_copilot_vscode_transcript(
         Path::new(path),
-        sweep_format,
+        sweep_format(format),
         &session_id,
     )
     .ok()
@@ -116,14 +110,17 @@ fn enrich_native_events(data: &serde_json::Value, events: &mut [ParsedHookEvent]
     set_model(events, &model);
 }
 
-fn extract_model(path: &Path, format: StreamFormat) -> Option<String> {
-    let sweep_format = match format {
+fn sweep_format(format: StreamFormat) -> crate::operations::streams::sweep::StreamFormat {
+    match format {
         StreamFormat::CopilotEventStreamJsonl => {
             crate::operations::streams::sweep::StreamFormat::CopilotEventStreamJsonl
         }
         _ => crate::operations::streams::sweep::StreamFormat::CopilotSessionJson,
-    };
-    model_extraction::extract_model(path, sweep_format, None)
+    }
+}
+
+fn extract_model(path: &Path, format: StreamFormat) -> Option<String> {
+    model_extraction::extract_model(path, sweep_format(format), None)
         .ok()
         .flatten()
 }

@@ -6,10 +6,7 @@ use std::path::PathBuf;
 
 impl StreamWorker {
     /// Revalidate a checkpoint stream against host authority before enqueueing it.
-    pub(super) async fn handle_checkpoint_notification(
-        &mut self,
-        notification: CheckpointNotification,
-    ) {
+    pub(super) fn handle_checkpoint_notification(&mut self, notification: CheckpointNotification) {
         let Some(agent) = crate::operations::streams::agent::get_agent(&notification.tool) else {
             tracing::warn!(tool = %notification.tool, "checkpoint stream agent is not supported");
             return;

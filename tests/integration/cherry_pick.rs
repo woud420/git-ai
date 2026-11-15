@@ -1173,6 +1173,38 @@ fn test_cherry_pick_no_commit_defers_to_final_commit_tree() {
     ]);
 }
 
+/// `git cherry-pick main..x y` is one revision walk over all arguments, so it
+/// also picks y's first commit even though `y` is written as a single commit.
+#[test]
+fn test_cherry_pick_range_plus_single_keeps_every_source_attribution() {
+    let repo = TestRepo::new();
+    fs::write(repo.path().join("base.txt"), "base\n").unwrap();
+    repo.stage_all_and_commit("initial").unwrap();
+    let main_branch = repo.current_branch();
+
+    let commit_ai_file = |name: &str| {
+        fs::write(repo.path().join(name), format!("AI {name}\n")).unwrap();
+        repo.git_ai(&["checkpoint", "mock_ai", name]).unwrap();
+        repo.stage_all_and_commit(&format!("add {name}")).unwrap();
+    };
+    repo.git(&["checkout", "-b", "x"]).unwrap();
+    commit_ai_file("x1.txt");
+    commit_ai_file("x2.txt");
+    repo.git(&["checkout", "-b", "y", &main_branch]).unwrap();
+    commit_ai_file("y1.txt");
+    commit_ai_file("y2.txt");
+
+    repo.git(&["checkout", &main_branch]).unwrap();
+    repo.git(&["cherry-pick", &format!("{main_branch}..x"), "y"])
+        .unwrap();
+
+    for name in ["x1.txt", "x2.txt", "y1.txt", "y2.txt"] {
+        let line = format!("AI {name}");
+        repo.filename(name)
+            .assert_committed_lines(crate::lines![line.as_str().ai()]);
+    }
+}
+
 /// Cherry-pick chain where only commit 1 conflicts (on file_a), requiring a
 /// conflict-resolution working log.  Commit 2 (file_b only) applies cleanly and
 /// its working log was consumed at commit time on the feature branch, so only
@@ -1301,6 +1333,49 @@ fn test_multi_commit_cherry_pick_chain_with_conflict_resolution_working_logs() {
         "base_b".unattributed_human(),
         "FEATURE_B_AI".ai()
     ]);
+}
+
+/// A conflicted cherry-pick in one linked worktree must not hand its pending
+/// sources to a `--continue` in another worktree of the same repository.
+#[test]
+fn test_cherry_pick_continue_uses_own_worktree_pending_sources() {
+    let repo = TestRepo::new();
+    let mut a = repo.filename("a.txt");
+    a.set_contents(crate::lines!["a1", "a2"]);
+    let mut b = repo.filename("b.txt");
+    b.set_contents(crate::lines!["b1", "b2"]);
+    repo.stage_all_and_commit("initial").unwrap();
+    let main_branch = repo.current_branch();
+
+    repo.git(&["checkout", "-b", "feature"]).unwrap();
+    a.replace_at(1, "AI_A".ai());
+    repo.stage_all_and_commit("AI a").unwrap();
+    let pick_a = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+    b.replace_at(1, "AI_B".ai());
+    repo.stage_all_and_commit("AI b").unwrap();
+    let pick_b = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+
+    repo.git(&["checkout", &main_branch]).unwrap();
+    a.replace_at(1, "MAIN_A".human());
+    b.replace_at(1, "MAIN_B".human());
+    repo.stage_all_and_commit("conflicting main").unwrap();
+
+    let other = repo.path().with_extension("other-worktree");
+    let other_str = other.to_str().unwrap();
+    repo.git(&["worktree", "add", "-b", "other", other_str, "HEAD"])
+        .unwrap();
+
+    assert!(repo.git(&["cherry-pick", &pick_b]).is_err());
+    assert!(
+        repo.git_from_working_dir(&other, &["cherry-pick", &pick_a])
+            .is_err()
+    );
+
+    fs::write(repo.path().join("b.txt"), "b1\nAI_B").unwrap();
+    repo.git(&["add", "b.txt"]).unwrap();
+    repo.git(&["cherry-pick", "--continue"]).unwrap();
+
+    b.assert_lines_and_blame(crate::lines!["b1".human(), "AI_B".ai()]);
 }
 
 crate::reuse_tests_in_worktree!(

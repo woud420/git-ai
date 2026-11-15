@@ -144,25 +144,25 @@ fn test_parse_custom_attributes_object_rejects_empty_name() {
 
 #[test]
 fn test_parse_value_json_string() {
-    let result = parse_value("\"hello\"").unwrap();
+    let result = parse_value("\"hello\"");
     assert_eq!(result, Value::String("hello".to_string()));
 }
 
 #[test]
 fn test_parse_value_json_number() {
-    let result = parse_value("42").unwrap();
+    let result = parse_value("42");
     assert_eq!(result, Value::Number(serde_json::Number::from(42)));
 }
 
 #[test]
 fn test_parse_value_json_boolean() {
-    let result = parse_value("true").unwrap();
+    let result = parse_value("true");
     assert_eq!(result, Value::Bool(true));
 }
 
 #[test]
 fn test_parse_value_json_array() {
-    let result = parse_value("[1,2,3]").unwrap();
+    let result = parse_value("[1,2,3]");
     assert!(result.is_array());
     let arr = result.as_array().unwrap();
     assert_eq!(arr.len(), 3);
@@ -170,13 +170,13 @@ fn test_parse_value_json_array() {
 
 #[test]
 fn test_parse_value_json_object() {
-    let result = parse_value(r#"{"key":"value"}"#).unwrap();
+    let result = parse_value(r#"{"key":"value"}"#);
     assert!(result.is_object());
 }
 
 #[test]
 fn test_parse_value_plain_string() {
-    let result = parse_value("plain text").unwrap();
+    let result = parse_value("plain text");
     assert_eq!(result, Value::String("plain text".to_string()));
 }
 
@@ -196,31 +196,25 @@ fn test_parse_author_config_object_rejects_non_object() {
 }
 
 #[test]
-fn test_mask_api_key_long() {
-    let key = "abcdefghijklmnop";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "abcd...mnop");
-}
-
-#[test]
-fn test_mask_api_key_short() {
-    let key = "short";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "****");
-}
-
-#[test]
-fn test_mask_api_key_exactly_eight() {
-    let key = "12345678";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "****");
-}
-
-#[test]
-fn test_mask_api_key_nine_chars() {
-    let key = "123456789";
-    let masked = mask_api_key(key);
-    assert_eq!(masked, "1234...6789");
+fn printable_config_redacts_all_key_content_and_preserves_runtime_value() {
+    let mut config = crate::config::tests::create_test_config(vec![], vec![]);
+    for key in [
+        "",
+        "short",
+        "12345678",
+        "123456789",
+        "abcdefghijklmnop",
+        "日本語のキーです長い",
+    ] {
+        config.api_key = Some(key.to_string());
+        assert_eq!(serde_json::to_value(&config).unwrap()["api_key"], "****");
+        assert_eq!(config.api_key.as_deref(), Some(key));
+    }
+    config.api_key = None;
+    assert_eq!(
+        serde_json::to_value(&config).unwrap()["api_key"],
+        Value::Null
+    );
 }
 
 #[test]

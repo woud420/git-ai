@@ -4,8 +4,7 @@
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
 use dirs;
-use rusqlite::{Connection, params};
-use std::collections::HashMap;
+use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -81,16 +80,6 @@ const MIGRATIONS: &[&str] = &[
 
 /// Global database singleton
 static INTERNAL_DB: OnceLock<Mutex<InternalDatabase>> = OnceLock::new();
-
-/// CAS sync queue record
-#[derive(Debug, Clone)]
-pub struct CasSyncRecord {
-    pub id: i64,
-    pub hash: String,
-    pub data: String,
-    pub metadata: HashMap<String, String>,
-    pub attempts: u32,
-}
 
 /// Database wrapper for internal git-ai storage
 pub struct InternalDatabase {
@@ -181,211 +170,23 @@ impl InternalDatabase {
     fn initialize_schema(&mut self) -> Result<(), GitAiError> {
         use crate::model::repository::sqlite;
 
-        // FAST PATH: Check if database is already at current version
-        // This avoids expensive schema operations on every process start
-        if let Some(current_version) = sqlite::read_schema_version(&self.conn) {
-            if current_version == SCHEMA_VERSION {
-                // Database is up-to-date, no migrations needed
-                return Ok(());
-            }
-            if current_version > SCHEMA_VERSION {
-                // Forward-compatible: an older binary can still read/write
-                // known tables even if a newer binary added extra tables.
-                // Just skip migrations and use what we have.
-                return Ok(());
-            }
-            // Fall through to apply missing migrations (current_version < SCHEMA_VERSION)
-        }
-        // If the read found nothing, the table doesn't exist - proceed with full
-        // initialization.
-
-        // Step 1: Create schema_metadata table (this is the only table we create directly)
-        sqlite::ensure_schema_metadata_table(&self.conn)?;
-
-        // Step 2: Get current schema version (0 if brand new database)
-        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
-
-        // Step 3: Apply all missing migrations sequentially
-        for target_version in current_version..SCHEMA_VERSION {
-            tracing::debug!(
-                "[Migration] Upgrading database from version {} to {}",
-                target_version,
-                target_version + 1
-            );
-
-            // Apply the migration (FATAL on error)
-            self.apply_migration(target_version)?;
-
-            // Use an upsert so concurrent initializers do not race on version row creation.
-            self.conn.execute(
-                r#"
-                INSERT INTO schema_metadata (key, value)
-                VALUES ('version', ?1)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value
-                WHERE CAST(schema_metadata.value AS INTEGER) < CAST(excluded.value AS INTEGER)
-                "#,
-                params![(target_version + 1).to_string()],
-            )?;
-
-            tracing::debug!(
-                "[Migration] Successfully upgraded to version {}",
-                target_version + 1
-            );
+        // FAST PATH: the database is already at the current version, which
+        // avoids schema operations on every process start. A newer version is
+        // forward-compatible: an older binary can still read/write the tables
+        // it knows even if a newer binary added more, so skip migrations.
+        if sqlite::read_schema_version(&self.conn).is_some_and(|v| v >= SCHEMA_VERSION) {
+            return Ok(());
         }
 
-        // Step 5: Verify final version matches expected
-        let final_version: usize = self.conn.query_row(
-            "SELECT value FROM schema_metadata WHERE key = 'version'",
-            [],
-            |row| {
-                let version_str: String = row.get(0)?;
-                version_str
-                    .parse::<usize>()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-            },
-        )?;
-
-        if final_version != SCHEMA_VERSION {
-            return Err(GitAiError::Generic(format!(
-                "Migration failed: expected version {} but got version {}",
-                SCHEMA_VERSION, final_version
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Apply a single migration
-    /// Migration failures are FATAL - the program cannot continue with a partially migrated database
-    fn apply_migration(&mut self, from_version: usize) -> Result<(), GitAiError> {
-        if from_version >= MIGRATIONS.len() {
-            return Err(PersistenceError::no_migration_path(
-                "internal",
-                from_version,
-                from_version + 1,
-            ));
-        }
-
-        let migration_sql = MIGRATIONS[from_version];
-
-        // Execute migration in a transaction for atomicity
-        let tx = self.conn.transaction()?;
-        tx.execute_batch(migration_sql)?;
-        tx.commit()?;
-
-        Ok(())
-    }
-
-    /// Enqueue a CAS object for syncing
-    ///
-    /// Takes raw JSON data, canonicalizes it (RFC 8785), computes SHA256 hash,
-    /// and stores both in the queue.
-    ///
-    /// Returns the hash of the canonicalized content.
-    pub fn enqueue_cas_object(
-        &mut self,
-        json_data: &serde_json::Value,
-        metadata: Option<&HashMap<String, String>>,
-    ) -> Result<String, GitAiError> {
-        use sha2::{Digest, Sha256};
-
-        // Canonicalize JSON (RFC 8785)
-        let canonical = serde_json_canonicalizer::to_string(json_data)
-            .map_err(|e| GitAiError::Generic(format!("Failed to canonicalize JSON: {}", e)))?;
-
-        // Hash the canonicalized content
-        let mut hasher = Sha256::new();
-        hasher.update(canonical.as_bytes());
-        let hash = crate::hex::encode(&hasher.finalize());
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let metadata_json = serde_json::to_string(metadata.unwrap_or(&HashMap::new()))?;
-
-        self.conn.execute(
-            r#"
-            INSERT OR IGNORE INTO cas_sync_queue (
-                hash, data, metadata, status, attempts, next_retry_at, created_at
-            ) VALUES (?1, ?2, ?3, 'pending', 0, ?4, ?4)
-            "#,
-            params![hash, canonical, metadata_json, now],
-        )?;
-
-        Ok(hash)
-    }
-
-    /// Dequeue a batch of CAS objects for syncing (with lock acquisition)
-    pub fn dequeue_cas_batch(
-        &mut self,
-        batch_size: usize,
-    ) -> Result<Vec<CasSyncRecord>, GitAiError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        // Step 1: Recover stale locks (processing for >10 minutes)
-        let stale_threshold = now - 600; // 10 minutes
-        self.conn.execute(
-            r#"
-            UPDATE cas_sync_queue
-            SET status = 'pending', processing_started_at = NULL
-            WHERE status = 'processing'
-              AND processing_started_at < ?1
-            "#,
-            params![stale_threshold],
-        )?;
-
-        // Step 2: Atomically lock and fetch batch using UPDATE...RETURNING
-        // Note: SQLite's UPDATE...RETURNING is atomic
-        let mut stmt = self.conn.prepare(
-            r#"
-            UPDATE cas_sync_queue
-            SET status = 'processing', processing_started_at = ?1
-            WHERE id IN (
-                SELECT id FROM cas_sync_queue
-                WHERE status = 'pending'
-                  AND next_retry_at <= ?2
-                  AND attempts < 6
-                ORDER BY next_retry_at
-                LIMIT ?3
-            )
-            RETURNING id, hash, data, metadata, attempts
-            "#,
-        )?;
-
-        let rows = stmt.query_map(params![now, now, batch_size], |row| {
-            let metadata_json: String = row.get(3)?;
-            let metadata: HashMap<String, String> =
-                serde_json::from_str(&metadata_json).unwrap_or_default();
-            let hash: String = row.get(1)?;
-            let data: String = row.get(2)?;
-            Ok(CasSyncRecord {
-                id: row.get(0)?,
-                hash,
-                data,
-                attempts: row.get(4)?,
-                metadata,
-            })
-        })?;
-
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-
-        Ok(records)
-    }
-
-    /// Delete a CAS sync record (on successful sync)
-    pub fn delete_cas_sync_record(&mut self, id: i64) -> Result<(), GitAiError> {
-        self.conn
-            .execute("DELETE FROM cas_sync_queue WHERE id = ?", params![id])?;
-        Ok(())
+        // No version yet (brand new database) or an older one: apply all
+        // missing migrations sequentially (FATAL on error).
+        sqlite::apply_migrations(
+            &mut self.conn,
+            "internal",
+            SCHEMA_VERSION,
+            MIGRATIONS,
+            |_, _| Ok(()),
+        )
     }
 
     /// Delete CAS sync records by their content hashes (used by daemon after successful upload).
@@ -393,92 +194,14 @@ impl InternalDatabase {
         if hashes.is_empty() {
             return Ok(0);
         }
-        let placeholders: Vec<&str> = hashes.iter().map(|_| "?").collect();
         let sql = format!(
             "DELETE FROM cas_sync_queue WHERE hash IN ({})",
-            placeholders.join(",")
+            crate::model::repository::sqlite::in_placeholders(hashes.len())
         );
-        let params: Vec<&dyn rusqlite::ToSql> =
-            hashes.iter().map(|h| h as &dyn rusqlite::ToSql).collect();
-        let deleted = self.conn.execute(&sql, params.as_slice())?;
-        Ok(deleted)
+        Ok(self
+            .conn
+            .execute(&sql, rusqlite::params_from_iter(hashes))?)
     }
-
-    /// Get cached CAS messages by hash
-    pub fn get_cas_cache(&self, hash: &str) -> Result<Option<String>, GitAiError> {
-        let result = self.conn.query_row(
-            "SELECT messages FROM cas_cache WHERE hash = ?1",
-            params![hash],
-            |row| row.get::<_, String>(0),
-        );
-
-        match result {
-            Ok(messages) => Ok(Some(messages)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    /// Cache CAS messages by hash (INSERT OR REPLACE since content is immutable)
-    pub fn set_cas_cache(&mut self, hash: &str, messages_json: &str) -> Result<(), GitAiError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        self.conn.execute(
-            "INSERT OR REPLACE INTO cas_cache (hash, messages, cached_at) VALUES (?1, ?2, ?3)",
-            params![hash, messages_json, now],
-        )?;
-
-        Ok(())
-    }
-
-    /// Update CAS sync record on failure (release lock, increment attempts, set next retry)
-    pub fn update_cas_sync_failure(&mut self, id: i64, error: &str) -> Result<(), GitAiError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        // Get current attempts count to calculate next retry
-        let attempts: u32 = self.conn.query_row(
-            "SELECT attempts FROM cas_sync_queue WHERE id = ?",
-            params![id],
-            |row| row.get(0),
-        )?;
-
-        let next_retry = calculate_next_retry(attempts + 1, now);
-
-        self.conn.execute(
-            r#"
-            UPDATE cas_sync_queue
-            SET status = 'pending',
-                processing_started_at = NULL,
-                attempts = attempts + 1,
-                last_sync_error = ?1,
-                last_sync_at = ?2,
-                next_retry_at = ?3
-            WHERE id = ?4
-            "#,
-            params![error, now, next_retry, id],
-        )?;
-
-        Ok(())
-    }
-}
-
-/// Calculate next retry timestamp based on attempt number
-fn calculate_next_retry(attempts: u32, now: i64) -> i64 {
-    let delay_seconds = match attempts {
-        1 => 5 * 60,       // 5 minutes
-        2 => 30 * 60,      // 30 minutes
-        3 => 2 * 60 * 60,  // 2 hours
-        4 => 6 * 60 * 60,  // 6 hours
-        5 => 12 * 60 * 60, // 12 hours
-        _ => 24 * 60 * 60, // 24 hours (attempts >= 6)
-    };
-    now + delay_seconds
 }
 
 #[cfg(test)]
@@ -556,6 +279,34 @@ mod tests {
     }
 
     #[test]
+    fn test_initialize_schema_accepts_newer_schema_version() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("newer.db");
+        let conn = crate::model::repository::sqlite::open_with_memory_limits(&db_path).unwrap();
+
+        // Written by a newer binary: forward-compatible, so neither an error
+        // nor a downgrade of the recorded version.
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_metadata (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            );
+            INSERT INTO schema_metadata (key, value) VALUES ('version', '99');
+            "#,
+        )
+        .unwrap();
+
+        let mut db = InternalDatabase {
+            conn,
+            _db_path: db_path,
+        };
+        db.initialize_schema().unwrap();
+
+        assert_persisted_schema_version(&db.conn, "99");
+    }
+
+    #[test]
     fn test_database_path() {
         let override_path = std::env::var("GIT_AI_TEST_DB_PATH").ok();
         let path = InternalDatabase::database_path().unwrap();
@@ -597,407 +348,5 @@ mod tests {
         assert_eq!(status, "'pending'");
     }
 
-    #[test]
-    fn test_enqueue_cas_object_with_metadata() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        let mut metadata = HashMap::new();
-        metadata.insert("key1".to_string(), "value1".to_string());
-        metadata.insert("key2".to_string(), "value2".to_string());
-
-        let json_data = serde_json::json!({"test": "data", "number": 123});
-
-        // Enqueue an object with metadata
-        let hash = db.enqueue_cas_object(&json_data, Some(&metadata)).unwrap();
-
-        // Verify metadata was stored correctly
-        let metadata_json: String = db
-            .conn
-            .query_row(
-                "SELECT metadata FROM cas_sync_queue WHERE hash = ?",
-                params![&hash],
-                |row| row.get(0),
-            )
-            .unwrap();
-
-        let stored_metadata: HashMap<String, String> =
-            serde_json::from_str(&metadata_json).unwrap();
-        assert_eq!(stored_metadata.get("key1"), Some(&"value1".to_string()));
-        assert_eq!(stored_metadata.get("key2"), Some(&"value2".to_string()));
-
-        // Verify dequeue returns metadata correctly
-        let batch = db.dequeue_cas_batch(10).unwrap();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].hash, hash);
-        // Data is canonicalized JSON
-        let stored_json: serde_json::Value = serde_json::from_str(&batch[0].data).unwrap();
-        assert_eq!(stored_json, json_data);
-        assert_eq!(batch[0].metadata.get("key1"), Some(&"value1".to_string()));
-        assert_eq!(batch[0].metadata.get("key2"), Some(&"value2".to_string()));
-    }
-
-    #[test]
-    fn test_enqueue_cas_object() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        let json_data = serde_json::json!({"key": "value"});
-
-        // Enqueue an object
-        let hash = db.enqueue_cas_object(&json_data, None).unwrap();
-
-        // Verify it was inserted with correct defaults
-        let (stored_hash, stored_data, metadata, status, attempts): (
-            String,
-            String,
-            String,
-            String,
-            u32,
-        ) = db
-            .conn
-            .query_row(
-                "SELECT hash, data, metadata, status, attempts FROM cas_sync_queue WHERE hash = ?",
-                params![&hash],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .unwrap();
-
-        assert_eq!(stored_hash, hash);
-        // Data should be canonicalized JSON
-        let stored_json: serde_json::Value = serde_json::from_str(&stored_data).unwrap();
-        assert_eq!(stored_json, json_data);
-        assert_eq!(status, "pending");
-        assert_eq!(attempts, 0);
-        assert_eq!(metadata, "{}");
-    }
-
-    #[test]
-    fn test_enqueue_duplicate_hash() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        // Same JSON content should produce same hash
-        let json_data = serde_json::json!({"same": "content"});
-
-        // Enqueue the same content twice
-        let hash1 = db.enqueue_cas_object(&json_data, None).unwrap();
-        let hash2 = db.enqueue_cas_object(&json_data, None).unwrap();
-
-        // Both calls should return the same hash
-        assert_eq!(hash1, hash2);
-
-        // Verify only one record exists (INSERT OR IGNORE)
-        let count: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM cas_sync_queue WHERE hash = ?",
-                params![&hash1],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn test_dequeue_cas_batch() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        // Enqueue multiple objects with different content
-        db.enqueue_cas_object(&serde_json::json!({"id": 1}), None)
-            .unwrap();
-        db.enqueue_cas_object(&serde_json::json!({"id": 2}), None)
-            .unwrap();
-        db.enqueue_cas_object(&serde_json::json!({"id": 3}), None)
-            .unwrap();
-
-        // Dequeue batch of 2
-        let batch = db.dequeue_cas_batch(2).unwrap();
-        assert_eq!(batch.len(), 2);
-
-        // Verify records are marked as processing
-        let processing_count: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM cas_sync_queue WHERE status = 'processing'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(processing_count, 2);
-
-        // Verify one is still pending
-        let pending_count: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM cas_sync_queue WHERE status = 'pending'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(pending_count, 1);
-    }
-
-    #[test]
-    fn test_dequeue_respects_next_retry() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let hash1 = "hash1";
-        let hash2 = "hash2";
-        let data1 = "data1";
-        let data2 = "data2";
-
-        // Insert one record ready to retry (past)
-        db.conn.execute(
-            "INSERT INTO cas_sync_queue (hash, data, metadata, status, attempts, next_retry_at, created_at) VALUES (?, ?, '{}', 'pending', 0, ?, ?)",
-            params![hash1, data1, now - 100, now],
-        ).unwrap();
-
-        // Insert one record not ready yet (future)
-        db.conn.execute(
-            "INSERT INTO cas_sync_queue (hash, data, metadata, status, attempts, next_retry_at, created_at) VALUES (?, ?, '{}', 'pending', 0, ?, ?)",
-            params![hash2, data2, now + 1000, now],
-        ).unwrap();
-
-        // Dequeue should only return the first one
-        let batch = db.dequeue_cas_batch(10).unwrap();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].hash, hash1);
-    }
-
-    #[test]
-    fn test_dequeue_locks_records() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        let json_data = serde_json::json!({"test": "lock"});
-        let hash = db.enqueue_cas_object(&json_data, None).unwrap();
-
-        // Dequeue
-        let batch = db.dequeue_cas_batch(10).unwrap();
-        assert_eq!(batch.len(), 1);
-
-        // Verify status is 'processing'
-        let status: String = db
-            .conn
-            .query_row(
-                "SELECT status FROM cas_sync_queue WHERE hash = ?",
-                params![&hash],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(status, "processing");
-
-        // Verify processing_started_at is set
-        let processing_started_at: Option<i64> = db
-            .conn
-            .query_row(
-                "SELECT processing_started_at FROM cas_sync_queue WHERE hash = ?",
-                params![&hash],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(processing_started_at.is_some());
-
-        // Try to dequeue again - should get empty (already locked)
-        let batch2 = db.dequeue_cas_batch(10).unwrap();
-        assert_eq!(batch2.len(), 0);
-    }
-
-    #[test]
-    fn test_stale_lock_recovery() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let hash = "hash1";
-        let data = "data1";
-
-        // Insert a record in 'processing' state with old timestamp (>10 minutes ago)
-        let stale_time = now - 700; // 11+ minutes ago
-        db.conn.execute(
-            "INSERT INTO cas_sync_queue (hash, data, metadata, status, attempts, next_retry_at, processing_started_at, created_at) VALUES (?, ?, '{}', 'processing', 0, ?, ?, ?)",
-            params![hash, data, now, stale_time, now],
-        ).unwrap();
-
-        // Dequeue should recover the stale lock
-        let batch = db.dequeue_cas_batch(10).unwrap();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].hash, hash);
-    }
-
-    #[test]
-    fn test_max_attempts_limit() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let hash1 = "hash1";
-        let hash2 = "hash2";
-        let data1 = "data1";
-        let data2 = "data2";
-
-        // Insert a record with 6 attempts (max reached)
-        db.conn.execute(
-            "INSERT INTO cas_sync_queue (hash, data, metadata, status, attempts, next_retry_at, created_at) VALUES (?, ?, '{}', 'pending', 6, ?, ?)",
-            params![hash1, data1, now - 100, now],
-        ).unwrap();
-
-        // Insert a record with 5 attempts (still eligible)
-        db.conn.execute(
-            "INSERT INTO cas_sync_queue (hash, data, metadata, status, attempts, next_retry_at, created_at) VALUES (?, ?, '{}', 'pending', 5, ?, ?)",
-            params![hash2, data2, now - 100, now],
-        ).unwrap();
-
-        // Dequeue should only return the one with 5 attempts
-        let batch = db.dequeue_cas_batch(10).unwrap();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].hash, hash2);
-        assert_eq!(batch[0].attempts, 5);
-    }
-
-    #[test]
-    fn test_update_cas_sync_failure() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        db.enqueue_cas_object(&serde_json::json!({"test": "failure"}), None)
-            .unwrap();
-        let batch = db.dequeue_cas_batch(10).unwrap();
-        let record = &batch[0];
-
-        // Update with failure
-        db.update_cas_sync_failure(record.id, "test error").unwrap();
-
-        // Verify status is back to 'pending'
-        let status: String = db
-            .conn
-            .query_row(
-                "SELECT status FROM cas_sync_queue WHERE id = ?",
-                params![record.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(status, "pending");
-
-        // Verify processing_started_at is cleared
-        let processing_started_at: Option<i64> = db
-            .conn
-            .query_row(
-                "SELECT processing_started_at FROM cas_sync_queue WHERE id = ?",
-                params![record.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(processing_started_at.is_none());
-
-        // Verify attempts incremented
-        let attempts: u32 = db
-            .conn
-            .query_row(
-                "SELECT attempts FROM cas_sync_queue WHERE id = ?",
-                params![record.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(attempts, 1);
-
-        // Verify error recorded
-        let error: String = db
-            .conn
-            .query_row(
-                "SELECT last_sync_error FROM cas_sync_queue WHERE id = ?",
-                params![record.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(error, "test error");
-    }
-
-    #[test]
-    fn test_delete_cas_sync_record() {
-        let (mut db, _temp_dir) = create_test_db();
-
-        db.enqueue_cas_object(&serde_json::json!({"test": "delete"}), None)
-            .unwrap();
-        let batch = db.dequeue_cas_batch(10).unwrap();
-        let record = &batch[0];
-
-        // Delete the record
-        db.delete_cas_sync_record(record.id).unwrap();
-
-        // Verify it's gone
-        let count: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM cas_sync_queue WHERE id = ?",
-                params![record.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
     // CAS cache tests
-
-    #[test]
-    fn test_cas_cache_get_miss() {
-        let (db, _temp_dir) = create_test_db();
-        let result = db.get_cas_cache("nonexistent_hash").unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_cas_cache_set_and_get() {
-        let (mut db, _temp_dir) = create_test_db();
-        let hash = "abc123def456";
-        let messages = r#"[{"type":"user","text":"hello"}]"#;
-
-        db.set_cas_cache(hash, messages).unwrap();
-
-        let result = db.get_cas_cache(hash).unwrap();
-        assert_eq!(result, Some(messages.to_string()));
-    }
-
-    #[test]
-    fn test_cas_cache_overwrite() {
-        let (mut db, _temp_dir) = create_test_db();
-        let hash = "abc123def456";
-        let messages1 = r#"[{"type":"user","text":"v1"}]"#;
-        let messages2 = r#"[{"type":"user","text":"v2"}]"#;
-
-        db.set_cas_cache(hash, messages1).unwrap();
-        db.set_cas_cache(hash, messages2).unwrap();
-
-        let result = db.get_cas_cache(hash).unwrap();
-        assert_eq!(result, Some(messages2.to_string()));
-    }
-
-    #[test]
-    fn test_exponential_backoff() {
-        let now = 1000000i64;
-
-        // Test each attempt's backoff
-        assert_eq!(calculate_next_retry(1, now), now + 5 * 60); // 5 min
-        assert_eq!(calculate_next_retry(2, now), now + 30 * 60); // 30 min
-        assert_eq!(calculate_next_retry(3, now), now + 2 * 60 * 60); // 2 hours
-        assert_eq!(calculate_next_retry(4, now), now + 6 * 60 * 60); // 6 hours
-        assert_eq!(calculate_next_retry(5, now), now + 12 * 60 * 60); // 12 hours
-        assert_eq!(calculate_next_retry(6, now), now + 24 * 60 * 60); // 24 hours
-        assert_eq!(calculate_next_retry(7, now), now + 24 * 60 * 60); // 24 hours (max)
-    }
 }

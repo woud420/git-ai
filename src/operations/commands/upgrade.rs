@@ -365,29 +365,9 @@ fn fetch_and_verify_checksums(
     channel: &str,
     expected_checksum: &str,
 ) -> Result<HashMap<String, String>, String> {
-    let endpoint = format!("/worker/releases/{}/download/SHA256SUMS", channel);
-
-    let (_agent, request) =
-        ApiContext::http_get(&format!("{}{}", api_base_url, endpoint), Some(30));
-    let response = crate::clients::http::send(request)
-        .map_err(|e| format!("Failed to fetch SHA256SUMS: {}", e))?;
-
-    if response.status_code != 200 {
-        return Err(format!(
-            "Failed to fetch SHA256SUMS: HTTP {}",
-            response.status_code
-        ));
-    }
-
-    let content = response.as_bytes();
-
-    verify_sha256(content, expected_checksum)
-        .map_err(|e| format!("SHA256SUMS verification failed: {}", e))?;
-
-    let content_str = std::str::from_utf8(content)
-        .map_err(|e| format!("SHA256SUMS is not valid UTF-8: {}", e))?;
-
-    Ok(parse_checksums(content_str))
+    let content =
+        fetch_verified_release_file(api_base_url, channel, "SHA256SUMS", expected_checksum)?;
+    Ok(parse_checksums(&content))
 }
 
 /// Fetch install script from the releases API and verify against checksums.
@@ -405,29 +385,39 @@ fn fetch_and_verify_install_script(
         .get(script_name)
         .ok_or_else(|| format!("Checksum for {} not found in SHA256SUMS", script_name))?;
 
-    let endpoint = format!("/worker/releases/{}/download/{}", channel, script_name);
+    fetch_verified_release_file(api_base_url, channel, script_name, expected_checksum)
+}
+
+/// Download `name` from the channel's release assets and verify its SHA256.
+fn fetch_verified_release_file(
+    api_base_url: &str,
+    channel: &str,
+    name: &str,
+    expected_checksum: &str,
+) -> Result<String, String> {
+    let endpoint = format!("/worker/releases/{}/download/{}", channel, name);
 
     let (_agent, request) =
         ApiContext::http_get(&format!("{}{}", api_base_url, endpoint), Some(30));
     let response = crate::clients::http::send(request)
-        .map_err(|e| format!("Failed to fetch {}: {}", script_name, e))?;
+        .map_err(|e| format!("Failed to fetch {}: {}", name, e))?;
 
     if response.status_code != 200 {
         return Err(format!(
             "Failed to fetch {}: HTTP {}",
-            script_name, response.status_code
+            name, response.status_code
         ));
     }
 
     let content = response.as_bytes();
 
     verify_sha256(content, expected_checksum)
-        .map_err(|e| format!("{} verification failed: {}", script_name, e))?;
+        .map_err(|e| format!("{} verification failed: {}", name, e))?;
 
-    let script = std::str::from_utf8(content)
-        .map_err(|e| format!("{} is not valid UTF-8: {}", script_name, e))?;
+    let content =
+        std::str::from_utf8(content).map_err(|e| format!("{} is not valid UTF-8: {}", name, e))?;
 
-    Ok(script.to_string())
+    Ok(content.to_string())
 }
 
 fn fetch_release_for_channel(
@@ -658,6 +648,31 @@ fn run_install_script(script_content: &str, tag: &str, silent: bool) -> Result<(
     }
 }
 
+/// Decide the upgrade action for `release`, cache it, and log the check.
+fn record_update_check(
+    force: bool,
+    release: &ChannelRelease,
+    api_base_url: &str,
+    channel: UpdateChannel,
+) -> UpgradeAction {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let action = determine_action(force, release, current_version);
+    let cache_release = matches!(action, UpgradeAction::UpgradeAvailable);
+    persist_update_state(channel, cache_release.then_some(release));
+
+    log_message(
+        "checked_for_update",
+        "info",
+        Some(serde_json::json!({
+            "current_version": current_version,
+            "api_base_url": api_base_url,
+            "channel": channel.as_str(),
+            "result": action.to_string()
+        })),
+    );
+    action
+}
+
 fn run_impl_with_url(
     force: bool,
     api_base_url: &str,
@@ -685,20 +700,7 @@ fn run_impl_with_url(
     );
     println!();
 
-    let action = determine_action(force, &release, current_version);
-    let cache_release = matches!(action, UpgradeAction::UpgradeAvailable);
-    persist_update_state(channel, cache_release.then_some(&release));
-
-    log_message(
-        "checked_for_update",
-        "info",
-        Some(serde_json::json!({
-            "current_version": current_version,
-            "api_base_url": api_base_url,
-            "channel": channel.as_str(),
-            "result": action.to_string()
-        })),
-    );
+    let action = record_update_check(force, &release, api_base_url, channel);
 
     match action {
         UpgradeAction::AlreadyLatest => {
@@ -993,21 +995,7 @@ fn check_release_for_update() -> Result<DaemonUpdateCheckResult, String> {
     }
 
     let release = fetch_release_for_channel(api_base_url, channel)?;
-    let current_version = env!("CARGO_PKG_VERSION");
-    let action = determine_action(false, &release, current_version);
-    let cache_release = matches!(action, UpgradeAction::UpgradeAvailable);
-    persist_update_state(channel, cache_release.then_some(&release));
-
-    log_message(
-        "checked_for_update",
-        "info",
-        Some(serde_json::json!({
-            "current_version": current_version,
-            "api_base_url": api_base_url,
-            "channel": channel.as_str(),
-            "result": action.to_string()
-        })),
-    );
+    let action = record_update_check(false, &release, api_base_url, channel);
 
     if action == UpgradeAction::UpgradeAvailable && !config.auto_updates_disabled() {
         Ok(DaemonUpdateCheckResult::UpdateReady)

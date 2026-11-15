@@ -5,7 +5,7 @@ pub(crate) mod bash_candidate;
 mod checkpoint_history;
 pub mod conflict_resolution;
 pub mod diff_ai_accepted;
-pub(crate) mod diff_base;
+pub mod diff_base;
 pub mod git_ai_hooks;
 pub mod ignore;
 pub mod line_lookup;

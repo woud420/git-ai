@@ -86,13 +86,8 @@ fn explicit_fetch_pack_source(cmd: &NormalizedCommand) -> Option<String> {
     if parsed.command.as_deref() != Some("fetch-pack") {
         return None;
     }
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        match arg.as_str() {
-            "-C" if globals.next().is_some() => {}
-            value if value.starts_with("-C") && value.len() > 2 => {}
-            _ => return None,
-        }
+    if !crate::operations::daemon::analyzers::has_only_worktree_globals(&parsed) {
+        return None;
     }
     match parsed.command_args.as_slice() {
         [all, source] if all == "--all" && std::path::Path::new(source).is_absolute() => {
@@ -117,13 +112,8 @@ pub(super) fn explicit_fetch_remote(cmd: &NormalizedCommand) -> Option<String> {
     }
     // Normalization already resolved -C. Other globals can redirect transport
     // or repository selection and are not preserved by the notes sync helper.
-    let mut globals = parsed.global_args.iter();
-    while let Some(arg) = globals.next() {
-        match arg.as_str() {
-            "-C" if globals.next().is_some() => {}
-            value if value.starts_with("-C") && value.len() > 2 => {}
-            _ => return None,
-        }
+    if !crate::operations::daemon::analyzers::has_only_worktree_globals(&parsed) {
+        return None;
     }
     Some(remote.clone())
 }

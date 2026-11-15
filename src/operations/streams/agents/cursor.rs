@@ -5,10 +5,9 @@ use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::file_time_fallback;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Cursor agent that discovers conversations from Cursor storage.
 pub struct CursorAgent {
@@ -54,10 +53,6 @@ impl Default for CursorAgent {
 }
 
 impl Agent for CursorAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::conversation_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,
@@ -80,11 +75,6 @@ impl Agent for CursorAgent {
 
     fn batch_size_hint(&self) -> usize {
         self.batch_size
-    }
-
-    fn sweep_strategy(&self) -> SweepStrategy {
-        // Poll every 30 minutes for new Cursor conversations
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
     }
 
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
@@ -134,15 +124,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = CursorAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_jsonl_line(i: usize) -> String {
         format!(

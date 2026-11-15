@@ -95,8 +95,9 @@ impl<B: GitBackend> Coordinator<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::domain::{CommandScope, Confidence, FamilyKey, NormalizedCommand};
+    use crate::model::domain::{CommandScope, FamilyKey, NormalizedCommand};
     use crate::operations::daemon::git_backend::GitBackend;
+    use crate::operations::daemon::tests_fixtures::normalized_command;
     use crate::operations::git::cli_parser::parse_git_cli_args;
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
@@ -158,29 +159,8 @@ mod tests {
 
     fn global_cmd() -> NormalizedCommand {
         NormalizedCommand {
-            scope: CommandScope::Global,
-            family_key: None,
-            worktree: None,
             root_sid: "g1".to_string(),
-            trace_derived: false,
-            raw_argv: vec!["git".to_string(), "help".to_string()],
-            primary_command: Some("help".to_string()),
-            invoked_command: Some("help".to_string()),
-            invoked_args: Vec::new(),
-            observed_child_commands: Vec::new(),
-            index_write: Default::default(),
-            index_v2: false,
-            bisect_checkout: None,
-            exit_code: 0,
-            started_at_ns: 1,
-            finished_at_ns: 2,
-            reflog_start_offsets: std::collections::HashMap::new(),
-            stash_target_oid: None,
-            cherry_pick_source_oids: Vec::new(),
-            revert_source_oids: Vec::new(),
-            transport_targets: None,
-            ref_changes: Vec::new(),
-            confidence: Confidence::Low,
+            ..normalized_command("help", &["git", "help"])
         }
     }
 
@@ -190,25 +170,7 @@ mod tests {
             family_key: Some(FamilyKey::new(family.to_string())),
             worktree: Some(PathBuf::from(worktree)),
             root_sid: "f1".to_string(),
-            trace_derived: false,
-            raw_argv: vec!["git".to_string(), "status".to_string()],
-            primary_command: Some("status".to_string()),
-            invoked_command: Some("status".to_string()),
-            invoked_args: Vec::new(),
-            observed_child_commands: Vec::new(),
-            index_write: Default::default(),
-            index_v2: false,
-            bisect_checkout: None,
-            exit_code: 0,
-            started_at_ns: 1,
-            finished_at_ns: 2,
-            reflog_start_offsets: std::collections::HashMap::new(),
-            stash_target_oid: None,
-            cherry_pick_source_oids: Vec::new(),
-            revert_source_oids: Vec::new(),
-            transport_targets: None,
-            ref_changes: Vec::new(),
-            confidence: Confidence::Low,
+            ..normalized_command("status", &["git", "status"])
         }
     }
 

@@ -1,27 +1,9 @@
-use std::collections::HashMap;
-
 use crate::repos::test_repo::{DaemonTestScope, TestRepo};
 use git_ai::operations::git::repository as GitAiRepository;
 
 /// Helper to get git config via CLI for comparison
 fn get_git_config_cli(repo: &TestRepo, _command: &str, key: &str) -> Result<String, String> {
     repo.git_og(&["config", "--get", key])
-}
-
-fn git_config_cli_regexp(
-    repo: &TestRepo,
-    _command: &str,
-    key: &str,
-) -> Result<HashMap<String, String>, String> {
-    let mut result = HashMap::new();
-    let output = repo.git_og(&["config", "--get-regexp", key])?;
-    for line in output.lines() {
-        // Format: "key value" (space-separated)
-        if let Some((key, value)) = line.split_once(' ') {
-            result.insert(key.to_string(), value.to_string());
-        }
-    }
-    Ok(result)
 }
 
 // ============================================================================
@@ -121,97 +103,6 @@ fn test_config_get_str_special_chars() {
 // config_get_regexp tests
 // ============================================================================
 
-#[test]
-fn test_config_get_regexp_subsection() {
-    let repo = TestRepo::new();
-    let key = "custom.sub.testkey";
-    let pattern = "test";
-
-    repo.git(&["config", key, "custom_value"]).unwrap();
-
-    let git_ai_repo =
-        GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let result = git_ai_repo
-        .config_get_regexp(pattern)
-        .expect("Failed to match pattern");
-
-    let git_config_result = git_config_cli_regexp(&repo, "--get-regexp", pattern).unwrap();
-
-    // compare with trimmed git config --get-regexp output
-    assert_eq!(result, git_config_result);
-}
-
-#[test]
-fn test_config_get_regexp_no_matches() {
-    let repo = TestRepo::new();
-    let pattern = "nonexistant";
-    let git_ai_repo =
-        GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let result = git_ai_repo
-        .config_get_regexp(pattern)
-        .expect("Failed to match pattern");
-    assert!(result.is_empty());
-}
-
-#[test]
-fn test_config_get_regexp_with_subsections() {
-    let repo = TestRepo::new();
-    let git_ai_repo =
-        GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Set up remotes using TestRepo's git method
-    repo.git(&[
-        "config",
-        "remote.origin.url",
-        "https://github.com/test/repo.git",
-    ])
-    .unwrap();
-    repo.git(&[
-        "config",
-        "remote.origin.fetch",
-        "+refs/heads/*:refs/remotes/origin/*",
-    ])
-    .unwrap();
-    repo.git(&[
-        "config",
-        "remote.upstream.url",
-        "https://github.com/upstream/repo.git",
-    ])
-    .unwrap();
-
-    // Match all remote.*.url keys
-    let result = git_ai_repo.config_get_regexp(r"^remote\..*\.url$").unwrap();
-
-    assert_eq!(result.len(), 2);
-    assert!(result.contains_key("remote.origin.url"));
-    assert!(result.contains_key("remote.upstream.url"));
-}
-
-#[test]
-fn test_config_get_regexp_case_insensitive_keys() {
-    let repo = TestRepo::new();
-    let key = "Core.AutoCRLF";
-    let value = "true";
-
-    repo.git(&["config", key, value]).unwrap();
-    let git_ai_repo =
-        GitAiRepository::find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Our implementation normalizes to lowercase
-    let result = git_ai_repo.config_get_regexp(r"^core\.autocrlf$").unwrap();
-    assert!(
-        result.contains_key("core.autocrlf"),
-        "Expected core.autocrlf in lowercase, got: {:?}",
-        result.keys()
-    );
-
-    // Also compare to actual git config command output
-    let git_config_result =
-        git_config_cli_regexp(&repo, "--get-regexp", r"^core\.autocrlf$").unwrap();
-
-    assert_eq!(result, git_config_result);
-}
-
 // ============================================================================
 // Global config fallback tests
 // ============================================================================
@@ -286,31 +177,11 @@ fn test_config_get_str_bare_repo() {
     assert_eq!(result, Some("bare_value".to_string()));
 }
 
-#[test]
-fn test_config_get_regexp_bare_repo() {
-    let repo = TestRepo::new_bare_with_daemon_scope(DaemonTestScope::NoDaemon);
-
-    repo.git(&["config", "baretest.key1", "value1"]).unwrap();
-    repo.git(&["config", "baretest.key2", "value2"]).unwrap();
-
-    let git_ai_repo = GitAiRepository::from_bare_repository(repo.path()).unwrap();
-    let result = git_ai_repo.config_get_regexp(r"^baretest\.").unwrap();
-
-    assert_eq!(result.len(), 2);
-    assert_eq!(result.get("baretest.key1"), Some(&"value1".to_string()));
-    assert_eq!(result.get("baretest.key2"), Some(&"value2".to_string()));
-}
-
 crate::reuse_tests_in_worktree!(
     test_config_get_str_simple_value,
     test_config_get_str_subsection,
     test_config_get_str_missing_key_returns_none,
     test_config_get_str_special_chars,
-    test_config_get_regexp_subsection,
-    test_config_get_regexp_no_matches,
-    test_config_get_regexp_with_subsections,
-    test_config_get_regexp_case_insensitive_keys,
     test_config_local_overrides_global,
     test_config_get_str_bare_repo,
-    test_config_get_regexp_bare_repo,
 );

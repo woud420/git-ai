@@ -1,6 +1,7 @@
 use super::*;
-use crate::model::domain::{CommandScope, Confidence, NormalizedCommand, RefChange};
+use crate::model::domain::{CommandScope, NormalizedCommand, RefChange};
 use crate::operations::daemon::ref_cursor::capture_reflog_start_offsets_for_worktree;
+use crate::operations::daemon::tests_fixtures::normalized_command;
 use std::fs;
 use std::path::PathBuf;
 
@@ -10,25 +11,9 @@ fn sample_normalized_cmd(family_key: &str, seq: u128) -> NormalizedCommand {
         family_key: Some(FamilyKey::new(family_key)),
         worktree: Some(PathBuf::from("/tmp/repo")),
         root_sid: format!("sid-{}", seq),
-        trace_derived: false,
-        raw_argv: vec!["git".to_string(), "status".to_string()],
-        primary_command: Some("status".to_string()),
-        invoked_command: Some("status".to_string()),
-        invoked_args: Vec::new(),
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
         started_at_ns: seq,
         finished_at_ns: seq + 1,
-        reflog_start_offsets: std::collections::HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
-        ref_changes: Vec::new(),
-        confidence: Confidence::Low,
+        ..normalized_command("status", &["git", "status"])
     }
 }
 
@@ -57,33 +42,13 @@ async fn commit_enrichment_retries_until_reflog_entry_is_visible() {
         worktree: Some(worktree),
         root_sid: "delayed-reflog".to_string(),
         trace_derived: true,
-        raw_argv: vec![
-            "git".to_string(),
-            "commit".to_string(),
-            "-m".to_string(),
-            "delayed".to_string(),
-        ],
-        primary_command: Some("commit".to_string()),
-        invoked_command: Some("commit".to_string()),
         invoked_args: vec![
             "commit".to_string(),
             "-m".to_string(),
             "delayed".to_string(),
         ],
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
         reflog_start_offsets,
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
-        ref_changes: Vec::new(),
-        confidence: Confidence::Low,
+        ..normalized_command("commit", &["git", "commit", "-m", "delayed"])
     };
 
     let old = "1111111111111111111111111111111111111111";
@@ -140,28 +105,8 @@ async fn trace_cherry_pick_retries_without_initial_reflog_evidence() {
         worktree: Some(worktree),
         root_sid: "trace-cherry-pick".to_string(),
         trace_derived: true,
-        raw_argv: vec![
-            "git".to_string(),
-            "cherry-pick".to_string(),
-            source.to_string(),
-        ],
-        primary_command: Some("cherry-pick".to_string()),
-        invoked_command: Some("cherry-pick".to_string()),
         invoked_args: vec!["cherry-pick".to_string(), source.to_string()],
-        observed_child_commands: Vec::new(),
-        index_write: Default::default(),
-        index_v2: false,
-        bisect_checkout: None,
-        exit_code: 0,
-        started_at_ns: 1,
-        finished_at_ns: 2,
-        reflog_start_offsets: HashMap::new(),
-        stash_target_oid: None,
-        cherry_pick_source_oids: Vec::new(),
-        revert_source_oids: Vec::new(),
-        transport_targets: None,
-        ref_changes: Vec::new(),
-        confidence: Confidence::Low,
+        ..normalized_command("cherry-pick", &["git", "cherry-pick", source])
     };
 
     let delayed_head_log = head_log.clone();
@@ -186,6 +131,78 @@ async fn trace_cherry_pick_retries_without_initial_reflog_evidence() {
             old: old.to_string(),
             new: new.to_string(),
         }]
+    );
+}
+
+#[tokio::test]
+async fn cherry_pick_continue_retry_keeps_its_pending_sources() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().to_path_buf();
+    let head_log = worktree.join(".git/logs/HEAD");
+    fs::create_dir_all(head_log.parent().unwrap()).unwrap();
+    crate::operations::git::test_utils::seed_valid_git_dir(&worktree.join(".git"));
+    fs::write(&head_log, "").unwrap();
+
+    let family = FamilyKey::new(worktree.to_string_lossy().to_string());
+    let state = FamilyState {
+        family_key: family.clone(),
+        refs: HashMap::new(),
+        worktrees: HashMap::new(),
+        last_error: None,
+        applied_seq: 0,
+        watermarks: WatermarkState::default(),
+    };
+    let [head, source_one, source_two, picked_one, picked_two] =
+        ["1", "2", "3", "4", "5"].map(|digit| digit.repeat(40));
+    let cherry_pick = |args: &[&str], exit_code: i32| {
+        let mut cmd = sample_normalized_cmd(&family.0, 1);
+        cmd.worktree = Some(worktree.clone());
+        cmd.trace_derived = true;
+        cmd.primary_command = Some("cherry-pick".to_string());
+        cmd.invoked_command = Some("cherry-pick".to_string());
+        cmd.raw_argv = ["git", "cherry-pick"]
+            .iter()
+            .chain(args)
+            .map(|arg| arg.to_string())
+            .collect();
+        cmd.exit_code = exit_code;
+        cmd
+    };
+    let mut ref_cursor = RefCursor::new(family.clone());
+
+    // The conflicted pick leaves both sources pending in the cursor.
+    let mut conflicted = cherry_pick(&[&source_one, &source_two], 1);
+    enrich_command_with_retries(&mut ref_cursor, &mut conflicted, &state)
+        .await
+        .unwrap();
+    assert!(conflicted.ref_changes.is_empty());
+
+    // The first enrichment pass runs before this task, so it sees no rows.
+    let rows = format!(
+        "{head} {picked_one} Test User <test@example.com> 0 +0000\tcommit (cherry-pick): one\n\
+         {picked_one} {picked_two} Test User <test@example.com> 0 +0000\tcherry-pick: two\n"
+    );
+    tokio::spawn(async move { fs::write(head_log, rows).unwrap() });
+    let mut resumed = cherry_pick(&["--continue"], 0);
+    enrich_command_with_retries(&mut ref_cursor, &mut resumed, &state)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resumed.cherry_pick_source_oids,
+        vec![source_one, source_two]
+    );
+    let head_change = |old: &str, new: &str| RefChange {
+        reference: "HEAD".to_string(),
+        old: old.to_string(),
+        new: new.to_string(),
+    };
+    assert_eq!(
+        resumed.ref_changes,
+        vec![
+            head_change(&head, &picked_one),
+            head_change(&picked_one, &picked_two)
+        ]
     );
 }
 
@@ -230,6 +247,17 @@ fn ref_enrichment_retry_requires_successful_unenriched_commit_like_command() {
         new: "2222222222222222222222222222222222222222".to_string(),
     });
     assert!(!should_retry_ref_enrichment(&cmd));
+}
+
+#[test]
+fn ref_enrichment_retry_skips_commit_forms_that_imply_dry_run() {
+    let mut cmd = sample_normalized_cmd("family-1", 1);
+    cmd.primary_command = Some("commit".to_string());
+    cmd.trace_derived = true;
+    for flag in ["--dry-run", "--short", "--porcelain", "--long"] {
+        cmd.invoked_args = vec!["-a".to_string(), flag.to_string()];
+        assert!(!should_retry_ref_enrichment(&cmd), "{flag}");
+    }
 }
 
 #[tokio::test]

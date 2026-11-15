@@ -7,9 +7,10 @@
 //! - `diff_json_builder` — building the `--json` output structures
 //! - `diff_render`       — ANSI terminal rendering
 
+use crate::cli::fail::print_stdout;
 use crate::error::GitAiError;
+use crate::operations::commands::show::resolve_commit;
 use crate::operations::git::repository::Repository;
-use std::collections::HashSet;
 
 // Re-export public items used by callers outside this module so the public API
 // path (`operations::commands::diff::*`) stays unchanged.
@@ -20,7 +21,6 @@ pub use crate::model::diff_json::{
 pub use crate::operations::commands::diff_args::parse_diff_args;
 pub use crate::operations::commands::diff_attribution::{
     build_diff_artifacts, build_diff_artifacts_from_hunks, build_diff_artifacts_with_note,
-    overlay_diff_attributions,
 };
 pub use crate::operations::commands::diff_parsing::get_diff_with_line_numbers;
 pub use crate::operations::commands::diff_render::format_annotated_diff;
@@ -102,7 +102,7 @@ pub fn handle_diff(repo: &Repository, args: &[String]) -> Result<(), GitAiError>
 
     let parsed = parse_diff_args(args)?;
     let output = execute_diff(repo, parsed)?;
-    print!("{}", output);
+    print_stdout(&output);
 
     Ok(())
 }
@@ -194,160 +194,28 @@ pub fn execute_diff(repo: &Repository, parsed: ParsedDiffArgs) -> Result<String,
 // Commit Resolution
 // ============================================================================
 
-fn resolve_commit(repo: &Repository, rev: &str) -> Result<String, GitAiError> {
-    use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
-
-    let mut args = repo.global_args_for_exec();
-    args.push("rev-parse".to_string());
-    args.push(rev.to_string());
-
-    let output = exec_git_with_profile(&args, InternalGitProfile::General)?;
-    let sha = String::from_utf8(output.stdout)
-        .map_err(|e| GitAiError::Generic(format!("Failed to parse rev-parse output: {}", e)))?
-        .trim()
-        .to_string();
-
-    if sha.is_empty() {
-        return Err(GitAiError::Generic(format!(
-            "Could not resolve commit: {}",
-            rev
-        )));
-    }
-
-    Ok(sha)
-}
-
 fn resolve_parent(repo: &Repository, commit: &str) -> Result<String, GitAiError> {
     use crate::clients::git_cli::{InternalGitProfile, exec_git_with_profile};
+    use crate::operations::authorship::diff_base::empty_tree_for;
 
-    let parent_rev = format!("{}^", commit);
-
+    // `<commit>^@` lists the parents and prints nothing for a root commit, so
+    // a failed lookup is reported instead of being taken for a root commit.
     let mut args = repo.global_args_for_exec();
     args.push("rev-parse".to_string());
-    args.push(parent_rev);
+    args.push(format!("{commit}^@"));
 
-    let output = exec_git_with_profile(&args, InternalGitProfile::General);
-
-    match output {
-        Ok(out) => {
-            let sha = String::from_utf8(out.stdout)
-                .map_err(|e| GitAiError::Generic(format!("Failed to parse parent SHA: {}", e)))?
-                .trim()
-                .to_string();
-
-            if sha.is_empty() {
-                // No parent — initial commit; use empty tree.
-                Ok("4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string())
-            } else {
-                Ok(sha)
-            }
-        }
-        Err(_) => {
-            // No parent — initial commit; use empty tree hash.
-            Ok("4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string())
-        }
-    }
+    let output = exec_git_with_profile(&args, InternalGitProfile::General)?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let first_parent = stdout
+        .lines()
+        .next()
+        .unwrap_or_else(|| empty_tree_for(commit));
+    Ok(first_parent.to_string())
 }
 
 // ============================================================================
 // Filtered Diff for Bundle Sharing
 // ============================================================================
-
-/// Options for getting a diff with optional filtering.
-#[derive(Default)]
-pub struct DiffOptions {
-    /// If provided, only include files with attributions from these prompts.
-    pub prompt_ids: Option<Vec<String>>,
-    /// Whether to filter files to only those with attributions from `prompt_ids`.
-    pub filter_to_attributed_files: bool,
-}
-
-/// Get diff JSON for a single commit with optional filtering by prompt attributions.
-///
-/// This function is designed for bundle sharing:
-/// - If `options.filter_to_attributed_files` is true, only includes files that have
-///   attributions from the specified `prompt_ids`.
-/// - If `options.prompt_ids` is `Some`, filters the returned prompts to only those IDs.
-pub fn get_diff_json_filtered(
-    repo: &Repository,
-    commit_sha: &str,
-    options: DiffOptions,
-) -> Result<DiffJson, GitAiError> {
-    use crate::operations::commands::diff_json_builder::extract_session_id;
-
-    // Resolve the commit to get from/to SHAs (parent -> commit)
-    let to_commit = resolve_commit(repo, commit_sha)?;
-    let from_commit = resolve_parent(repo, &to_commit)?;
-
-    let artifacts = build_diff_artifacts(
-        repo,
-        &from_commit,
-        &to_commit,
-        &DiffCommandOptions {
-            format: DiffFormat::Json,
-            ..DiffCommandOptions::default()
-        },
-    )?;
-
-    let mut diff_json = build_diff_json(
-        repo,
-        &from_commit,
-        &to_commit,
-        &artifacts,
-        &artifacts.prompts,
-        &artifacts.sessions,
-        None,
-    )?;
-
-    // Apply filtering if requested
-    if options.filter_to_attributed_files
-        && let Some(ref prompt_ids) = options.prompt_ids
-    {
-        let prompt_id_set: HashSet<&String> = prompt_ids.iter().collect();
-
-        // Filter files to only those with attributions from the specified prompts
-        diff_json.files.retain(|_file_path, file_diff| {
-            // Check if any annotation key matches a prompt_id
-            file_diff
-                .annotations
-                .keys()
-                .any(|key| prompt_id_set.contains(key))
-        });
-
-        let kept_files: HashSet<String> = diff_json.files.keys().cloned().collect();
-        diff_json
-            .hunks
-            .retain(|hunk| kept_files.contains(&hunk.file_path));
-    }
-
-    // Filter prompts/sessions to only those specified (if any)
-    if let Some(ref prompt_ids) = options.prompt_ids {
-        let prompt_id_set: HashSet<&String> = prompt_ids.iter().collect();
-        diff_json
-            .prompts
-            .retain(|key, _| prompt_id_set.contains(key));
-        // Session keys are session IDs only, but prompt_ids may contain combined IDs
-        // Extract session IDs from prompt_ids for session filtering
-        let session_id_set: HashSet<&str> =
-            prompt_ids.iter().map(|id| extract_session_id(id)).collect();
-        diff_json
-            .sessions
-            .retain(|key, _| session_id_set.contains(key.as_str()));
-    }
-
-    let mut referenced_commit_shas: HashSet<String> = HashSet::new();
-    for hunk in &diff_json.hunks {
-        referenced_commit_shas.insert(hunk.commit_sha.clone());
-        if let Some(original) = &hunk.original_commit_sha {
-            referenced_commit_shas.insert(original.clone());
-        }
-    }
-    diff_json
-        .commits
-        .retain(|sha, _| referenced_commit_shas.contains(sha));
-
-    Ok(diff_json)
-}
 
 // ============================================================================
 // Tests

@@ -1,4 +1,5 @@
 use crate::clients::api::{ApiClient, ApiContext};
+use crate::clients::auth::identity::TokenOrg;
 use crate::clients::auth::state::AuthStatus;
 use crate::clients::auth::{AuthState, collect_auth_status, format_unix_timestamp};
 use crate::config;
@@ -47,6 +48,17 @@ pub fn handle_whoami(args: &[String]) {
     }
 }
 
+/// `slug (name) [id] role=role`, with a placeholder for each missing field.
+pub(crate) fn format_org(org: &TokenOrg) -> String {
+    format!(
+        "{} ({}) [{}] role={}",
+        org.org_slug.as_deref().unwrap_or("<unknown-slug>"),
+        org.org_name.as_deref().unwrap_or("<unknown-name>"),
+        org.org_id.as_deref().unwrap_or("<unknown-id>"),
+        org.role.as_deref().unwrap_or("<unknown-role>")
+    )
+}
+
 fn collect_metrics_status() -> Result<MetricsStatus, String> {
     let db = MetricsDatabase::global().map_err(|e| e.to_string())?;
     let db = db
@@ -88,7 +100,11 @@ fn render_whoami(
     writeln!(
         out,
         "  API key: {}",
-        api_key_status(api_ctx.api_key.as_deref())
+        if api_ctx.api_key.is_some() {
+            "configured"
+        } else {
+            "unset"
+        }
     )
     .unwrap();
     writeln!(out, "  Login: {}", login_status(auth, api_client)).unwrap();
@@ -127,16 +143,7 @@ fn render_whoami(
         } else {
             writeln!(out, "  Organizations:").unwrap();
             for org in &auth.orgs {
-                let org_id = org.org_id.as_deref().unwrap_or("<unknown-id>");
-                let org_slug = org.org_slug.as_deref().unwrap_or("<unknown-slug>");
-                let org_name = org.org_name.as_deref().unwrap_or("<unknown-name>");
-                let role = org.role.as_deref().unwrap_or("<unknown-role>");
-                writeln!(
-                    out,
-                    "    - {} ({}) [{}] role={}",
-                    org_slug, org_name, org_id, role
-                )
-                .unwrap();
+                writeln!(out, "    - {}", format_org(org)).unwrap();
             }
         }
         writeln!(out).unwrap();
@@ -203,12 +210,6 @@ fn author_identity_header_status(api_ctx: &ApiContext) -> String {
         .unwrap_or_else(|| "unavailable (header will be omitted)".to_string())
 }
 
-fn api_key_status(api_key: Option<&str>) -> String {
-    api_key
-        .map(|key| format!("configured ({})", mask_api_key(key)))
-        .unwrap_or_else(|| "unset".to_string())
-}
-
 fn login_status(auth: &AuthStatus, api_client: &ApiClient) -> String {
     match &auth.state {
         AuthState::LoggedIn => "logged in".to_string(),
@@ -262,16 +263,6 @@ fn optional_or_unavailable(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("<unavailable>")
 }
 
-fn mask_api_key(key: &str) -> String {
-    let chars: Vec<char> = key.chars().collect();
-    if chars.len() <= 8 {
-        return "*".repeat(chars.len());
-    }
-    let prefix: String = chars[..4].iter().collect();
-    let suffix: String = chars[chars.len() - 4..].iter().collect();
-    format!("{}...{}", prefix, suffix)
-}
-
 fn print_help() {
     eprintln!("git-ai whoami - Show current auth, identity, and telemetry status");
     eprintln!();
@@ -283,7 +274,6 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clients::auth::identity::TokenOrg;
 
     fn auth_status(state: AuthState) -> AuthStatus {
         AuthStatus {
@@ -311,6 +301,7 @@ mod tests {
             api_key: api_key.map(str::to_string),
             author_identity: author_identity.map(str::to_string),
             timeout_secs: Some(30),
+            agent: crate::clients::http::build_agent(Some(30)),
         }
     }
 
@@ -343,7 +334,9 @@ mod tests {
         let output = render_whoami(&ctx.base_url, &auth, &ctx, &client, Ok(&metrics), true);
 
         assert!(output.contains("API access: connected via API key"));
-        assert!(output.contains("API key: configured (gita...7890)"));
+        assert!(output.contains("API key: configured\n"));
+        assert!(!output.contains("gita..."));
+        assert!(!output.contains("7890"));
         assert!(output.contains("Login: optional (using api key)"));
         assert!(output.contains("Identity: Alice Example <alice@example.com>"));
         assert!(!output.contains("Author identity header"));
@@ -404,6 +397,18 @@ mod tests {
 
         assert!(output.contains("API key: unset"));
         assert!(output.contains("Login: not logged in"));
+    }
+
+    #[test]
+    fn rendered_status_does_not_disclose_key_content_or_length() {
+        let auth = auth_status(AuthState::LoggedOut);
+        let metrics = metrics_status();
+        for key in ["", "abc", "12345678", "123456789", "日本語のキーです長い"] {
+            let ctx = api_context(crate::config::DEFAULT_API_BASE_URL, Some(key), None, None);
+            let client = ApiClient::new(ctx.clone());
+            let out = render_whoami(&ctx.base_url, &auth, &ctx, &client, Ok(&metrics), false);
+            assert!(out.contains("API key: configured\n"));
+        }
     }
 
     #[test]

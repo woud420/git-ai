@@ -2,8 +2,6 @@
 
 use std::{fs, path::PathBuf};
 
-use insta::assert_debug_snapshot;
-
 use super::blame_support::{is_ai_blame_author, parse_blame_line};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -222,13 +220,6 @@ impl<'a> TestFile<'a> {
         );
     }
 
-    pub fn assert_blame_snapshot(&self) {
-        let blame_output = self.blame_output();
-
-        let formatted = self.format_blame_for_snapshot(&blame_output);
-        assert_debug_snapshot!(formatted);
-    }
-
     pub fn assert_lines_and_blame<T: Into<ExpectedLine>>(&mut self, lines: Vec<T>) {
         let expected_lines: Vec<ExpectedLine> = lines.into_iter().map(|l| l.into()).collect();
         let blame_output = self.blame_output();
@@ -317,34 +308,6 @@ impl<'a> TestFile<'a> {
                 }
             }
         }
-    }
-
-    /// Format blame output for readable snapshots
-    /// Format: Name of user\n\n$author 1) LINE CONTENTS\n$author 2) LINE CONTENTS
-    pub fn format_blame_for_snapshot(&self, blame_output: &str) -> String {
-        let mut result = String::new();
-        let mut current_author: Option<String> = None;
-
-        for (index, (author, content)) in Self::parse_blame_lines(blame_output)
-            .into_iter()
-            .enumerate()
-        {
-            let line_num = index + 1;
-
-            // Add header when author changes
-            if current_author.as_ref() != Some(&author) {
-                if current_author.is_some() {
-                    result.push('\n');
-                }
-                result.push_str(&format!("{}\n\n", author));
-                current_author = Some(author.clone());
-            }
-
-            // Add the line with author prefix and line number
-            result.push_str(&format!("{} {}) {}\n", author, line_num, content));
-        }
-
-        result
     }
 
     /// Parse a single blame line to extract author and content

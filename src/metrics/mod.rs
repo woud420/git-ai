@@ -69,7 +69,7 @@ pub fn record<V: EventValues>(values: V, attrs: EventAttributes) {
     if should_ignore_debug_self_check_event(&attrs) {
         return;
     }
-    let event = MetricEvent::new(&values, attrs.to_sparse());
+    let event = MetricEvent::from_values(values, attrs.to_sparse());
     // Write directly to observability log
     crate::observability::log_metrics(vec![event]);
 }
@@ -108,7 +108,7 @@ mod tests {
             .commit_sha("test-commit");
 
         // Create the event manually to verify structure
-        let event = MetricEvent::new(&values, attrs.to_sparse());
+        let event = MetricEvent::from_values(values, attrs.to_sparse());
         assert_eq!(event.event_id, MetricEventId::Committed as u16);
         assert!(event.timestamp > 0);
     }

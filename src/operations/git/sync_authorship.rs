@@ -27,78 +27,44 @@ pub fn fetch_remote_from_args(
     repository: &Repository,
     parsed_args: &ParsedGitInvocation,
 ) -> Result<String, GitAiError> {
-    let remotes = repository.remotes().ok();
-    let remote_names: Vec<String> = remotes
-        .as_ref()
-        .map(|r| {
-            (0..r.len())
-                .filter_map(|i| r.get(i).map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // 2) Fetch authorship refs from the appropriate remote
-    // Try to detect remote (named remote, URL, or local path) from args first
-    let positional_remote = extract_repository_arg_from_args(&parsed_args.command_args);
-    let specified_remote = positional_remote.or_else(|| {
-        parsed_args
-            .command_args
-            .iter()
-            .find(|a| remote_names.iter().any(|r| r == *a))
-            .cloned()
-    });
-
-    let remote = specified_remote
-        .or_else(|| repository.upstream_remote().ok().flatten())
-        .or_else(|| repository.get_default_remote().ok().flatten());
-
-    remote.map(|r| r.to_string()).ok_or_else(|| {
-        // Daemon side-effect status persists this exact legacy Display text.
-        GitAiError::Generic(
-            "Could not determine a remote for fetch/push operation. \
-                 No remote was specified in args, no upstream is configured, \
-                 and no default remote was found."
-                .to_string(),
-        )
-    })
+    remote_from_args(repository, parsed_args, "fetch/push")
 }
 
 pub fn push_remote_from_args(
     repository: &Repository,
     parsed_args: &ParsedGitInvocation,
 ) -> Result<String, GitAiError> {
-    let remotes = repository.remotes().ok();
-    let remote_names: Vec<String> = remotes
-        .as_ref()
-        .map(|r| {
-            (0..r.len())
-                .filter_map(|i| r.get(i).map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
+    remote_from_args(repository, parsed_args, "push")
+}
 
-    let specified_remote =
-        extract_repository_arg_from_args(&parsed_args.command_args).or_else(|| {
+/// The remote a fetch or push invocation targets: a repository named in the
+/// args (URL, local path, or configured remote name), else the upstream
+/// remote, else the default remote. `operation` only words the error.
+fn remote_from_args(
+    repository: &Repository,
+    parsed_args: &ParsedGitInvocation,
+    operation: &str,
+) -> Result<String, GitAiError> {
+    let remote_names = repository.remotes().unwrap_or_default();
+
+    extract_repository_arg_from_args(&parsed_args.command_args)
+        .or_else(|| {
             parsed_args
                 .command_args
                 .iter()
-                .find(|a| remote_names.iter().any(|r| r == *a))
+                .find(|arg| remote_names.contains(arg))
                 .cloned()
-        });
-
-    let remote = specified_remote
+        })
         .or_else(|| repository.upstream_remote().ok().flatten())
-        .or_else(|| repository.get_default_remote().ok().flatten());
-
-    remote.map(|r| r.to_string()).ok_or_else(|| {
-        // Daemon side-effect status persists this exact legacy Display text.
-        GitAiError::Generic(
-            "Could not determine a remote for push operation. \
+        .or_else(|| repository.get_default_remote().ok().flatten())
+        .ok_or_else(|| {
+            // Daemon side-effect status persists this exact legacy Display text.
+            GitAiError::Generic(format!(
+                "Could not determine a remote for {operation} operation. \
                  No remote was specified in args, no upstream is configured, \
                  and no default remote was found."
-                .to_string(),
-        )
-    })
+            ))
+        })
 }
 
 /// Try to fetch authorship notes from all remotes for source commits that are missing
@@ -271,14 +237,16 @@ pub fn fetch_authorship_notes(
     merge_fetched_authorship_notes(repository, &tracking_ref)
 }
 
+/// Merge a fetched tracking ref into local `refs/notes/ai` (or initialize the
+/// local ref from it). Shared by post-fetch sync and the pre-push refresh.
 fn merge_fetched_authorship_notes(
     repository: &Repository,
     tracking_ref: &str,
 ) -> Result<NotesExistence, GitAiError> {
     let local_notes_ref = "refs/notes/ai";
 
-    if crate::operations::git::refs::ref_exists(repository, tracking_ref) {
-        if crate::operations::git::refs::ref_exists(repository, local_notes_ref) {
+    if ref_exists(repository, tracking_ref) {
+        if ref_exists(repository, local_notes_ref) {
             // Both exist - merge them
             tracing::debug!(
                 "merging authorship notes from {} into {}",
@@ -288,6 +256,8 @@ fn merge_fetched_authorship_notes(
             if let Err(e) = merge_notes_from_ref(repository, tracking_ref) {
                 tracing::debug!("notes merge failed: {}", e);
                 // Fallback: manually merge notes when git notes merge crashes
+                // (e.g., due to corrupted/mixed-fanout notes trees, or git bugs
+                // with fanout-level mismatches on older git versions like macOS)
                 if let Err(e2) = fallback_merge_notes_ours(repository, tracking_ref) {
                     tracing::debug!("fallback merge also failed: {}", e2);
                     return Err(e2);
@@ -416,39 +386,10 @@ fn fetch_and_merge_tracking_notes(
     // Network I/O must not hold the family lock. Only the local merge shares
     // the post-commit writer's exclusion, preventing lost concurrent notes.
     let _guard = local_notes_lock.map(tokio::sync::Mutex::blocking_lock);
-    let local_notes_ref = "refs/notes/ai";
 
-    if !ref_exists(repository, &tracking_ref) {
-        return;
-    }
-
-    if !ref_exists(repository, local_notes_ref) {
-        // Only tracking ref exists - copy it to local
-        tracing::debug!(
-            "pre-push: initializing {} from {}",
-            local_notes_ref,
-            tracking_ref
-        );
-        if let Err(e) = copy_ref(repository, &tracking_ref, local_notes_ref) {
-            tracing::debug!("pre-push notes copy failed: {}", e);
-        }
-        return;
-    }
-
-    // Both exist - merge them
-    tracing::debug!(
-        "pre-push: merging {} into {}",
-        tracking_ref,
-        local_notes_ref
-    );
-    if let Err(e) = merge_notes_from_ref(repository, &tracking_ref) {
+    // Best-effort like the fetch: the push below still runs if this fails.
+    if let Err(e) = merge_fetched_authorship_notes(repository, &tracking_ref) {
         tracing::debug!("pre-push notes merge failed: {}", e);
-        // Fallback: manually merge notes when git notes merge crashes
-        // (e.g., due to corrupted/mixed-fanout notes trees, or git bugs
-        // with fanout-level mismatches on older git versions like macOS)
-        if let Err(e2) = fallback_merge_notes_ours(repository, &tracking_ref) {
-            tracing::debug!("pre-push fallback merge also failed: {}", e2);
-        }
     }
 }
 
@@ -541,6 +482,24 @@ mod tests {
                 .any(|pair| pair[0] == "-c" && pair[1] == disabled_hooks)
         );
         assert!(args.contains(&"push".to_string()));
+    }
+
+    #[test]
+    fn remote_from_args_errors_keep_their_persisted_text() {
+        let tmp = crate::operations::git::test_utils::TmpRepo::new().expect("TmpRepo::new");
+        let parsed = crate::operations::git::cli_parser::parse_git_cli_args(&[]);
+
+        let fetch = fetch_remote_from_args(tmp.gitai_repo(), &parsed).unwrap_err();
+        let push = push_remote_from_args(tmp.gitai_repo(), &parsed).unwrap_err();
+
+        assert_eq!(
+            fetch.to_string(),
+            "Generic error: Could not determine a remote for fetch/push operation. No remote was specified in args, no upstream is configured, and no default remote was found."
+        );
+        assert_eq!(
+            push.to_string(),
+            "Generic error: Could not determine a remote for push operation. No remote was specified in args, no upstream is configured, and no default remote was found."
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{TestRepo, real_git_executable};
 use std::path::Path;
 
 /// Verify that FastRefReader::try_read_head() matches `git symbolic-ref HEAD`
@@ -264,4 +264,53 @@ fn test_fast_reader_worktree_refs_in_common_dir() {
         worktree_path.to_str().unwrap(),
     ])
     .unwrap();
+}
+
+/// The stub git writes to `.git/HEAD` in reftable repositories is declined.
+/// Unlike the test below, this runs even when the local git predates reftable.
+#[test]
+fn test_fast_head_declines_reftable_stub() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("HEAD"), "ref: refs/heads/.invalid\n").unwrap();
+    let reader = git_ai::operations::git::fast_reader::FastRefReader::new(temp.path(), temp.path());
+
+    assert_eq!(reader.try_read_head(), None);
+    assert_eq!(reader.try_resolve_ref("HEAD"), None);
+}
+
+/// Reftable repositories keep refs out of `.git/HEAD`: the file is a constant
+/// `ref: refs/heads/.invalid` stub. The fast reader must decline it so HEAD
+/// lookups fall back to the git CLI instead of reporting an unborn `.invalid`
+/// branch.
+#[test]
+fn test_reftable_head_falls_back_to_git_cli() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("reftable-repo");
+    let init = std::process::Command::new(real_git_executable())
+        .args(["init", "--ref-format=reftable", "--initial-branch=main"])
+        .arg(&path)
+        .output()
+        .expect("git init should run");
+    if !init.status.success() {
+        eprintln!("skipping: this git does not support --ref-format=reftable");
+        return;
+    }
+
+    let repo = TestRepo::new_at_path(&path);
+    std::fs::write(repo.path().join("init.txt"), "init\n").unwrap();
+    repo.git_og(&["add", "-A"]).unwrap();
+    repo.git_og(&["commit", "-m", "initial"]).unwrap();
+    let sha = repo.git_og(&["rev-parse", "HEAD"]).unwrap();
+
+    let gitai_repo =
+        git_ai::operations::git::repository::find_repository_in_path(path.to_str().unwrap())
+            .unwrap();
+    let head = gitai_repo.head().unwrap();
+    assert_eq!(head.name(), Some("refs/heads/main"));
+    assert_eq!(head.target().unwrap(), sha.trim());
+
+    repo.git_og(&["checkout", "--detach", "HEAD"]).unwrap();
+    let detached = gitai_repo.head().unwrap();
+    assert_eq!(detached.name(), Some("HEAD"));
+    assert_eq!(detached.target().unwrap(), sha.trim());
 }

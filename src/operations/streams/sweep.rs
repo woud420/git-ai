@@ -8,10 +8,6 @@ use std::time::Duration;
 pub enum SweepStrategy {
     /// Periodic polling at the given interval
     Periodic(Duration),
-    /// File system watcher (not implemented yet)
-    FsWatcher,
-    /// HTTP API polling (not implemented yet)
-    HttpApi,
     /// No sweep support for this agent
     None,
 }

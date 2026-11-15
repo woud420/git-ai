@@ -1,14 +1,6 @@
 //! Runtime environment detection for CLI startup checks: interactive
 //! terminal, background AI agent, and superuser (root/Administrator) guards.
 
-/// Returns true if the process is running inside a background AI agent environment.
-pub fn is_in_background_agent() -> bool {
-    !matches!(
-        crate::operations::authorship::background_agent::detect(),
-        crate::operations::authorship::background_agent::BackgroundAgent::None
-    )
-}
-
 /// Returns true if the current process is running with elevated privileges
 /// (root on Unix, Administrator on Windows).
 #[cfg(unix)]
@@ -79,40 +71,19 @@ pub fn is_running_as_superuser() -> bool {
 /// Returns true if the environment indicates a CI system or automated agent
 /// sandbox where running as superuser is expected and acceptable.
 pub fn is_superuser_expected_environment() -> bool {
-    if std::env::var_os("CI").is_some() {
-        return true;
-    }
-    if std::env::var_os("GITHUB_ACTIONS").is_some() {
-        return true;
-    }
-    if std::env::var_os("GITLAB_CI").is_some() {
-        return true;
-    }
-    if std::env::var_os("JENKINS_URL").is_some() {
-        return true;
-    }
-    if std::env::var_os("BUILDKITE").is_some() {
-        return true;
-    }
-    if std::env::var_os("CIRCLECI").is_some() {
-        return true;
-    }
-    if std::env::var_os("CODEBUILD_BUILD_ID").is_some() {
-        return true;
-    }
-    if std::env::var_os("AGENT_OS").is_some() {
-        return true;
-    }
-    if std::env::var_os("KUBERNETES_SERVICE_HOST").is_some() {
-        return true;
-    }
-    if is_inside_container() {
-        return true;
-    }
-    if std::env::var_os("GIT_AI_DAEMON_UPGRADE").is_some() {
-        return true;
-    }
-    false
+    const MARKERS: [&str; 10] = [
+        "CI",
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "JENKINS_URL",
+        "BUILDKITE",
+        "CIRCLECI",
+        "CODEBUILD_BUILD_ID",
+        "AGENT_OS",
+        "KUBERNETES_SERVICE_HOST",
+        "GIT_AI_DAEMON_UPGRADE",
+    ];
+    MARKERS.iter().any(|name| std::env::var_os(name).is_some()) || is_inside_container()
 }
 
 fn is_inside_container() -> bool {

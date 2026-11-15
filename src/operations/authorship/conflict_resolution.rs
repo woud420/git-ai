@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::model::authorship_log::LineRange;
+use crate::model::authorship_log::{LineRange, metadata_key};
 use crate::model::authorship_log_serialization::AuthorshipLog;
 
 fn normalize_line_ranges(ranges: &[LineRange]) -> Vec<LineRange> {
@@ -38,10 +38,6 @@ fn line_coverage_by_file(log: &AuthorshipLog) -> HashMap<String, Vec<LineRange>>
     coverage
 }
 
-fn attestation_metadata_key(hash: &str) -> &str {
-    hash.split("::").next().unwrap_or(hash)
-}
-
 pub(crate) fn retain_referenced_metadata(log: &mut AuthorshipLog) {
     let mut prompt_keys = HashSet::new();
     let mut human_keys = HashSet::new();
@@ -49,7 +45,7 @@ pub(crate) fn retain_referenced_metadata(log: &mut AuthorshipLog) {
 
     for attestation in &log.attestations {
         for entry in &attestation.entries {
-            let key = attestation_metadata_key(&entry.hash).to_string();
+            let key = metadata_key(&entry.hash).to_string();
             if key.starts_with("h_") {
                 human_keys.insert(key);
             } else if key.starts_with("s_") {

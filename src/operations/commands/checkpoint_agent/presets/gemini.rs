@@ -74,22 +74,13 @@ impl AgentPreset for GeminiPreset {
         _hook_input: &str,
         events: &mut [ParsedHookEvent],
     ) -> Result<(), GitAiError> {
-        for event in events {
-            let Some(context) = event.preset_context_mut() else {
-                continue;
-            };
-            let Some(path) = context.metadata.get("transcript_path") else {
-                continue;
-            };
-            context.agent_id.model = crate::operations::streams::model_extraction::extract_model(
-                std::path::Path::new(path),
+        super::enrich_model_from_metadata_path(events, "transcript_path", |path| {
+            crate::operations::streams::model_extraction::extract_model(
+                path,
                 crate::operations::streams::sweep::StreamFormat::GeminiJsonl,
                 None,
             )
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "unknown".to_string());
-        }
+        });
 
         Ok(())
     }

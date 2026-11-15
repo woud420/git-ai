@@ -84,8 +84,6 @@ fn test_line_attribution_new_creates_valid_range() {
     assert_eq!(attr.end_line, 10);
     assert_eq!(attr.author_id, "ai-1");
     assert_eq!(attr.overrode, None);
-    assert_eq!(attr.line_count(), 10);
-    assert!(!attr.is_empty());
 }
 
 #[test]
@@ -93,33 +91,6 @@ fn test_line_attribution_with_override() {
     // Test LineAttribution with override tracking
     let attr = LineAttribution::new(1, 5, "human-1".to_string(), Some("ai-1".to_string()));
     assert_eq!(attr.overrode, Some("ai-1".to_string()));
-}
-
-#[test]
-fn test_line_attribution_overlaps() {
-    // Test line attribution overlap detection
-    let attr = LineAttribution::new(10, 20, "ai-1".to_string(), None);
-
-    assert!(attr.overlaps(5, 15)); // Overlaps start
-    assert!(attr.overlaps(15, 25)); // Overlaps end
-    assert!(attr.overlaps(12, 18)); // Fully contained
-    assert!(attr.overlaps(5, 25)); // Fully encompasses
-
-    assert!(!attr.overlaps(1, 9)); // Before
-    assert!(!attr.overlaps(21, 30)); // After
-}
-
-#[test]
-fn test_line_attribution_intersection() {
-    // Test line attribution intersection
-    let attr = LineAttribution::new(10, 20, "ai-1".to_string(), None);
-
-    assert_eq!(attr.intersection(5, 15), Some((10, 15)));
-    assert_eq!(attr.intersection(15, 25), Some((15, 20)));
-    assert_eq!(attr.intersection(12, 18), Some((12, 18)));
-    assert_eq!(attr.intersection(5, 25), Some((10, 20)));
-    assert_eq!(attr.intersection(1, 9), None);
-    assert_eq!(attr.intersection(21, 30), None);
 }
 
 // =============================================================================
@@ -1265,22 +1236,6 @@ fn test_tracker_surrounding_context_preserved() {
 }
 
 #[test]
-fn test_line_attribution_zero_line_count() {
-    // Test edge case of inverted line range
-    let attr = LineAttribution::new(10, 5, "ai-1".to_string(), None);
-    assert_eq!(attr.line_count(), 0);
-    assert!(attr.is_empty());
-}
-
-#[test]
-fn test_line_attribution_single_line() {
-    // Test single line attribution
-    let attr = LineAttribution::new(5, 5, "ai-1".to_string(), None);
-    assert_eq!(attr.line_count(), 1);
-    assert!(!attr.is_empty());
-}
-
-#[test]
 fn test_tracker_all_whitespace_file() {
     // Test a file that's entirely whitespace
     let tracker = AttributionTracker::new();
@@ -1504,19 +1459,6 @@ fn test_attribution_boundary_conditions() {
 }
 
 #[test]
-fn test_line_attribution_boundary_conditions() {
-    // Test line attribution at exact boundaries
-    let attr = LineAttribution::new(10, 20, "ai-1".to_string(), None);
-
-    // Boundary checks
-    assert!(!attr.overlaps(1, 9)); // Before
-    assert!(!attr.overlaps(21, 30)); // After
-    assert!(attr.overlaps(10, 20)); // Exact
-    assert!(attr.overlaps(9, 11)); // Crosses start
-    assert!(attr.overlaps(19, 21)); // Crosses end
-}
-
-#[test]
 fn test_tracker_progressive_file_growth() {
     // Test progressive file growth over multiple edits
     let tracker = AttributionTracker::new();
@@ -1575,8 +1517,6 @@ crate::reuse_tests_in_worktree!(
     test_attribution_intersection,
     test_line_attribution_new_creates_valid_range,
     test_line_attribution_with_override,
-    test_line_attribution_overlaps,
-    test_line_attribution_intersection,
     test_tracker_no_changes_preserves_attributions,
     test_tracker_simple_addition_at_end,
     test_tracker_simple_addition_at_start,
@@ -1631,8 +1571,6 @@ crate::reuse_tests_in_worktree!(
     test_tracker_alternating_small_edits,
     test_tracker_nested_structures,
     test_tracker_surrounding_context_preserved,
-    test_line_attribution_zero_line_count,
-    test_line_attribution_single_line,
     test_tracker_all_whitespace_file,
     test_tracker_massive_insertion,
     test_tracker_massive_deletion,
@@ -1644,7 +1582,6 @@ crate::reuse_tests_in_worktree!(
     test_tracker_json_like_content,
     test_tracker_url_like_content,
     test_attribution_boundary_conditions,
-    test_line_attribution_boundary_conditions,
     test_tracker_progressive_file_growth,
     test_attribution_with_stash,
 );

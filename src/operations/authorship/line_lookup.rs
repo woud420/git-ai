@@ -5,7 +5,7 @@
 //! `model`; this wrapper adds the repo-touching fallback (git-notes search for
 //! prompt records not present locally), so the model stays free of `Repository`.
 
-use crate::model::authorship_log::{Author, PromptRecord};
+use crate::model::authorship_log::{Author, PromptRecord, metadata_key};
 use crate::model::authorship_log_serialization::AuthorshipLog;
 use crate::operations::git::notes_api::{read_authorship, search_notes};
 use crate::operations::git::repository::Repository;
@@ -50,7 +50,7 @@ pub fn get_line_attribution(
             // s_-prefixed hashes are session attestations — route to sessions map
             if entry.hash.starts_with("s_") {
                 // Extract session key from "s_<14hex>::t_<14hex>" format
-                let session_key = entry.hash.split("::").next().unwrap_or(&entry.hash);
+                let session_key = metadata_key(&entry.hash);
                 if let Some(session_record) = log.metadata.sessions.get(session_key) {
                     // Create a PromptRecord-like structure from SessionRecord for compatibility
                     // Note: sessions don't have message transcripts or detailed stats

@@ -2,12 +2,11 @@
 name = "git-ai"
 version = "1.6.16"
 edition = "2024"
-rust-version = "1.93"
+rust-version = "1.100"
 license = "Apache-2.0"
 default-run = "git-ai"
 
 [dependencies]
-clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_json_canonicalizer = "0.3"
@@ -30,12 +29,10 @@ ureq = { version = "3.3", default-features = false, features = ["native-tls"] }
 url = "2.5"
 glob = "0.3"
 ignore = "0.4"
-ratatui = "0.30"
 flate2 = "1.1"
 crossterm = "0.29"
 keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"], optional = true }
 gix-config = { version = "0.58.0", features = ["sha1"] }
-gix-index = { version = "0.53.0", features = ["sha1"] }
 rand = "0.10"
 regex = "1.12"
 toml = "0.9"
@@ -49,7 +46,6 @@ openssl = { version = "0.10", features = ["vendored"] }
 [target.'cfg(windows)'.dependencies]
 named_pipe = "0.4.1"
 same-file = "1.0"
-winreg = "0.55"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [features]

@@ -1,7 +1,8 @@
 //! Shared "resolve or exit" helpers for `git-ai` command handlers: repository
 //! discovery that prints the standard failure message and exits, plus a
 //! generic `"{what} failed: {e}"` + exit(1) helper for arms that already use
-//! that exact message shape.
+//! that exact message shape, and a stdout writer that ends the command
+//! quietly when the reader has closed the pipe.
 //!
 //! Never use `fail` for the checkpoint/hook-input paths — those deliberately
 //! exit(0) on failure so a git-ai error never fails an agent's edit.
@@ -11,6 +12,7 @@ use crate::operations::git::find_repository_in_path;
 use crate::operations::git::repository::Repository;
 use std::env;
 use std::fmt::Display;
+use std::io::{ErrorKind, Write};
 
 /// Resolve the repository via git's normal discovery (no explicit cwd),
 /// printing "Failed to find repository: {e}" and exiting with status 1 on
@@ -48,4 +50,20 @@ pub(crate) fn resolve_repo_in_cwd_or_fail() -> (Repository, String) {
 pub(crate) fn fail(what: &str, e: impl Display) -> ! {
     eprintln!("{what} failed: {e}");
     std::process::exit(1);
+}
+
+/// Write command output to stdout. A reader that closed the pipe early
+/// (`git-ai blame f | head -1`) ends the command with status 0 where `print!`
+/// would panic. SIGPIPE stays ignored process-wide because the daemon is the
+/// same binary.
+pub(crate) fn print_stdout(text: &str) {
+    let mut stdout = std::io::stdout().lock();
+    match stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Ok(()) => {}
+        Err(e) if e.kind() == ErrorKind::BrokenPipe => std::process::exit(0),
+        Err(e) => fail("Writing output", e),
+    }
 }

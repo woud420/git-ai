@@ -191,7 +191,7 @@ pub(crate) fn parse_diff_hunks(diff_text: &str) -> Result<Vec<DiffHunk>, GitAiEr
             let old_file_path = current_old_file
                 .as_deref()
                 .filter(|old_path| *old_path != current_file.as_str());
-            if let Some(mut hunk) = parse_hunk_line(line, &current_file, old_file_path)? {
+            if let Some(mut hunk) = parse_hunk_line(line, &current_file, old_file_path) {
                 old_line_cursor = hunk.old_start;
                 new_line_cursor = hunk.new_start;
                 hunk.deleted_lines.clear();
@@ -225,14 +225,14 @@ pub(super) fn parse_hunk_line(
     line: &str,
     file_path: &str,
     old_file_path: Option<&str>,
-) -> Result<Option<DiffHunk>, GitAiError> {
+) -> Option<DiffHunk> {
     // Parse hunk header format: @@ -old_start,old_count +new_start,new_count @@
     // Also handles: @@ -old_start +new_start,new_count @@ (single line deletion)
     // Also handles: @@ -old_start,old_count +new_start @@ (single line addition)
 
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 3 {
-        return Ok(None);
+        return None;
     }
 
     let old_part = parts[1]; // e.g., "-10,3" or "-10"
@@ -279,7 +279,7 @@ pub(super) fn parse_hunk_line(
         Vec::new()
     };
 
-    Ok(Some(DiffHunk {
+    Some(DiffHunk {
         file_path: file_path.to_string(),
         old_file_path: old_file_path.map(ToString::to_string),
         old_start,
@@ -290,7 +290,7 @@ pub(super) fn parse_hunk_line(
         added_lines,
         deleted_contents: Vec::new(),
         added_contents: Vec::new(),
-    }))
+    })
 }
 
 /// Build a map from [`DiffLineKey`] to the line's text content.
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn test_parse_hunk_line_basic() {
         let line = "@@ -10,3 +15,5 @@ fn main() {";
-        let result = parse_hunk_line(line, "test.rs", None).unwrap().unwrap();
+        let result = parse_hunk_line(line, "test.rs", None).unwrap();
 
         assert_eq!(result.file_path, "test.rs");
         assert_eq!(result.old_file_path, None);
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn test_parse_hunk_line_single_line_deletion() {
         let line = "@@ -10 +10,2 @@ fn main() {";
-        let result = parse_hunk_line(line, "test.rs", None).unwrap().unwrap();
+        let result = parse_hunk_line(line, "test.rs", None).unwrap();
 
         assert_eq!(result.old_start, 10);
         assert_eq!(result.old_count, 1);
@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn test_parse_hunk_line_single_line_addition() {
         let line = "@@ -10,2 +10 @@ fn main() {";
-        let result = parse_hunk_line(line, "test.rs", None).unwrap().unwrap();
+        let result = parse_hunk_line(line, "test.rs", None).unwrap();
 
         assert_eq!(result.old_start, 10);
         assert_eq!(result.old_count, 2);
@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn test_parse_hunk_line_pure_addition() {
         let line = "@@ -0,0 +1,3 @@ fn main() {";
-        let result = parse_hunk_line(line, "test.rs", None).unwrap().unwrap();
+        let result = parse_hunk_line(line, "test.rs", None).unwrap();
 
         assert_eq!(result.old_start, 0);
         assert_eq!(result.old_count, 0);
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn test_parse_hunk_line_pure_deletion() {
         let line = "@@ -5,3 +0,0 @@ fn main() {";
-        let result = parse_hunk_line(line, "test.rs", None).unwrap().unwrap();
+        let result = parse_hunk_line(line, "test.rs", None).unwrap();
 
         assert_eq!(result.old_start, 5);
         assert_eq!(result.old_count, 3);

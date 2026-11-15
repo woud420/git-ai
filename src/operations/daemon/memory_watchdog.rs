@@ -101,6 +101,16 @@ fn run_watchdog(coordinator: Arc<ActorDaemonCoordinator>, thresholds: MemoryThre
             MemoryWatchdogDecision::Continue => {}
             MemoryWatchdogDecision::Abort => {
                 record_memory_emergency(usage, thresholds, "abort");
+                // A core dump of a process near its memory limit takes seconds
+                // and fills the disk; the diagnostic above already explains the abort.
+                #[cfg(unix)]
+                unsafe {
+                    let no_core = libc::rlimit {
+                        rlim_cur: 0,
+                        rlim_max: 0,
+                    };
+                    libc::setrlimit(libc::RLIMIT_CORE, &no_core);
+                }
                 std::process::abort();
             }
         }

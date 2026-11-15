@@ -69,7 +69,7 @@ fn classify_line(analysis: &BlameAnalysisResult, line: u32) -> LineClassificatio
         return LineClassification::Unknown;
     };
 
-    if author == &CheckpointKind::Human.to_str() {
+    if author == CheckpointKind::Human.to_str() {
         return LineClassification::Untracked;
     }
 

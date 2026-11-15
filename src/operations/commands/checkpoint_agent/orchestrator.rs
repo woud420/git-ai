@@ -7,7 +7,7 @@ use crate::model::checkpoint_delivery::CHECKPOINT_DELIVERY_MAX_FILES;
 use crate::model::working_log::{AgentId, CheckpointKind};
 use crate::operations::commands::checkpoint_agent::authorization::{
     CheckpointFileSnapshot, authorize_events, authorize_repository_path,
-    authorize_repository_workdir, read_checkpoint_file_snapshot, validate_checkpoint_file_count,
+    read_checkpoint_file_snapshot, validate_checkpoint_file_count,
 };
 use crate::operations::commands::checkpoint_agent::presets::{
     KnownHumanEdit, ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit,
@@ -171,9 +171,10 @@ pub fn execute_preset_checkpoint(
         return Ok(CheckpointPresetOutcome::Authorized(Vec::new()));
     }
     let events_len = events.len();
-    if let Err(denial) = authorize_events(&mut events, config::Config::get()) {
-        return Ok(CheckpointPresetOutcome::Denied(denial));
-    }
+    let bash_repo_roots = match authorize_events(&mut events, config::Config::get()) {
+        Ok(roots) => roots,
+        Err(denial) => return Ok(CheckpointPresetOutcome::Denied(denial)),
+    };
     preset.enrich_authorized_events(hook_input, &mut events)?;
     ensure_bash_events_daemon_ready(&events)?;
 
@@ -189,7 +190,7 @@ pub fn execute_preset_checkpoint(
     for event in events {
         let t_event = std::time::Instant::now();
         let event_name = format!("{:?}", std::mem::discriminant(&event));
-        let new_requests = execute_event(event)?;
+        let new_requests = execute_event(event, &bash_repo_roots)?;
         if perf {
             eprintln!(
                 "[perf] orchestrator: execute_event({})={:.1}ms (requests={})",
@@ -242,15 +243,38 @@ fn event_has_checkpoint_target(event: &ParsedHookEvent) -> bool {
     }
 }
 
-fn execute_event(event: ParsedHookEvent) -> Result<Vec<CheckpointRequest>, GitAiError> {
+/// `bash_repo_roots` maps each authorized bash cwd to its repository root.
+fn execute_event(
+    event: ParsedHookEvent,
+    bash_repo_roots: &HashMap<PathBuf, PathBuf>,
+) -> Result<Vec<CheckpointRequest>, GitAiError> {
     match event {
         ParsedHookEvent::PreFileEdit(e) => execute_pre_file_edit(e),
         ParsedHookEvent::PostFileEdit(e) => execute_post_file_edit(e),
-        ParsedHookEvent::PreBashCall(e) => execute_pre_bash_call(e),
-        ParsedHookEvent::PostBashCall(e) => execute_post_bash_call(e),
+        ParsedHookEvent::PreBashCall(e) => {
+            let repo_work_dir = authorized_bash_repo_root(bash_repo_roots, &e.context.cwd)?;
+            execute_pre_bash_call(e, repo_work_dir)
+        }
+        ParsedHookEvent::PostBashCall(e) => {
+            let repo_work_dir = authorized_bash_repo_root(bash_repo_roots, &e.context.cwd)?;
+            execute_post_bash_call(e, repo_work_dir)
+        }
         ParsedHookEvent::KnownHumanEdit(e) => execute_known_human_edit(e),
         ParsedHookEvent::UntrackedEdit(e) => execute_untracked_edit(e),
     }
+}
+
+fn authorized_bash_repo_root(
+    bash_repo_roots: &HashMap<PathBuf, PathBuf>,
+    cwd: &Path,
+) -> Result<PathBuf, GitAiError> {
+    bash_repo_roots.get(cwd).cloned().ok_or_else(|| {
+        GitAiError::PresetError(
+            CheckpointAuthorizationDenial::RepositoryUnverifiable
+                .user_message()
+                .to_string(),
+        )
+    })
 }
 
 fn split_files_into_requests(
@@ -359,15 +383,15 @@ fn execute_untracked_edit(e: UntrackedEdit) -> Result<Vec<CheckpointRequest>, Gi
     ))
 }
 
-fn execute_pre_bash_call(e: PreBashCall) -> Result<Vec<CheckpointRequest>, GitAiError> {
+fn execute_pre_bash_call(
+    e: PreBashCall,
+    repo_work_dir: PathBuf,
+) -> Result<Vec<CheckpointRequest>, GitAiError> {
     use crate::operations::commands::checkpoint_agent::bash_tool::{
         self, BashHookAttemptPhase, BashHookAttemptSignal,
     };
 
     let started_at_ns = crate::model::repository::bash_history_db::unix_time_ns();
-    let repo_work_dir =
-        authorize_repository_workdir(e.context.cwd.as_path(), config::Config::get())
-            .map_err(|denial| GitAiError::PresetError(denial.user_message().to_string()))?;
 
     if config::Config::get()
         .get_feature_flags()
@@ -435,15 +459,15 @@ fn execute_pre_bash_call(e: PreBashCall) -> Result<Vec<CheckpointRequest>, GitAi
     ))
 }
 
-fn execute_post_bash_call(e: PostBashCall) -> Result<Vec<CheckpointRequest>, GitAiError> {
+fn execute_post_bash_call(
+    e: PostBashCall,
+    repo_work_dir: PathBuf,
+) -> Result<Vec<CheckpointRequest>, GitAiError> {
     use crate::operations::commands::checkpoint_agent::bash_tool::{
         self, BashHookAttemptPhase, BashHookAttemptSignal,
     };
 
     let ended_at_ns = crate::model::repository::bash_history_db::unix_time_ns();
-    let repo_work_dir =
-        authorize_repository_workdir(e.context.cwd.as_path(), config::Config::get())
-            .map_err(|denial| GitAiError::PresetError(denial.user_message().to_string()))?;
 
     if config::Config::get()
         .get_feature_flags()

@@ -1,3 +1,4 @@
+pub(crate) mod atomic_write;
 pub(crate) mod checkpoint_content_budget;
 pub mod cli;
 pub mod clients;

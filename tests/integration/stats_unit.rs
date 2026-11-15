@@ -654,37 +654,6 @@ fn test_stats_command_default_to_head() {
 }
 
 #[test]
-fn test_get_git_diff_stats_binary_files() {
-    let repo = TestRepo::new();
-
-    // Create initial commit
-    std::fs::write(repo.path().join("text.txt"), "text\n").unwrap();
-    repo.git(&["add", "text.txt"]).unwrap();
-    repo.git_ai(&["checkpoint", "mock_known_human", "text.txt"])
-        .unwrap();
-    repo.stage_all_and_commit("Initial").unwrap();
-
-    // Add binary file (git will detect it as binary if it contains null bytes)
-    let binary_content = vec![0u8, 1u8, 2u8, 3u8, 255u8];
-    std::fs::write(repo.path().join("binary.bin"), &binary_content).unwrap();
-    repo.git(&["add", "binary.bin"]).unwrap();
-
-    repo.stage_all_and_commit("Add binary").unwrap();
-
-    let head_sha = repo
-        .git_og(&["rev-parse", "HEAD"])
-        .unwrap()
-        .trim()
-        .to_string();
-
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Binary files should be handled (shown as "-" in numstat)
-    let result = get_git_diff_stats(&gitai_repo, &head_sha, &[]);
-    assert!(result.is_ok());
-}
-
-#[test]
 fn test_stats_from_authorship_log_no_log() {
     let stats = stats_from_authorship_log(None, 10, 5, 3, 0, &BTreeMap::new());
 

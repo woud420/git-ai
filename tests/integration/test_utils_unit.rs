@@ -5,7 +5,6 @@ use git_ai::operations::commands::checkpoint_agent::orchestrator::{
     BaseCommit, CheckpointFile, CheckpointRequest,
 };
 use git_ai::operations::daemon::checkpoint::PreparedPathRole;
-use git_ai::operations::git::find_repository_in_path;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -97,15 +96,7 @@ fn test_build_scoped_human_agent_run_result_uses_current_changed_paths() {
 
     fs::write(repo.path().join("tracked.txt"), "base\nchanged\n").unwrap();
 
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let mut paths: Vec<String> = gitai_repo
-        .get_staged_and_unstaged_filenames()
-        .unwrap()
-        .into_iter()
-        .collect();
-    paths.sort();
-
-    assert!(!paths.is_empty(), "changed file should produce scope paths");
+    let paths = vec!["tracked.txt".to_string()];
 
     let scoped = build_scoped_human_checkpoint_request(repo.path().to_str().unwrap(), paths);
 
@@ -128,13 +119,7 @@ fn test_apply_default_checkpoint_scope_preserves_existing_explicit_scope() {
 
     fs::write(repo.path().join("tracked.txt"), "base\nchanged\n").unwrap();
 
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-    let mut scope_paths: Vec<String> = gitai_repo
-        .get_staged_and_unstaged_filenames()
-        .unwrap()
-        .into_iter()
-        .collect();
-    scope_paths.sort();
+    let scope_paths = vec!["tracked.txt".to_string()];
 
     let original = CheckpointRequest {
         trace_id: "test-session".to_string(),

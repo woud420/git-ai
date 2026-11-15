@@ -58,8 +58,7 @@ pub fn spawn_global_actor() -> GlobalActorHandle {
         while let Some(msg) = rx.recv().await {
             match msg {
                 GlobalMsg::Apply(cmd, respond_to) => {
-                    let result = reducer::reduce_global_command(&mut state, *cmd, &analyzers)
-                        .map(|(applied, _)| applied);
+                    let result = reducer::reduce_global_command(&mut state, *cmd, &analyzers);
                     let _ = respond_to.send(result);
                 }
                 GlobalMsg::Shutdown => break,
@@ -73,33 +72,15 @@ pub fn spawn_global_actor() -> GlobalActorHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::domain::{CommandScope, Confidence, NormalizedCommand};
+    use crate::model::domain::NormalizedCommand;
+    use crate::operations::daemon::tests_fixtures::normalized_command;
 
     fn global_cmd(seq: u128) -> NormalizedCommand {
         NormalizedCommand {
-            scope: CommandScope::Global,
-            family_key: None,
-            worktree: None,
             root_sid: format!("global-{}", seq),
-            trace_derived: false,
-            raw_argv: vec!["git".to_string(), "help".to_string()],
-            primary_command: Some("help".to_string()),
-            invoked_command: Some("help".to_string()),
-            invoked_args: Vec::new(),
-            observed_child_commands: Vec::new(),
-            index_write: Default::default(),
-            index_v2: false,
-            bisect_checkout: None,
-            exit_code: 0,
             started_at_ns: seq,
             finished_at_ns: seq + 1,
-            reflog_start_offsets: std::collections::HashMap::new(),
-            stash_target_oid: None,
-            cherry_pick_source_oids: Vec::new(),
-            revert_source_oids: Vec::new(),
-            transport_targets: None,
-            ref_changes: Vec::new(),
-            confidence: Confidence::Low,
+            ..normalized_command("help", &["git", "help"])
         }
     }
 

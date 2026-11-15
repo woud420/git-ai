@@ -2072,6 +2072,67 @@ fn test_rtl_directory_path() {
     );
 }
 
+// =============================================================================
+// Rewrites of git-quoted (non-ASCII) paths
+// =============================================================================
+
+#[test]
+fn test_rebase_shifts_ai_lines_in_non_ascii_file() {
+    let repo = TestRepo::new();
+    let path = repo.path().join("é.txt");
+    std::fs::write(&path, "h1\nh2\n").unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    let default_branch = repo.current_branch();
+
+    repo.git(&["checkout", "-b", "feature"]).unwrap();
+    std::fs::write(&path, "h1\nh2\nai1\nai2\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "é.txt"]).unwrap();
+    repo.stage_all_and_commit("AI appends").unwrap();
+
+    repo.git(&["checkout", &default_branch]).unwrap();
+    std::fs::write(&path, "top1\ntop2\nh1\nh2\n").unwrap();
+    repo.stage_all_and_commit("Insert lines above").unwrap();
+
+    repo.git(&["checkout", "feature"]).unwrap();
+    repo.git(&["rebase", &default_branch]).unwrap();
+
+    repo.filename("é.txt").assert_committed_lines(crate::lines![
+        "top1".unattributed_human(),
+        "top2".unattributed_human(),
+        "h1".unattributed_human(),
+        "h2".unattributed_human(),
+        "ai1".ai(),
+        "ai2".ai(),
+    ]);
+}
+
+#[test]
+fn test_rebase_carries_ai_lines_across_non_ascii_rename() {
+    let repo = TestRepo::new();
+    std::fs::write(repo.path().join("é.txt"), "a\nb\nc\n").unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+    let default_branch = repo.current_branch();
+
+    repo.git(&["checkout", "-b", "feature"]).unwrap();
+    std::fs::write(repo.path().join("é.txt"), "a\nb\nc\nai1\n").unwrap();
+    repo.git_ai(&["checkpoint", "mock_ai", "é.txt"]).unwrap();
+    repo.stage_all_and_commit("AI appends").unwrap();
+
+    repo.git(&["checkout", &default_branch]).unwrap();
+    repo.git(&["mv", "é.txt", "ü.txt"]).unwrap();
+    repo.stage_all_and_commit("Rename").unwrap();
+
+    repo.git(&["checkout", "feature"]).unwrap();
+    repo.git(&["rebase", &default_branch]).unwrap();
+
+    repo.filename("ü.txt").assert_committed_lines(crate::lines![
+        "a".unattributed_human(),
+        "b".unattributed_human(),
+        "c".unattributed_human(),
+        "ai1".ai(),
+    ]);
+}
+
 crate::reuse_tests_in_worktree!(
     test_chinese_filename_ai_attribution,
     test_emoji_filename_ai_attribution,

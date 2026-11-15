@@ -90,9 +90,12 @@ pub fn process_trace_connection_line(
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let mut parsed: Value = match serde_json::from_str(trimmed) {
-        Ok(v) => v,
-        Err(_) => return Ok(None),
+    // Trace2 frames are JSON objects. Any other line is ignored like a
+    // malformed one: it cannot carry an ingest sequence, and the ingest worker
+    // shuts the daemon down when it receives a payload without one.
+    let mut parsed = match serde_json::from_str::<Value>(trimmed) {
+        Ok(value) if value.is_object() => value,
+        _ => return Ok(None),
     };
     if parsed.get("event").and_then(Value::as_str)
         == Some(super::socket_health::TRACE_HEALTH_PING_EVENT)

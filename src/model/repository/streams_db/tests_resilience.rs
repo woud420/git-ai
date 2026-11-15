@@ -96,45 +96,6 @@ fn test_record_error_nonexistent_stream() {
 }
 
 #[test]
-fn test_delete_stream() {
-    let (db, _temp) = create_test_db();
-    let stream = create_test_stream("session-1");
-    db.insert_stream(&stream).unwrap();
-
-    // Verify it exists
-    assert!(
-        db.get_stream("session-1", "transcript", "/path/to/transcript.jsonl")
-            .unwrap()
-            .is_some()
-    );
-
-    // Delete it
-    db.delete_stream("session-1", "transcript", "/path/to/transcript.jsonl")
-        .unwrap();
-
-    // Verify it's gone
-    assert!(
-        db.get_stream("session-1", "transcript", "/path/to/transcript.jsonl")
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[test]
-fn test_delete_nonexistent_stream() {
-    let (db, _temp) = create_test_db();
-
-    let result = db.delete_stream("nonexistent", "transcript", "/no/such/path");
-    assert!(result.is_err());
-    match result {
-        Err(StreamError::Fatal { message }) => {
-            assert!(message.contains("Stream not found"));
-        }
-        _ => panic!("Expected Fatal error"),
-    }
-}
-
-#[test]
 fn test_insert_stream_duplicate_fails() {
     let (db, _temp) = create_test_db();
 
@@ -405,32 +366,6 @@ fn test_composite_pk_allows_same_session_id_different_paths() {
         .unwrap();
     assert_eq!(s1.stream_path, "/worktree-a/transcript.jsonl");
     assert_eq!(s2.stream_path, "/worktree-b/transcript.jsonl");
-
-    // Delete one, the other remains
-    db.delete_stream(
-        "colliding-session",
-        "transcript",
-        "/worktree-a/transcript.jsonl",
-    )
-    .unwrap();
-    assert!(
-        db.get_stream(
-            "colliding-session",
-            "transcript",
-            "/worktree-a/transcript.jsonl"
-        )
-        .unwrap()
-        .is_none()
-    );
-    assert!(
-        db.get_stream(
-            "colliding-session",
-            "transcript",
-            "/worktree-b/transcript.jsonl"
-        )
-        .unwrap()
-        .is_some()
-    );
 }
 
 // Verify all_streams() skips rows with unknown enum values (log-and-skip, not abort).

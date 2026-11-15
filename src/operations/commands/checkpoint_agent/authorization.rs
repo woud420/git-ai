@@ -48,10 +48,12 @@ pub enum CheckpointPresetOutcome {
     Denied(CheckpointAuthorizationDenial),
 }
 
+/// Authorizes every event and returns the repository root of each bash
+/// event, keyed by its canonicalized cwd.
 pub(super) fn authorize_events(
     events: &mut [ParsedHookEvent],
     config: &Config,
-) -> Result<(), CheckpointAuthorizationDenial> {
+) -> Result<HashMap<PathBuf, PathBuf>, CheckpointAuthorizationDenial> {
     for count in events.iter().filter_map(event_file_count) {
         validate_checkpoint_file_count(count)?;
     }
@@ -60,13 +62,18 @@ pub(super) fn authorize_events(
     }
 
     let mut checked_repositories = HashSet::new();
+    let mut bash_repo_roots = HashMap::new();
     for event in events {
         match event {
             ParsedHookEvent::PreBashCall(event) => {
-                authorize_bash_cwd(&mut event.context.cwd, config, &mut checked_repositories)?;
+                let root =
+                    authorize_bash_cwd(&mut event.context.cwd, config, &mut checked_repositories)?;
+                bash_repo_roots.insert(event.context.cwd.clone(), root);
             }
             ParsedHookEvent::PostBashCall(event) => {
-                authorize_bash_cwd(&mut event.context.cwd, config, &mut checked_repositories)?;
+                let root =
+                    authorize_bash_cwd(&mut event.context.cwd, config, &mut checked_repositories)?;
+                bash_repo_roots.insert(event.context.cwd.clone(), root);
             }
             ParsedHookEvent::PreFileEdit(event) => {
                 authorize_file_paths(
@@ -106,7 +113,7 @@ pub(super) fn authorize_events(
             }
         }
     }
-    Ok(())
+    Ok(bash_repo_roots)
 }
 
 pub(super) fn validate_checkpoint_file_count(
@@ -133,17 +140,10 @@ pub(super) fn authorize_repository_path(
     path: &Path,
     config: &Config,
 ) -> Result<(), CheckpointAuthorizationDenial> {
-    authorize_repository_workdir(path, config).map(|_| ())
-}
-
-pub(super) fn authorize_repository_workdir(
-    path: &Path,
-    config: &Config,
-) -> Result<PathBuf, CheckpointAuthorizationDenial> {
     if !config.has_allowed_repositories() {
         return Err(CheckpointAuthorizationDenial::NoAllowedRepositories);
     }
-    authorize_path(path, config, &mut HashSet::new())
+    authorize_path(path, config, &mut HashSet::new()).map(|_| ())
 }
 
 fn authorize_file_paths(
@@ -354,25 +354,25 @@ fn authorize_bash_cwd(
     cwd: &mut PathBuf,
     config: &Config,
     checked_repositories: &mut HashSet<PathBuf>,
-) -> Result<(), CheckpointAuthorizationDenial> {
+) -> Result<PathBuf, CheckpointAuthorizationDenial> {
     bind_bash_cwd_with(cwd, &mut |canonical_cwd| {
-        authorize_path(canonical_cwd, config, checked_repositories).map(|_| ())
+        authorize_path(canonical_cwd, config, checked_repositories)
     })
 }
 
-fn bind_bash_cwd_with<Authorize>(
+fn bind_bash_cwd_with<Authorized, Authorize>(
     cwd: &mut PathBuf,
     authorize: &mut Authorize,
-) -> Result<(), CheckpointAuthorizationDenial>
+) -> Result<Authorized, CheckpointAuthorizationDenial>
 where
-    Authorize: FnMut(&Path) -> Result<(), CheckpointAuthorizationDenial>,
+    Authorize: FnMut(&Path) -> Result<Authorized, CheckpointAuthorizationDenial>,
 {
     let canonical_cwd = cwd
         .canonicalize()
         .map_err(|_| CheckpointAuthorizationDenial::RepositoryUnverifiable)?;
-    authorize(&canonical_cwd)?;
+    let authorized = authorize(&canonical_cwd)?;
     *cwd = canonical_cwd;
-    Ok(())
+    Ok(authorized)
 }
 
 fn authorize_path_with_policy<Location, Discover, IsAllowed>(

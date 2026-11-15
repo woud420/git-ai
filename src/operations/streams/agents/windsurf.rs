@@ -5,10 +5,9 @@ use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::file_time_fallback;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Windsurf agent that reads Windsurf JSONL transcript files.
 pub struct WindsurfAgent {
@@ -86,10 +85,6 @@ impl Agent for WindsurfAgent {
         self.batch_size
     }
 
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-    }
-
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
         // Sweep not fully implemented for Windsurf yet — discovery comes from presets
         Ok(Vec::new())
@@ -134,15 +129,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = WindsurfAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_jsonl_line(i: usize) -> String {
         format!(

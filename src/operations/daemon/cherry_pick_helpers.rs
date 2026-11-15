@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::Path;
 
 use crate::clients::git_cli::exec_git;
@@ -13,7 +12,6 @@ use super::{
     is_valid_oid, parsed_invocation_for_normalized_command, rebase_is_control_mode,
     valid_non_zero_ref_change,
 };
-use crate::clients::git_cli::exec_git_stdin;
 use crate::operations::git::repo_state::git_dir_for_worktree;
 
 pub(crate) fn rebase_new_tip_from_command(
@@ -133,8 +131,9 @@ pub(crate) fn cherry_pick_command_has_flag(
     parsed.command_args.iter().any(|arg| arg == flag)
 }
 
-fn cherry_pick_source_is_range(source: &str) -> bool {
-    source.contains("..")
+/// Arguments that make git walk history instead of taking each commit as given.
+fn sequencer_source_is_range(source: &str) -> bool {
+    source.contains("..") || source.starts_with('^')
 }
 
 fn cherry_pick_range_has_omitted_side(source: &str) -> bool {
@@ -152,31 +151,59 @@ pub(crate) fn resolve_cherry_pick_source_args_with_git_in_head_context(
     source_args: &[String],
     head_context: Option<&str>,
 ) -> Result<Vec<String>, GitAiError> {
-    let mut resolved = Vec::new();
-    let mut seen = HashSet::new();
+    resolve_sequencer_source_args_with_git(repo, source_args, head_context, true)
+}
 
-    for source in source_args {
-        let source = head_context
-            .map(|head| rewrite_head_source_arg_for_side_effect(source, head))
-            .unwrap_or_else(|| source.clone());
-        let oids = if cherry_pick_source_is_range(&source) {
-            if cherry_pick_range_has_omitted_side(&source) {
-                Vec::new()
-            } else {
-                resolve_cherry_pick_range_source_with_git(repo, &source)?
-            }
-        } else {
-            resolve_cherry_pick_single_source_with_git(repo, &source)?
-        };
-
-        for oid in oids {
-            if seen.insert(oid.clone()) {
-                resolved.push(oid);
-            }
-        }
+/// Resolve cherry-pick/revert source arguments with one `rev-list`, in the
+/// order git applies them (sequencer.c `prepare_revs`): when any argument is a
+/// range, git walks all arguments together, oldest-first for cherry-pick and
+/// newest-first for revert; otherwise it takes the commits as given.
+fn resolve_sequencer_source_args_with_git(
+    repo: &Repository,
+    source_args: &[String],
+    head_context: Option<&str>,
+    oldest_first: bool,
+) -> Result<Vec<String>, GitAiError> {
+    let sources: Vec<String> = source_args
+        .iter()
+        .map(|source| {
+            head_context
+                .map(|head| rewrite_head_source_arg_for_side_effect(source, head))
+                .unwrap_or_else(|| source.clone())
+        })
+        // An argument starting with `-` (possible after `--`) is not a commit,
+        // range or `^rev`, and rev-list would read it as an option.
+        .filter(|source| !source.starts_with('-') && !cherry_pick_range_has_omitted_side(source))
+        .collect();
+    if sources.is_empty() {
+        return Ok(Vec::new());
     }
 
-    Ok(resolved)
+    let mut args = repo.global_args_for_exec();
+    args.push("rev-list".to_string());
+    if sources
+        .iter()
+        .any(|source| sequencer_source_is_range(source))
+    {
+        if oldest_first {
+            args.push("--reverse".to_string());
+        }
+    } else {
+        // Unresolvable single commits are skipped rather than failing the
+        // whole resolution.
+        args.extend([
+            "--no-walk=unsorted".to_string(),
+            "--ignore-missing".to_string(),
+        ]);
+    }
+    args.extend(sources);
+    let output = exec_git(&args)?;
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| is_valid_oid(line))
+        .map(ToOwned::to_owned)
+        .collect())
 }
 
 fn rewrite_head_source_arg_for_side_effect(source: &str, head_context: &str) -> String {
@@ -215,46 +242,6 @@ fn rewrite_head_source_term_for_side_effect(term: &str, head_context: &str) -> S
         return format!("{head_context}{suffix}");
     }
     term.to_string()
-}
-
-fn resolve_cherry_pick_single_source_with_git(
-    repo: &Repository,
-    source: &str,
-) -> Result<Vec<String>, GitAiError> {
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "cat-file".to_string(),
-        "--batch-check=%(objectname) %(objecttype)".to_string(),
-    ]);
-    let stdin_data = format!("{source}^{{commit}}\n");
-    let output = exec_git_stdin(&args, stdin_data.as_bytes())?;
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut parts = line.split_whitespace();
-            let oid = parts.next()?;
-            (parts.next() == Some("commit") && is_valid_oid(oid)).then(|| oid.to_string())
-        })
-        .collect())
-}
-
-fn resolve_cherry_pick_range_source_with_git(
-    repo: &Repository,
-    source: &str,
-) -> Result<Vec<String>, GitAiError> {
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "rev-list".to_string(),
-        "--reverse".to_string(),
-        source.to_string(),
-    ]);
-    let output = exec_git(&args)?;
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| is_valid_oid(line))
-        .map(ToOwned::to_owned)
-        .collect())
 }
 
 pub(crate) fn resolve_explicit_cherry_pick_sources_for_side_effect(
@@ -298,11 +285,7 @@ pub(crate) fn resolve_explicit_revert_sources_for_side_effect(
         return Ok(Vec::new());
     }
     let original_head = revert_original_head(cmd);
-    resolve_cherry_pick_source_args_with_git_in_head_context(
-        repo,
-        &source_args,
-        original_head.as_deref(),
-    )
+    resolve_sequencer_source_args_with_git(repo, &source_args, original_head.as_deref(), false)
 }
 
 pub(crate) fn cherry_pick_state_exists_for_worktree(worktree: &Path) -> bool {

@@ -105,6 +105,54 @@ fn test_claude_case_insensitive_file_edit_hook_creates_ai_attribution() {
 }
 
 #[test]
+fn test_claude_notebook_edit_hook_creates_ai_attribution() {
+    use crate::repos::test_file::ExpectedLineExt;
+    use crate::repos::test_repo::TestRepo;
+
+    let repo = TestRepo::new();
+    let repo_root = repo.canonical_path();
+    let notebook_path = repo_root.join("analysis.ipynb");
+    fs::write(&notebook_path, "{\n\"cells\": []\n}\n").unwrap();
+    repo.stage_all_and_commit("Initial commit").unwrap();
+
+    let transcript = tempfile::Builder::new()
+        .suffix(".jsonl")
+        .tempfile()
+        .unwrap();
+    fs::write(transcript.path(), "").unwrap();
+    let hook_input = |hook_event_name: &str| {
+        json!({
+            "cwd": repo_root,
+            "hook_event_name": hook_event_name,
+            "session_id": "claude-notebook-session",
+            "tool_name": "NotebookEdit",
+            "tool_use_id": "toolu_notebook_edit",
+            "transcript_path": transcript.path(),
+            "tool_input": {
+                "notebook_path": notebook_path,
+                "new_source": "print(1)",
+            }
+        })
+        .to_string()
+    };
+
+    repo.checkpoint_with_hook_input("claude", &hook_input("PreToolUse"))
+        .unwrap();
+    fs::write(&notebook_path, "{\n\"cells\": [\"print(1)\"]\n}\n").unwrap();
+    repo.checkpoint_with_hook_input("claude", &hook_input("PostToolUse"))
+        .unwrap();
+    repo.stage_all_and_commit("Add Claude notebook edit")
+        .unwrap();
+
+    repo.filename("analysis.ipynb")
+        .assert_committed_lines(crate::lines![
+            "{".unattributed_human(),
+            "\"cells\": [\"print(1)\"]".ai(),
+            "}".unattributed_human(),
+        ]);
+}
+
+#[test]
 fn test_claude_preset_no_filepath_when_tool_input_missing() {
     let hook_input = r##"{
         "cwd": "/Users/svarlamov/projects/testing-git",

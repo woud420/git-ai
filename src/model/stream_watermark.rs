@@ -10,9 +10,6 @@ pub trait WatermarkStrategy: Send + Sync {
     /// Serialize the watermark to a string for database storage.
     fn serialize(&self) -> String;
 
-    /// Advance the watermark based on bytes and records read.
-    fn advance(&mut self, bytes_read: usize, records_read: usize);
-
     /// Downcast support for concrete watermark types.
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -97,10 +94,6 @@ impl WatermarkStrategy for ByteOffsetWatermark {
         self.0.to_string()
     }
 
-    fn advance(&mut self, bytes_read: usize, _records_read: usize) {
-        self.0 += bytes_read as u64;
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -134,10 +127,6 @@ impl WatermarkStrategy for RecordIndexWatermark {
         self.0.to_string()
     }
 
-    fn advance(&mut self, _bytes_read: usize, records_read: usize) {
-        self.0 += records_read as u64;
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -169,11 +158,6 @@ impl TimestampWatermark {
 impl WatermarkStrategy for TimestampWatermark {
     fn serialize(&self) -> String {
         self.0.to_rfc3339()
-    }
-
-    fn advance(&mut self, _bytes_read: usize, _records_read: usize) {
-        // Timestamp watermarks don't auto-advance
-        // They must be explicitly updated based on record timestamps
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -223,10 +207,6 @@ impl TimestampCursorWatermark {
 impl WatermarkStrategy for TimestampCursorWatermark {
     fn serialize(&self) -> String {
         format!("{}|{}", self.timestamp_millis, self.last_id)
-    }
-
-    fn advance(&mut self, _bytes_read: usize, _records_read: usize) {
-        // Must be explicitly updated with new timestamp + cursor
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -280,12 +260,6 @@ impl WatermarkStrategy for HybridWatermark {
             Some(ts) => format!("{}|{}|{}", self.offset, self.record, ts.to_rfc3339()),
             None => format!("{}|{}|", self.offset, self.record),
         }
-    }
-
-    fn advance(&mut self, bytes_read: usize, records_read: usize) {
-        self.offset += bytes_read as u64;
-        self.record += records_read as u64;
-        // Timestamp must be explicitly updated based on record data
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -356,13 +330,6 @@ mod tests {
     }
 
     #[test]
-    fn test_byte_offset_watermark_advance() {
-        let mut wm = ByteOffsetWatermark::new(100);
-        wm.advance(50, 10);
-        assert_eq!(wm.0, 150);
-    }
-
-    #[test]
     fn test_byte_offset_watermark_roundtrip() {
         let original = ByteOffsetWatermark::new(9999);
         let serialized = original.serialize();
@@ -389,13 +356,6 @@ mod tests {
     }
 
     #[test]
-    fn test_record_index_watermark_advance() {
-        let mut wm = RecordIndexWatermark::new(10);
-        wm.advance(1000, 5);
-        assert_eq!(wm.0, 15);
-    }
-
-    #[test]
     fn test_record_index_watermark_roundtrip() {
         let original = RecordIndexWatermark::new(7777);
         let serialized = original.serialize();
@@ -419,17 +379,6 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert_eq!(wm.0, expected);
-    }
-
-    #[test]
-    fn test_timestamp_watermark_advance_noop() {
-        let ts = DateTime::parse_from_rfc3339("2024-01-01T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let mut wm = TimestampWatermark::new(ts);
-        let original_ts = wm.0;
-        wm.advance(100, 10);
-        assert_eq!(wm.0, original_ts); // Should not change
     }
 
     #[test]
@@ -472,14 +421,6 @@ mod tests {
         assert_eq!(wm.offset, 3000);
         assert_eq!(wm.record, 150);
         assert!(wm.timestamp.is_none());
-    }
-
-    #[test]
-    fn test_hybrid_watermark_advance() {
-        let mut wm = HybridWatermark::new(100, 10, None);
-        wm.advance(50, 5);
-        assert_eq!(wm.offset, 150);
-        assert_eq!(wm.record, 15);
     }
 
     #[test]

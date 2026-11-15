@@ -6,10 +6,8 @@ use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::mdm::paths::codex_home_dir;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
 use crate::operations::streams::reader::read_jsonl_byte_stream;
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Codex agent that reads Codex JSONL transcript files.
 pub struct CodexAgent {
@@ -51,7 +49,11 @@ impl CodexAgent {
                 continue;
             }
 
-            let pattern = format!("{}/**/rollout-*{}*.jsonl", search_dir.display(), session_id);
+            let pattern = format!(
+                "{}/**/rollout-*{}*.jsonl",
+                glob::Pattern::escape(&search_dir.to_string_lossy()),
+                glob::Pattern::escape(session_id)
+            );
 
             let entries = glob::glob(&pattern).map_err(|e| StreamError::Fatal {
                 message: format!("Invalid glob pattern for Codex session search: {}", e),
@@ -157,10 +159,6 @@ impl Default for CodexAgent {
 }
 
 impl Agent for CodexAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::session_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,
@@ -186,10 +184,6 @@ impl Agent for CodexAgent {
 
     fn batch_size_hint(&self) -> usize {
         self.batch_size
-    }
-
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
     }
 
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
@@ -219,15 +213,6 @@ impl Agent for CodexAgent {
             "Codex",
             "open",
         )
-    }
-
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
@@ -268,15 +253,6 @@ mod tests {
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, jsonl_fixture,
     };
 
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = CodexAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
-
     fn make_jsonl_line(i: usize) -> String {
         format!(
             r#"{{"type":"response_item","id":{},"payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"msg-{}"}}]}}}}"#,
@@ -300,6 +276,22 @@ mod tests {
             "test",
             StreamAdapterContractCapabilities::APPEND_ALL,
         );
+    }
+
+    #[test]
+    fn test_find_rollout_path_treats_home_and_session_id_literally() {
+        let temp = tempfile::tempdir().unwrap();
+        let codex_home = temp.path().join("home[1]");
+        let rollout_dir = codex_home.join("sessions/2026/02/11");
+        std::fs::create_dir_all(&rollout_dir).unwrap();
+        let rollout = rollout_dir.join("rollout-2026-02-11-sess[a].jsonl");
+        std::fs::write(&rollout, "{}\n").unwrap();
+        std::fs::write(rollout_dir.join("rollout-2026-02-11-sessa.jsonl"), "{}\n").unwrap();
+
+        let found = CodexAgent::find_rollout_path_for_session_in_home("sess[a]", &codex_home)
+            .unwrap()
+            .expect("rollout should be found");
+        assert_eq!(found, rollout);
     }
 
     #[test]

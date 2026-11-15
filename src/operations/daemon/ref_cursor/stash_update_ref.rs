@@ -135,8 +135,8 @@ impl RefCursor {
                 cmd.worktree.as_deref(),
                 &[],
                 ExpectedTransition {
-                    old_oids: [old.clone()].into_iter().collect(),
-                    new_oid: Some(new.clone()),
+                    old_oids: [old].into_iter().collect(),
+                    new_oid: Some(new),
                     messages: HashSet::new(),
                     allow_identity: false,
                 },
@@ -156,9 +156,8 @@ impl RefCursor {
         cmd: &mut NormalizedCommand,
         state: &FamilyState,
     ) -> Result<(), GitAiError> {
-        let args = command_args(cmd);
-        let stash_args = stash_command_args(&args);
-        let kind = stash_kind(stash_args);
+        let stash_args = &stash_args(cmd);
+        let kind = stash_subcommand(stash_args);
 
         if matches!(kind, "apply" | "pop" | "drop" | "branch") {
             let target = if kind == "branch" {
@@ -261,9 +260,8 @@ impl RefCursor {
         if cmd.primary_command.as_deref() != Some("stash") || key != common_key("refs/stash") {
             return Ok(offset);
         }
-        let args = command_args(cmd);
-        let stash_args = stash_command_args(&args);
-        let kind = stash_kind(stash_args);
+        let stash_args = &stash_args(cmd);
+        let kind = stash_subcommand(stash_args);
         if !matches!(kind, "push" | "save") {
             return Ok(offset);
         }
@@ -344,24 +342,16 @@ impl RefCursor {
 
     pub(super) fn apply_stash_ref_entry(&mut self, kind: &str, entry: &CursorEntry) {
         match kind {
-            "push" | "save" => {
-                if valid_non_zero_oid(&entry.new)
-                    && !self.stash_stack.iter().any(|oid| oid == &entry.new)
-                {
-                    self.stash_stack.insert(0, entry.new.clone());
-                }
-            }
+            "push" | "save" => {}
             "pop" | "drop" | "branch" => {
                 if let Some(position) = self.stash_stack.iter().position(|oid| oid == &entry.old) {
                     self.stash_stack.remove(position);
                 }
-                if valid_non_zero_oid(&entry.new)
-                    && !self.stash_stack.iter().any(|oid| oid == &entry.new)
-                {
-                    self.stash_stack.insert(0, entry.new.clone());
-                }
             }
-            _ => {}
+            _ => return,
+        }
+        if valid_non_zero_oid(&entry.new) && !self.stash_stack.iter().any(|oid| oid == &entry.new) {
+            self.stash_stack.insert(0, entry.new.clone());
         }
     }
 
@@ -511,18 +501,6 @@ pub(super) fn direct_update_ref_change_from_argv(spec: &UpdateRefSpec) -> Option
     })
 }
 
-pub(super) fn stash_command_args(args: &[String]) -> &[String] {
-    if args.first().is_some_and(|arg| arg == "stash") {
-        &args[1..]
-    } else {
-        args
-    }
-}
-
-fn stash_kind(stash_args: &[String]) -> &str {
-    stash_args.first().map(String::as_str).unwrap_or("push")
-}
-
 pub(super) fn stash_push_message_from_args(args: &[String], kind: &str) -> Option<String> {
     if kind == "save" {
         let message = args
@@ -535,7 +513,7 @@ pub(super) fn stash_push_message_from_args(args: &[String], kind: &str) -> Optio
         return (!message.is_empty()).then_some(message);
     }
 
-    let mut idx = if kind == "push" { 1 } else { 0 };
+    let mut idx = 0;
     while idx < args.len() {
         match args[idx].as_str() {
             "-m" | "--message" => {

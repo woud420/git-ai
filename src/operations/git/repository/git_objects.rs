@@ -3,7 +3,6 @@
 //! [`CommitRange`], [`Commit`], [`Parents`]) live in the sibling `commits`
 //! module.
 
-use super::commits::Commit;
 use super::core::Repository;
 use crate::clients::git_cli::exec_git;
 use crate::error::GitAiError;
@@ -40,15 +39,6 @@ impl<'a> Tree<'a> {
     // Get the id of the tree
     pub fn id(&self) -> String {
         self.oid.clone()
-    }
-
-    #[allow(dead_code)]
-    #[allow(clippy::should_implement_trait)]
-    pub fn clone(&self) -> Tree<'a> {
-        Tree {
-            repo: self.repo,
-            oid: self.oid.clone(),
-        }
     }
 
     // Retrieve a tree entry contained in a tree or in any of its subtrees, given its relative path.
@@ -125,11 +115,6 @@ pub struct Blob<'a> {
 }
 
 impl<'a> Blob<'a> {
-    #[allow(dead_code)]
-    pub fn id(&self) -> String {
-        self.oid.clone()
-    }
-
     pub fn content(&self) -> Result<Vec<u8>, GitAiError> {
         let reader =
             crate::operations::git::fast_reader::FastObjectReader::new(&self.repo.git_common_dir);
@@ -219,43 +204,6 @@ impl<'a> Reference<'a> {
         args.push(self.ref_name.clone());
         let output = exec_git(&args)?;
         Ok(String::from_utf8(output.stdout)?.trim().to_string())
-    }
-
-    // Peel a reference to a commit This method recursively peels the reference until it reaches a commit.
-    #[allow(dead_code)]
-    pub fn peel_to_commit(&self) -> Result<Commit<'a>, GitAiError> {
-        let mut args = self.repo.global_args_for_exec();
-        args.push("rev-parse".to_string());
-        // args.push("-q".to_string());
-        args.push("--verify".to_string());
-        args.push(format!("{}^{}", self.ref_name, "{commit}"));
-        let output = exec_git(&args)?;
-        Ok(super::commits::make_commit(
-            self.repo,
-            String::from_utf8(output.stdout)?.trim().to_string(),
-        ))
-    }
-}
-
-pub struct References<'a> {
-    repo: &'a Repository,
-    refs: Vec<String>,
-    index: usize,
-}
-
-impl<'a> Iterator for References<'a> {
-    type Item = Result<Reference<'a>, GitAiError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.refs.len() {
-            return None;
-        }
-        let ref_name = self.refs[self.index].clone();
-        self.index += 1;
-        Some(Ok(Reference {
-            repo: self.repo,
-            ref_name,
-        }))
     }
 }
 

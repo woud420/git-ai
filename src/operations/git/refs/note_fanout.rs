@@ -6,22 +6,6 @@ pub fn notes_path_for_object(oid: &str) -> String {
     }
 }
 
-pub fn flat_note_pathspec_for_commit(commit_sha: &str) -> String {
-    flat_note_pathspec_for_ref(super::AI_AUTHORSHIP_FULL_REF, commit_sha)
-}
-
-pub fn fanout_note_pathspec_for_commit(commit_sha: &str) -> String {
-    fanout_note_pathspec_for_ref(super::AI_AUTHORSHIP_FULL_REF, commit_sha)
-}
-
-pub fn flat_note_pathspec_for_ref(notes_ref: &str, commit_sha: &str) -> String {
-    format!("{}:{}", notes_ref, commit_sha)
-}
-
-pub fn fanout_note_pathspec_for_ref(notes_ref: &str, commit_sha: &str) -> String {
-    format!("{}:{}", notes_ref, notes_path_for_object(commit_sha))
-}
-
 pub(super) fn normalize_note_path(path: &mut String) -> Option<usize> {
     let mut component_len = 0;
     let mut fanout_depth = 0;

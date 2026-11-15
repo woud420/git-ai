@@ -18,8 +18,8 @@
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        # Pin the minimum supported Rust 1.93.0 via rust-overlay
-        rustToolchain = pkgs.rust-bin.stable."1.93.0".default.override {
+        # Pin the minimum supported Rust 1.100.0 via rust-overlay
+        rustToolchain = pkgs.rust-bin.stable."1.100.0".default.override {
           extensions = [
             "rust-src"
             "rust-analyzer"

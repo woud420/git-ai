@@ -178,20 +178,15 @@ pub fn remove_fence_block(text: &str) -> FenceRemovalResult {
         // that also remove duplicate blocks in a single pass).
         let mut current: Vec<&str> = lines.clone();
         let mut removed_any = false;
-        loop {
-            let open_idx = current
+        while let Some(oi) = current
+            .iter()
+            .position(|l| l.trim_end_matches('\r') == FENCE_OPEN)
+            && let Some(len) = current[oi..]
                 .iter()
-                .position(|l| l.trim_end_matches('\r') == FENCE_OPEN);
-            let close_idx = current
-                .iter()
-                .position(|l| l.trim_end_matches('\r') == FENCE_CLOSE);
-            match (open_idx, close_idx) {
-                (Some(oi), Some(ci)) if oi < ci => {
-                    current.drain(oi..=ci);
-                    removed_any = true;
-                }
-                _ => break,
-            }
+                .position(|l| l.trim_end_matches('\r') == FENCE_CLOSE)
+        {
+            current.drain(oi..=oi + len);
+            removed_any = true;
         }
         if removed_any {
             return FenceRemovalResult {
@@ -407,6 +402,20 @@ mod tests {
         assert_eq!(
             result.text, content,
             "file with only open marker must be unchanged"
+        );
+    }
+
+    #[test]
+    fn remove_fence_block_ignores_stray_close_before_block() {
+        let content = format!(
+            "{FENCE_CLOSE}\nexport FOO=1\n{}export BAR=2\n",
+            make_fence_block("export PATH=\"$HOME/.git-ai/bin:$PATH\"")
+        );
+        let result = remove_fence_block(&content);
+        assert!(result.removed_fence);
+        assert_eq!(
+            result.text,
+            format!("{FENCE_CLOSE}\nexport FOO=1\nexport BAR=2\n")
         );
     }
 

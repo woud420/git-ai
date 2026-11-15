@@ -35,7 +35,7 @@ fn cold_start_late_ingress_offset_does_not_skip_commit_on_uninitialized_head_cur
     // commit's HEAD entry, with a trailing entry after it (so the offset is
     // NOT at EOF). Cold-start seeding used `command_start_offset_is_authoritative`
     // -> records-exist-after-offset == true -> seed the cursor at the late
-    // offset, positioning it PAST the commit's own entry. find_entry_in_log
+    // offset, positioning it PAST the commit's own entry. The entry finder
     // then reads from the late cursor, never sees the commit -> empty
     // ref_changes -> head_change None -> no CommitCreated -> AI attribution
     // silently lost.

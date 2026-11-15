@@ -2003,3 +2003,49 @@ fn test_update_ref_stdin_head_with_new_content_preserves_attribution() {
 
     assert_note_has_ai_for_file(&repo, &commit_sha, "stdin.txt");
 }
+
+/// `update-ref --stdin` carries no OIDs in argv, so how many of the moved
+/// branches the daemon matches from the reflogs depends on when it ingests
+/// the command (it fails closed for the rest). The bound below therefore has
+/// to hold for any number of matched branches: each of the two update-ref
+/// handlers resolves the repository once, and one resolution is two
+/// `rev-parse` spawns. Resolving per branch needs six or more as soon as two
+/// branches match.
+#[test]
+fn test_update_ref_stdin_resolves_the_repository_once_for_all_moved_branches() {
+    const BRANCH_COUNT: usize = 4;
+    const MAX_REPOSITORY_LOOKUP_SPAWNS: usize = 4;
+
+    let temp = tempfile::tempdir().unwrap();
+    let log_path = temp.path().join("spawns.log");
+    let repo = TestRepo::new_with_daemon_env(&[("GIT_AI_SPAWN_LOG", log_path.to_str().unwrap())]);
+    setup_initial_commit(&repo);
+    let old = head_sha(&repo);
+    fs::write(repo.path().join("next.txt"), "next\n").unwrap();
+    repo.stage_all_and_commit("next commit").unwrap();
+    let new = head_sha(&repo);
+    let mut updates = String::new();
+    for index in 0..BRANCH_COUNT {
+        raw_untraced_git(&repo, &["branch", &format!("moved-{index}"), &old]);
+        updates.push_str(&format!("update refs/heads/moved-{index} {new} {old}\n"));
+    }
+
+    repo.sync_daemon();
+    fs::write(&log_path, "").unwrap();
+    let baseline = repo.daemon_total_completion_count();
+    raw_traced_git_stdin(&repo, &["update-ref", "--stdin"], &updates);
+    repo.wait_for_daemon_total_completion_count(baseline, baseline + 1);
+    // The completion count can advance before the command's side effects
+    // have spawned everything; read the log once the daemon is idle.
+    repo.sync_daemon();
+
+    let commands = fs::read_to_string(&log_path).unwrap();
+    let rev_parse_count = commands
+        .lines()
+        .filter(|command| *command == "rev-parse")
+        .count();
+    assert!(
+        rev_parse_count <= MAX_REPOSITORY_LOOKUP_SPAWNS,
+        "repository lookups must not repeat per moved branch; daemon spawned: {commands:?}"
+    );
+}

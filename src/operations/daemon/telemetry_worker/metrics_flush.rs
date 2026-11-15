@@ -106,33 +106,6 @@ fn store_metric_jsons_in_db_with(
     db_lock.insert_events(event_jsons)
 }
 
-pub(super) fn flush_metrics(events: &[MetricEvent], stores: TelemetryStores) {
-    let (api_base_url, client) = default_api_base_and_client();
-
-    let should_upload = metrics_upload_allowed(&api_base_url, &client);
-    METRICS_UPLOAD_AVAILABLE.store(should_upload, Ordering::Relaxed);
-
-    let mut upload_failed = false;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-
-    for chunk in events.chunks(MAX_METRICS_PER_ENVELOPE) {
-        if let Err(e) = store_metrics_in_db_with(Ok(stores.metrics), chunk) {
-            tracing::warn!(%e, "telemetry: failed to persist metrics before upload");
-            continue;
-        }
-
-        if should_upload && !upload_failed && std::time::Instant::now() < deadline {
-            match flush_pending_metrics_from_db(&client, deadline, stores) {
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(%e, "telemetry: failed to upload pending metrics");
-                    upload_failed = true;
-                }
-            }
-        }
-    }
-}
-
 pub(super) fn flush_pending_metrics(stores: TelemetryStores) {
     let (api_base_url, client) = default_api_base_and_client();
 

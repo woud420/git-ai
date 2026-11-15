@@ -24,7 +24,7 @@ pub(crate) fn scan_jsonl(
     path: &Path,
     extract_from_line: fn(&str) -> Option<String>,
 ) -> Result<Option<String>, StreamError> {
-    let (value, tail_was_truncated) = scan_jsonl_tail(path, extract_from_line)?;
+    let (value, tail_was_truncated) = scan_jsonl_tail(path, extract_from_line);
     if value.is_some() {
         return Ok(value);
     }
@@ -40,31 +40,31 @@ pub(crate) fn scan_jsonl(
 fn scan_jsonl_tail(
     path: &Path,
     extract_from_line: fn(&str) -> Option<String>,
-) -> Result<(Option<String>, bool), StreamError> {
+) -> (Option<String>, bool) {
     let mut file = match File::open(path) {
         Ok(f) => f,
-        Err(_) => return Ok((None, false)),
+        Err(_) => return (None, false),
     };
 
     let file_size = match file.metadata() {
         Ok(m) => m.len(),
-        Err(_) => return Ok((None, false)),
+        Err(_) => return (None, false),
     };
 
     if file_size == 0 {
-        return Ok((None, false));
+        return (None, false);
     }
 
     let read_size = std::cmp::min(MAX_JSONL_SCAN_BYTES, file_size);
     let seek_pos = file_size - read_size;
 
     if file.seek(SeekFrom::Start(seek_pos)).is_err() {
-        return Ok((None, false));
+        return (None, false);
     }
 
     let mut window = Vec::with_capacity(read_size as usize);
     if file.take(read_size).read_to_end(&mut window).is_err() {
-        return Ok((None, false));
+        return (None, false);
     }
 
     // A truncated window usually starts mid-line — possibly mid-way through a
@@ -73,7 +73,7 @@ fn scan_jsonl_tail(
     let window = if seek_pos > 0 {
         match window.iter().position(|byte| *byte == b'\n') {
             Some(first_newline) => &window[first_newline + 1..],
-            None => return Ok((None, true)),
+            None => return (None, true),
         }
     } else {
         &window[..]
@@ -84,11 +84,11 @@ fn scan_jsonl_tail(
             continue;
         };
         if let Some(value) = extract_from_line(line) {
-            return Ok((Some(value), seek_pos > 0));
+            return (Some(value), seek_pos > 0);
         }
     }
 
-    Ok((None, seek_pos > 0))
+    (None, seek_pos > 0)
 }
 
 /// Scans up to `MAX_JSONL_HEAD_LINES` leading lines within a
@@ -171,7 +171,7 @@ mod tests {
         }
         file.flush().unwrap();
 
-        let (model, truncated) = scan_jsonl_tail(file.path(), take_model).unwrap();
+        let (model, truncated) = scan_jsonl_tail(file.path(), take_model);
         assert_eq!(model, None);
         assert!(
             truncated,
@@ -197,7 +197,7 @@ mod tests {
             "window must start mid-character for this fixture"
         );
 
-        let (model, truncated) = scan_jsonl_tail(file.path(), take_model).unwrap();
+        let (model, truncated) = scan_jsonl_tail(file.path(), take_model);
         assert_eq!(model, Some("tail-model".to_string()));
         assert!(truncated);
     }
@@ -208,7 +208,7 @@ mod tests {
         writeln!(file, r#"{{"model":"small-file-model"}}"#).unwrap();
         file.flush().unwrap();
 
-        let (model, truncated) = scan_jsonl_tail(file.path(), take_model).unwrap();
+        let (model, truncated) = scan_jsonl_tail(file.path(), take_model);
         assert_eq!(model, Some("small-file-model".to_string()));
         assert!(!truncated);
     }

@@ -68,7 +68,7 @@ impl AttributionTracker {
                         new_content,
                         &mut computation,
                         is_ai_checkpoint,
-                    )?;
+                    );
                     pending_changed.clear();
                 }
 
@@ -87,7 +87,7 @@ impl AttributionTracker {
                 new_content,
                 &mut computation,
                 is_ai_checkpoint,
-            )?;
+            );
         }
 
         computation.substantive_new_ranges = merge_ranges(computation.substantive_new_ranges);
@@ -141,9 +141,9 @@ impl AttributionTracker {
         new_content: &'a str,
         computation: &mut DiffComputation<'a>,
         is_ai_checkpoint: bool,
-    ) -> Result<(), GitAiError> {
+    ) {
         if ops.is_empty() {
-            return Ok(());
+            return;
         }
 
         let (old_start_line, old_end_line) = hunk_line_bounds(ops, true);
@@ -173,7 +173,7 @@ impl AttributionTracker {
                 (new_start, new_end),
                 true,
             );
-            return Ok(());
+            return;
         }
 
         if should_use_line_aligned_hunk_diff(
@@ -198,7 +198,7 @@ impl AttributionTracker {
                     .substantive_new_ranges
                     .push((new_start, new_end));
             }
-            return Ok(());
+            return;
         }
 
         let (mut hunk_diffs, substantive_ranges) = build_token_aligned_diffs(
@@ -212,8 +212,6 @@ impl AttributionTracker {
         computation
             .substantive_new_ranges
             .extend(substantive_ranges);
-
-        Ok(())
     }
 
     pub(super) fn build_diff_catalog(

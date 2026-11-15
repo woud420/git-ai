@@ -1,6 +1,5 @@
 // Existing Generic diagnostics reach persisted daemon errors; their Display
 // text remains byte-stable when changing reset handling.
-#[allow(unused_imports)]
 use super::*;
 use crate::error::GitAiError;
 use crate::model::domain::RewriteEvent;
@@ -218,8 +217,6 @@ impl ActorDaemonCoordinator {
     }
 
     pub(crate) fn handle_bisect(
-        &self,
-        family: Option<&str>,
         cmd: &crate::model::domain::NormalizedCommand,
     ) -> Result<(), GitAiError> {
         let (old_head, new_head) = Self::resolve_heads_for_command(cmd);
@@ -233,40 +230,7 @@ impl ActorDaemonCoordinator {
         if !repo.is_collection_allowed(&crate::config::Config::fresh()) {
             return Ok(());
         }
-        let family = family
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| family_key_for_repository(&repo));
-        self.record_recent_replay_prerequisite(
-            &family,
-            RecentReplayPrerequisite::CheckoutSwitchRename {
-                target_head: new_head.clone(),
-                old_head: old_head.clone(),
-            },
-        )?;
         repo.storage.rename_working_log(&old_head, &new_head)
-    }
-
-    /// For checkout/switch: record a recent-replay prerequisite and migrate the
-    /// working log to the new HEAD.
-    pub(crate) fn handle_checkout_switch(
-        &self,
-        family: Option<&str>,
-        cmd: &crate::model::domain::NormalizedCommand,
-    ) -> Result<(), GitAiError> {
-        if let Some(prerequisite) = recent_checkout_switch_prerequisite_from_command(cmd) {
-            let family = family.map(ToOwned::to_owned).or_else(|| {
-                cmd.worktree.as_ref().and_then(|worktree| {
-                    find_repository_in_path(&worktree.to_string_lossy())
-                        .ok()
-                        .map(|repo| family_key_for_repository(&repo))
-                })
-            });
-            if let Some(family) = family {
-                self.record_recent_replay_prerequisite(&family, prerequisite)?;
-            }
-        }
-        apply_checkout_switch_working_log_side_effect(cmd)?;
-        Ok(())
     }
 
     /// For pull events whose HEAD moved fast-forward, migrate the working log
@@ -282,12 +246,8 @@ impl ActorDaemonCoordinator {
             return Ok(());
         }
         let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-        if repo_is_ancestor(&repo, &old_head, &new_head) {
-            apply_pull_fast_forward_working_log_side_effect(
-                &worktree.to_string_lossy(),
-                &old_head,
-                &new_head,
-            )?;
+        if is_ancestor_commit(&repo, &old_head, &new_head) {
+            repo.storage.rename_working_log(&old_head, &new_head)?;
         }
         Ok(())
     }
@@ -301,6 +261,7 @@ impl ActorDaemonCoordinator {
         let Some(worktree) = cmd.worktree.as_ref() else {
             return Ok(());
         };
+        let mut repo = None;
         for event in events {
             let crate::model::domain::SemanticEvent::RefUpdated {
                 reference,
@@ -317,8 +278,12 @@ impl ActorDaemonCoordinator {
             {
                 continue;
             }
-            let repo = find_repository_in_path(&worktree.to_string_lossy())?;
-            if repo_is_ancestor(&repo, old, new) {
+            // Resolved once (a rev-parse spawn), and only if some ref qualifies.
+            let repo = match repo {
+                Some(ref repo) => repo,
+                None => &*repo.insert(find_repository_in_path(&worktree.to_string_lossy())?),
+            };
+            if is_ancestor_commit(repo, old, new) {
                 let affects_checked_out_branch = reference == "HEAD"
                     || cmd.ref_changes.iter().any(|change| {
                         change.reference == "HEAD" && change.old == *old && change.new == *new
@@ -326,19 +291,21 @@ impl ActorDaemonCoordinator {
                 if affects_checked_out_branch {
                     if repo.storage.has_working_log(old) {
                         let author = repo.effective_author_identity().formatted_or_unknown();
-                        crate::operations::authorship::post_commit::post_commit_from_working_log(
-                            &repo,
+                        crate::operations::authorship::post_commit::post_commit_from_working_log_with_recovery_timestamps(
+                            repo,
                             Some(old.to_string()),
                             new.to_string(),
                             author,
                             true,
+                            None,
+                            None,
                         )?;
                     }
                     repo.storage.rename_working_log(old, new)?;
                 }
             } else {
                 crate::operations::authorship::rewrite::handle_rewrite_event(
-                    &repo,
+                    repo,
                     RewriteEvent::NonFastForward {
                         old_tip: old.to_string(),
                         new_tip: new.to_string(),

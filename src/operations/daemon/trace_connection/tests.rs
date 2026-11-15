@@ -56,3 +56,27 @@ async fn worker_read_error_releases_its_existing_root_registration() {
     assert!(!coordinator.is_shutting_down());
     coordinator.request_shutdown();
 }
+
+#[tokio::test]
+async fn non_object_json_lines_are_ignored_without_stopping_the_daemon() {
+    let coordinator = Arc::new(ActorDaemonCoordinator::new());
+    coordinator.start_trace_ingest_worker().unwrap();
+    let mut roots = BTreeMap::new();
+    for line in ["[]", "42", "\"x\"", "null", "true"] {
+        assert!(
+            process_trace_connection_line(line, coordinator.clone(), &mut roots)
+                .unwrap()
+                .is_none(),
+            "{line} is not a trace frame"
+        );
+    }
+    // A frame without an ingest sequence would stop the worker, so prove it
+    // still drains a real frame queued behind the ignored lines.
+    coordinator
+        .enqueue_trace_payload(serde_json::json!({"event": "version", "sid": "root"}))
+        .unwrap();
+    coordinator.wait_for_trace_ingest_processed_through().await;
+    assert!(!coordinator.is_shutting_down());
+    assert!(roots.is_empty());
+    coordinator.request_shutdown();
+}

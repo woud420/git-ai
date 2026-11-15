@@ -131,6 +131,22 @@ impl StreamWorker {
                     &stream.stream_path,
                     batch.new_watermark.as_ref(),
                 )?;
+                // Record what was stat'ed before reading: bytes appended since
+                // then, or left unread by a shutdown, keep the file stale for the sweep.
+                if let Some(metadata) = &file_meta {
+                    let modified = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| Utc.timestamp_opt(d.as_secs() as i64, 0).unwrap());
+                    db.update_file_metadata(
+                        &stream.session_id,
+                        &task.stream_kind,
+                        &stream.stream_path,
+                        metadata.len(),
+                        modified,
+                    )?;
+                }
                 break;
             }
 
@@ -218,22 +234,6 @@ impl StreamWorker {
                 batch.new_watermark.as_ref(),
             )?;
             current_watermark = batch.new_watermark;
-        }
-
-        if let Ok(metadata) = std::fs::metadata(&stream.stream_path) {
-            let file_size = metadata.len();
-            let modified = metadata
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| Utc.timestamp_opt(d.as_secs() as i64, 0).unwrap());
-            db.update_file_metadata(
-                &stream.session_id,
-                &task.stream_kind,
-                &stream.stream_path,
-                file_size,
-                modified,
-            )?;
         }
 
         tracing::debug!(

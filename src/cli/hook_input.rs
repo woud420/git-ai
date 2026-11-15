@@ -61,12 +61,12 @@ fn likely_utf16_endian(bytes: &[u8]) -> Option<Utf16Endian> {
 }
 
 fn decode_utf16_hook_input(bytes: &[u8], endian: Utf16Endian) -> Result<String, String> {
-    let chunks = bytes.chunks_exact(2);
-    if !chunks.remainder().is_empty() {
+    let (chunks, remainder) = bytes.as_chunks::<2>();
+    if !remainder.is_empty() {
         return Err("UTF-16 hook input has an odd byte length".to_string());
     }
 
-    let code_units = chunks.map(|chunk| match endian {
+    let code_units = chunks.iter().map(|chunk| match endian {
         Utf16Endian::Little => u16::from_le_bytes([chunk[0], chunk[1]]),
         Utf16Endian::Big => u16::from_be_bytes([chunk[0], chunk[1]]),
     });

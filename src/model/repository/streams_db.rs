@@ -150,26 +150,13 @@ pub struct StreamsDatabase {
 impl StreamsDatabase {
     /// Open or create the transcripts database at the given path.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StreamError> {
-        let conn = crate::model::repository::sqlite::open_with_memory_limits(path.as_ref())
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to open database: {}", e),
-            })?;
-
-        // Enable WAL mode for better concurrency and crash resistance
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to enable WAL mode: {}", e),
-            })?;
-
-        // Performance optimizations
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to set synchronous mode: {}", e),
-            })?;
-        conn.pragma_update(None, "temp_store", "MEMORY")
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to set temp store: {}", e),
-            })?;
+        // WAL journal, synchronous=NORMAL and an in-memory temp store, like
+        // the other writable stores.
+        let conn =
+            crate::model::repository::sqlite::open_writable_with_memory_limits(path.as_ref())
+                .map_err(|e| StreamError::Fatal {
+                    message: format!("Failed to open database: {}", e),
+                })?;
 
         let db = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -328,27 +315,18 @@ impl StreamsDatabase {
         })
     }
 
-    /// Update the watermark for a stream.
-    pub fn update_watermark(
+    /// Run an `UPDATE tracked_streams` that must hit `session_id`'s row.
+    /// `action` completes the "Failed to …" text of a SQLite error.
+    fn update_stream(
         &self,
+        action: &str,
         session_id: &str,
-        stream_kind: &str,
-        stream_path: &str,
-        watermark: &dyn WatermarkStrategy,
+        sql: &str,
+        params: impl rusqlite::Params,
     ) -> Result<(), StreamError> {
         let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
-        let now = Utc::now().timestamp();
-        let watermark_value = watermark.serialize();
-        let cursor_type = watermark
-            .as_any()
-            .is::<crate::model::stream_watermark::TimestampCursorWatermark>();
-
-        let rows_changed = conn.execute(
-            "UPDATE tracked_streams SET watermark_value = ?1, last_processed_at = ?2, watermark_type = CASE WHEN ?6 AND stream_format = 'OpenCodeSqlite' THEN 'TimestampCursor' ELSE watermark_type END WHERE session_id = ?3 AND stream_kind = ?4 AND stream_path = ?5",
-            params![watermark_value, now, session_id, stream_kind, stream_path, cursor_type],
-        )
-        .map_err(|e| StreamError::Fatal {
-            message: format!("Failed to update watermark: {}", e),
+        let rows_changed = conn.execute(sql, params).map_err(|e| StreamError::Fatal {
+            message: format!("Failed to {}: {}", action, e),
         })?;
 
         if rows_changed == 0 {
@@ -358,6 +336,27 @@ impl StreamsDatabase {
         }
 
         Ok(())
+    }
+
+    /// Update the watermark for a stream.
+    pub fn update_watermark(
+        &self,
+        session_id: &str,
+        stream_kind: &str,
+        stream_path: &str,
+        watermark: &dyn WatermarkStrategy,
+    ) -> Result<(), StreamError> {
+        let now = Utc::now().timestamp();
+        let watermark_value = watermark.serialize();
+        let cursor_type = watermark
+            .as_any()
+            .is::<crate::model::stream_watermark::TimestampCursorWatermark>();
+        self.update_stream(
+            "update watermark",
+            session_id,
+            "UPDATE tracked_streams SET watermark_value = ?1, last_processed_at = ?2, watermark_type = CASE WHEN ?6 AND stream_format = 'OpenCodeSqlite' THEN 'TimestampCursor' ELSE watermark_type END WHERE session_id = ?3 AND stream_kind = ?4 AND stream_path = ?5",
+            params![watermark_value, now, session_id, stream_kind, stream_path, cursor_type],
+        )
     }
 
     /// Update file metadata (size and modified time) for a stream.
@@ -369,24 +368,13 @@ impl StreamsDatabase {
         file_size: u64,
         modified: Option<DateTime<Utc>>,
     ) -> Result<(), StreamError> {
-        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
         let modified_ts = modified.map(|dt| dt.timestamp());
-
-        let rows_changed = conn.execute(
+        self.update_stream(
+            "update file metadata",
+            session_id,
             "UPDATE tracked_streams SET last_known_size = ?1, last_modified = ?2 WHERE session_id = ?3 AND stream_kind = ?4 AND stream_path = ?5",
             params![file_size as i64, modified_ts, session_id, stream_kind, stream_path],
         )
-        .map_err(|e| StreamError::Fatal {
-            message: format!("Failed to update file metadata: {}", e),
-        })?;
-
-        if rows_changed == 0 {
-            return Err(StreamError::Fatal {
-                message: format!("Stream not found: {}", session_id),
-            });
-        }
-
-        Ok(())
     }
 
     /// Update the repo_work_dir for a stream.
@@ -397,24 +385,12 @@ impl StreamsDatabase {
         stream_path: &str,
         repo_work_dir: &str,
     ) -> Result<(), StreamError> {
-        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
-
-        let rows_changed = conn
-            .execute(
-                "UPDATE tracked_streams SET repo_work_dir = ?1 WHERE session_id = ?2 AND stream_kind = ?3 AND stream_path = ?4",
-                params![repo_work_dir, session_id, stream_kind, stream_path],
-            )
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to update repo_work_dir: {}", e),
-            })?;
-
-        if rows_changed == 0 {
-            return Err(StreamError::Fatal {
-                message: format!("Stream not found: {}", session_id),
-            });
-        }
-
-        Ok(())
+        self.update_stream(
+            "update repo_work_dir",
+            session_id,
+            "UPDATE tracked_streams SET repo_work_dir = ?1 WHERE session_id = ?2 AND stream_kind = ?3 AND stream_path = ?4",
+            params![repo_work_dir, session_id, stream_kind, stream_path],
+        )
     }
 
     /// Record an error for a stream.
@@ -425,50 +401,12 @@ impl StreamsDatabase {
         stream_path: &str,
         error_message: &str,
     ) -> Result<(), StreamError> {
-        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
-
-        let rows_changed = conn.execute(
+        self.update_stream(
+            "record error",
+            session_id,
             "UPDATE tracked_streams SET processing_errors = processing_errors + 1, last_error = ?1 WHERE session_id = ?2 AND stream_kind = ?3 AND stream_path = ?4",
             params![error_message, session_id, stream_kind, stream_path],
         )
-        .map_err(|e| StreamError::Fatal {
-            message: format!("Failed to record error: {}", e),
-        })?;
-
-        if rows_changed == 0 {
-            return Err(StreamError::Fatal {
-                message: format!("Stream not found: {}", session_id),
-            });
-        }
-
-        Ok(())
-    }
-
-    /// Delete a stream and its associated data.
-    pub fn delete_stream(
-        &self,
-        session_id: &str,
-        stream_kind: &str,
-        stream_path: &str,
-    ) -> Result<(), StreamError> {
-        let conn = crate::model::repository::sqlite::poisoned_lock(&self.conn);
-
-        let rows_changed = conn
-            .execute(
-                "DELETE FROM tracked_streams WHERE session_id = ?1 AND stream_kind = ?2 AND stream_path = ?3",
-                params![session_id, stream_kind, stream_path],
-            )
-            .map_err(|e| StreamError::Fatal {
-                message: format!("Failed to delete stream: {}", e),
-            })?;
-
-        if rows_changed == 0 {
-            return Err(StreamError::Fatal {
-                message: format!("Stream not found: {}", session_id),
-            });
-        }
-
-        Ok(())
     }
 
     /// Get all stream records.

@@ -35,7 +35,7 @@ pub fn stash_base_head(repo: &Repository, stash_sha: &str) -> Option<String> {
     repo.find_commit(stash_sha.to_string())
         .ok()
         .and_then(|commit| commit.parent(0).ok())
-        .map(|parent| parent.id().to_string())
+        .map(|parent| parent.id())
 }
 
 pub(crate) fn commit_parent_pairs_from_log(log_output: &str) -> Vec<(String, String)> {
@@ -251,32 +251,22 @@ pub fn apply_checkpoint_side_effect(mut request: CheckpointRequest) -> Result<()
     }
 
     let repo_work_dir = &request.files[0].repo_work_dir;
-    let repo = match discover_repository_in_path_no_git_exec(repo_work_dir) {
-        Ok(repo) => repo,
-        Err(e) => {
-            if request.checkpoint_kind.is_ai()
-                && let Some(ref agent_id) = request.agent_id
-                && crate::operations::daemon::checkpoint::should_emit_agent_usage(agent_id)
-            {
-                let attrs =
-                    crate::operations::daemon::checkpoint::build_agent_usage_attrs(None, agent_id);
-                let values = crate::metrics::AgentUsageValues::new();
-                crate::metrics::record(values, attrs);
-            }
-            return Err(e);
-        }
-    };
-    let author = repo.effective_author_identity().formatted_or_unknown();
+    let repo = discover_repository_in_path_no_git_exec(repo_work_dir);
 
+    // Agent usage is recorded even when the repository cannot be resolved.
     if request.checkpoint_kind.is_ai()
         && let Some(ref agent_id) = request.agent_id
         && crate::operations::daemon::checkpoint::should_emit_agent_usage(agent_id)
     {
-        let attrs =
-            crate::operations::daemon::checkpoint::build_agent_usage_attrs(Some(&repo), agent_id);
+        let attrs = crate::operations::daemon::checkpoint::build_agent_usage_attrs(
+            repo.as_ref().ok(),
+            agent_id,
+        );
         let values = crate::metrics::AgentUsageValues::new();
         crate::metrics::record(values, attrs);
     }
+    let repo = repo?;
+    let author = repo.effective_author_identity().formatted_or_unknown();
 
     let resolved = resolve_checkpoint_request(&repo, &mut request)?;
     let Some(resolved) = resolved else {

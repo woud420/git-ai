@@ -64,41 +64,6 @@ impl LineAttribution {
             overrode,
         }
     }
-
-    /// Returns the number of lines this attribution covers
-    #[allow(dead_code)]
-    pub fn line_count(&self) -> u32 {
-        if self.start_line > self.end_line {
-            0
-        } else {
-            self.end_line - self.start_line + 1
-        }
-    }
-
-    /// Checks if this line attribution is empty
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.start_line > self.end_line
-    }
-
-    /// Checks if this attribution overlaps with a given line range (inclusive)
-    #[allow(dead_code)]
-    pub fn overlaps(&self, start_line: u32, end_line: u32) -> bool {
-        self.start_line <= end_line && self.end_line >= start_line
-    }
-
-    /// Returns the overlapping portion of this attribution with a given line range
-    #[allow(dead_code)]
-    pub fn intersection(&self, start_line: u32, end_line: u32) -> Option<(u32, u32)> {
-        let overlap_start = self.start_line.max(start_line);
-        let overlap_end = self.end_line.min(end_line);
-
-        if overlap_start <= overlap_end {
-            Some((overlap_start, overlap_end))
-        } else {
-            None
-        }
-    }
 }
 
 impl Attribution {

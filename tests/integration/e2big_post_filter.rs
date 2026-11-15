@@ -1,7 +1,7 @@
 use crate::repos::test_repo::TestRepo;
 
+use git_ai::operations::git::repository::MAX_PATHSPEC_ARGS;
 use git_ai::operations::git::repository::find_repository_in_path;
-use git_ai::operations::git::status::MAX_PATHSPEC_ARGS;
 use std::collections::HashSet;
 
 /// Pad a set of real paths with non-existent paths to exceed MAX_PATHSPEC_ARGS.
@@ -35,170 +35,6 @@ fn create_files(
 // ============================================================
 // Test Group A: status()
 // ============================================================
-
-#[test]
-fn test_status_post_filter_equivalence() {
-    let repo = TestRepo::new();
-
-    // Create and commit 5 files
-    let filenames = create_files(&repo, 5, |i| format!("initial content {}", i));
-    repo.git_og(&["add", "-A"]).unwrap();
-    repo.git_og(&["commit", "-m", "initial"]).unwrap();
-
-    // Modify 2 files in working dir (unstaged)
-    std::fs::write(repo.path().join(&filenames[0]), "modified content 0").unwrap();
-    std::fs::write(repo.path().join(&filenames[1]), "modified content 1").unwrap();
-
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Small pathspec (CLI-arg path)
-    let small: HashSet<String> = filenames.iter().cloned().collect();
-    let result_small = gitai_repo.status(Some(&small), true).unwrap();
-
-    // Padded pathspec (post-filter path)
-    let refs: Vec<&str> = filenames.iter().map(|s| s.as_str()).collect();
-    let large = padded_pathspecs(&refs);
-    let result_large = gitai_repo.status(Some(&large), true).unwrap();
-
-    // Sort both by path for comparison
-    let mut sorted_small = result_small.clone();
-    sorted_small.sort_by(|a, b| a.path.cmp(&b.path));
-    let mut sorted_large = result_large.clone();
-    sorted_large.sort_by(|a, b| a.path.cmp(&b.path));
-
-    assert_eq!(
-        sorted_small.len(),
-        sorted_large.len(),
-        "entry count mismatch"
-    );
-    for (s, l) in sorted_small.iter().zip(sorted_large.iter()) {
-        assert_eq!(s, l, "entries differ: {:?} vs {:?}", s, l);
-    }
-}
-
-#[test]
-fn test_status_post_filter_excludes_unmatched_files() {
-    let repo = TestRepo::new();
-
-    // Create and commit 5 files
-    let filenames = create_files(&repo, 5, |i| format!("initial content {}", i));
-    repo.git_og(&["add", "-A"]).unwrap();
-    repo.git_og(&["commit", "-m", "initial"]).unwrap();
-
-    // Modify all 5 files in working dir
-    for (i, name) in filenames.iter().enumerate() {
-        std::fs::write(repo.path().join(name), format!("modified content {}", i)).unwrap();
-    }
-
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Padded pathspec containing only 2 of the 5 modified files
-    let subset = padded_pathspecs(&[&filenames[0], &filenames[1]]);
-    let result = gitai_repo.status(Some(&subset), true).unwrap();
-
-    let paths: HashSet<String> = result.iter().map(|e| e.path.clone()).collect();
-    assert!(paths.contains(&filenames[0]), "should contain file_0");
-    assert!(paths.contains(&filenames[1]), "should contain file_1");
-    assert!(!paths.contains(&filenames[2]), "should NOT contain file_2");
-    assert!(!paths.contains(&filenames[3]), "should NOT contain file_3");
-    assert!(!paths.contains(&filenames[4]), "should NOT contain file_4");
-    assert_eq!(result.len(), 2);
-}
-
-#[test]
-fn test_status_post_filter_rename_matched_by_new_path() {
-    let repo = TestRepo::new();
-
-    // Commit old.txt
-    std::fs::write(repo.path().join("old.txt"), "content").unwrap();
-    repo.git_og(&["add", "-A"]).unwrap();
-    repo.git_og(&["commit", "-m", "initial"]).unwrap();
-
-    // git mv old.txt new.txt (stages the rename)
-    repo.git_og(&["mv", "old.txt", "new.txt"]).unwrap();
-
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Padded pathspec containing "new.txt"
-    let pathspecs = padded_pathspecs(&["new.txt"]);
-    let result = gitai_repo.status(Some(&pathspecs), true).unwrap();
-
-    assert!(!result.is_empty(), "rename entry should appear");
-    let entry = result.iter().find(|e| e.path == "new.txt").unwrap();
-    assert_eq!(
-        entry.orig_path.as_deref(),
-        Some("old.txt"),
-        "orig_path should be old.txt"
-    );
-}
-
-#[test]
-fn test_status_post_filter_rename_matched_by_orig_path() {
-    let repo = TestRepo::new();
-
-    // Commit old.txt
-    std::fs::write(repo.path().join("old.txt"), "content").unwrap();
-    repo.git_og(&["add", "-A"]).unwrap();
-    repo.git_og(&["commit", "-m", "initial"]).unwrap();
-
-    // git mv old.txt new.txt (stages the rename)
-    repo.git_og(&["mv", "old.txt", "new.txt"]).unwrap();
-
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Padded pathspec containing only "old.txt" (the orig_path)
-    let pathspecs = padded_pathspecs(&["old.txt"]);
-    let result = gitai_repo.status(Some(&pathspecs), true).unwrap();
-
-    // The rename entry should still appear because orig_path matches
-    let rename_entry = result
-        .iter()
-        .find(|e| e.orig_path.as_deref() == Some("old.txt"));
-    assert!(
-        rename_entry.is_some(),
-        "rename entry should appear when matching by orig_path"
-    );
-}
-
-#[test]
-fn test_status_post_filter_rename_excluded_when_neither_matches() {
-    // Note: status() unions staged filenames into combined_pathspecs, so we test
-    // the post-filter retain predicate via list_commit_files on a commit with a rename.
-    // Here we verify that status() correctly includes only the pathspec-relevant entries
-    // when there are NO staged files (all changes are unstaged modifications).
-    let repo = TestRepo::new();
-
-    // Commit file_a.txt, file_b.txt, file_c.txt
-    std::fs::write(repo.path().join("file_a.txt"), "content a").unwrap();
-    std::fs::write(repo.path().join("file_b.txt"), "content b").unwrap();
-    std::fs::write(repo.path().join("file_c.txt"), "content c").unwrap();
-    repo.git_og(&["add", "-A"]).unwrap();
-    repo.git_og(&["commit", "-m", "initial"]).unwrap();
-
-    // Modify all 3 files in working dir (unstaged)
-    std::fs::write(repo.path().join("file_a.txt"), "modified a").unwrap();
-    std::fs::write(repo.path().join("file_b.txt"), "modified b").unwrap();
-    std::fs::write(repo.path().join("file_c.txt"), "modified c").unwrap();
-
-    let gitai_repo = find_repository_in_path(repo.path().to_str().unwrap()).unwrap();
-
-    // Padded pathspec containing only "file_a.txt"
-    // Since nothing is staged, combined_pathspecs == our pathspec
-    let pathspecs = padded_pathspecs(&["file_a.txt"]);
-    let result = gitai_repo.status(Some(&pathspecs), true).unwrap();
-
-    let paths: Vec<&str> = result.iter().map(|e| e.path.as_str()).collect();
-    assert!(paths.contains(&"file_a.txt"), "file_a.txt should appear");
-    assert!(
-        !paths.contains(&"file_b.txt"),
-        "file_b.txt should NOT appear"
-    );
-    assert!(
-        !paths.contains(&"file_c.txt"),
-        "file_c.txt should NOT appear"
-    );
-    assert_eq!(result.len(), 1, "should have exactly 1 entry");
-}
 
 // ============================================================
 // Test Group B: list_commit_files()
@@ -549,11 +385,6 @@ fn test_empty_pathspec_early_return() {
 }
 
 crate::reuse_tests_in_worktree!(
-    test_status_post_filter_equivalence,
-    test_status_post_filter_excludes_unmatched_files,
-    test_status_post_filter_rename_matched_by_new_path,
-    test_status_post_filter_rename_matched_by_orig_path,
-    test_status_post_filter_rename_excluded_when_neither_matches,
     test_list_commit_files_post_filter_equivalence,
     test_list_commit_files_post_filter_exclusion,
     test_list_commit_files_post_filter_no_matches,

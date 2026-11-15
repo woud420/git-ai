@@ -1,3 +1,4 @@
+use crate::clients::auth::types::StoredCredentials;
 use crate::clients::auth::{CredentialStore, OAuthClient};
 use crate::clients::http;
 use crate::config;
@@ -47,16 +48,21 @@ fn try_load_auth_token() -> Option<String> {
     }
 
     // Still expired - we need to refresh
-    let client = OAuthClient::new();
-    match client.refresh_access_token(&creds.refresh_token) {
-        Ok(new_creds) => {
-            // Store refreshed credentials (ignore errors - we still have the token)
-            let _ = store.store(&new_creds);
-            Some(new_creds.access_token)
-        }
-        Err(_) => None,
-    }
+    let new_creds =
+        refresh_credentials(config::Config::fresh().api_base_url(), &creds.refresh_token)?;
+    // Store refreshed credentials (ignore errors - we still have the token)
+    let _ = store.store(&new_creds);
+    Some(new_creds.access_token)
     // Mutex guard is automatically released when _guard is dropped
+}
+
+/// Refresh against `base_url`; `None` when the URL fails OAuth's HTTPS check
+/// (instead of `OAuthClient::new`'s panic) or the refresh fails.
+fn refresh_credentials(base_url: &str, refresh_token: &str) -> Option<StoredCredentials> {
+    OAuthClient::with_base_url(base_url)
+        .ok()?
+        .refresh_access_token(refresh_token)
+        .ok()
 }
 
 /// Resolver for the git-ai author identity sent as the `X-Author-Identity`
@@ -79,6 +85,9 @@ pub struct ApiContext {
     pub author_identity: Option<String>,
     /// Request timeout in seconds
     pub timeout_secs: Option<u64>,
+    /// HTTP agent built for `timeout_secs`, shared by every request (and
+    /// clone) of this context so connections are pooled.
+    pub(crate) agent: ureq::Agent,
 }
 
 impl std::fmt::Debug for ApiContext {
@@ -121,6 +130,7 @@ impl ApiContext {
             api_key,
             author_identity,
             timeout_secs: Some(30),
+            agent: http::build_agent(Some(30)),
         }
     }
 
@@ -176,7 +186,6 @@ impl ApiContext {
     /// Create a new API context explicitly without authentication
     /// Use this when you need to ensure no auth token is sent
     /// Uses Config::fresh() to support runtime config updates (daemon mode)
-    #[allow(dead_code)]
     pub fn without_auth(
         base_url: Option<String>,
         identity_resolver: AuthorIdentityResolver,
@@ -184,21 +193,10 @@ impl ApiContext {
         Self::from_auth_token_resolver(base_url, identity_resolver, || None)
     }
 
-    /// Create a new API context with authentication
-    /// If base_url is None, uses api_base_url from config (which can be set via config file, env var, or defaults)
-    /// Uses Config::fresh() to support runtime config updates (daemon mode)
-    #[allow(dead_code)]
-    pub fn with_auth(
-        base_url: Option<String>,
-        auth_token: String,
-        identity_resolver: AuthorIdentityResolver,
-    ) -> Self {
-        Self::from_auth_token_resolver(base_url, identity_resolver, || Some(auth_token))
-    }
-
     /// Set a custom timeout
     pub fn with_timeout(mut self, timeout_secs: u64) -> Self {
         self.timeout_secs = Some(timeout_secs);
+        self.agent = http::build_agent(self.timeout_secs);
         self
     }
 
@@ -248,7 +246,7 @@ impl ApiContext {
         &self,
         url: &str,
     ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-        let (_agent, request) = Self::http_post(url, self.timeout_secs);
+        let request = Self::with_common_headers(self.agent.post(url));
         self.apply_auth_headers(request.header("Content-Type", "application/json"))
     }
 
@@ -256,8 +254,7 @@ impl ApiContext {
         &self,
         url: &str,
     ) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
-        let (_agent, request) = Self::http_get(url, self.timeout_secs);
-        self.apply_auth_headers(request)
+        self.apply_auth_headers(Self::with_common_headers(self.agent.get(url)))
     }
 
     /// Make a POST request with JSON body
@@ -297,12 +294,6 @@ impl ApiClient {
         &self.context
     }
 
-    /// Get a mutable reference to the API context
-    #[allow(dead_code)]
-    pub fn context_mut(&mut self) -> &mut ApiContext {
-        &mut self.context
-    }
-
     /// Check if user is logged in (has an auth token)
     pub fn is_logged_in(&self) -> bool {
         self.context.auth_token.is_some()
@@ -321,20 +312,14 @@ mod tests {
     // ============= ApiContext Tests =============
 
     #[test]
-    fn test_api_context_without_auth() {
-        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
-        assert!(ctx.auth_token.is_none());
-        assert_eq!(ctx.base_url, "https://example.com");
+    fn test_refresh_credentials_rejects_insecure_base_url_without_panicking() {
+        assert!(refresh_credentials("ftp://example.com", "refresh").is_none());
     }
 
     #[test]
-    fn test_api_context_with_auth() {
-        let ctx = ApiContext::with_auth(
-            Some("https://example.com".to_string()),
-            "test_token".to_string(),
-            || None,
-        );
-        assert_eq!(ctx.auth_token, Some("test_token".to_string()));
+    fn test_api_context_without_auth() {
+        let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
+        assert!(ctx.auth_token.is_none());
         assert_eq!(ctx.base_url, "https://example.com");
     }
 
@@ -343,12 +328,20 @@ mod tests {
         let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None)
             .with_timeout(60);
         assert_eq!(ctx.timeout_secs, Some(60));
+        assert_eq!(
+            ctx.agent.config().timeouts().global,
+            Some(std::time::Duration::from_secs(60))
+        );
     }
 
     #[test]
     fn test_api_context_default_timeout() {
         let ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
         assert_eq!(ctx.timeout_secs, Some(30));
+        assert_eq!(
+            ctx.agent.config().timeouts().global,
+            Some(std::time::Duration::from_secs(30))
+        );
     }
 
     #[test]
@@ -359,6 +352,7 @@ mod tests {
             api_key: Some("api-key".to_string()),
             author_identity: Some("Test User <test@example.com>".to_string()),
             timeout_secs: Some(30),
+            agent: http::build_agent(Some(30)),
         };
 
         let get = ctx.authenticated_get_request("https://example.com/get");
@@ -385,6 +379,7 @@ mod tests {
             api_key: None,
             author_identity: Some("Test User <test@example.com>".to_string()),
             timeout_secs: Some(30),
+            agent: http::build_agent(Some(30)),
         };
 
         let request = ctx.apply_auth_headers(ureq::get("https://example.com"));
@@ -407,11 +402,8 @@ mod tests {
 
     #[test]
     fn test_api_client_is_logged_in_true() {
-        let ctx = ApiContext::with_auth(
-            Some("https://example.com".to_string()),
-            "token".to_string(),
-            || None,
-        );
+        let mut ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
+        ctx.auth_token = Some("token".to_string());
         let client = ApiClient::new(ctx);
         assert!(client.is_logged_in());
     }
@@ -425,11 +417,8 @@ mod tests {
 
     #[test]
     fn test_api_client_context_access() {
-        let ctx = ApiContext::with_auth(
-            Some("https://example.com".to_string()),
-            "token".to_string(),
-            || None,
-        );
+        let mut ctx = ApiContext::without_auth(Some("https://example.com".to_string()), || None);
+        ctx.auth_token = Some("token".to_string());
         let client = ApiClient::new(ctx);
         assert_eq!(client.context().base_url, "https://example.com");
     }

@@ -46,7 +46,7 @@ impl InstallerEnvironment {
     pub(super) fn apply(&self) {
         for (name, value) in &self.values {
             // SAFETY: command dispatch invokes this before install-hooks starts
-            // its async runtime, telemetry worker, daemon work, or subprocesses.
+            // its telemetry worker, daemon work, or subprocesses.
             unsafe { std::env::set_var(name, value) };
         }
     }

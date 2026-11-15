@@ -47,7 +47,7 @@ pub(super) fn fixture(records: &[JjOperationEvidence]) -> (Fixture, DurableCurre
 
 pub(super) fn set_checkout(fixture: &Fixture, record: &JjOperationEvidence) {
     let mut bytes = vec![0x12, 64];
-    for pair in record.operation_id.as_bytes().chunks_exact(2) {
+    for pair in record.operation_id.as_bytes().as_chunks::<2>().0 {
         bytes.push(u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap());
     }
     bytes.extend([0x1a, 7]);

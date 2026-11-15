@@ -4,10 +4,17 @@ class GitAi < Formula
   license "Apache-2.0"
   head "https://github.com/woud420/git-ai.git", branch: "main"
 
-  depends_on "rust" => :build
+  depends_on "rustup" => :build
   depends_on "git"
 
   def install
+    # Homebrew's Rust can lag the source minimum; keep downloads out of user state.
+    ENV["CARGO_HOME"] = buildpath/".cargo"
+    ENV["RUSTUP_HOME"] = buildpath/".rustup"
+    ENV["RUSTUP_TOOLCHAIN"] = "1.100.0"
+    ENV.prepend_path "PATH", Formula["rustup"].opt_bin
+    system "rustup", "toolchain", "install", ENV.fetch("RUSTUP_TOOLCHAIN"),
+           "--profile", "minimal", "--no-self-update"
     system "cargo", "install", *std_cargo_args, "--bin", "git-ai"
     (bin/"git-ai-package-manager").write "homebrew\n"
   end

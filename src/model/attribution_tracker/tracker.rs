@@ -8,6 +8,7 @@
 use crate::error::GitAiError;
 use std::cmp::Ordering;
 
+use super::coverage::{covered_char_ranges, uncovered_ranges};
 use crate::model::attribution::Attribution;
 
 /// Configuration for the attribution tracker
@@ -50,36 +51,14 @@ impl AttributionTracker {
         author: &str,
         ts: u128,
     ) -> Vec<Attribution> {
+        // A char is attributed when any range touches one of its bytes, so the
+        // gaps between the covered ranges fall on UTF-8 boundaries.
+        let covered =
+            covered_char_ranges(content, prev_attributions.iter().map(|a| (a.start, a.end)));
         let mut attributions = prev_attributions.to_vec();
-        let mut range_start: Option<usize> = None;
-
-        // Find all unattributed character ranges on UTF-8 boundaries.
-        for (idx, ch) in content.char_indices() {
-            let end = idx + ch.len_utf8();
-            let covered = attributions.iter().any(|a| a.overlaps(idx, end));
-
-            if covered {
-                if let Some(start) = range_start.take()
-                    && start < idx
-                {
-                    attributions.push(Attribution::new(start, idx, author.to_string(), ts));
-                }
-            } else if range_start.is_none() {
-                range_start = Some(idx);
-            }
+        for (start, end) in uncovered_ranges(&covered, 0, content.len()) {
+            attributions.push(Attribution::new(start, end, author.to_string(), ts));
         }
-
-        if let Some(start) = range_start.take()
-            && start < content.len()
-        {
-            attributions.push(Attribution::new(
-                start,
-                content.len(),
-                author.to_string(),
-                ts,
-            ));
-        }
-
         attributions
     }
 

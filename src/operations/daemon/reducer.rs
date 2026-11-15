@@ -8,35 +8,13 @@ use std::path::PathBuf;
 
 mod analysis_refs;
 
-/// Convenience wrapper around [`reduce_family_command_with_ref_snapshot`] for
-/// unit tests.
-///
-/// **Skips canonicalization** — worktrees are keyed by the raw path from
-/// `cmd.worktree` (i.e. `canonical_worktree = None`).  Production callers
-/// must use [`reduce_family_command_with_ref_snapshot`] with a
-/// pre-canonicalized path so that symlinked worktree paths (e.g. `/tmp` →
-/// `/private/tmp` on macOS) resolve to a single canonical key.
-pub fn reduce_family_command(
-    state: &mut FamilyState,
-    cmd: NormalizedCommand,
-    analyzers: &AnalyzerRegistry,
-) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
-    reduce_family_command_with_ref_snapshot(
-        state,
-        cmd,
-        analyzers,
-        &std::collections::HashMap::new(),
-        None,
-    )
-}
-
 pub fn reduce_family_command_with_ref_snapshot(
     state: &mut FamilyState,
     cmd: NormalizedCommand,
     analyzers: &AnalyzerRegistry,
     command_start_refs: &std::collections::HashMap<String, String>,
     canonical_worktree: Option<PathBuf>,
-) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
+) -> Result<AppliedCommand, GitAiError> {
     // Analyze against pre-command state so history/ref analyzers can infer old->new correctly.
     let analysis_refs = analysis_refs::for_command(
         state,
@@ -66,28 +44,26 @@ pub fn reduce_family_command_with_ref_snapshot(
     apply_worktree_state(state, &cmd, canonical_worktree, &analysis);
 
     state.applied_seq = state.applied_seq.saturating_add(1);
-    let applied = AppliedCommand {
+    Ok(AppliedCommand {
         seq: state.applied_seq,
         command: cmd,
-        analysis: analysis.clone(),
-    };
-    Ok((applied, analysis))
+        analysis,
+    })
 }
 
 pub fn reduce_global_command(
     state: &mut GlobalState,
     cmd: NormalizedCommand,
     analyzers: &AnalyzerRegistry,
-) -> Result<(AppliedCommand, AnalysisResult), GitAiError> {
+) -> Result<AppliedCommand, GitAiError> {
     let empty_refs = std::collections::HashMap::new();
     let analysis = analyzers.analyze(&cmd, AnalysisView::from_refs(&empty_refs))?;
     state.applied_seq = state.applied_seq.saturating_add(1);
-    let applied = AppliedCommand {
+    Ok(AppliedCommand {
         seq: state.applied_seq,
         command: cmd,
-        analysis: analysis.clone(),
-    };
-    Ok((applied, analysis))
+        analysis,
+    })
 }
 
 pub fn reduce_checkpoint(state: &mut FamilyState) {

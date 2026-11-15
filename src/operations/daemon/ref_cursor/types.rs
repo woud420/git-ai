@@ -15,7 +15,8 @@ pub struct RefCursor {
     /// selection — they never move the cursor. See `select_entry_for_hint`.
     pub(super) command_start_hints: HashMap<String, u64>,
     pub(super) stash_stack: Vec<String>,
-    pub(super) pending_cherry_pick_source_oids: Vec<String>,
+    /// Sources left by a conflicted cherry-pick, keyed by worktree state key.
+    pub(super) pending_cherry_pick_source_oids: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone)]

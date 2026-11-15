@@ -38,7 +38,9 @@ struct PreviousFileState {
 }
 
 use super::state_error::state_error as checkpoint_error;
+mod head_contents;
 mod known_human_checkpoint_filter;
+use head_contents::read_head_contents;
 use known_human_checkpoint_filter::filter_same_content_known_human_files;
 
 use crate::model::working_log::AgentId;
@@ -69,14 +71,30 @@ pub fn build_agent_usage_attrs(
     repo: Option<&Repository>,
     agent_id: &AgentId,
 ) -> crate::metrics::EventAttributes {
-    let session_id = generate_session_id(&agent_id.id, &agent_id.tool);
+    build_event_attrs(repo, Some(agent_id))
+}
 
+/// Attributes shared by AgentUsage and Checkpoint events. A checkpoint without
+/// an agent still reports an (empty) session_id.
+fn build_event_attrs(
+    repo: Option<&Repository>,
+    agent_id: Option<&AgentId>,
+) -> crate::metrics::EventAttributes {
+    let session_id = agent_id
+        .map(|aid| generate_session_id(&aid.id, &aid.tool))
+        .unwrap_or_default();
+
+    // Config::fresh() so custom attributes follow runtime config updates.
     let mut attrs = crate::metrics::EventAttributes::with_version(env!("CARGO_PKG_VERSION"))
         .session_id(session_id)
-        .tool(&agent_id.tool)
-        .model(&agent_id.model)
-        .external_session_id(&agent_id.id)
         .custom_attributes_map(crate::config::Config::fresh().custom_attributes());
+
+    if let Some(agent_id) = agent_id {
+        attrs = attrs
+            .tool(&agent_id.tool)
+            .model(&agent_id.model)
+            .external_session_id(&agent_id.id);
+    }
 
     if let Some(repo) = repo {
         if let Some(url) = crate::operations::git::remote_url::resolve_repo_url_from_repo(repo) {
@@ -93,79 +111,15 @@ pub fn build_agent_usage_attrs(
     attrs
 }
 
-/// Build EventAttributes with repo metadata.
-/// Reused for both AgentUsage and Checkpoint events.
-fn build_checkpoint_attrs(
-    repo: &Repository,
-    base_commit: &str,
-    agent_id: Option<&AgentId>,
-) -> crate::metrics::EventAttributes {
-    // Extract session_id from agent_id if available
-    let session_id = agent_id
-        .as_ref()
-        .map(|aid| generate_session_id(&aid.id, &aid.tool))
-        .unwrap_or_default();
-
-    let mut attrs = crate::metrics::EventAttributes::with_version(env!("CARGO_PKG_VERSION"))
-        .session_id(session_id)
-        .base_commit_sha(base_commit);
-
-    // Add AI-specific attributes
-    if let Some(agent_id) = agent_id {
-        attrs = attrs
-            .tool(&agent_id.tool)
-            .model(&agent_id.model)
-            .external_session_id(&agent_id.id);
-    }
-
-    // Attach custom attributes using Config::fresh() to support runtime config updates
-    attrs = attrs.custom_attributes_map(crate::config::Config::fresh().custom_attributes());
-
-    // Add repo URL
-    if let Some(url) = crate::operations::git::remote_url::resolve_repo_url_from_repo(repo) {
-        attrs = attrs.repo_url(url);
-    }
-
-    // Add branch
-    if let Ok(head_ref) = repo.head()
-        && let Ok(short_branch) = head_ref.shorthand()
-    {
-        attrs = attrs.branch(short_branch);
-    }
-
-    attrs
-}
-
 pub fn execute_resolved_checkpoint_from_daemon(
     repo: &Repository,
     author: &str,
     kind: CheckpointKind,
     checkpoint_request: CheckpointRequest,
-    resolved: ResolvedCheckpointExecution,
+    mut resolved: ResolvedCheckpointExecution,
 ) -> Result<(), GitAiError> {
     let checkpoint_start = Instant::now();
     tracing::debug!("[BENCHMARK] Starting daemon replay checkpoint");
-    execute_resolved_checkpoint(
-        repo,
-        author,
-        kind,
-        true,
-        checkpoint_request,
-        resolved,
-        checkpoint_start,
-    )
-    .map(|_| ())
-}
-
-fn execute_resolved_checkpoint(
-    repo: &Repository,
-    author: &str,
-    kind: CheckpointKind,
-    quiet: bool,
-    checkpoint_request: CheckpointRequest,
-    mut resolved: ResolvedCheckpointExecution,
-    checkpoint_start: Instant,
-) -> Result<(usize, usize, usize), GitAiError> {
     if kind.is_ai() && checkpoint_request.agent_id.is_none() {
         return Err(checkpoint_error(
             std::io::ErrorKind::InvalidData,
@@ -203,7 +157,7 @@ fn execute_resolved_checkpoint(
         working_log
             .ensure_cached_checkpoint_record_durable(&mut checkpoints, applied_checkpoint_index)?;
         tracing::debug!(delivery_id, "skipping already-applied checkpoint delivery");
-        return Ok((0, resolved.files.len(), checkpoints.len()));
+        return Ok(());
     }
 
     let save_states_start = Instant::now();
@@ -221,7 +175,7 @@ fn execute_resolved_checkpoint(
             );
         }
         if resolved.files.is_empty() {
-            return Ok((0, filtered_files, checkpoints.len()));
+            return Ok(());
         }
     }
     tracing::debug!(
@@ -258,7 +212,7 @@ fn execute_resolved_checkpoint(
         &checkpoints,
         &checkpoint_request,
         resolved.ts,
-        Some(resolved.base_commit.as_str()),
+        &resolved.base_commit,
         trace_id.clone(),
     ))?;
     tracing::debug!(
@@ -267,13 +221,12 @@ fn execute_resolved_checkpoint(
         entries_start.elapsed()
     );
 
-    let entry_count = entries.len();
     if !entries.is_empty() {
         let checkpoint_create_start = Instant::now();
         let mut checkpoint = Checkpoint::new(kind, combined_hash, author.to_string(), entries);
         checkpoint.timestamp = (resolved.ts / 1000) as u64;
-        checkpoint.line_stats = compute_line_stats(&file_stats)?;
-        checkpoint.trace_id = Some(trace_id.clone());
+        checkpoint.line_stats = compute_line_stats(&file_stats);
+        checkpoint.trace_id = Some(trace_id);
         checkpoint.delivery_id = checkpoint_request.delivery_id.clone();
 
         if kind.is_ai() {
@@ -325,8 +278,8 @@ fn execute_resolved_checkpoint(
             .last()
             .expect("checkpoint was appended to the collection above");
 
-        let mut attrs =
-            build_checkpoint_attrs(repo, &resolved.base_commit, checkpoint.agent_id.as_ref());
+        let mut attrs = build_event_attrs(Some(repo), checkpoint.agent_id.as_ref())
+            .base_commit_sha(&resolved.base_commit);
 
         // Add trace_id to attributes - links all checkpoint events together
         if let Some(ref tid) = checkpoint.trace_id {
@@ -368,52 +321,11 @@ fn execute_resolved_checkpoint(
         }
     }
 
-    let agent_tool = if kind.is_ai() {
-        checkpoint_request
-            .agent_id
-            .as_ref()
-            .map(|aid| aid.tool.as_str())
-    } else {
-        None
-    };
-
-    let label = if entry_count > 1 {
-        "checkpoint"
-    } else {
-        "commit"
-    };
-
-    if !quiet {
-        let log_author = agent_tool.unwrap_or(author);
-        let files_with_entries = entry_count;
-        let total_uncommitted_files = resolved.files.len();
-
-        if files_with_entries == total_uncommitted_files {
-            eprintln!(
-                "{} {} changed {} file(s) that have changed since the last {}",
-                kind.to_str(),
-                log_author,
-                files_with_entries,
-                label
-            );
-        } else {
-            eprintln!(
-                "{} {} changed {} of the {} file(s) that have changed since the last {} ({} already checkpointed)",
-                kind.to_str(),
-                log_author,
-                files_with_entries,
-                total_uncommitted_files,
-                label,
-                total_uncommitted_files - files_with_entries
-            );
-        }
-    }
-
     tracing::debug!(
         "[BENCHMARK] Total checkpoint run took {:?}",
         checkpoint_start.elapsed()
     );
-    Ok((entry_count, resolved.files.len(), checkpoints.len()))
+    Ok(())
 }
 
 fn save_current_file_states(
@@ -427,21 +339,14 @@ fn save_current_file_states(
     let files = files.to_vec();
 
     let file_content_hashes = crate::tokio_runtime::block_on(async {
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
         let blobs_dir = Arc::new(blobs_dir);
 
         let mut futures = Vec::with_capacity(files.len());
         for file_path in files {
             let blobs_dir = Arc::clone(&blobs_dir);
             let dirty_files = dirty_files.clone();
-            let semaphore = Arc::clone(&semaphore);
 
             futures.push(async move {
-                let _permit = semaphore
-                    .acquire_owned()
-                    .await
-                    .expect("file state semaphore was closed");
-
                 let content = if let Some(ref dirty_map) = dirty_files {
                     dirty_map.get(&file_path).cloned()
                 } else {
@@ -467,7 +372,7 @@ fn save_current_file_states(
             });
         }
 
-        // Collect results from all concurrent operations
+        // At most 8 file writes run at once.
         let results: Vec<Result<(String, String), GitAiError>> =
             stream::iter(futures).buffer_unordered(8).collect().await;
 
@@ -482,23 +387,6 @@ fn save_current_file_states(
     })?;
 
     Ok(file_content_hashes)
-}
-
-fn get_previous_content_from_head(
-    repo: &Repository,
-    file_path: &str,
-    head_tree_id: &Option<String>,
-) -> Arc<str> {
-    let Some(tree_id) = head_tree_id.as_ref() else {
-        return Arc::from("");
-    };
-    match repo.read_file_blob_at_tree(tree_id, std::path::Path::new(file_path)) {
-        Ok(content) => {
-            let text = String::from_utf8_lossy(&content);
-            Arc::from(text.into_owned())
-        }
-        Err(_) => Arc::from(""),
-    }
 }
 
 #[doc(hidden)]
@@ -548,16 +436,16 @@ fn build_previous_file_state_maps(
 fn get_checkpoint_entry_for_file(
     file_path: String,
     kind: CheckpointKind,
-    repo: Repository,
     working_log: PersistedWorkingLog,
     previous_file_state_by_file: Arc<HashMap<String, PreviousFileState>>,
     ai_touched_files: Arc<HashSet<String>>,
     file_content_hash: String,
     author_id: Arc<String>,
-    head_tree_id: Arc<Option<String>>,
+    // HEAD's version of the file when no earlier checkpoint recorded one;
+    // empty when HEAD lacks the file.
+    head_content: Arc<str>,
     initial_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
     initial_snapshot_contents: Arc<HashMap<String, Arc<str>>>,
-    parent_note_attributions: Arc<HashMap<String, Vec<LineAttribution>>>,
     ts: u128,
 ) -> Result<Option<(WorkingLogEntry, FileLineStats)>, GitAiError> {
     // Deterministic blocking work for the TestRepo throughput guard; release builds omit it.
@@ -595,7 +483,7 @@ fn get_checkpoint_entry_for_file(
                     .unwrap_or_default(),
             )
         } else {
-            get_previous_content_from_head(&repo, &file_path, head_tree_id.as_ref())
+            head_content
         };
 
         if content_eq_ignoring_line_endings(&current_content, &previous_content) {
@@ -623,8 +511,7 @@ fn get_checkpoint_entry_for_file(
         (content, attrs)
     } else {
         // File doesn't exist in any previous checkpoint - need to initialize from git + INITIAL
-        let previous_content =
-            get_previous_content_from_head(&repo, &file_path, head_tree_id.as_ref());
+        let previous_content = head_content;
 
         // Skip if no changes, UNLESS we have INITIAL attributions for this file
         // (in which case we need to create an entry to record those attributions)
@@ -634,11 +521,9 @@ fn get_checkpoint_entry_for_file(
             return Ok(None);
         }
 
-        // Start with INITIAL attributions (they win), augmented by parent note
+        // Start with INITIAL attributions (they win). Parent notes are not
+        // seeded here; post-commit inherits them.
         let mut prev_line_attributions = initial_attrs_for_file.clone();
-
-        // Parent note seeding removed — handled at post-commit via inheritance.
-        let _ = &parent_note_attributions;
 
         // For AI checkpoints, attribute any lines NOT in INITIAL and NOT returned by ai_blame
         if kind.is_ai() {
@@ -777,7 +662,7 @@ async fn get_checkpoint_entries(
     previous_checkpoints: &[Checkpoint],
     checkpoint_request: &CheckpointRequest,
     ts: u128,
-    head_commit_override: Option<&str>,
+    base_commit: &str,
     trace_id: String,
 ) -> Result<(Vec<WorkingLogEntry>, Vec<FileLineStats>), GitAiError> {
     let entries_fn_start = Instant::now();
@@ -812,7 +697,7 @@ async fn get_checkpoint_entries(
 
     // Determine author_id based on checkpoint kind and agent_id
     let author_id = match kind {
-        CheckpointKind::Human => kind.to_str(), // "human" — stripped, never attested
+        CheckpointKind::Human => kind.to_str().to_string(), // "human" — stripped, never attested
         CheckpointKind::KnownHuman => {
             crate::model::authorship_log_serialization::generate_human_short_hash(author)
         }
@@ -825,13 +710,12 @@ async fn get_checkpoint_entries(
                     let session_id = generate_session_id(&aid.id, &aid.tool);
                     format!("{}::{}", session_id, trace_id)
                 })
-                .unwrap_or_else(|| kind.to_str())
+                .unwrap_or_else(|| kind.to_str().to_string())
         }
     };
 
     // Get HEAD commit info for git operations
-    let head_commit = head_commit_override
-        .map(str::trim)
+    let head_commit = Some(base_commit.trim())
         .filter(|sha| !sha.is_empty() && *sha != "initial")
         .and_then(|sha| repo.find_commit(sha.to_string()).ok())
         .or_else(|| {
@@ -843,9 +727,16 @@ async fn get_checkpoint_entries(
     let head_tree_id = head_commit
         .as_ref()
         .and_then(|c| c.tree().ok())
-        .map(|t| t.id().to_string());
+        .map(|t| t.id());
 
-    let parent_note_attributions: HashMap<String, Vec<LineAttribution>> = HashMap::new();
+    // Files with no earlier checkpoint state are diffed against HEAD.
+    let head_contents = read_head_contents(
+        repo,
+        head_tree_id.as_deref(),
+        files
+            .iter()
+            .filter(|file| !previous_file_state_by_file.contains_key(*file)),
+    );
 
     const MAX_CONCURRENT: usize = 30;
 
@@ -856,10 +747,8 @@ async fn get_checkpoint_entries(
     let previous_file_state_by_file = Arc::new(previous_file_state_by_file);
     let ai_touched_files = Arc::new(ai_touched_files);
     let author_id = Arc::new(author_id);
-    let head_tree_id = Arc::new(head_tree_id);
     let initial_attributions = Arc::new(initial_attributions);
     let initial_snapshot_contents = Arc::new(initial_snapshot_contents);
-    let parent_note_attributions = Arc::new(parent_note_attributions);
 
     // Spawn tasks for each file
     let spawn_start = Instant::now();
@@ -867,19 +756,20 @@ async fn get_checkpoint_entries(
 
     for file_path in files {
         let file_path = file_path.clone();
-        let repo = repo.clone();
         let working_log = working_log.clone();
         let previous_file_state_by_file = Arc::clone(&previous_file_state_by_file);
         let ai_touched_files = Arc::clone(&ai_touched_files);
         let author_id = Arc::clone(&author_id);
-        let head_tree_id = Arc::clone(&head_tree_id);
+        let head_content = head_contents
+            .get(&file_path)
+            .cloned()
+            .unwrap_or_else(|| Arc::from(""));
         let blob_sha = file_content_hashes
             .get(&file_path)
             .cloned()
             .unwrap_or_default();
         let initial_attributions = Arc::clone(&initial_attributions);
         let initial_snapshot_contents = Arc::clone(&initial_snapshot_contents);
-        let parent_note_attributions = Arc::clone(&parent_note_attributions);
         let semaphore = Arc::clone(&semaphore);
 
         let task = async move {
@@ -892,16 +782,14 @@ async fn get_checkpoint_entries(
                 get_checkpoint_entry_for_file(
                     file_path,
                     kind,
-                    repo,
                     working_log,
                     previous_file_state_by_file,
                     ai_touched_files,
                     blob_sha,
                     author_id.clone(),
-                    head_tree_id.clone(),
+                    head_content,
                     initial_attributions.clone(),
                     initial_snapshot_contents.clone(),
-                    parent_note_attributions.clone(),
                     ts,
                 )
             })
@@ -910,6 +798,8 @@ async fn get_checkpoint_entries(
 
         tasks.push(task);
     }
+    // Each task now owns the HEAD content it needs and frees it when done.
+    drop(head_contents);
     tracing::debug!(
         "[BENCHMARK] Spawning {} tasks took {:?}",
         tasks.len(),
@@ -984,7 +874,7 @@ fn make_entry_for_file(
     let filled_in_prev_attributions = tracker.attribute_unattributed_ranges(
         previous_content,
         previous_attributions,
-        &CheckpointKind::Human.to_str(),
+        CheckpointKind::Human.to_str(),
         ts - 1,
     );
     tracing::debug!(
@@ -1081,7 +971,7 @@ pub fn compute_file_line_stats(previous_content: &str, current_content: &str) ->
 /// This avoids redundant diff computation since stats are already computed during entry creation
 fn compute_line_stats(
     file_stats: &[FileLineStats],
-) -> Result<crate::model::working_log::CheckpointLineStats, GitAiError> {
+) -> crate::model::working_log::CheckpointLineStats {
     let mut stats = crate::model::working_log::CheckpointLineStats::default();
 
     // Aggregate line stats from all files
@@ -1092,5 +982,5 @@ fn compute_line_stats(
         stats.deletions_sloc += file_stat.deletions_sloc;
     }
 
-    Ok(stats)
+    stats
 }

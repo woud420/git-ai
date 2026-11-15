@@ -203,3 +203,20 @@ fn non_ascii_revision_names_are_not_rewritten_or_sliced_mid_character() {
         repo.git_ai(&["show", &fixture.primary_commit]).unwrap()
     );
 }
+
+#[test]
+fn annotated_tags_resolve_to_their_commit() {
+    let repo = TestRepo::new();
+    let mut file = repo.filename("tagged.txt");
+    file.set_contents(crate::lines!["human", "ai".ai()]);
+    let commit = repo.stage_all_and_commit("Tagged commit").unwrap();
+    repo.git(&["tag", "-a", "v1", "-m", "annotated"]).unwrap();
+
+    for command in ["show", "diff"] {
+        assert_eq!(
+            repo.git_ai(&[command, "v1"]).unwrap(),
+            repo.git_ai(&[command, &commit.commit_sha]).unwrap(),
+            "`git-ai {command} v1` must read the tagged commit"
+        );
+    }
+}

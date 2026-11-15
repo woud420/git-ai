@@ -54,21 +54,6 @@ fn fetch_metric_history(
     db_lock.get_metric_history(since_ts, repo_filter, USAGE_EVENT_IDS)
 }
 
-/// Aggregate metric history since `since_ts` (Unix seconds) into activity stats.
-///
-/// When `repo_filter` is `Some(url)`, only events from that repository are
-/// aggregated. When `None`, events from all repositories are included.
-pub fn compute_activity(
-    since_ts: u32,
-    period_label: String,
-    granularity: BucketGranularity,
-    repo_filter: Option<&str>,
-) -> Result<LocalActivityStats, GitAiError> {
-    let records = fetch_metric_history(since_ts, repo_filter)?;
-    let refs: Vec<&MetricHistoryRecord> = records.iter().collect();
-    compute_activity_from_records(&refs, since_ts, period_label, granularity)
-}
-
 /// Aggregate a pre-fetched slice of `MetricHistoryRecord`s into activity stats.
 ///
 /// Separated from `compute_activity` so callers that already hold all events
@@ -78,7 +63,7 @@ fn compute_activity_from_records(
     since_ts: u32,
     period_label: String,
     granularity: BucketGranularity,
-) -> Result<LocalActivityStats, GitAiError> {
+) -> LocalActivityStats {
     let mut total_commits = 0u32;
     let mut total_ai_lines = 0u32;
     let mut total_human_lines = 0u32;
@@ -107,10 +92,8 @@ fn compute_activity_from_records(
     // the per-session max rather than summing.
     let mut codex_sessions: HashMap<String, CodexSessionAccum> = HashMap::new();
 
-    // bucket_key -> accumulated stats
-    let mut bucket_map: HashMap<String, BucketAccum> = HashMap::new();
-    // bucket_key -> sort key (for ordering)
-    let mut bucket_order: HashMap<String, i64> = HashMap::new();
+    // bucket_key (sort order) -> accumulated stats
+    let mut bucket_map: HashMap<i64, BucketAccum> = HashMap::new();
 
     let mut hourly: Vec<u32> = vec![0u32; 24];
     let mut daily: Vec<u32> = vec![0u32; 7];
@@ -152,8 +135,9 @@ fn compute_activity_from_records(
                         *ai_lines_by_day.entry(local_dt.date_naive()).or_insert(0) += c.ai_lines;
                     }
 
-                    let (key, order_key) = bucket_key(&local_dt, granularity);
-                    let entry = bucket_map.entry(key.clone()).or_default();
+                    let entry = bucket_map
+                        .entry(bucket_key(&local_dt, granularity))
+                        .or_default();
                     entry.ai_lines += c.ai_lines;
                     // Count AI commits only, to match the AI-lines bar.
                     if c.ai_lines > 0 {
@@ -161,7 +145,6 @@ fn compute_activity_from_records(
                     }
                     entry.diff_added += c.diff_added;
                     entry.attributed += c.ai_lines + c.human_lines;
-                    bucket_order.entry(key).or_insert(order_key);
                 }
             }
             4 => aggregate_checkpoint(
@@ -249,14 +232,8 @@ fn compute_activity_from_records(
     let (tokens, cost_by_day) =
         build_token_summary(message_usage, codex_sessions, now_ts, since_ts);
 
-    // Map by order key for fill_buckets to look up real data.
-    let bucket_by_order: HashMap<i64, BucketAccum> = bucket_map
-        .into_iter()
-        .map(|(label, accum)| (bucket_order[&label], accum))
-        .collect();
-
     // Fill in empty buckets between since_ts and now so the chart has no gaps.
-    let filled = fill_buckets(bucket_by_order, since_ts, granularity);
+    let filled = fill_buckets(bucket_map, since_ts, granularity);
 
     // ── Derived calendar + summary stats ──
     let calendar_end = Local::now().date_naive();
@@ -329,7 +306,7 @@ fn compute_activity_from_records(
         favorite_model: tokens.by_model.first().map(|m| m.model.clone()),
     };
 
-    Ok(LocalActivityStats {
+    LocalActivityStats {
         period_label,
         commits: CommitSummary {
             total: total_commits,
@@ -361,7 +338,7 @@ fn compute_activity_from_records(
         calendar_start,
         calendar_end,
         summary,
-    })
+    }
 }
 
 /// Fetch events once and compute overall activity stats and the per-repo
@@ -374,21 +351,7 @@ pub fn compute_all(
 ) -> Result<(LocalActivityStats, Vec<RepoActivitySummary>), GitAiError> {
     let records = fetch_metric_history(since_ts, repo_filter)?;
     let refs: Vec<&MetricHistoryRecord> = records.iter().collect();
-    let stats = compute_activity_from_records(&refs, since_ts, period_label, granularity)?;
-    let repos = repo_summaries_from_records(&records, since_ts, granularity)?;
+    let stats = compute_activity_from_records(&refs, since_ts, period_label, granularity);
+    let repos = repo_summaries_from_records(&records, since_ts, granularity);
     Ok((stats, repos))
-}
-
-/// Compute a per-repository breakdown for the given time window.
-///
-/// Fetches all matching events in a single DB query, groups them in memory by
-/// `repo_url`, and aggregates each group — O(n) instead of O(n × repos).
-/// Sorted by `ai_lines` descending.
-pub fn compute_repo_summaries(
-    since_ts: u32,
-    granularity: BucketGranularity,
-    repo_filter: Option<&str>,
-) -> Result<Vec<RepoActivitySummary>, GitAiError> {
-    let all_records = fetch_metric_history(since_ts, repo_filter)?;
-    repo_summaries_from_records(&all_records, since_ts, granularity)
 }

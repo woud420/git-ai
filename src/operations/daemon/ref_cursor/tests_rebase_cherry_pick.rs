@@ -332,7 +332,10 @@ fn cherry_pick_span_starts_at_first_pick_when_expected_state_matches_second_pick
         .refs
         .insert("refs/heads/intermediate".to_string(), C.to_string());
     let mut cursor = RefCursor::new(family.clone());
-    cursor.pending_cherry_pick_source_oids = vec![A.to_string(), E.to_string()];
+    cursor.pending_cherry_pick_source_oids.insert(
+        crate::operations::daemon::ActorDaemonCoordinator::worktree_state_key(&worktree),
+        vec![A.to_string(), E.to_string()],
+    );
     let mut cmd = command_with_worktree(&family, Some(worktree), &["cherry-pick", "--continue"]);
 
     cursor.enrich_command(&mut cmd, &state).unwrap();
@@ -341,6 +344,48 @@ fn cherry_pick_span_starts_at_first_pick_when_expected_state_matches_second_pick
         cmd.ref_changes,
         vec![ref_change("HEAD", B, C), ref_change("HEAD", C, D)]
     );
+}
+
+#[test]
+fn span_walk_does_not_reclaim_a_row_an_earlier_command_consumed() {
+    let temp = tempfile::tempdir().unwrap();
+    let worktree = temp.path().join("repo");
+    let git_dir = worktree.join(".git");
+    fs::create_dir_all(git_dir.join("logs")).unwrap();
+    let rows = [
+        (B, C, "cherry-pick: Untraced pick"),
+        (C, D, "cherry-pick: Traced pick"),
+    ];
+    append_reflog(&git_dir, "HEAD", &rows);
+    let family = FamilyKey::new(git_dir.to_string_lossy().to_string());
+    let state = family_state(&family);
+    let mut cursor = RefCursor::new(family.clone());
+    let key = head_key(&git_dir);
+    cursor.offsets.insert(key.clone(), 0);
+
+    // The ingress hint lands after the untraced row, so the traced pick owns
+    // only the second row and the cursor stays before the first one.
+    let untraced_row_len = format!(
+        "{B} {C} Test User <test@example.com> 0 +0000\t{}\n",
+        rows[0].2
+    )
+    .len();
+    let mut traced = command_with_worktree(&family, Some(worktree.clone()), &["cherry-pick", E]);
+    traced
+        .reflog_start_offsets
+        .insert(key, untraced_row_len as u64);
+    cursor.enrich_command(&mut traced, &state).unwrap();
+    assert_eq!(traced.ref_changes, vec![ref_change("HEAD", C, D)]);
+
+    // A later two-commit span that starts at the untraced row must stop
+    // there: the row after it already belongs to the traced pick.
+    cursor.pending_cherry_pick_source_oids.insert(
+        crate::operations::daemon::ActorDaemonCoordinator::worktree_state_key(&worktree),
+        vec![F.to_string(), G.to_string()],
+    );
+    let mut later = command_with_worktree(&family, Some(worktree), &["cherry-pick", "--continue"]);
+    cursor.enrich_command(&mut later, &state).unwrap();
+    assert_eq!(later.ref_changes, vec![ref_change("HEAD", B, C)]);
 }
 
 #[test]

@@ -37,3 +37,23 @@ fn ingestion_byte_budgets_round_trip_and_environment_takes_precedence() {
         assert_eq!(get_json(&repo, key), default);
     }
 }
+
+#[test]
+fn padded_budget_key_targets_the_named_budget() {
+    let repo = TestRepo::new_with_daemon_scope(DaemonTestScope::NoDaemon);
+    let default = 8 * 1024 * 1024;
+
+    // Keys are trimmed when resolved; a padded key must not fall through to
+    // a different budget.
+    repo.git_ai(&["config", "set", " max_transcript_line_bytes", "4096"])
+        .unwrap();
+    assert_eq!(get_json(&repo, "max_transcript_line_bytes"), 4096);
+    assert_eq!(get_json(&repo, "max_metrics_flush_chunk_bytes"), default);
+
+    repo.git_ai(&["config", "set", "max_metrics_flush_chunk_bytes", "8192"])
+        .unwrap();
+    repo.git_ai(&["config", "unset", " max_transcript_line_bytes"])
+        .unwrap();
+    assert_eq!(get_json(&repo, "max_transcript_line_bytes"), default);
+    assert_eq!(get_json(&repo, "max_metrics_flush_chunk_bytes"), 8192);
+}

@@ -7,7 +7,9 @@ use super::diff_utils::{
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
-use crate::model::authorship_log::{HumanRecord, LineRange, PromptRecord, SessionRecord};
+use crate::model::authorship_log::{
+    HumanRecord, LineRange, PromptRecord, SessionRecord, is_ai_author_id, metadata_key,
+};
 use crate::model::authorship_log_serialization::{AttestationEntry, AuthorshipLog};
 use crate::model::working_log::CheckpointKind;
 use crate::operations::git::repository::Repository;
@@ -171,8 +173,7 @@ pub(super) fn fill_committed_gaps(
     let mut content_to_ai_author: HashMap<&str, &str> = HashMap::new();
     if !gap_file_lines.is_empty() {
         for &(line_num, author) in &line_to_author {
-            if !author.starts_with("h_")
-                && author != CheckpointKind::Human.to_str()
+            if is_ai_author_id(author)
                 && let Some(&content) = gap_file_lines.get((line_num - 1) as usize)
                 && !content.trim().is_empty()
             {
@@ -270,11 +271,7 @@ impl VirtualAttributions {
             }
 
             if author_id.starts_with("s_") {
-                let session_key = author_id
-                    .split("::")
-                    .next()
-                    .unwrap_or(&author_id)
-                    .to_string();
+                let session_key = metadata_key(&author_id).to_string();
                 if let Some(record) = self.sessions.get(&session_key) {
                     initial_sessions.insert(session_key, record.clone());
                 }
@@ -341,25 +338,7 @@ impl VirtualAttributions {
     pub(super) fn prune_unreferenced_metadata(&self, authorship_log: &mut AuthorshipLog) {
         self.prune_unreferenced_initial_prompts(authorship_log);
 
-        let committed_session_ids: HashSet<String> = authorship_log
-            .attestations
-            .iter()
-            .flat_map(|file_att| file_att.entries.iter())
-            .filter_map(|entry| {
-                if entry.hash.starts_with("s_") {
-                    Some(
-                        entry
-                            .hash
-                            .split("::")
-                            .next()
-                            .unwrap_or(&entry.hash)
-                            .to_string(),
-                    )
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let committed_session_ids = authorship_log.referenced_session_ids();
         authorship_log
             .metadata
             .sessions

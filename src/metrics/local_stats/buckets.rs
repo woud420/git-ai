@@ -12,7 +12,7 @@ pub(super) fn ts_to_local(ts: u32) -> DateTime<Local> {
 }
 
 /// Produce the display label for a bucket whose "anchor" date (Monday for
-/// weekly, 1st for monthly, the day itself for daily) is `date`.
+/// weekly, the day itself for daily) is `date`.
 fn bucket_label(date: NaiveDate, granularity: BucketGranularity) -> String {
     match granularity {
         BucketGranularity::Daily => date.format("%b %d").to_string(),
@@ -20,27 +20,18 @@ fn bucket_label(date: NaiveDate, granularity: BucketGranularity) -> String {
             let sunday = date + chrono::Duration::days(6);
             format!("{} – {}", date.format("%b %d"), sunday.format("%b %d"))
         }
-        BucketGranularity::Monthly => date.format("%b %Y").to_string(),
     }
 }
 
-pub(super) fn bucket_key(dt: &DateTime<Local>, granularity: BucketGranularity) -> (String, i64) {
+/// Sort key of the bucket containing `dt`; `fill_buckets` derives labels.
+pub(super) fn bucket_key(dt: &DateTime<Local>, granularity: BucketGranularity) -> i64 {
     match granularity {
-        BucketGranularity::Daily => {
-            let date = dt.date_naive();
-            let order = date.num_days_from_ce() as i64;
-            (bucket_label(date, granularity), order)
-        }
+        BucketGranularity::Daily => dt.date_naive().num_days_from_ce() as i64,
         BucketGranularity::Weekly => {
             // ISO week: key on Monday of the week.
             let weekday = dt.weekday().num_days_from_monday() as i64;
             let monday = dt.date_naive() - chrono::Duration::days(weekday);
-            let order = monday.num_days_from_ce() as i64;
-            (bucket_label(monday, granularity), order)
-        }
-        BucketGranularity::Monthly => {
-            let order = dt.year() as i64 * 12 + dt.month0() as i64;
-            (bucket_label(dt.date_naive(), granularity), order)
+            monday.num_days_from_ce() as i64
         }
     }
 }
@@ -67,7 +58,7 @@ pub(super) fn fill_buckets(
     let since_date = if since_ts == 0 {
         let earliest_order = data_map.keys().copied().min();
         earliest_order
-            .and_then(|order| bucket_start_date(order, granularity))
+            .and_then(|order| NaiveDate::from_num_days_from_ce_opt(order.try_into().ok()?))
             .unwrap_or_else(|| now.date_naive())
     } else {
         ts_to_local(since_ts).date_naive()
@@ -111,42 +102,7 @@ pub(super) fn fill_buckets(
                     .unwrap_or(today);
             }
         }
-        BucketGranularity::Monthly => {
-            let mut year = since_date.year();
-            let mut month = since_date.month();
-            let now_year = now.year();
-            let now_month = now.month();
-            loop {
-                let order = year as i64 * 12 + (month - 1) as i64;
-                let Some(date) = NaiveDate::from_ymd_opt(year, month, 1) else {
-                    break;
-                };
-                let label = bucket_label(date, granularity);
-                result.push(make(label, data_map.remove(&order).unwrap_or_default()));
-                if year == now_year && month == now_month {
-                    break;
-                }
-                month += 1;
-                if month > 12 {
-                    month = 1;
-                    year += 1;
-                }
-            }
-        }
     }
 
     result
-}
-
-fn bucket_start_date(order: i64, granularity: BucketGranularity) -> Option<NaiveDate> {
-    match granularity {
-        BucketGranularity::Daily | BucketGranularity::Weekly => {
-            NaiveDate::from_num_days_from_ce_opt(order.try_into().ok()?)
-        }
-        BucketGranularity::Monthly => {
-            let year = order.div_euclid(12);
-            let month0 = order.rem_euclid(12);
-            NaiveDate::from_ymd_opt(year.try_into().ok()?, (month0 + 1).try_into().ok()?, 1)
-        }
-    }
 }

@@ -26,13 +26,13 @@ fn reingest_command_is_retry_and_restart_safe_without_duplicating_local_history(
         .unwrap()
         .as_secs() as u32;
     let event = |timestamp: u32, marker: &str| {
-        MetricEvent::with_timestamp(
-            timestamp,
-            &SessionEventValues::new(json!({ "marker": marker })),
+        MetricEvent::from_values_with_timestamp(
+            SessionEventValues::new(json!({ "marker": marker })),
             EventAttributes::with_version("test")
                 .session_id(marker)
                 .trace_id(marker)
                 .to_sparse(),
+            Some(timestamp),
         )
     };
     let serialized = [

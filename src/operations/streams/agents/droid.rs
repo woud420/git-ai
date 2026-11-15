@@ -4,10 +4,8 @@ use super::discovery::{collect_files_recursively, stem_session_binding};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::{HybridWatermark, WatermarkStrategy};
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// Droid agent that discovers conversations from Droid storage.
 pub struct DroidAgent {
@@ -54,10 +52,6 @@ impl Default for DroidAgent {
 }
 
 impl Agent for DroidAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::conversation_roots()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,
@@ -84,11 +78,6 @@ impl Agent for DroidAgent {
 
     fn batch_size_hint(&self) -> usize {
         self.batch_size
-    }
-
-    fn sweep_strategy(&self) -> SweepStrategy {
-        // Poll every 30 minutes for new Droid conversations
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
     }
 
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
@@ -152,15 +141,6 @@ impl Agent for DroidAgent {
         })
     }
 
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
-    }
-
     fn streams(&self) -> Vec<StreamDescriptor> {
         vec![StreamDescriptor::identity_transcript(
             StreamFormat::DroidJsonl,
@@ -197,15 +177,6 @@ mod tests {
             2,
             "test",
             StreamAdapterContractCapabilities::APPEND_ALL,
-        );
-    }
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = DroidAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
         );
     }
 

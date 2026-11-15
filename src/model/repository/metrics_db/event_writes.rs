@@ -118,11 +118,15 @@ impl MetricsDatabase {
         }
 
         let cutoff = now.saturating_sub(Self::METRICS_RETENTION_SECS);
-        let rows_to_prune = self.old_metric_row_ids(cutoff)?;
+        let rows_to_prune = self.old_metric_row_ids_without_event_ts(cutoff)?;
         let tx = self.conn.transaction()?;
         tx.execute(
             "INSERT OR REPLACE INTO schema_metadata (key, value) VALUES ('metrics_last_prune_ts', ?1)",
             params![now.to_string()],
+        )?;
+        tx.execute(
+            "DELETE FROM metrics WHERE event_ts >= 0 AND event_ts < ?1",
+            params![cutoff as i64],
         )?;
         {
             let mut stmt = tx.prepare_cached("DELETE FROM metrics WHERE id = ?1")?;
@@ -135,23 +139,24 @@ impl MetricsDatabase {
         Ok(())
     }
 
-    fn old_metric_row_ids(&self, cutoff: u64) -> Result<Vec<i64>, GitAiError> {
+    /// Rows without a cached `event_ts` are aged from their JSON instead.
+    fn old_metric_row_ids_without_event_ts(&self, cutoff: u64) -> Result<Vec<i64>, GitAiError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, event_json, event_ts, delivered_ts FROM metrics ORDER BY id ASC",
+            "SELECT id, event_json, delivered_ts FROM metrics \
+             WHERE event_ts IS NULL OR event_ts < 0 ORDER BY id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<i64>>(2)?,
-                row.get::<_, Option<i64>>(3)?,
             ))
         })?;
 
         let mut ids = Vec::new();
         for row in rows {
-            let (id, event_json, event_ts, delivered_ts) = row?;
-            if metric_row_is_older_than_cutoff(&event_json, event_ts, delivered_ts, cutoff) {
+            let (id, event_json, delivered_ts) = row?;
+            if metric_row_is_older_than_cutoff(&event_json, delivered_ts, cutoff) {
                 ids.push(id);
             }
         }
@@ -209,16 +214,9 @@ pub(super) fn extract_metric_event_ts_from_value(value: &Value) -> Option<u32> {
 
 fn metric_row_is_older_than_cutoff(
     event_json: &str,
-    event_ts: Option<i64>,
     delivered_ts: Option<i64>,
     cutoff: u64,
 ) -> bool {
-    if let Some(ts) = event_ts
-        && ts >= 0
-    {
-        return (ts as u64) < cutoff;
-    }
-
     if let Some(ts) = extract_metric_event_ts(event_json) {
         return u64::from(ts) < cutoff;
     }

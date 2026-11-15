@@ -13,7 +13,9 @@
 //! - **Flat command-hooks** (Cursor, Firebender): see the sibling
 //!   `hooks_merge_flat` module.
 use crate::error::GitAiError;
-use crate::operations::mdm::file_ops::{generate_diff, write_atomic};
+use crate::operations::mdm::file_ops::{generate_diff, read_optional, write_atomic};
+use crate::operations::mdm::hook_installer::HookCheckResult;
+use crate::operations::mdm::hooks_merge_flat::has_command;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -27,10 +29,25 @@ pub fn is_git_ai_checkpoint_command(cmd: &str) -> bool {
     cmd.contains("git-ai") && cmd.contains("checkpoint")
 }
 
+/// Whether `hook["command"]` is a git-ai checkpoint command.
+fn is_git_ai_hook(hook: &Value) -> bool {
+    has_command(hook, is_git_ai_checkpoint_command)
+}
+
+/// Whether `block` is the `"*"` catch-all matcher block.
+fn is_catch_all_block(block: &Value) -> bool {
+    block.get("matcher").and_then(|m| m.as_str()) == Some(CATCH_ALL_MATCHER)
+}
+
+/// `parse` argument for the helpers below when the settings file is strict JSON.
+pub fn parse_json(content: &str) -> Result<Value, GitAiError> {
+    Ok(serde_json::from_str(content)?)
+}
+
 /// Controls how [`edit_settings_json`] treats a settings file that doesn't exist.
 pub enum MissingBehavior {
-    /// Install-style: proceed as if the file contained `{}`, and ensure the
-    /// parent directory exists so a write can land there.
+    /// Install-style: proceed as if the file contained `{}`; the write
+    /// creates the parent directory.
     TreatAsEmpty,
     /// Uninstall-style: nothing to remove from a missing file, so return
     /// `Ok(None)` immediately without touching the filesystem.
@@ -54,20 +71,10 @@ pub fn edit_settings_json(
     parse: impl Fn(&str) -> Result<Value, GitAiError>,
     mutate: impl FnOnce(&mut Value),
 ) -> Result<Option<String>, GitAiError> {
-    if !settings_path.exists() && matches!(on_missing, MissingBehavior::NoOp) {
-        return Ok(None);
-    }
-
-    if matches!(on_missing, MissingBehavior::TreatAsEmpty)
-        && let Some(dir) = settings_path.parent()
-    {
-        fs::create_dir_all(dir)?;
-    }
-
-    let existing_content = if settings_path.exists() {
-        fs::read_to_string(settings_path)?
-    } else {
-        String::new()
+    let existing_content = match read_optional(settings_path)? {
+        Some(content) => content,
+        None if matches!(on_missing, MissingBehavior::NoOp) => return Ok(None),
+        None => String::new(),
     };
 
     let existing: Value = match on_missing {
@@ -92,57 +99,44 @@ pub fn edit_settings_json(
     Ok(Some(diff_output))
 }
 
-/// Ensure exactly one git-ai checkpoint command (identified via
-/// `is_git_ai_checkpoint_command` on each entry's `"command"`) exists in
-/// `array`: replace a differing match with `desired_hook`, dedup any further
-/// matches down to one, or append `desired_hook` if none exist. Shared by the
-/// catch-all matcher installers' dedup step and by Windsurf's flat per-event
-/// hook arrays.
+/// Ensure exactly one entry matched by `is_ours` exists in `array`: the first
+/// match is kept and handed to `refresh` with `desired_hook` (to bring a stale
+/// entry up to date), any further matches are dropped, and `desired_hook` is
+/// appended if there is no match.
+pub fn upsert_singleton_hook(
+    array: &mut Vec<Value>,
+    desired_hook: Value,
+    is_ours: impl Fn(&Value) -> bool,
+    refresh: impl FnOnce(&mut Value, Value),
+) {
+    let Some(keep_idx) = array.iter().position(&is_ours) else {
+        array.push(desired_hook);
+        return;
+    };
+    refresh(&mut array[keep_idx], desired_hook);
+
+    let mut idx = 0;
+    array.retain(|item| {
+        let keep = idx == keep_idx || !is_ours(item);
+        idx += 1;
+        keep
+    });
+}
+
+/// [`upsert_singleton_hook`] for entries whose `"command"` is a git-ai
+/// checkpoint command: a match with a command other than `desired_cmd` is
+/// replaced by `desired_hook`. Shared by the catch-all matcher installers'
+/// dedup step and by Windsurf's flat per-event hook arrays.
 pub fn upsert_singleton_command_hook(
     array: &mut Vec<Value>,
     desired_cmd: &str,
     desired_hook: Value,
 ) {
-    let mut found_idx: Option<usize> = None;
-    let mut needs_update = false;
-
-    for (idx, item) in array.iter().enumerate() {
-        if let Some(cmd) = item.get("command").and_then(|c| c.as_str())
-            && is_git_ai_checkpoint_command(cmd)
-            && found_idx.is_none()
-        {
-            found_idx = Some(idx);
-            if cmd != desired_cmd {
-                needs_update = true;
-            }
+    upsert_singleton_hook(array, desired_hook, is_git_ai_hook, |existing, desired| {
+        if existing.get("command").and_then(|c| c.as_str()) != Some(desired_cmd) {
+            *existing = desired;
         }
-    }
-
-    match found_idx {
-        Some(idx) => {
-            if needs_update {
-                array[idx] = desired_hook;
-            }
-            let keep_idx = idx;
-            let mut current_idx = 0;
-            array.retain(|item| {
-                if current_idx == keep_idx {
-                    current_idx += 1;
-                    true
-                } else if let Some(cmd) = item.get("command").and_then(|c| c.as_str()) {
-                    let is_dup = is_git_ai_checkpoint_command(cmd);
-                    current_idx += 1;
-                    !is_dup
-                } else {
-                    current_idx += 1;
-                    true
-                }
-            });
-        }
-        None => {
-            array.push(desired_hook);
-        }
-    }
+    });
 }
 
 /// Ensure exactly one git-ai checkpoint command lives in the `"*"` catch-all
@@ -162,21 +156,11 @@ pub fn install_catch_all_hooks(hooks_obj: &mut Value, desired: &[(&str, &str)]) 
         // Step 1: strip git-ai from every non-catch-all matcher block (migration).
         let mut emptied_by_migration = vec![false; hook_type_array.len()];
         for (i, block) in hook_type_array.iter_mut().enumerate() {
-            let is_catch_all = block
-                .get("matcher")
-                .and_then(|m| m.as_str())
-                .map(|m| m == CATCH_ALL_MATCHER)
-                .unwrap_or(false);
-            if !is_catch_all
+            if !is_catch_all_block(block)
                 && let Some(hooks) = block.get_mut("hooks").and_then(|h| h.as_array_mut())
             {
                 let before = hooks.len();
-                hooks.retain(|hook| {
-                    hook.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(|cmd| !is_git_ai_checkpoint_command(cmd))
-                        .unwrap_or(true)
-                });
+                hooks.retain(|hook| !is_git_ai_hook(hook));
                 if hooks.is_empty() && before > 0 {
                     emptied_by_migration[i] = true;
                 }
@@ -192,12 +176,7 @@ pub fn install_catch_all_hooks(hooks_obj: &mut Value, desired: &[(&str, &str)]) 
         // Step 2: find or create the "*" catch-all matcher block.
         let catch_all_idx = hook_type_array
             .iter()
-            .position(|b| {
-                b.get("matcher")
-                    .and_then(|m| m.as_str())
-                    .map(|m| m == CATCH_ALL_MATCHER)
-                    .unwrap_or(false)
-            })
+            .position(is_catch_all_block)
             .unwrap_or_else(|| {
                 hook_type_array.push(json!({
                     "matcher": CATCH_ALL_MATCHER,
@@ -246,13 +225,7 @@ pub fn uninstall_catch_all_hooks(hooks_obj: &mut Value, hook_types: &[&str]) -> 
                     .and_then(|h| h.as_array_mut())
                 {
                     let original_len = hooks_array.len();
-                    hooks_array.retain(|hook| {
-                        if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                            !is_git_ai_checkpoint_command(cmd)
-                        } else {
-                            true
-                        }
-                    });
+                    hooks_array.retain(|hook| !is_git_ai_hook(hook));
                     if hooks_array.len() != original_len {
                         changed = true;
                     }
@@ -261,6 +234,79 @@ pub fn uninstall_catch_all_hooks(hooks_obj: &mut Value, hook_types: &[&str]) -> 
         }
     }
     changed
+}
+
+/// [`edit_settings_json`] envelope around [`install_catch_all_hooks`] for the
+/// `"hooks"` object of `settings_path`; `extra` then applies whatever else the
+/// tool needs in the same settings value.
+pub fn install_catch_all_hooks_at(
+    settings_path: &Path,
+    dry_run: bool,
+    parse: impl Fn(&str) -> Result<Value, GitAiError>,
+    desired: &[(&str, &str)],
+    extra: impl FnOnce(&mut Value),
+) -> Result<Option<String>, GitAiError> {
+    edit_settings_json(
+        settings_path,
+        dry_run,
+        MissingBehavior::TreatAsEmpty,
+        parse,
+        |merged| {
+            let mut hooks_obj = merged.get("hooks").cloned().unwrap_or_else(|| json!({}));
+            install_catch_all_hooks(&mut hooks_obj, desired);
+            if let Some(root) = merged.as_object_mut() {
+                root.insert("hooks".to_string(), hooks_obj);
+            }
+            extra(merged);
+        },
+    )
+}
+
+/// [`edit_settings_json`] envelope around [`uninstall_catch_all_hooks`] for
+/// the `"hooks"` object of `settings_path`.
+pub fn uninstall_catch_all_hooks_at(
+    settings_path: &Path,
+    dry_run: bool,
+    parse: impl Fn(&str) -> Result<Value, GitAiError>,
+    hook_types: &[&str],
+) -> Result<Option<String>, GitAiError> {
+    edit_settings_json(
+        settings_path,
+        dry_run,
+        MissingBehavior::NoOp,
+        parse,
+        |merged| {
+            let Some(mut hooks_obj) = merged.get("hooks").cloned() else {
+                return;
+            };
+            if uninstall_catch_all_hooks(&mut hooks_obj, hook_types)
+                && let Some(root) = merged.as_object_mut()
+            {
+                root.insert("hooks".to_string(), hooks_obj);
+            }
+        },
+    )
+}
+
+/// Shared tail of `HookInstaller::check_hooks` for a detected tool whose hooks
+/// live in one settings file: a missing file has no hooks, an unparseable one
+/// is read as `{}`, and `status` maps the settings to
+/// `(hooks_installed, hooks_up_to_date)`.
+pub fn check_settings_hooks(
+    settings_path: &Path,
+    parse: impl Fn(&str) -> Result<Value, GitAiError>,
+    status: impl Fn(&Value) -> (bool, bool),
+) -> Result<HookCheckResult, GitAiError> {
+    if !settings_path.exists() {
+        return Ok(HookCheckResult::installed_without_hooks());
+    }
+    let content = fs::read_to_string(settings_path)?;
+    let existing = parse(&content).unwrap_or_else(|_| json!({}));
+    let (hooks_installed, hooks_up_to_date) = status(&existing);
+    Ok(HookCheckResult::installed(
+        hooks_installed,
+        hooks_up_to_date,
+    ))
 }
 
 /// Returns `(hooks_installed, hooks_up_to_date)` for a catch-all-matcher-style
@@ -281,28 +327,14 @@ pub fn catch_all_hook_status(settings: &Value, pre_hook_type: &str) -> (bool, bo
     let mut hooks_up_to_date = false;
 
     for block in blocks {
-        let is_catch_all = block
-            .get("matcher")
-            .and_then(|m| m.as_str())
-            .map(|m| m == CATCH_ALL_MATCHER)
-            .unwrap_or(false);
-
         let has_git_ai = block
             .get("hooks")
             .and_then(|h| h.as_array())
-            .map(|hooks| {
-                hooks.iter().any(|hook| {
-                    hook.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(is_git_ai_checkpoint_command)
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
+            .is_some_and(|hooks| hooks.iter().any(is_git_ai_hook));
 
         if has_git_ai {
             hooks_installed = true;
-            if is_catch_all {
+            if is_catch_all_block(block) {
                 hooks_up_to_date = true;
             }
         }
@@ -315,10 +347,6 @@ pub fn catch_all_hook_status(settings: &Value, pre_hook_type: &str) -> (bool, bo
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    fn parse_json(content: &str) -> Result<Value, GitAiError> {
-        Ok(serde_json::from_str(content)?)
-    }
 
     #[test]
     fn test_is_git_ai_checkpoint_command() {
@@ -413,7 +441,7 @@ mod tests {
     #[test]
     fn envelope_dry_run_computes_diff_without_writing() {
         let temp = TempDir::new().unwrap();
-        let path = temp.path().join("settings.json");
+        let path = temp.path().join("nested").join("settings.json");
 
         let result = edit_settings_json(
             &path,
@@ -429,7 +457,7 @@ mod tests {
         .unwrap();
 
         assert!(result.is_some(), "dry run should still report a diff");
-        assert!(!path.exists(), "dry run must not write");
+        assert!(!path.parent().unwrap().exists(), "dry run must not write");
     }
 
     // ---- upsert_singleton_command_hook ----

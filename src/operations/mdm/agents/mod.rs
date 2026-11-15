@@ -1,4 +1,6 @@
 mod amp;
+#[cfg(test)]
+mod catch_all_scenarios;
 mod claude_code;
 mod cline;
 mod codex;

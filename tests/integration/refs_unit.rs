@@ -11,8 +11,7 @@ use git_ai::operations::git::refs::git_backend_for_tests::{
 };
 use git_ai::operations::git::refs::{
     AI_AUTHORSHIP_FORK_TRACKING_REF, CommitAuthorship, copy_missing_notes_for_commits_from_ref,
-    copy_ref, get_reference_as_working_log, merge_notes_from_ref,
-    note_blob_oids_for_commits_from_ref, ref_exists,
+    copy_ref, merge_notes_from_ref, note_blob_oids_for_commits_from_ref, ref_exists,
 };
 use git_ai::operations::git::repository::find_repository_in_path;
 use std::fs;
@@ -668,6 +667,26 @@ fn test_grep_ai_notes_no_notes() {
     // Err is also acceptable - refs/notes/ai may not exist yet
 }
 
+/// A commit range can hold more SHAs than fit on a command line (about 50,000
+/// on Linux, under 800 on Windows), so the list must not travel in argv.
+#[test]
+fn test_get_commits_with_notes_from_list_accepts_more_shas_than_fit_in_argv() {
+    let (repo, gitai_repo) = repo_with_handle();
+    fs::write(repo.path().join("a.txt"), "a\n").unwrap();
+    repo.stage_all_and_commit("Commit A").expect("commit A");
+
+    // 60,000 SHAs are about 2.4MB of arguments, past the 2MB Linux limit.
+    let commit_list = vec![head_sha(&repo); 60_000];
+    let result = get_commits_with_notes_from_list(&gitai_repo, &commit_list).expect("get commits");
+
+    assert_eq!(result.len(), commit_list.len());
+    assert!(
+        result
+            .iter()
+            .all(|commit| matches!(commit, CommitAuthorship::Log { .. }))
+    );
+}
+
 #[test]
 fn test_get_commits_with_notes_from_list() {
     let (repo, gitai_repo) = repo_with_handle();
@@ -833,22 +852,6 @@ fn test_commits_with_authorship_notes() {
         !result.is_empty(),
         "Should have at least 1 commit with notes"
     );
-}
-
-#[test]
-fn test_get_reference_as_working_log() {
-    let (repo, gitai_repo) = repo_with_handle();
-
-    fs::write(repo.path().join("test.txt"), "content\n").unwrap();
-    repo.stage_all_and_commit("Commit").expect("commit");
-    let commit_sha = head_sha(&repo);
-
-    // Add a working log format note
-    let working_log_json = "[]";
-    write_note(&gitai_repo, &commit_sha, working_log_json).expect("add note");
-
-    let result = get_reference_as_working_log(&gitai_repo, &commit_sha).expect("get working log");
-    assert_eq!(result.len(), 0); // Empty array
 }
 
 #[test]

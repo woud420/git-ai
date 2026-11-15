@@ -84,3 +84,15 @@ fn test_summarize_rebase_args_strategy_consumes_value() {
     assert!(!summary.is_control_mode);
     assert_eq!(summary.positionals, vec!["origin/main".to_string()]);
 }
+
+#[test]
+fn test_summarize_rebase_args_gpg_sign_takes_no_separate_value() {
+    for flag in ["-S", "--gpg-sign"] {
+        let summary = summarize_rebase_args(&args(&[flag, "main", "feature"]));
+        assert_eq!(
+            summary.positionals,
+            vec!["main".to_string(), "feature".to_string()],
+            "{flag} must not swallow the upstream"
+        );
+    }
+}

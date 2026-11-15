@@ -1,3 +1,4 @@
+use crate::config::FileConfig;
 use crate::operations::git::repository::find_repository_in_path;
 use dirs;
 
@@ -97,6 +98,20 @@ pub(super) fn resolve_repository_value(value: &str) -> Result<Vec<String>, Strin
             // Resolve to repository remote URLs
             resolve_path_to_remotes(value)
         }
+    }
+}
+
+/// The repository-pattern list that the top-level key `name` refers to, if it
+/// is one of the lists that `set_repository_array_field` manages.
+pub(super) fn repository_list_mut<'a>(
+    file_config: &'a mut FileConfig,
+    name: &str,
+) -> Option<&'a mut Option<Vec<String>>> {
+    match name {
+        "exclude_prompts_in_repositories" => Some(&mut file_config.exclude_prompts_in_repositories),
+        "allowed_repositories" => Some(&mut file_config.allowed_repositories),
+        "exclude_repositories" => Some(&mut file_config.exclude_repositories),
+        _ => None,
     }
 }
 

@@ -7,7 +7,28 @@ use crate::error::GitAiError;
 
 use super::GitAiBlameOptions;
 
+/// Options that take a value, which git also accepts as `--opt=value`.
+const VALUE_OPTIONS: [&str; 8] = [
+    "--abbrev",
+    "--contents",
+    "--date",
+    "--encoding",
+    "--ignore-rev",
+    "--ignore-revs-file",
+    "--reverse",
+    "--since",
+];
+
 pub fn parse_blame_args(args: &[String]) -> Result<(String, GitAiBlameOptions), GitAiError> {
+    let args: Vec<String> = args
+        .iter()
+        .flat_map(|arg| match arg.split_once('=') {
+            Some((flag, value)) if VALUE_OPTIONS.contains(&flag) => {
+                vec![flag.to_string(), value.to_string()]
+            }
+            _ => vec![arg.clone()],
+        })
+        .collect();
     let mut options = GitAiBlameOptions::default();
     let mut file_path = None;
     let mut i = 0;
@@ -268,6 +289,22 @@ pub fn parse_blame_args(args: &[String]) -> Result<(String, GitAiBlameOptions), 
             "--show-prompt" => {
                 options.show_prompt = true;
                 i += 1;
+            }
+
+            // Everything after `--` is the path.
+            "--" => {
+                let [path] = &args[i + 1..] else {
+                    return Err(GitAiError::Generic(
+                        "Expected exactly one file path after --".to_string(),
+                    ));
+                };
+                if file_path.is_some() {
+                    return Err(GitAiError::Generic(
+                        "Multiple file paths specified".to_string(),
+                    ));
+                }
+                file_path = Some(path.clone());
+                break;
             }
 
             // File path (non-option argument)

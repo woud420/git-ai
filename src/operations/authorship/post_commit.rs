@@ -1,14 +1,15 @@
+mod commit_metadata;
 mod snapshots;
 mod stale_checkpoint;
 
 use crate::config::Config;
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::AuthorshipLog;
-use crate::model::working_log::{Checkpoint, CheckpointKind, WorkingLogEntry};
+use crate::model::working_log::{Checkpoint, CheckpointKind, InitialAttributions, WorkingLogEntry};
 use crate::operations::authorship::attribution_recovery::{
     AttributionRecoveryContext, FileTimestampsByPath, UnknownLinesByFile,
 };
-use crate::operations::authorship::diff_base::single_commit_diff_base;
+use crate::operations::authorship::diff_base::{empty_tree_for, single_commit_diff_base};
 use crate::operations::authorship::ignore::{
     build_ignore_matcher, effective_ignore_patterns, should_ignore_file_with_matcher,
 };
@@ -23,6 +24,9 @@ use crate::operations::authorship::virtual_attribution::{
 use crate::operations::git::notes_api::write_note;
 use crate::operations::git::patch_id::{PatchDiffMode, stable_patch_ids_for_commits};
 use crate::operations::git::repository::{Repository, parse_diff_added_lines};
+use commit_metadata::commit_metric_metadata;
+#[cfg(test)]
+use commit_metadata::parse_commit_metric_metadata_output;
 use snapshots::{commit_tree_snapshot_for_files, recovery_committed_hunks};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
@@ -71,33 +75,6 @@ fn checkpoint_entry_requires_post_processing(
             .any(|attr| attr.author_id != CheckpointKind::Human.to_str())
 }
 
-pub fn post_commit(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    supress_output: bool,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log(repo, base_commit, commit_sha, human_author, supress_output)
-}
-
-pub fn post_commit_from_working_log(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    supress_output: bool,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log_with_transform(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        supress_output,
-        Ok,
-    )
-}
-
 pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
     repo: &Repository,
     base_commit: Option<String>,
@@ -107,7 +84,7 @@ pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
     recovery_file_timestamps: Option<&FileTimestampsByPath>,
     before_external_recovery: Option<&dyn Fn(&UnknownLinesByFile)>,
 ) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_from_working_log_with_transform_context(
+    post_commit_from_working_log_with_transform_context_detailed(
         repo,
         base_commit,
         commit_sha,
@@ -125,6 +102,7 @@ pub(crate) fn post_commit_from_working_log_with_recovery_timestamps(
         },
         Ok,
     )
+    .map(|result| (result.commit_sha, result.authorship_log))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -143,140 +121,14 @@ pub(crate) struct PostCommitDetailedResult {
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct PostCommitContext<'a> {
+    /// Pre-computed parent→commit diff. A batched caller (the rebase
+    /// conflict-resolution driver) computes every qualifying commit's diff in
+    /// ONE `diff-tree` and threads each result here, so post-commit makes no
+    /// per-commit `git diff` / `git diff-tree` spawns. With `None` the diff is
+    /// computed for the single commit.
     pub(crate) precomputed_parent_diff: Option<&'a DiffTreeResult>,
     pub(crate) recovery_file_timestamps: Option<&'a FileTimestampsByPath>,
     pub(crate) before_external_recovery: Option<&'a dyn Fn(&UnknownLinesByFile)>,
-}
-
-pub fn post_commit_from_working_log_with_transform<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    supress_output: bool,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_and_options(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        PostCommitOptions {
-            supress_output,
-            compute_stats: true,
-            recover_attribution: true,
-            defer_note_write: false,
-        },
-        transform,
-    )
-}
-
-pub(crate) fn post_commit_from_working_log_with_transform_and_options<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_options_and_diff(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        None,
-        transform,
-    )
-}
-
-pub(crate) fn post_commit_from_working_log_with_transform_and_options_detailed<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    transform: F,
-) -> Result<PostCommitDetailedResult, GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_context_detailed(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        PostCommitContext {
-            precomputed_parent_diff: None,
-            recovery_file_timestamps: None,
-            before_external_recovery: None,
-        },
-        transform,
-    )
-}
-
-/// As [`post_commit_from_working_log_with_transform_and_options`], but accepts a
-/// pre-computed parent→commit `DiffTreeResult`. A batched caller (the rebase
-/// conflict-resolution driver) computes every qualifying commit's parent→commit
-/// diff in ONE `diff-tree` and threads each result here, so this function makes
-/// no per-commit `git diff` / `git diff-tree` spawns. With `None` the behavior
-/// is identical to the unbatched single-commit path.
-pub(crate) fn post_commit_from_working_log_with_transform_options_and_diff<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    precomputed_parent_diff: Option<&DiffTreeResult>,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_context(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        PostCommitContext {
-            precomputed_parent_diff,
-            recovery_file_timestamps: None,
-            before_external_recovery: None,
-        },
-        transform,
-    )
-}
-
-fn post_commit_from_working_log_with_transform_context<F>(
-    repo: &Repository,
-    base_commit: Option<String>,
-    commit_sha: String,
-    human_author: String,
-    options: PostCommitOptions,
-    context: PostCommitContext<'_>,
-    transform: F,
-) -> Result<(String, AuthorshipLog), GitAiError>
-where
-    F: FnOnce(AuthorshipLog) -> Result<AuthorshipLog, GitAiError>,
-{
-    post_commit_from_working_log_with_transform_context_detailed(
-        repo,
-        base_commit,
-        commit_sha,
-        human_author,
-        options,
-        context,
-        transform,
-    )
-    .map(|result| (result.commit_sha, result.authorship_log))
 }
 
 pub(crate) fn post_commit_from_working_log_with_transform_context_detailed<F>(
@@ -339,63 +191,27 @@ where
 
     authorship_log.metadata.base_commit_sha = commit_sha.clone();
 
-    // No-hooks background agents (Devin, Codex Cloud, etc.) may not fire checkpoints
-    // for all edits. Attribute any committed lines that have no existing attestation
-    // ("holes") to the detected agent, preserving explicit attributions.
-    if !matches!(
-        crate::operations::authorship::background_agent::detect(),
-        crate::operations::authorship::background_agent::BackgroundAgent::None
-            | crate::operations::authorship::background_agent::BackgroundAgent::WithHooks { .. }
-    ) {
-        // Prefer the batched parent→commit diff when supplied (no extra spawn);
-        // otherwise fall back to a per-commit `git diff`.
-        let committed_hunks: Option<HashMap<String, Vec<crate::model::authorship_log::LineRange>>> =
-            if let Some(diff) = context.precomputed_parent_diff {
-                Some(
-                    crate::operations::authorship::virtual_attribution::committed_hunks_from_diff_result(
-                        diff, None,
-                    ),
-                )
-            } else {
-                // Same bounding as recovery: on the daemon fast-forward `update-ref`
-                // path `parent_sha` is the far-behind old branch tip, so diff against
-                // the finalized commit's immediate parent to avoid buffering the whole
-                // pulled range. No-hooks agents (Devin/Codex Cloud)
-                // can be active during a pull, so this path is exposed too.
-                let diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
-                repo.diff_added_lines(&diff_base, &commit_sha, None)
-                    .ok()
-                    .map(|added_lines| {
-                        added_lines
-                            .into_iter()
-                            .filter(|(_, lines)| !lines.is_empty())
-                            .map(|(path, lines)| {
-                                (
-                                    path,
-                                    crate::model::authorship_log::LineRange::compress_lines(&lines),
-                                )
-                            })
-                            .collect()
-                    })
-            };
-        if let Some(committed_hunks) = committed_hunks {
-            crate::operations::authorship::background_agent::fill_unattributed_lines(
-                &mut authorship_log,
-                &committed_hunks,
-                &human_author,
-            );
-        }
-    }
-
-    authorship_log = transform(authorship_log)?;
-    authorship_log.metadata.base_commit_sha = commit_sha.clone();
-
+    // Lines added by the commit being finalized, from the batched parent→commit
+    // diff when supplied (no extra spawn) and one bounded `git diff` otherwise.
     let mut recovery_hunks = recovery_committed_hunks(
         repo,
         &parent_sha,
         &commit_sha,
         context.precomputed_parent_diff,
     )?;
+
+    // No-hooks background agents (Devin, Codex Cloud, etc.) may not fire checkpoints
+    // for all edits. Attribute any committed lines that have no existing attestation
+    // ("holes") to the detected agent, preserving explicit attributions.
+    crate::operations::authorship::background_agent::fill_unattributed_lines(
+        &mut authorship_log,
+        &recovery_hunks,
+        &human_author,
+    );
+
+    authorship_log = transform(authorship_log)?;
+    authorship_log.metadata.base_commit_sha = commit_sha.clone();
+
     stale_checkpoint::CheckpointEvidence {
         working_log: &working_log,
         checkpoints: &parent_working_log,
@@ -428,19 +244,7 @@ where
         authorship_log.metadata.base_commit_sha = commit_sha.clone();
     }
 
-    // Use Config::fresh() so long-lived daemon processes observe runtime config changes.
-    let config = Config::fresh();
-    let custom_attrs = config.custom_attributes().clone();
-
-    // Inject custom attributes into all PromptRecords and SessionRecords.
-    if !custom_attrs.is_empty() {
-        for pr in authorship_log.metadata.prompts.values_mut() {
-            pr.custom_attributes = Some(custom_attrs.clone());
-        }
-        for sr in authorship_log.metadata.sessions.values_mut() {
-            sr.custom_attributes = Some(custom_attrs.clone());
-        }
-    }
+    inject_custom_attributes(&mut authorship_log);
 
     // This diagnostic is persisted in daemon failure state; keep its text stable.
     let authorship_note_str = authorship_log
@@ -551,17 +355,12 @@ where
         }
     }
 
-    // Write INITIAL file for uncommitted AI attributions (if any)
-    if !initial_attributions.files.is_empty() {
-        let new_working_log = repo_storage.working_log_for_base_commit(&commit_sha)?;
-        new_working_log.write_initial_attributions_with_contents(
-            initial_attributions.files,
-            initial_attributions.prompts,
-            initial_attributions.humans,
-            initial_file_contents,
-            initial_attributions.sessions,
-        )?;
-    }
+    write_uncommitted_initial(
+        repo,
+        &commit_sha,
+        initial_attributions,
+        initial_file_contents,
+    )?;
 
     // When deferring, the caller deletes working logs only after a successful
     // flush; deleting here would make attribution unrecoverable on flush failure.
@@ -602,48 +401,45 @@ where
     })
 }
 
-/// Amend-specific post-commit that merges blame-sourced attributions from the
-/// original commit with persisted working-log checkpoint data.
-pub fn post_commit_amend(
+/// Stamp the configured custom attributes on every prompt and session record.
+/// Config::fresh() so long-lived daemon processes observe runtime changes.
+fn inject_custom_attributes(authorship_log: &mut AuthorshipLog) {
+    let custom_attrs = Config::fresh().custom_attributes().clone();
+    if custom_attrs.is_empty() {
+        return;
+    }
+    for pr in authorship_log.metadata.prompts.values_mut() {
+        pr.custom_attributes = Some(custom_attrs.clone());
+    }
+    for sr in authorship_log.metadata.sessions.values_mut() {
+        sr.custom_attributes = Some(custom_attrs.clone());
+    }
+}
+
+/// Carry attributions that stayed uncommitted into `commit_sha`'s INITIAL file.
+fn write_uncommitted_initial(
     repo: &Repository,
-    original_commit: &str,
-    amended_commit: &str,
-    human_author: String,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_amend_with_recovery_timestamps(
-        repo,
-        original_commit,
-        amended_commit,
-        human_author,
-        None,
-        None,
-    )
+    commit_sha: &str,
+    initial: InitialAttributions,
+    file_contents: HashMap<String, String>,
+) -> Result<(), GitAiError> {
+    if initial.files.is_empty() {
+        return Ok(());
+    }
+    repo.storage
+        .working_log_for_base_commit(commit_sha)?
+        .write_initial_attributions_with_contents(
+            initial.files,
+            initial.prompts,
+            initial.humans,
+            file_contents,
+            initial.sessions,
+        )
 }
 
 pub(crate) struct PostCommitAmendResult {
-    pub commit_sha: String,
-    pub authorship_log: AuthorshipLog,
     pub authorship_note: String,
     pub parent_sha: String,
-}
-
-pub(crate) fn post_commit_amend_with_recovery_timestamps(
-    repo: &Repository,
-    original_commit: &str,
-    amended_commit: &str,
-    human_author: String,
-    recovery_file_timestamps: Option<&FileTimestampsByPath>,
-    before_external_recovery: Option<&dyn Fn(&UnknownLinesByFile)>,
-) -> Result<(String, AuthorshipLog), GitAiError> {
-    post_commit_amend_with_recovery_timestamps_detailed(
-        repo,
-        original_commit,
-        amended_commit,
-        human_author,
-        recovery_file_timestamps,
-        before_external_recovery,
-    )
-    .map(|result| (result.commit_sha, result.authorship_log))
 }
 
 pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
@@ -675,14 +471,13 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     // Check if original commit has existing authorship data. Read through
     // notes_api so the HTTP notes backend is honored (the note may only exist
     // in the notes-db cache, not refs/notes/ai).
-    let has_existing_data =
-        crate::operations::git::notes_api::read_authorship_v3(repo, original_commit)
-            .map(|log| {
-                !log.metadata.prompts.is_empty()
-                    || !log.metadata.humans.is_empty()
-                    || !log.metadata.sessions.is_empty()
-            })
-            .unwrap_or(false);
+    let original_log =
+        crate::operations::git::notes_api::read_authorship_v3(repo, original_commit).ok();
+    let has_existing_data = original_log.as_ref().is_some_and(|log| {
+        !log.metadata.prompts.is_empty()
+            || !log.metadata.humans.is_empty()
+            || !log.metadata.sessions.is_empty()
+    });
 
     let working_va = crate::tokio_runtime::block_on(async {
         VirtualAttributions::from_working_log_for_commit_snapshot(
@@ -701,15 +496,11 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     })?;
 
     // Resolve parent of the amended commit for diff base
-    let amended_commit_obj = repo.find_commit(amended_commit.to_string())?;
-    let parent_sha = if amended_commit_obj.parent_count()? > 0 {
-        amended_commit_obj
-            .parent(0)
-            .map(|p| p.id())
-            .unwrap_or_else(|_| "initial".to_string())
-    } else {
-        "initial".to_string()
-    };
+    let parent_sha = repo
+        .find_commit(amended_commit.to_string())?
+        .parents()
+        .next()
+        .map_or_else(|| "initial".to_string(), |parent| parent.id());
 
     let (mut authorship_log, initial_attributions, initial_file_contents) = working_va
         .to_authorship_log_and_initial_working_log(
@@ -723,37 +514,13 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();
 
     // Fill unattributed lines for background agents
-    if !matches!(
-        crate::operations::authorship::background_agent::detect(),
-        crate::operations::authorship::background_agent::BackgroundAgent::None
-            | crate::operations::authorship::background_agent::BackgroundAgent::WithHooks { .. }
-    ) {
-        let diff_base = if parent_sha == "initial" {
-            "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-        } else {
-            &parent_sha
-        };
-        if let Ok(added_lines) = repo.diff_added_lines(diff_base, amended_commit, None) {
-            let committed_hunks: HashMap<String, Vec<crate::model::authorship_log::LineRange>> =
-                added_lines
-                    .into_iter()
-                    .filter(|(_, lines)| !lines.is_empty())
-                    .map(|(path, lines)| {
-                        (
-                            path,
-                            crate::model::authorship_log::LineRange::compress_lines(&lines),
-                        )
-                    })
-                    .collect();
-            crate::operations::authorship::background_agent::fill_unattributed_lines(
-                &mut authorship_log,
-                &committed_hunks,
-                &human_author,
-            );
-        }
-    }
-
     let recovery_hunks = recovery_committed_hunks(repo, &parent_sha, amended_commit, None)?;
+    crate::operations::authorship::background_agent::fill_unattributed_lines(
+        &mut authorship_log,
+        &recovery_hunks,
+        &human_author,
+    );
+
     crate::operations::authorship::attribution_recovery::recover_attribution(
         repo,
         &parent_sha,
@@ -769,35 +536,15 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
     )?;
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();
 
-    // Preserve human/session metadata from the original commit's note. Read
-    // through notes_api so the HTTP notes backend is honored — with refs-only
-    // reads the amended note keeps its s_/h_ attestation hashes but silently
-    // loses the sessions/humans records they resolve through.
-    if let Ok(original_log) =
-        crate::operations::git::notes_api::read_authorship_v3(repo, original_commit)
-    {
+    // Preserve human/session metadata from the original commit's note (read
+    // above through notes_api so the HTTP notes backend is honored — with
+    // refs-only reads the amended note keeps its s_/h_ attestation hashes but
+    // silently loses the sessions/humans records they resolve through).
+    if let Some(original_log) = original_log {
         for (id, record) in original_log.metadata.humans {
             authorship_log.metadata.humans.entry(id).or_insert(record);
         }
-        let referenced_session_ids: HashSet<String> = authorship_log
-            .attestations
-            .iter()
-            .flat_map(|fa| fa.entries.iter())
-            .filter_map(|entry| {
-                if entry.hash.starts_with("s_") {
-                    Some(
-                        entry
-                            .hash
-                            .split("::")
-                            .next()
-                            .unwrap_or(&entry.hash)
-                            .to_string(),
-                    )
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let referenced_session_ids = authorship_log.referenced_session_ids();
         for (id, record) in original_log.metadata.sessions {
             if referenced_session_ids.contains(&id) {
                 authorship_log.metadata.sessions.entry(id).or_insert(record);
@@ -805,16 +552,7 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         }
     }
 
-    // Inject custom attributes
-    let custom_attrs = Config::fresh().custom_attributes().clone();
-    if !custom_attrs.is_empty() {
-        for pr in authorship_log.metadata.prompts.values_mut() {
-            pr.custom_attributes = Some(custom_attrs.clone());
-        }
-        for sr in authorship_log.metadata.sessions.values_mut() {
-            sr.custom_attributes = Some(custom_attrs.clone());
-        }
-    }
+    inject_custom_attributes(&mut authorship_log);
 
     // This diagnostic is persisted in daemon failure state; keep its text stable.
     let authorship_note_str = authorship_log
@@ -822,24 +560,17 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         .map_err(|_| GitAiError::Generic("Failed to serialize authorship log".to_string()))?;
     write_note(repo, amended_commit, &authorship_note_str)?;
 
-    // Write INITIAL file for uncommitted attributions
-    if !initial_attributions.files.is_empty() {
-        let new_working_log = repo_storage.working_log_for_base_commit(amended_commit)?;
-        new_working_log.write_initial_attributions_with_contents(
-            initial_attributions.files,
-            initial_attributions.prompts,
-            initial_attributions.humans,
-            initial_file_contents,
-            initial_attributions.sessions,
-        )?;
-    }
+    write_uncommitted_initial(
+        repo,
+        amended_commit,
+        initial_attributions,
+        initial_file_contents,
+    )?;
 
     // Clean up old working log
     repo_storage.delete_working_log_for_base_commit(original_commit)?;
 
     Ok(PostCommitAmendResult {
-        commit_sha: amended_commit.to_string(),
-        authorship_log,
         authorship_note: authorship_note_str,
         parent_sha,
     })
@@ -879,15 +610,14 @@ pub fn estimate_stats_cost_for_head(
     commit_sha: &str,
     ignore_patterns: &[String],
 ) -> Result<StatsSkipEstimate, GitAiError> {
-    let commit = repo.find_commit(commit_sha.to_string())?;
-    let parent_sha = if commit.parent_count().unwrap_or(0) > 0 {
-        commit
-            .parent(0)
-            .map(|p| p.id())
-            .unwrap_or_else(|_| "initial".to_string())
-    } else {
-        "4b825dc642cb6eb9a060e54bf8d69288fbee4904".to_string()
-    };
+    let parent_sha = repo
+        .find_commit(commit_sha.to_string())?
+        .parents()
+        .next()
+        .map_or_else(
+            || empty_tree_for(commit_sha).to_string(),
+            |parent| parent.id(),
+        );
     estimate_stats_cost_for_commit_range(repo, &parent_sha, commit_sha, ignore_patterns)
 }
 
@@ -1018,58 +748,6 @@ pub(crate) fn metric_tool_model_breakdown(
     })
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CommitMetricMetadata {
-    pub subject: Option<String>,
-    pub body: Option<String>,
-    pub author_ts: Option<u64>,
-    pub commit_ts: Option<u64>,
-}
-
-pub(crate) fn commit_metric_metadata(
-    repo: &Repository,
-    commit_sha: &str,
-) -> Result<CommitMetricMetadata, GitAiError> {
-    let mut args = repo.global_args_for_exec();
-    args.extend([
-        "show".to_string(),
-        "-s".to_string(),
-        "--no-notes".to_string(),
-        "--encoding=UTF-8".to_string(),
-        "--format=%s%x00%b%x00%at%x00%ct".to_string(),
-        commit_sha.to_string(),
-    ]);
-    let output = crate::clients::git_cli::exec_git(&args)?;
-    let stdout = String::from_utf8(output.stdout)?;
-    Ok(parse_commit_metric_metadata_output(&stdout))
-}
-
-fn parse_commit_metric_metadata_output(output: &str) -> CommitMetricMetadata {
-    let mut parts = output.splitn(4, '\0');
-    let Some(subject) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(body) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(author_ts) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-    let Some(commit_ts) = parts.next() else {
-        return CommitMetricMetadata::default();
-    };
-
-    let subject = subject.trim().to_string();
-    let body = body.trim().to_string();
-
-    CommitMetricMetadata {
-        subject: Some(subject),
-        body: (!body.is_empty()).then_some(body),
-        author_ts: author_ts.trim().parse::<u64>().ok(),
-        commit_ts: commit_ts.trim().parse::<u64>().ok(),
-    }
-}
-
 pub(crate) fn stable_patch_id_for_commit(repo: &Repository, commit_sha: &str) -> Option<String> {
     stable_patch_ids_for_commits(repo, &[commit_sha.to_string()], PatchDiffMode::Configured)
         .ok()
@@ -1088,9 +766,7 @@ pub(crate) fn commit_metric_attrs(
         .commit_sha(commit_sha)
         .base_commit_sha(parent_sha);
 
-    if let Ok(Some(remote_name)) = repo.get_default_remote()
-        && let Ok(remotes) = repo.remotes_with_urls()
-        && let Some((_, url)) = remotes.into_iter().find(|(n, _)| n == &remote_name)
+    if let Ok(Some((_, url))) = repo.default_remote_with_url()
         && let Ok(normalized) = crate::operations::git::remote_url::normalize_repo_url(&url)
     {
         attrs = attrs.repo_url(normalized);
@@ -1176,247 +852,5 @@ fn record_commit_metrics(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_commit_metric_metadata_output_reads_subject_body_and_timestamps() {
-        let metadata = parse_commit_metric_metadata_output(concat!(
-            "Subject line",
-            "\0",
-            "Body line one\n\nBody line two",
-            "\0",
-            "1704067200",
-            "\0",
-            "1704067260\n"
-        ));
-
-        assert_eq!(metadata.subject, Some("Subject line".to_string()));
-        assert_eq!(
-            metadata.body,
-            Some("Body line one\n\nBody line two".to_string())
-        );
-        assert_eq!(metadata.author_ts, Some(1_704_067_200));
-        assert_eq!(metadata.commit_ts, Some(1_704_067_260));
-    }
-
-    #[test]
-    fn parse_commit_metric_metadata_output_uses_null_body_for_empty_body() {
-        let metadata = parse_commit_metric_metadata_output(concat!(
-            "Subject line",
-            "\0",
-            "",
-            "\0",
-            "1704067200",
-            "\0",
-            "1704067260\n"
-        ));
-
-        assert_eq!(metadata.subject, Some("Subject line".to_string()));
-        assert_eq!(metadata.body, None);
-        assert_eq!(metadata.author_ts, Some(1_704_067_200));
-        assert_eq!(metadata.commit_ts, Some(1_704_067_260));
-    }
-
-    #[test]
-    fn test_count_line_ranges_handles_scattered_and_contiguous_lines() {
-        assert_eq!(count_line_ranges(&[]), 0);
-        assert_eq!(count_line_ranges(&[1]), 1);
-        assert_eq!(count_line_ranges(&[1, 2, 3]), 1);
-        assert_eq!(count_line_ranges(&[1, 3, 5]), 3);
-        // Includes unsorted and duplicate values.
-        assert_eq!(count_line_ranges(&[5, 3, 3, 4, 10]), 2);
-    }
-
-    #[test]
-    fn test_should_skip_expensive_post_commit_stats_thresholds() {
-        let below_threshold = StatsCostEstimate {
-            files_with_additions: STATS_SKIP_MAX_FILES_WITH_ADDITIONS - 1,
-            added_lines: STATS_SKIP_MAX_ADDED_LINES - 1,
-            hunk_ranges: STATS_SKIP_MAX_HUNKS - 1,
-            deleted_lines: STATS_SKIP_MAX_DELETED_LINES - 1,
-        };
-        assert!(!should_skip_expensive_post_commit_stats(&below_threshold));
-
-        let by_hunks = StatsCostEstimate {
-            files_with_additions: 1,
-            added_lines: 1,
-            hunk_ranges: STATS_SKIP_MAX_HUNKS,
-            deleted_lines: 0,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_hunks));
-
-        let by_added_lines = StatsCostEstimate {
-            files_with_additions: 1,
-            added_lines: STATS_SKIP_MAX_ADDED_LINES,
-            hunk_ranges: 1,
-            deleted_lines: 0,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_added_lines));
-
-        let by_files = StatsCostEstimate {
-            files_with_additions: STATS_SKIP_MAX_FILES_WITH_ADDITIONS,
-            added_lines: 1,
-            hunk_ranges: 1,
-            deleted_lines: 0,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_files));
-
-        let by_deleted_lines = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: STATS_SKIP_MAX_DELETED_LINES,
-        };
-        assert!(should_skip_expensive_post_commit_stats(&by_deleted_lines));
-    }
-
-    #[test]
-    fn test_count_line_ranges_single_element() {
-        assert_eq!(count_line_ranges(&[42]), 1);
-    }
-
-    #[test]
-    fn test_count_line_ranges_all_contiguous() {
-        assert_eq!(count_line_ranges(&[1, 2, 3, 4, 5]), 1);
-    }
-
-    #[test]
-    fn test_count_line_ranges_all_scattered() {
-        assert_eq!(count_line_ranges(&[1, 10, 20, 30]), 4);
-    }
-
-    #[test]
-    fn test_count_line_ranges_duplicates() {
-        assert_eq!(count_line_ranges(&[5, 5, 5]), 1);
-    }
-
-    #[test]
-    fn test_count_line_ranges_unsorted() {
-        // After sort+dedup: [1, 2, 5, 6, 10] -> ranges: [1,2], [5,6], [10]
-        assert_eq!(count_line_ranges(&[10, 5, 6, 1, 2]), 3);
-    }
-
-    #[test]
-    fn test_metric_tool_model_breakdown_filters_mock_ai() {
-        use crate::operations::authorship::stats::{CommitStats, ToolModelHeadlineStats};
-
-        let mut tool_model_breakdown = std::collections::BTreeMap::new();
-        tool_model_breakdown.insert(
-            "mock_ai::unknown".to_string(),
-            ToolModelHeadlineStats {
-                ai_additions: 4,
-                ai_accepted: 3,
-            },
-        );
-        tool_model_breakdown.insert(
-            "codex::gpt-5".to_string(),
-            ToolModelHeadlineStats {
-                ai_additions: 6,
-                ai_accepted: 5,
-            },
-        );
-        let stats = CommitStats {
-            ai_additions: 10,
-            ai_accepted: 8,
-            tool_model_breakdown,
-            ..Default::default()
-        };
-
-        let result = metric_tool_model_breakdown(&stats).unwrap();
-
-        assert_eq!(result.tool_model_pairs, vec!["all", "codex::gpt-5"]);
-        assert_eq!(result.ai_additions, vec![6, 6]);
-        assert_eq!(result.ai_accepted, vec![5, 5]);
-    }
-
-    #[test]
-    fn test_metric_tool_model_breakdown_skips_mock_only() {
-        use crate::operations::authorship::stats::{CommitStats, ToolModelHeadlineStats};
-
-        let mut tool_model_breakdown = std::collections::BTreeMap::new();
-        tool_model_breakdown.insert(
-            "mock_ai::unknown".to_string(),
-            ToolModelHeadlineStats {
-                ai_additions: 4,
-                ai_accepted: 3,
-            },
-        );
-        let stats = CommitStats {
-            ai_additions: 4,
-            ai_accepted: 3,
-            tool_model_breakdown,
-            ..Default::default()
-        };
-
-        assert_eq!(metric_tool_model_breakdown(&stats), None);
-    }
-
-    #[test]
-    fn test_count_line_ranges_two_ranges() {
-        assert_eq!(count_line_ranges(&[1, 2, 3, 10, 11, 12]), 2);
-    }
-
-    #[test]
-    fn test_should_skip_stats_exactly_at_thresholds() {
-        // Exactly at the hunks threshold alone should trigger skip.
-        let at_hunks = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: STATS_SKIP_MAX_HUNKS,
-            deleted_lines: 0,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_hunks),
-            "Exactly at hunk threshold should skip"
-        );
-
-        // Exactly at added-lines threshold alone should trigger skip.
-        let at_added = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: STATS_SKIP_MAX_ADDED_LINES,
-            hunk_ranges: 0,
-            deleted_lines: 0,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_added),
-            "Exactly at added-lines threshold should skip"
-        );
-
-        // Exactly at files-with-additions threshold alone should trigger skip.
-        let at_files = StatsCostEstimate {
-            files_with_additions: STATS_SKIP_MAX_FILES_WITH_ADDITIONS,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: 0,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_files),
-            "Exactly at files-with-additions threshold should skip"
-        );
-
-        // Exactly at deleted-lines threshold alone should trigger skip.
-        let at_deleted = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: STATS_SKIP_MAX_DELETED_LINES,
-        };
-        assert!(
-            should_skip_expensive_post_commit_stats(&at_deleted),
-            "Exactly at deleted-lines threshold should skip"
-        );
-
-        // All at zero should NOT skip.
-        let all_zero = StatsCostEstimate {
-            files_with_additions: 0,
-            added_lines: 0,
-            hunk_ranges: 0,
-            deleted_lines: 0,
-        };
-        assert!(
-            !should_skip_expensive_post_commit_stats(&all_zero),
-            "All zero values should not skip"
-        );
-    }
-}
+#[path = "post_commit_tests.rs"]
+mod tests;

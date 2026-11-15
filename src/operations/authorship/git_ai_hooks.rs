@@ -120,11 +120,6 @@ pub(crate) fn post_notes_updated_refs<'a>(
     wait_for_hooks_or_detach(running_children);
 }
 
-pub fn post_notes_updated_single(repo: &Repository, commit_sha: &str, note_content: &str) {
-    let note_batch = vec![(commit_sha.to_string(), note_content.to_string())];
-    post_notes_updated(repo, &note_batch);
-}
-
 fn wait_for_hooks_or_detach(mut children: Vec<(String, Child)>) {
     if children.is_empty() {
         return;

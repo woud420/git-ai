@@ -125,3 +125,29 @@ fn test_explicit_path_checkpoint_skips_binary_replacements() {
         "explicit-path checkpoints should skip files whose current contents are binary"
     );
 }
+
+#[test]
+fn test_pathless_checkpoint_discovers_staged_rename_to_non_ascii_path() {
+    let repo = TestRepo::new();
+    write_base_files(&repo);
+
+    repo.git(&["mv", "lines.md", "crème.md"])
+        .expect("rename should succeed");
+    fs::write(repo.path().join("crème.md"), "base lines\nAI line\n")
+        .expect("failed to update crème.md");
+    repo.git_ai(&["checkpoint", "mock_ai"])
+        .expect("pathless checkpoint should succeed");
+
+    let checkpoints = repo
+        .current_working_logs()
+        .read_all_checkpoints()
+        .expect("checkpoints should be readable");
+    let files: Vec<_> = checkpoints
+        .iter()
+        .flat_map(|checkpoint| checkpoint.entries.iter().map(|entry| entry.file.clone()))
+        .collect();
+    assert!(
+        files.iter().any(|file| file == "crème.md"),
+        "status-discovered rename target must be checkpointed, got {files:?}"
+    );
+}

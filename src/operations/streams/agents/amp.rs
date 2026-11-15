@@ -7,8 +7,7 @@ use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_s
 use crate::operations::streams::reader::{
     JsonArrayStreamSpec, RecordIndexAdvancePolicy, read_json_array_stream,
 };
-use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat, SweepStrategy};
-use crate::operations::streams::timestamp::event_timestamp_or_file_time;
+use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -80,10 +79,6 @@ impl Default for AmpAgent {
 }
 
 impl Agent for AmpAgent {
-    fn trusted_stream_roots(&self) -> Vec<PathBuf> {
-        Self::amp_threads_path().into_iter().collect()
-    }
-
     fn validate_checkpoint_stream(
         &self,
         source: &crate::model::checkpoint_request::StreamSource,
@@ -105,10 +100,6 @@ impl Agent for AmpAgent {
 
     fn batch_size_hint(&self) -> usize {
         self.batch_size
-    }
-
-    fn sweep_strategy(&self) -> SweepStrategy {
-        SweepStrategy::Periodic(Duration::from_secs(30 * 60))
     }
 
     fn discover_sessions(&self) -> Result<Vec<DiscoveredSession>, StreamError> {
@@ -159,15 +150,6 @@ impl Agent for AmpAgent {
         )
     }
 
-    fn extract_event_timestamp(
-        &self,
-        event: &serde_json::Value,
-        file_meta: &std::fs::Metadata,
-        is_first_event: bool,
-    ) -> u32 {
-        event_timestamp_or_file_time(event, file_meta, is_first_event)
-    }
-
     fn streams(&self) -> Vec<StreamDescriptor> {
         vec![StreamDescriptor::identity_transcript(
             StreamFormat::AmpThreadJson,
@@ -182,15 +164,6 @@ mod tests {
     use crate::operations::streams::agents::test_support::{
         StreamAdapterContractCapabilities, assert_stream_adapter_contract, rewritten_file_fixture,
     };
-
-    #[test]
-    fn test_sweep_strategy() {
-        let agent = AmpAgent::new();
-        assert_eq!(
-            agent.sweep_strategy(),
-            SweepStrategy::Periodic(Duration::from_secs(30 * 60))
-        );
-    }
 
     fn make_amp_json(message_count: usize) -> String {
         let messages: Vec<String> = (0..message_count)

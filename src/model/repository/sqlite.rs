@@ -1,6 +1,6 @@
 use crate::error::GitAiError;
 use crate::model::repository::error::PersistenceError;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -45,6 +45,11 @@ pub fn open_with_flags_and_memory_limits(
     Ok(conn)
 }
 
+/// `?,?,…` for an SQL `IN (...)` list of `count` bound values.
+pub fn in_placeholders(count: usize) -> String {
+    vec!["?"; count].join(",")
+}
+
 // ----- Singleton store scaffolding -----
 //
 // `notes_db`, `internal_db`, `bash_history_db`, and `metrics_db` are four
@@ -53,14 +58,13 @@ pub fn open_with_flags_and_memory_limits(
 // factor out only the mechanical parts that are code-identical across them (modulo comments/whitespace):
 // opening a connection at a path, reading the current schema version, and
 // running the compare-then-apply migration loop. Each store keeps its own
-// `SCHEMA_VERSION`, `MIGRATIONS`, and `apply_migration` body concrete.
+// `SCHEMA_VERSION` and `MIGRATIONS` sequence and passes them to
+// `apply_migrations`.
 //
-// `internal_db` does not call `migration_runner`: its fast path treats a
-// newer on-disk schema as forward-compatible (returns `Ok(())`) instead of
-// failing closed with `PersistenceError::schema_version`, and it runs an
-// extra post-loop verification step. It still uses
-// `ensure_schema_metadata_table`/`read_schema_version` for the mechanical
-// reads that don't differ.
+// `internal_db` differs in one way it handles itself, ahead of its
+// `apply_migrations` call: its fast path treats a newer on-disk schema as
+// forward-compatible (returns `Ok(())`) instead of failing closed with
+// `PersistenceError::schema_version`.
 
 /// Create parent directories, open a writable connection with the standard
 /// memory limits, and hand it to `init` to build and schema-initialize the
@@ -129,16 +133,13 @@ pub(crate) fn assert_persisted_schema_version(conn: &Connection, expected: &str)
 /// `initialize_schema`: succeeds immediately when `current` already matches
 /// `target`, fails closed with the standard schema-version error when the
 /// on-disk schema is newer than this binary supports (an older binary
-/// opening a database written by a newer one), and otherwise applies each
-/// missing migration in order, recording the new version after each
-/// successful step.
+/// opening a database written by a newer one), and otherwise calls `apply`
+/// for each missing migration in order, stopping at the first error.
 ///
 /// `db_label` is the store's own error-text label (e.g. `"notes"`,
 /// `"metrics"`), preserved verbatim in the `PersistenceError::Migration`
 /// text. `apply` applies a single migration `from_version -> from_version +
-/// 1` against `conn`; any per-step side effects a store needs (e.g.
-/// metrics' column backfills) run inside `apply`, before its own migration
-/// transaction.
+/// 1` against `conn` and records the new version.
 pub fn migration_runner(
     conn: &mut Connection,
     db_label: &'static str,
@@ -154,18 +155,65 @@ pub fn migration_runner(
     }
     for from_version in current..target {
         apply(conn, from_version)?;
-        // Upsert so concurrent initializers do not race on the version row.
-        conn.execute(
-            r#"
-            INSERT INTO schema_metadata (key, value)
-            VALUES ('version', ?1)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value
-            WHERE CAST(schema_metadata.value AS INTEGER) < CAST(excluded.value AS INTEGER)
-            "#,
-            params![(from_version + 1).to_string()],
-        )?;
     }
+    Ok(())
+}
+
+/// The singleton stores' `initialize_schema`: create `schema_metadata`, read
+/// the current version, and bring the schema to `target` by running each
+/// missing entry of the store's own `migrations` (index N upgrades version N
+/// to N + 1), via [`migration_runner`].
+///
+/// Each step runs in one `BEGIN IMMEDIATE` transaction that re-reads the
+/// version, skips the step if another process already applied it, and
+/// records the new version before committing. Concurrent upgraders therefore
+/// never re-run a migration, and a crash cannot leave a migration applied
+/// without its version row.
+///
+/// `before_step` runs inside a step's transaction, ahead of its SQL, for the
+/// store whose migrations need more than SQL (metrics' column backfills).
+pub fn apply_migrations(
+    conn: &mut Connection,
+    db_label: &'static str,
+    target: usize,
+    migrations: &[&str],
+    mut before_step: impl FnMut(&Connection, usize) -> Result<(), GitAiError>,
+) -> Result<(), GitAiError> {
+    ensure_schema_metadata_table(conn)?;
+    let current = read_schema_version(conn).unwrap_or(0);
+    migration_runner(conn, db_label, current, target, |conn, from_version| {
+        let Some(migration_sql) = migrations.get(from_version) else {
+            return Err(PersistenceError::no_migration_path(
+                db_label,
+                from_version,
+                from_version + 1,
+            ));
+        };
+        apply_migration_step(conn, from_version, migration_sql, &mut before_step)
+    })
+}
+
+fn apply_migration_step(
+    conn: &mut Connection,
+    from_version: usize,
+    migration_sql: &str,
+    before_step: &mut impl FnMut(&Connection, usize) -> Result<(), GitAiError>,
+) -> Result<(), GitAiError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if read_schema_version(&tx).unwrap_or(0) > from_version {
+        return Ok(());
+    }
+    before_step(&tx, from_version)?;
+    tx.execute_batch(migration_sql)?;
+    tx.execute(
+        r#"
+        INSERT INTO schema_metadata (key, value)
+        VALUES ('version', ?1)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        "#,
+        params![(from_version + 1).to_string()],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -350,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_runner_applies_each_missing_version_in_order_and_records_final_version() {
+    fn migration_runner_applies_each_missing_version_in_order() {
         let dir = tempfile::tempdir().unwrap();
         let mut conn = open_with_memory_limits(dir.path().join("upgrade.db")).unwrap();
         ensure_schema_metadata_table(&conn).unwrap();
@@ -363,7 +411,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(applied, vec![0, 1, 2]);
-        assert_eq!(read_schema_version(&conn), Some(3));
     }
 
     #[test]
@@ -383,10 +430,71 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(applied, vec![0, 1]);
-        assert_eq!(
-            read_schema_version(&conn),
-            Some(1),
-            "version row should reflect the last successfully applied migration"
+    }
+
+    // ----- apply_migrations -----
+
+    const ADD_COLUMN_MIGRATIONS: &[&str] = &[
+        "CREATE TABLE t (id INTEGER PRIMARY KEY);",
+        "ALTER TABLE t ADD COLUMN c TEXT;",
+    ];
+
+    fn column_count(conn: &Connection, column: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('t') WHERE name = ?1",
+            [column],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn apply_migrations_rolls_back_a_step_whose_version_row_cannot_be_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = open_with_memory_limits(dir.path().join("crash.db")).unwrap();
+        apply_migrations(&mut conn, "test", 1, ADD_COLUMN_MIGRATIONS, |_, _| Ok(())).unwrap();
+
+        // Stand-in for a process dying between a migration and its version row.
+        conn.execute_batch(
+            "CREATE TRIGGER block_version_update BEFORE UPDATE ON schema_metadata
+             BEGIN SELECT RAISE(ABORT, 'simulated crash'); END;",
+        )
+        .unwrap();
+        assert!(
+            apply_migrations(&mut conn, "test", 2, ADD_COLUMN_MIGRATIONS, |_, _| Ok(())).is_err()
         );
+        assert_eq!(
+            column_count(&conn, "c"),
+            0,
+            "migration must roll back with its version row"
+        );
+        assert_eq!(read_schema_version(&conn), Some(1));
+
+        conn.execute_batch("DROP TRIGGER block_version_update;")
+            .unwrap();
+        apply_migrations(&mut conn, "test", 2, ADD_COLUMN_MIGRATIONS, |_, _| Ok(())).unwrap();
+        assert_eq!(column_count(&conn, "c"), 1);
+        assert_eq!(read_schema_version(&conn), Some(2));
+    }
+
+    #[test]
+    fn apply_migrations_records_each_version_and_skips_steps_another_connection_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("race.db");
+        let mut first = open_with_memory_limits(&path).unwrap();
+        let mut second = open_with_memory_limits(&path).unwrap();
+        apply_migrations(&mut first, "test", 1, ADD_COLUMN_MIGRATIONS, |_, _| Ok(())).unwrap();
+        assert_eq!(
+            read_schema_version(&second),
+            Some(1),
+            "both connections start at v1"
+        );
+
+        apply_migrations(&mut first, "test", 2, ADD_COLUMN_MIGRATIONS, |_, _| Ok(())).unwrap();
+        // `second` read v1 before `first` upgraded, so it still runs step 1.
+        apply_migration_step(&mut second, 1, ADD_COLUMN_MIGRATIONS[1], &mut |_, _| Ok(())).unwrap();
+
+        assert_eq!(column_count(&second, "c"), 1);
+        assert_eq!(read_schema_version(&second), Some(2));
     }
 }

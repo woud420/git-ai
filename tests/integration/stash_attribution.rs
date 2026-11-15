@@ -1656,6 +1656,42 @@ fn test_stash_push_pathspec_excludes_unstashed_file_from_stash_log() {
     b.assert_committed_lines(vec!["b line 1".ai(), "b line 2".ai()]);
 }
 
+/// Git runs `stash push` when `stash` is given no subcommand or starts with an
+/// option, so those forms must move the stashed attributions out of the live log.
+#[test]
+fn test_option_first_stash_is_recorded_as_push() {
+    for stash_args in [
+        &["stash"][..],
+        &["stash", "-u"],
+        &["stash", "-m", "x"],
+        &["stash", "--", "a.txt"],
+    ] {
+        eprintln!("stash form: {stash_args:?}");
+        let repo = TestRepo::new();
+        let mut a = repo.filename("a.txt");
+        a.set_contents(vec!["base".human(), "end".human()]);
+        repo.stage_all_and_commit("initial commit").unwrap();
+        a.insert_at(1, vec!["a line".ai()]);
+
+        repo.git(stash_args).unwrap();
+        repo.sync_daemon_force();
+
+        let stashed_files: BTreeSet<_> = single_stash_v2_initial(&repo).files.into_keys().collect();
+        assert!(
+            stashed_files.contains("a.txt"),
+            "{stash_args:?}: stash should carry a.txt, got {stashed_files:?}"
+        );
+        assert!(
+            !current_checkpoint_files(&repo).contains("a.txt"),
+            "{stash_args:?}: live checkpoints must not retain stashed a.txt"
+        );
+
+        repo.git(&["stash", "pop"]).unwrap();
+        repo.stage_all_and_commit("apply stash").unwrap();
+        a.assert_committed_lines(vec!["base".human(), "a line".ai(), "end".human()]);
+    }
+}
+
 crate::reuse_tests_in_worktree!(
     test_stash_pop_with_ai_attribution,
     test_stash_apply_with_ai_attribution,

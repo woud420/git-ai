@@ -159,9 +159,6 @@ pub enum SemanticEvent {
         new_head: String,
         interactive: bool,
     },
-    RebaseAbort {
-        head: String,
-    },
     MergeSquash {
         source_head: String,
         onto: String,
@@ -174,9 +171,6 @@ pub enum SemanticEvent {
     },
     CherryPickNoCommit {
         source_commits: Vec<String>,
-        head: String,
-    },
-    CherryPickAbort {
         head: String,
     },
     RefUpdated {
@@ -250,9 +244,7 @@ pub enum SemanticEvent {
     SendPackCompleted {
         repository: String,
     },
-    CloneCompleted {
-        target: PathBuf,
-    },
+    CloneCompleted,
     LsRemoteCompleted,
     RepoInitialized {
         path: PathBuf,

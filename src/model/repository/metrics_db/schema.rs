@@ -173,42 +173,18 @@ impl MetricsDatabase {
 
     /// Initialize schema and handle migrations
     pub(super) fn initialize_schema(&mut self) -> Result<(), GitAiError> {
-        use crate::model::repository::sqlite;
-
-        sqlite::ensure_schema_metadata_table(&self.conn)?;
-        let current_version = sqlite::read_schema_version(&self.conn).unwrap_or(0);
-        sqlite::migration_runner(
+        crate::model::repository::sqlite::apply_migrations(
             &mut self.conn,
             "metrics",
-            current_version,
             SCHEMA_VERSION,
-            Self::apply_migration,
+            MIGRATIONS,
+            // Columns these two migrations' SQL relies on are added first.
+            |conn, from_version| match from_version {
+                2 => add_row_level_retry_columns(conn),
+                3 => add_event_metadata_columns(conn),
+                _ => Ok(()),
+            },
         )
-    }
-
-    /// Apply a single migration
-    fn apply_migration(conn: &mut Connection, from_version: usize) -> Result<(), GitAiError> {
-        if from_version >= MIGRATIONS.len() {
-            return Err(PersistenceError::no_migration_path(
-                "metrics",
-                from_version,
-                from_version + 1,
-            ));
-        }
-
-        if from_version == 2 {
-            add_row_level_retry_columns(conn)?;
-        }
-        if from_version == 3 {
-            add_event_metadata_columns(conn)?;
-        }
-
-        let migration_sql = MIGRATIONS[from_version];
-        let tx = conn.transaction()?;
-        tx.execute_batch(migration_sql)?;
-        tx.commit()?;
-
-        Ok(())
     }
 }
 

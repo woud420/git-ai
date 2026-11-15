@@ -1,4 +1,4 @@
-use super::tests::{family_state, normalized};
+use super::tests::{family_state, normalized, reduce_family_command};
 use super::*;
 use crate::model::domain::RefChange;
 

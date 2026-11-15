@@ -6,9 +6,10 @@ use super::log_split_stages::{
 use super::types::{AuthorshipLogDiffContext, VirtualAttributions};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
+use crate::model::authorship_log::{LineRange, is_ai_author_id};
 use crate::model::hunk_shift::apply_hunk_shifts_to_line_attributions;
 use crate::model::repository::error::PersistenceError;
-use crate::model::working_log::{CheckpointKind, InitialAttributions};
+use crate::model::working_log::InitialAttributions;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 
@@ -148,25 +149,21 @@ impl VirtualAttributions {
                 line_attrs
             };
 
-            // Expand this file's unstaged ranges to a sorted Vec for binary_search.
-            let mut unstaged_lines: Vec<u32> = Vec::new();
+            // Expand this file's ranges to sorted Vecs for binary_search, so the
+            // per-line loop below does not rescan every range for every line.
             let unstaged_lookup = hunks.unstaged.get(&nfc_file_path).or_else(|| {
                 rename_map
                     .get(&nfc_file_path)
                     .and_then(|np| hunks.unstaged.get(np))
             });
-            if let Some(unstaged_ranges) = unstaged_lookup {
-                for range in unstaged_ranges {
-                    unstaged_lines.extend(range.expand());
-                }
-                unstaged_lines.sort_unstable();
-            }
+            let unstaged_lines = sorted_lines(unstaged_lookup);
 
             let pending_ranges = pending_hunks.get(&nfc_file_path).or_else(|| {
                 rename_map
                     .get(&nfc_file_path)
                     .and_then(|path| pending_hunks.get(path))
             });
+            let pending_lines = sorted_lines(pending_ranges);
 
             // Committed hunks for this file are keyed by new path after renames.
             let file_committed_hunks = hunks.committed.get(&nfc_file_path).or_else(|| {
@@ -174,6 +171,7 @@ impl VirtualAttributions {
                     .get(&nfc_file_path)
                     .and_then(|np| hunks.committed.get(np))
             });
+            let committed_lines = sorted_lines(file_committed_hunks);
 
             // Classify each workdir line as committed or uncommitted.
             let mut committed_lines_map: HashMap<String, Vec<u32>> = HashMap::new();
@@ -184,9 +182,7 @@ impl VirtualAttributions {
                 for workdir_line_num in line_attr.start_line..=line_attr.end_line {
                     let is_unstaged = unstaged_lines.binary_search(&workdir_line_num).is_ok();
 
-                    if pending_ranges.is_some_and(|ranges| {
-                        ranges.iter().any(|range| range.contains(workdir_line_num))
-                    }) {
+                    if pending_lines.binary_search(&workdir_line_num).is_ok() {
                         uncommitted_lines_map
                             .entry(line_attr.author_id.clone())
                             .or_default()
@@ -200,19 +196,12 @@ impl VirtualAttributions {
                             unstaged_lines.partition_point(|&l| l < workdir_line_num) as u32;
                         let commit_line_num = workdir_line_num - adjustment;
 
-                        let is_committed = file_committed_hunks
-                            .map(|hunks| hunks.iter().any(|h| h.contains(commit_line_num)))
-                            .unwrap_or(false);
-
-                        if is_committed {
+                        if committed_lines.binary_search(&commit_line_num).is_ok() {
                             committed_lines_map
                                 .entry(line_attr.author_id.clone())
                                 .or_default()
                                 .push(commit_line_num);
-                        } else if is_renamed_file
-                            && line_attr.author_id != CheckpointKind::Human.to_str()
-                            && !line_attr.author_id.starts_with("h_")
-                        {
+                        } else if is_renamed_file && is_ai_author_id(&line_attr.author_id) {
                             // For renamed files, git blame attributes ALL lines to
                             // this commit.  Include AI lines even outside committed
                             // hunks so they have an attestation entry.
@@ -278,4 +267,15 @@ impl VirtualAttributions {
 
         Ok((authorship_log, initial_attributions, initial_file_contents))
     }
+}
+
+/// Every line the ranges cover, sorted for `binary_search`.
+fn sorted_lines(ranges: Option<&Vec<LineRange>>) -> Vec<u32> {
+    let mut lines: Vec<u32> = ranges
+        .into_iter()
+        .flatten()
+        .flat_map(LineRange::expand)
+        .collect();
+    lines.sort_unstable();
+    lines
 }

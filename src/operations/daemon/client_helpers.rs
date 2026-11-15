@@ -254,7 +254,7 @@ fn daemon_request_io_error(action: &str, socket_path: &Path, e: std::io::Error) 
     )
 }
 
-fn write_all_daemon_client_stream(
+pub(crate) fn write_all_daemon_client_stream(
     stream: &mut DaemonClientStream,
     socket_path: &Path,
     payload: &[u8],
@@ -268,7 +268,7 @@ fn write_all_daemon_client_stream(
     Ok(())
 }
 
-fn read_daemon_client_line(
+pub(crate) fn read_daemon_client_line(
     reader: &mut BufReader<DaemonClientStream>,
     socket_path: &Path,
     response_timeout: Duration,

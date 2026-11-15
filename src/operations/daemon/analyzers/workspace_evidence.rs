@@ -19,7 +19,7 @@ pub(super) fn ordered_head<'a>(
         .filter(|head| is_non_zero_oid(head))
 }
 
-pub(super) fn has_only_worktree_globals(parsed: &ParsedGitInvocation) -> bool {
+pub(crate) fn has_only_worktree_globals(parsed: &ParsedGitInvocation) -> bool {
     let mut globals = parsed.global_args.iter();
     while let Some(arg) = globals.next() {
         match arg.as_str() {

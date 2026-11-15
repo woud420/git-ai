@@ -10,7 +10,7 @@ impl RefCursor {
             consumed_anchors: HashMap::new(),
             command_start_hints: HashMap::new(),
             stash_stack: Vec::new(),
-            pending_cherry_pick_source_oids: Vec::new(),
+            pending_cherry_pick_source_oids: HashMap::new(),
         }
     }
 
@@ -109,12 +109,13 @@ impl RefCursor {
         message_prefixes: &[&str],
     ) -> Result<Option<CursorEntry>, GitAiError> {
         let path = self.common_dir().join("logs").join(reference);
-        self.find_entry_in_log(
+        self.find_entry_in_log_with_hint(
             common_key(reference),
             &path,
             reference,
             expected,
             message_prefixes,
+            true,
         )
     }
 
@@ -133,17 +134,6 @@ impl RefCursor {
             message_prefixes,
             false,
         )
-    }
-
-    pub(super) fn find_entry_in_log(
-        &mut self,
-        key: String,
-        path: &Path,
-        reference: &str,
-        expected: ExpectedTransition,
-        message_prefixes: &[&str],
-    ) -> Result<Option<CursorEntry>, GitAiError> {
-        self.find_entry_in_log_with_hint(key, path, reference, expected, message_prefixes, true)
     }
 
     pub(super) fn find_entry_in_log_with_hint(
@@ -394,13 +384,7 @@ impl RefCursor {
     }
 
     pub(super) fn reflog_path_for_key(&self, key: &str) -> Option<PathBuf> {
-        if let Some(reference) = key.strip_prefix("common:") {
-            return Some(self.common_dir().join("logs").join(reference));
-        }
-        let git_dir = key
-            .strip_prefix("worktree:")
-            .and_then(|value| value.strip_suffix(":HEAD"))?;
-        Some(PathBuf::from(git_dir).join("logs").join("HEAD"))
+        reflog_reference_and_path_for_key(&self.common_dir(), key).map(|(_, path)| path)
     }
 
     pub(super) fn ref_tip_at_cursor_start(&self, key: &str) -> Option<String> {
@@ -411,6 +395,15 @@ impl RefCursor {
     }
 
     pub(super) fn consume_entry(&mut self, entry: &CursorEntry) -> Result<(), GitAiError> {
+        self.mark_entry_consumed(entry);
+        self.compact_consumed_entries(&entry.key, &entry.path, &entry.reference)
+    }
+
+    /// Records ownership of `entry` without compacting. Compaction forgets the
+    /// rows it advances past, so a span walk marks all of its rows before it
+    /// compacts once; compacting in between would let the walk reclaim a row
+    /// that an earlier command consumed right after one of its own.
+    pub(super) fn mark_entry_consumed(&mut self, entry: &CursorEntry) {
         self.consumed_offsets
             .entry(entry.key.clone())
             .or_default()
@@ -419,7 +412,34 @@ impl RefCursor {
             .entry(entry.key.clone())
             .or_default()
             .insert(entry.end_offset, ReflogAnchor::from(entry));
-        self.compact_consumed_entries(&entry.key, &entry.path, &entry.reference)
+    }
+
+    /// Reflog rows recorded after `first`, read once so a span walk can follow
+    /// its chain in memory instead of re-reading the reflog for every row.
+    pub(super) fn entries_after(first: &CursorEntry) -> Result<Vec<CursorEntry>, GitAiError> {
+        read_reflog_entries(
+            first.key.clone(),
+            &first.path,
+            &first.reference,
+            Some(first.end_offset),
+        )
+    }
+
+    /// Advances `rest` to the next row of a span: the first unconsumed row
+    /// that continues from `tip` with one of `message_prefixes`. Rows passed
+    /// over are not revisited, as when each step searched the reflog from the
+    /// end of the previous row.
+    pub(super) fn next_span_entry<'a>(
+        &self,
+        rest: &mut std::slice::Iter<'a, CursorEntry>,
+        tip: &str,
+        message_prefixes: &[&str],
+    ) -> Option<&'a CursorEntry> {
+        rest.find(|entry| {
+            !self.entry_consumed(entry)
+                && entry.old == tip
+                && message_matches(&entry.message, message_prefixes)
+        })
     }
 
     pub(super) fn advance_cursor_to_entry(&mut self, entry: &CursorEntry) {

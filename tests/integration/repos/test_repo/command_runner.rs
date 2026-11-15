@@ -114,8 +114,29 @@ pub(crate) fn run_raw_git_plumbing(
         .to_string()
 }
 
+/// Variables that point an agent's config or transcript directory away from
+/// `$HOME`. A developer may have them exported, and an inherited value would
+/// let a test read or rewrite the real directory.
+const AGENT_DIR_OVERRIDE_VARS: [&str; 7] = [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "GEMINI_CLI_HOME",
+    "CURSOR_CONFIG_DIR",
+    "PI_CODING_AGENT_SESSION_DIR",
+    "AMP_THREAD_PATH",
+    "XDG_DATA_HOME",
+];
+
 pub(super) fn configure_test_home_env(command: &mut Command, test_home: &Path) {
     command.env("HOME", test_home);
+    for var in AGENT_DIR_OVERRIDE_VARS {
+        if !command
+            .get_envs()
+            .any(|(key, _)| key == std::ffi::OsStr::new(var))
+        {
+            command.env_remove(var);
+        }
+    }
     if !command
         .get_envs()
         .any(|(key, _)| key == std::ffi::OsStr::new("GIT_AI_TEST_NOTES_DB_PATH"))
@@ -413,6 +434,29 @@ mod tests {
         assert_eq!(
             notes_db_path,
             Some(test_home.join(".git-ai").join("internal").join("notes-db"))
+        );
+    }
+
+    #[test]
+    fn test_configure_test_home_env_drops_inherited_agent_directories() {
+        let mut command = Command::new("git");
+        command.env("CODEX_HOME", "explicit-codex-home");
+
+        configure_test_home_env(&mut command, Path::new("isolated-test-home"));
+
+        let value_of = |var: &str| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == std::ffi::OsStr::new(var))
+                .map(|(_, value)| value.map(PathBuf::from))
+        };
+        // `Some(None)` is an explicit removal: the child will not inherit it.
+        assert_eq!(value_of("CLAUDE_CONFIG_DIR"), Some(None));
+        assert_eq!(value_of("GEMINI_CLI_HOME"), Some(None));
+        assert_eq!(
+            value_of("CODEX_HOME"),
+            Some(Some(PathBuf::from("explicit-codex-home"))),
+            "a value the test set itself must survive"
         );
     }
 

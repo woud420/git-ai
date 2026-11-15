@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crate::clients::git_cli::{disable_internal_git_hooks, exec_git_allow_nonzero_with_env};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
-use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord};
+use crate::model::authorship_log::{HumanRecord, PromptRecord, SessionRecord, metadata_key};
 use crate::model::imara_diff_utils::{DiffOp, capture_diff_slices};
 use crate::model::repository::error::PersistenceError;
 use crate::model::working_log::{CheckpointKind, InitialAttributions};
@@ -152,13 +152,7 @@ fn trim_initial_metadata_to_referenced_authors(initial: &mut InitialAttributions
 
             referenced_authors.insert(attr.author_id.clone());
             if attr.author_id.starts_with("s_") {
-                let session_key = attr
-                    .author_id
-                    .split("::")
-                    .next()
-                    .unwrap_or(&attr.author_id)
-                    .to_string();
-                referenced_sessions.insert(session_key);
+                referenced_sessions.insert(metadata_key(&attr.author_id).to_string());
             }
         }
     }

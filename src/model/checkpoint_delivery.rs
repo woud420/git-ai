@@ -131,12 +131,6 @@ impl CheckpointDelivery {
         }
         validate_checkpoint_request(&self.request, true)
     }
-
-    pub fn captured_at_unix_ns(&self) -> u128 {
-        u128::from(self.captured_at_unix_ms)
-            .checked_mul(1_000_000)
-            .expect("u64 milliseconds always fit in u128 nanoseconds")
-    }
 }
 
 pub(crate) fn validate_checkpoint_request_bounds(
@@ -371,15 +365,6 @@ mod tests {
                 supported: CHECKPOINT_DELIVERY_SCHEMA_VERSION,
             })
         );
-    }
-
-    #[test]
-    fn capture_milliseconds_convert_to_nanoseconds_explicitly() {
-        let delivery =
-            CheckpointDelivery::from_requests_at(vec![request("trace-1")], 1_725_000_123_456)
-                .remove(0);
-
-        assert_eq!(delivery.captured_at_unix_ns(), 1_725_000_123_456_000_000);
     }
 
     #[test]

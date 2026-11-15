@@ -1,6 +1,6 @@
 use super::types::VirtualAttributions;
 use crate::error::GitAiError;
-use crate::model::authorship_log::{PromptRecord, SessionRecord};
+use crate::model::authorship_log::{PromptRecord, SessionRecord, metadata_key};
 use crate::operations::git::repository::Repository;
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ impl VirtualAttributions {
 
         for id in all_author_ids {
             if id.starts_with("s_") {
-                let session_key = id.split("::").next().unwrap_or(&id).to_string();
+                let session_key = metadata_key(&id).to_string();
                 if !self.sessions.contains_key(&session_key) {
                     missing_session_ids.insert(session_key);
                 }

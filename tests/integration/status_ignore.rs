@@ -299,6 +299,22 @@ fn test_status_numstat_is_stable_under_hostile_diff_config() {
     assert_eq!(status.stats.git_diff_deleted_lines, 0);
     assert_eq!(status.stats.ai_accepted, 1);
 }
+
+/// Before the first commit, checkpoints live under the `initial` working log
+/// and the working tree is diffed against the empty tree.
+#[test]
+fn test_status_reports_checkpoints_before_first_commit() {
+    let repo = TestRepo::new();
+
+    repo.write_file("README.md", "# repo\nai line\n");
+    repo.git_ai(&["checkpoint", "mock_ai"]).unwrap();
+    repo.git(&["add", "README.md"]).unwrap();
+
+    let status = status_from_args(&repo, &["status", "--json"]);
+    assert_eq!(status.checkpoints.len(), 1);
+    assert_eq!(status.stats.git_diff_added_lines, 2);
+    assert_eq!(status.stats.ai_accepted, 2);
+}
 crate::reuse_tests_in_worktree!(
     test_checkpoint_ignores_default_lockfiles_integration,
     test_checkpoint_honors_uncommitted_root_gitattributes_linguist_generated_integration,

@@ -1,9 +1,11 @@
 use crate::error::GitAiError;
 use crate::operations::mdm::editor_cli::resolve_editor_cli;
 use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
-use crate::operations::mdm::hooks_merge::{MissingBehavior, edit_settings_json};
+use crate::operations::mdm::hooks_merge::{
+    MissingBehavior, check_settings_hooks, edit_settings_json, parse_json,
+};
 use crate::operations::mdm::hooks_merge_flat::{
-    remove_command_hooks_flat, upsert_command_hooks_flat,
+    has_command, has_flat_hook, remove_command_hooks_flat, upsert_command_hooks_flat,
 };
 use crate::operations::mdm::paths::home_dir;
 use crate::operations::mdm::version::{
@@ -12,8 +14,6 @@ use crate::operations::mdm::version::{
 use crate::operations::mdm::vscode_settings::{
     settings_paths_for_products, should_process_settings_target,
 };
-use serde_json::{Value, json};
-use std::fs;
 use std::path::PathBuf;
 
 const CURSOR_PRE_TOOL_USE_CMD: &str = "checkpoint cursor --hook-input stdin";
@@ -70,29 +70,12 @@ impl HookInstaller for CursorInstaller {
         }
 
         // Check if hooks are installed
-        let hooks_path = Self::hooks_path();
-        if !hooks_path.exists() {
-            return Ok(HookCheckResult::installed_without_hooks());
-        }
-
-        let content = fs::read_to_string(&hooks_path)?;
-        let existing: Value = serde_json::from_str(&content).unwrap_or_else(|_| json!({}));
-
-        let has_hooks = existing
-            .get("hooks")
-            .and_then(|h| h.get("preToolUse"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter().any(|hook| {
-                    hook.get("command")
-                        .and_then(|c| c.as_str())
-                        .map(Self::is_cursor_checkpoint_command)
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-
-        Ok(HookCheckResult::installed(has_hooks, has_hooks))
+        check_settings_hooks(&Self::hooks_path(), parse_json, |existing| {
+            let has_hooks = has_flat_hook(existing, "preToolUse", |hook| {
+                has_command(hook, Self::is_cursor_checkpoint_command)
+            });
+            (has_hooks, has_hooks)
+        })
     }
 
     fn process_names(&self) -> Vec<&str> {
@@ -114,7 +97,7 @@ impl HookInstaller for CursorInstaller {
             &Self::hooks_path(),
             dry_run,
             MissingBehavior::TreatAsEmpty,
-            |content| Ok(serde_json::from_str(content)?),
+            parse_json,
             |merged| {
                 upsert_command_hooks_flat(
                     merged,
@@ -136,7 +119,7 @@ impl HookInstaller for CursorInstaller {
             &Self::hooks_path(),
             dry_run,
             MissingBehavior::NoOp,
-            |content| Ok(serde_json::from_str(content)?),
+            parse_json,
             |merged| {
                 remove_command_hooks_flat(
                     merged,
@@ -153,6 +136,7 @@ mod tests {
     use super::*;
     use crate::operations::mdm::paths::clean_path;
     use crate::operations::mdm::test_env::with_temp_home;
+    use serde_json::{Value, json};
     use serial_test::serial;
     use std::fs;
 

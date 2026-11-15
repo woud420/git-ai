@@ -3,6 +3,7 @@
 use crate::config::Config;
 use crate::model::api_types::{DaemonLogEvent, DaemonLogFieldValue, DaemonLogKind, DaemonLogLevel};
 use crate::operations::authorship::secrets::redact_secrets_in_text;
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::{Mutex, OnceLock};
@@ -150,24 +151,48 @@ fn daemon_log_target_is_captureable(
 fn daemon_log_capture_enabled() -> bool {
     static CACHE: OnceLock<Mutex<Option<CaptureEligibilityCache>>> = OnceLock::new();
 
-    let cache = CACHE.get_or_init(|| Mutex::new(None));
-    let now = Instant::now();
-    if let Ok(mut guard) = cache.lock() {
-        if let Some(cached) = guard.as_ref()
-            && now.duration_since(cached.checked_at) < DAEMON_LOG_CAPTURE_ELIGIBILITY_TTL
-        {
-            return cached.enabled;
-        }
+    cached_capture_enabled(
+        CACHE.get_or_init(|| Mutex::new(None)),
+        compute_daemon_log_capture_enabled,
+    )
+}
 
-        let enabled = compute_daemon_log_capture_enabled();
-        *guard = Some(CaptureEligibilityCache {
-            checked_at: now,
-            enabled,
-        });
-        return enabled;
+fn cached_capture_enabled(
+    cache: &Mutex<Option<CaptureEligibilityCache>>,
+    compute: impl FnOnce() -> bool,
+) -> bool {
+    thread_local! {
+        static CHECKING: Cell<bool> = const { Cell::new(false) };
+    }
+    // `compute` can log (`Config::fresh()` does). The daemon's global
+    // subscriber hands that event straight back to `on_event` on this thread
+    // while the cache lock, which is not re-entrant, is still held. Such
+    // events are not captured.
+    if CHECKING.replace(true) {
+        return false;
     }
 
-    compute_daemon_log_capture_enabled()
+    let now = Instant::now();
+    let enabled = match cache.lock() {
+        Ok(mut guard) => match guard.as_ref() {
+            Some(cached)
+                if now.duration_since(cached.checked_at) < DAEMON_LOG_CAPTURE_ELIGIBILITY_TTL =>
+            {
+                cached.enabled
+            }
+            _ => {
+                let enabled = compute();
+                *guard = Some(CaptureEligibilityCache {
+                    checked_at: now,
+                    enabled,
+                });
+                enabled
+            }
+        },
+        Err(_) => compute(),
+    };
+    CHECKING.set(false);
+    enabled
 }
 
 fn compute_daemon_log_capture_enabled() -> bool {
@@ -425,6 +450,28 @@ mod tests {
             DaemonLogFieldValue::from("ureq::unit"),
         )]);
         assert!(!daemon_log_target_is_captureable("log", &fields));
+    }
+
+    #[test]
+    fn eligibility_check_survives_an_event_logged_while_computing_it() {
+        // Under the daemon's global subscriber, an event logged while
+        // eligibility is computed re-enters `on_event` on the same thread.
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let cache = Mutex::new(None);
+            let outer = cached_capture_enabled(&cache, || {
+                assert!(!cached_capture_enabled(&cache, || true));
+                true
+            });
+            let cached = cached_capture_enabled(&cache, || unreachable!("entry is fresh"));
+            done.send((outer, cached)).unwrap();
+        });
+
+        assert_eq!(
+            finished.recv_timeout(Duration::from_secs(5)),
+            Ok((true, true)),
+            "re-entrant eligibility check deadlocked on the cache lock"
+        );
     }
 
     #[test]

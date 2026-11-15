@@ -68,9 +68,6 @@ const EMBEDDED_SKILLS: &[EmbeddedSkill] = &[
 pub struct SkillsInstallResult {
     /// Whether any changes were made
     pub changed: bool,
-    /// Number of skills installed
-    #[allow(dead_code)]
-    pub installed_count: usize,
 }
 
 /// Get the ~/.agents/skills directory path
@@ -131,6 +128,15 @@ fn link_skill_dir(target: &PathBuf, link_path: &PathBuf) -> Result<(), GitAiErro
                 .map(|m| m.file_type().is_symlink())
                 .unwrap_or(false)
         {
+            // Unix installs are symlinks, so a real directory is the user's
+            // own skill; only Windows installs are copies to be refreshed.
+            if cfg!(unix) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "a directory git-ai did not create already exists there",
+                )
+                .into());
+            }
             fs::remove_dir_all(link_path)?;
         } else {
             fs::remove_file(link_path)?;
@@ -164,6 +170,7 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), GitAiError> {
 }
 
 /// Remove a skill link (symlink on Unix, copied directory on Windows) if it exists.
+/// A real directory on Unix is the user's own skill and is left in place.
 fn remove_skill_link(link_path: &PathBuf) -> Result<(), GitAiError> {
     if link_path.symlink_metadata().is_ok() {
         let is_symlink = link_path
@@ -172,7 +179,7 @@ fn remove_skill_link(link_path: &PathBuf) -> Result<(), GitAiError> {
             .unwrap_or(false);
         if is_symlink {
             fs::remove_file(link_path)?;
-        } else if link_path.is_dir() {
+        } else if cfg!(windows) && link_path.is_dir() {
             fs::remove_dir_all(link_path)?;
         }
     }
@@ -207,10 +214,7 @@ fn install(
     let skills_base = &paths.source;
 
     if dry_run {
-        return Ok(SkillsInstallResult {
-            changed: true,
-            installed_count: EMBEDDED_SKILLS.len(),
-        });
+        return Ok(SkillsInstallResult { changed: true });
     }
 
     // Nuke the skills directory if it exists
@@ -253,10 +257,7 @@ fn install(
         }
     }
 
-    Ok(SkillsInstallResult {
-        changed: true,
-        installed_count: EMBEDDED_SKILLS.len(),
-    })
+    Ok(SkillsInstallResult { changed: true })
 }
 
 /// Uninstall all skills by removing ~/.git-ai/skills/ and linked skill directories
@@ -268,17 +269,11 @@ fn uninstall(paths: &SkillsPaths, dry_run: bool) -> Result<SkillsInstallResult, 
     let skills_base = &paths.source;
 
     if !skills_base.exists() {
-        return Ok(SkillsInstallResult {
-            changed: false,
-            installed_count: 0,
-        });
+        return Ok(SkillsInstallResult { changed: false });
     }
 
     if dry_run {
-        return Ok(SkillsInstallResult {
-            changed: true,
-            installed_count: EMBEDDED_SKILLS.len(),
-        });
+        return Ok(SkillsInstallResult { changed: true });
     }
 
     // Remove linked skill directories first
@@ -297,10 +292,7 @@ fn uninstall(paths: &SkillsPaths, dry_run: bool) -> Result<SkillsInstallResult, 
     // Nuke the entire skills directory
     fs::remove_dir_all(skills_base)?;
 
-    Ok(SkillsInstallResult {
-        changed: true,
-        installed_count: EMBEDDED_SKILLS.len(),
-    })
+    Ok(SkillsInstallResult { changed: true })
 }
 
 #[cfg(test)]
@@ -378,8 +370,11 @@ mod tests {
         );
     }
 
+    /// Unix installs are symlinks, so a real directory at the link path is the
+    /// user's own skill and must survive. Windows installs are copies, which
+    /// are refreshed in place.
     #[test]
-    fn test_link_skill_dir_replaces_existing_directory() {
+    fn test_link_skill_dir_replaces_only_directories_git_ai_created() {
         let tmp = tempfile::tempdir().unwrap();
         let source = tmp.path().join("source-skill");
         fs::create_dir_all(&source).unwrap();
@@ -389,12 +384,15 @@ mod tests {
         fs::create_dir_all(&link).unwrap();
         fs::write(link.join("SKILL.md"), "old content").unwrap();
 
-        link_skill_dir(&source, &link).unwrap();
+        let result = link_skill_dir(&source, &link);
 
-        assert_eq!(
-            fs::read_to_string(link.join("SKILL.md")).unwrap(),
+        assert_eq!(result.is_err(), cfg!(unix));
+        let expected = if cfg!(unix) {
+            "old content"
+        } else {
             "new content"
-        );
+        };
+        assert_eq!(fs::read_to_string(link.join("SKILL.md")).unwrap(), expected);
     }
 
     #[test]
@@ -442,15 +440,16 @@ mod tests {
         assert_eq!(fs::read_link(&link).unwrap(), source);
     }
 
+    /// Only Windows installs are copied directories; see the link test above.
     #[test]
-    fn test_remove_skill_link_removes_directory() {
+    fn test_remove_skill_link_removes_only_directories_git_ai_created() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("skill-dir");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("SKILL.md"), "content").unwrap();
 
         remove_skill_link(&dir).unwrap();
-        assert!(!dir.exists());
+        assert_eq!(dir.exists(), cfg!(unix));
     }
 
     #[cfg(unix)]
@@ -512,7 +511,6 @@ mod tests {
 
         let dry_result = install(&paths, true, &all_tools).unwrap();
         assert!(dry_result.changed);
-        assert_eq!(dry_result.installed_count, EMBEDDED_SKILLS.len());
         for root in [
             &paths.source,
             paths.agents.as_ref().unwrap(),
@@ -528,7 +526,6 @@ mod tests {
 
         let result = install(&paths, false, &all_tools).unwrap();
         assert!(result.changed);
-        assert_eq!(result.installed_count, EMBEDDED_SKILLS.len());
         assert_installed();
 
         let first_skill = &EMBEDDED_SKILLS[0];
@@ -543,7 +540,6 @@ mod tests {
 
         let repeated_result = install(&paths, false, &all_tools).unwrap();
         assert!(repeated_result.changed);
-        assert_eq!(repeated_result.installed_count, EMBEDDED_SKILLS.len());
         assert_installed();
 
         let uninstall_result = uninstall(&paths, false).unwrap();
@@ -566,6 +562,5 @@ mod tests {
 
         let noop_result = uninstall(&paths, false).unwrap();
         assert!(!noop_result.changed);
-        assert_eq!(noop_result.installed_count, 0);
     }
 }

@@ -11,8 +11,8 @@ use std::path::Path;
 
 use super::timestamp_collection::collect_unknown_file_timestamps;
 use super::{
-    FileTimestampsByPath, RecoveryMetricInput, add_attestation, existing_commit_session_ids,
-    record_recovery_metric, repo_worktree_key, unknown_lines_by_file,
+    FileTimestampsByPath, RecoveryMetricInput, add_attestation, record_recovery_metric,
+    repo_worktree_key, unknown_lines_by_file,
 };
 
 const BASH_RECOVERY_WINDOW_NS: u128 = 3_000_000_000;
@@ -91,7 +91,7 @@ pub(super) fn recover_bash_mtime(
         return Ok(());
     }
 
-    let existing_commit_sessions = existing_commit_session_ids(authorship_log);
+    let existing_commit_sessions = authorship_log.referenced_session_ids();
     for (file_path, unknown_lines) in timestamp_collection.unknown_by_file {
         let Some(timestamps) = timestamp_collection.timestamps_by_file.get(&file_path) else {
             continue;

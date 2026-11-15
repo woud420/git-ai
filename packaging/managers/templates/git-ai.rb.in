@@ -6,7 +6,7 @@ class GitAi < Formula
 
   head do
     url "https://github.com/@REPOSITORY@.git", branch: "main"
-    depends_on "rust" => :build
+    depends_on "rustup" => :build
   end
 
   depends_on "git"
@@ -35,6 +35,13 @@ class GitAi < Formula
 
   def install
     if build.head?
+      # Homebrew's Rust can lag the source minimum; keep downloads out of user state.
+      ENV["CARGO_HOME"] = buildpath/".cargo"
+      ENV["RUSTUP_HOME"] = buildpath/".rustup"
+      ENV["RUSTUP_TOOLCHAIN"] = "1.100.0"
+      ENV.prepend_path "PATH", Formula["rustup"].opt_bin
+      system "rustup", "toolchain", "install", ENV.fetch("RUSTUP_TOOLCHAIN"),
+             "--profile", "minimal", "--no-self-update"
       system "cargo", "install", *std_cargo_args, "--bin", "git-ai"
     else
       platform = OS.mac? ? "macos" : "linux"

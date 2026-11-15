@@ -1,27 +1,37 @@
 use super::*;
 
 #[test]
-fn test_extract_b_path_simple() {
+fn test_parse_diff_tree_output_quoted_non_ascii_paths() {
+    let output = "\
+diff --git \"a/\\303\\251.txt\" \"b/\\303\\274.txt\"
+similarity index 80%
+rename from \"\\303\\251.txt\"
+rename to \"\\303\\274.txt\"
+--- \"a/\\303\\251.txt\"
++++ \"b/\\303\\274.txt\"
+@@ -1,0 +2 @@
++added
+diff --git a/x b/y.txt b/x b/y.txt
+--- a/x b/y.txt\t
++++ b/x b/y.txt\t
+@@ -1,0 +2 @@
++added
+diff --git a/gone.txt b/gone.txt
+deleted file mode 100644
+--- a/gone.txt
++++ /dev/null
+@@ -1 +0,0 @@
+--- removed line that looks like a header
+";
+    let result = parse_diff_tree_output(output);
     assert_eq!(
-        extract_b_path("a/src/main.rs b/src/main.rs"),
-        Some("src/main.rs".to_string())
+        result.renames,
+        vec![("\u{e9}.txt".to_string(), "\u{fc}.txt".to_string())]
     );
-}
-
-#[test]
-fn test_extract_b_path_rename() {
-    assert_eq!(
-        extract_b_path("a/src/old.rs b/src/new.rs"),
-        Some("src/new.rs".to_string())
-    );
-}
-
-#[test]
-fn test_extract_b_path_with_spaces() {
-    assert_eq!(
-        extract_b_path("a/path with spaces b/another path"),
-        Some("another path".to_string())
-    );
+    assert_eq!(result.added_lines_by_file["\u{fc}.txt"], vec![2]);
+    assert_eq!(result.added_lines_by_file["x b/y.txt"], vec![2]);
+    assert_eq!(result.hunks_by_file["gone.txt"].len(), 1);
+    assert_eq!(result.hunks_by_file.len(), 3);
 }
 
 #[test]
@@ -211,11 +221,15 @@ fn test_parse_batched_diff_tree_output_mixed_identical_and_changed() {
     let output = "\
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 diff --git a/f.txt b/f.txt
+--- a/f.txt
++++ b/f.txt
 @@ -1,0 +2 @@
 +x
 cccccccccccccccccccccccccccccccccccccccc cccccccccccccccccccccccccccccccccccccccc
 dddddddddddddddddddddddddddddddddddddddd eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 diff --git a/g.txt b/g.txt
+--- a/g.txt
++++ b/g.txt
 @@ -3,1 +3,2 @@
 +y
 ";
@@ -279,14 +293,20 @@ fn test_batched_diff_tree_parser_drains_completed_chunks_without_losing_tail() {
     let output = "\
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
 @@ -1,0 +1 @@
 +a
 cccccccccccccccccccccccccccccccccccccccc dddddddddddddddddddddddddddddddddddddddd
 diff --git a/b.txt b/b.txt
+--- a/b.txt
++++ b/b.txt
 @@ -1,0 +1 @@
 +b
 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee ffffffffffffffffffffffffffffffffffffffff
 diff --git a/c.txt b/c.txt
+--- a/c.txt
++++ b/c.txt
 @@ -1,0 +1 @@
 +c
 ";

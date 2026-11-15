@@ -1,15 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StartBlockReason {
+enum StartBlockReason {
     AutoStartDisabled,
     StrongSandboxMarker,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DaemonStartDecision {
-    UseExisting,
-    StartDetached,
-    PublishOutbox(StartBlockReason),
-    Unavailable(StartBlockReason),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -17,7 +9,6 @@ pub struct SandboxMarkers {
     pub cursor_sandbox: Option<String>,
     pub sandbox_runtime: Option<String>,
     pub codex_sandbox: Option<String>,
-    pub codex_network_disabled: Option<String>,
 }
 
 impl SandboxMarkers {
@@ -33,7 +24,6 @@ impl SandboxMarkers {
             cursor_sandbox: std::env::var("CURSOR_SANDBOX").ok(),
             sandbox_runtime: std::env::var("SANDBOX_RUNTIME").ok(),
             codex_sandbox: std::env::var("CODEX_SANDBOX").ok(),
-            codex_network_disabled: std::env::var("CODEX_SANDBOX_NETWORK_DISABLED").ok(),
         }
     }
 
@@ -54,30 +44,18 @@ impl SandboxMarkers {
     }
 }
 
-pub fn decide_daemon_start(
-    daemon_reachable: bool,
+/// Why a detached daemon start is not allowed, if it is not.
+fn start_block_reason(
     auto_start_disabled: bool,
-    outbox_supported: bool,
     markers: &SandboxMarkers,
-) -> DaemonStartDecision {
-    if daemon_reachable {
-        return DaemonStartDecision::UseExisting;
-    }
+) -> Option<StartBlockReason> {
     if auto_start_disabled {
-        return if outbox_supported {
-            DaemonStartDecision::PublishOutbox(StartBlockReason::AutoStartDisabled)
-        } else {
-            DaemonStartDecision::Unavailable(StartBlockReason::AutoStartDisabled)
-        };
+        Some(StartBlockReason::AutoStartDisabled)
+    } else if markers.has_strong_marker() {
+        Some(StartBlockReason::StrongSandboxMarker)
+    } else {
+        None
     }
-    if markers.has_strong_marker() {
-        return if outbox_supported {
-            DaemonStartDecision::PublishOutbox(StartBlockReason::StrongSandboxMarker)
-        } else {
-            DaemonStartDecision::Unavailable(StartBlockReason::StrongSandboxMarker)
-        };
-    }
-    DaemonStartDecision::StartDetached
 }
 
 fn blocked_message(reason: StartBlockReason, markers: &SandboxMarkers) -> String {
@@ -95,25 +73,14 @@ fn blocked_message(reason: StartBlockReason, markers: &SandboxMarkers) -> String
     }
 }
 
-pub fn require_detached_start_allowed(markers: &SandboxMarkers) -> Result<(), String> {
-    match decide_daemon_start(false, false, false, markers) {
-        DaemonStartDecision::StartDetached | DaemonStartDecision::UseExisting => Ok(()),
-        DaemonStartDecision::PublishOutbox(reason) | DaemonStartDecision::Unavailable(reason) => {
-            Err(blocked_message(reason, markers))
-        }
-    }
-}
-
-pub fn should_auto_start_detached(
+/// `Err` with a user-facing message when a detached daemon start is blocked.
+pub fn require_detached_start_allowed(
     auto_start_disabled: bool,
     markers: &SandboxMarkers,
-) -> Result<bool, String> {
-    match decide_daemon_start(false, auto_start_disabled, true, markers) {
-        DaemonStartDecision::UseExisting => Ok(false),
-        DaemonStartDecision::StartDetached => Ok(true),
-        DaemonStartDecision::PublishOutbox(reason) | DaemonStartDecision::Unavailable(reason) => {
-            Err(blocked_message(reason, markers))
-        }
+) -> Result<(), String> {
+    match start_block_reason(auto_start_disabled, markers) {
+        Some(reason) => Err(blocked_message(reason, markers)),
+        None => Ok(()),
     }
 }
 
@@ -121,33 +88,16 @@ pub fn should_auto_start_detached(
 mod tests {
     use super::*;
 
-    fn strong_markers() -> SandboxMarkers {
-        SandboxMarkers {
-            cursor_sandbox: Some("1".to_string()),
-            sandbox_runtime: Some("seatbelt".to_string()),
-            codex_sandbox: Some("seatbelt".to_string()),
-            codex_network_disabled: Some("1".to_string()),
-        }
-    }
-
     #[test]
-    fn reachable_daemon_always_wins_over_sandbox_markers() {
+    fn explicit_auto_start_disable_blocks_start() {
         assert_eq!(
-            decide_daemon_start(true, true, true, &strong_markers()),
-            DaemonStartDecision::UseExisting
+            start_block_reason(true, &SandboxMarkers::default()),
+            Some(StartBlockReason::AutoStartDisabled)
         );
     }
 
     #[test]
-    fn explicit_auto_start_disable_uses_outbox() {
-        assert_eq!(
-            decide_daemon_start(false, true, true, &SandboxMarkers::default()),
-            DaemonStartDecision::PublishOutbox(StartBlockReason::AutoStartDisabled)
-        );
-    }
-
-    #[test]
-    fn each_strong_marker_uses_outbox() {
+    fn each_strong_marker_blocks_start() {
         for markers in [
             SandboxMarkers {
                 cursor_sandbox: Some("1".to_string()),
@@ -163,23 +113,16 @@ mod tests {
             },
         ] {
             assert_eq!(
-                decide_daemon_start(false, false, true, &markers),
-                DaemonStartDecision::PublishOutbox(StartBlockReason::StrongSandboxMarker)
+                start_block_reason(false, &markers),
+                Some(StartBlockReason::StrongSandboxMarker)
             );
         }
     }
 
     #[test]
-    fn network_disabled_alone_is_not_a_spawn_ban() {
-        let markers = SandboxMarkers {
-            codex_network_disabled: Some("1".to_string()),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            decide_daemon_start(false, false, true, &markers),
-            DaemonStartDecision::StartDetached
-        );
+    fn no_markers_allow_start() {
+        assert_eq!(start_block_reason(false, &SandboxMarkers::default()), None);
+        assert!(require_detached_start_allowed(false, &SandboxMarkers::default()).is_ok());
     }
 
     #[test]
@@ -191,17 +134,8 @@ mod tests {
         };
 
         assert_eq!(markers.strong_marker_name(), Some("CURSOR_SANDBOX"));
-    }
-
-    #[test]
-    fn guard_stays_disabled_without_outbox_support() {
-        assert_eq!(
-            decide_daemon_start(false, false, false, &strong_markers()),
-            DaemonStartDecision::Unavailable(StartBlockReason::StrongSandboxMarker)
-        );
-        assert_eq!(
-            decide_daemon_start(false, true, false, &SandboxMarkers::default()),
-            DaemonStartDecision::Unavailable(StartBlockReason::AutoStartDisabled)
-        );
+        let message = require_detached_start_allowed(false, &markers).unwrap_err();
+        assert!(message.contains("CURSOR_SANDBOX"), "{message}");
+        assert!(!message.contains("secret-value"), "{message}");
     }
 }

@@ -27,7 +27,7 @@ use crate::operations::git::repository::{Repository, parse_diff_added_lines};
 use commit_metadata::commit_metric_metadata;
 #[cfg(test)]
 use commit_metadata::parse_commit_metric_metadata_output;
-use snapshots::{commit_tree_snapshot_for_files, recovery_committed_hunks};
+use snapshots::{CommitDiffText, commit_tree_snapshot_for_files, recovery_committed_hunks};
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 
@@ -190,15 +190,12 @@ where
         )?;
 
     authorship_log.metadata.base_commit_sha = commit_sha.clone();
+    let mut commit_diff = CommitDiffText::new(repo, &parent_sha, &commit_sha);
 
     // Lines added by the commit being finalized, from the batched parent→commit
-    // diff when supplied (no extra spawn) and one bounded `git diff` otherwise.
-    let mut recovery_hunks = recovery_committed_hunks(
-        repo,
-        &parent_sha,
-        &commit_sha,
-        context.precomputed_parent_diff,
-    )?;
+    // diff when supplied (no extra spawn) and the shared single-commit diff otherwise.
+    let mut recovery_hunks =
+        recovery_committed_hunks(context.precomputed_parent_diff, &mut commit_diff)?;
 
     // No-hooks background agents (Devin, Codex Cloud, etc.) may not fire checkpoints
     // for all edits. Attribute any committed lines that have no existing attestation
@@ -260,7 +257,6 @@ where
     let mut skip_reason = None;
 
     if options.compute_stats {
-        let stats_diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
         let is_merge_commit = repo
             .find_commit(commit_sha.clone())
             .map(|commit| commit.parent_count().unwrap_or(0) > 1)
@@ -270,12 +266,7 @@ where
         let stats_diff_text = if is_merge_commit {
             None
         } else {
-            Some(crate::operations::commands::diff_parsing::get_diff_text(
-                repo,
-                &stats_diff_base,
-                &commit_sha,
-                true,
-            )?)
+            Some(commit_diff.text()?)
         };
         skip_reason = match &stats_diff_text {
             None => Some(StatsSkipReason::MergeCommit),
@@ -512,9 +503,10 @@ pub(crate) fn post_commit_amend_with_recovery_timestamps_detailed(
         )?;
 
     authorship_log.metadata.base_commit_sha = amended_commit.to_string();
+    let mut commit_diff = CommitDiffText::new(repo, &parent_sha, amended_commit);
 
     // Fill unattributed lines for background agents
-    let recovery_hunks = recovery_committed_hunks(repo, &parent_sha, amended_commit, None)?;
+    let recovery_hunks = recovery_committed_hunks(None, &mut commit_diff)?;
     crate::operations::authorship::background_agent::fill_unattributed_lines(
         &mut authorship_log,
         &recovery_hunks,

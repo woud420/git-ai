@@ -472,3 +472,56 @@ fn commit_reflog_subject_rewrite_fallback_stays_in_command_time_window() {
         "subject-rewrite fallback must reject entries outside the command's timestamp window"
     );
 }
+
+#[test]
+fn working_log_base_oids_reads_the_storage_git_discovery_finds() {
+    use crate::operations::git::find_repository_in_path;
+    use crate::operations::git::test_utils::TmpRepo;
+
+    let tmp = TmpRepo::new().unwrap();
+    tmp.commit_all("initial").unwrap();
+    let linked = tmp.path().with_extension("linked");
+    tmp.git_command(&["worktree", "add", "-b", "side", linked.to_str().unwrap()])
+        .unwrap();
+    fs::create_dir_all(tmp.path().join("sub/dir")).unwrap();
+    let separate = tmp.path().join("separate");
+    let separate_git_dir = tmp.path().join("separate.git");
+    tmp.git_command(&[
+        "init",
+        "--separate-git-dir",
+        separate_git_dir.to_str().unwrap(),
+        separate.to_str().unwrap(),
+    ])
+    .unwrap();
+    tmp.git_command(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        tmp.path().to_str().unwrap(),
+        "module",
+    ])
+    .unwrap();
+
+    for (path, oids) in [
+        (tmp.path().join("sub/dir"), vec!["initial", A]),
+        (linked.clone(), vec![B]),
+        (separate, vec![C]),
+        (tmp.path().join("module"), vec![D]),
+    ] {
+        // Write where the git-based discovery puts the working logs.
+        let repo = find_repository_in_path(&path.to_string_lossy()).unwrap();
+        for name in oids.iter().chain(["not-an-oid"].iter()) {
+            fs::create_dir_all(repo.storage.working_logs.join(name)).unwrap();
+        }
+        let expected: HashSet<String> = oids
+            .iter()
+            .map(|name| match *name {
+                "initial" => "0".repeat(40),
+                oid => oid.to_string(),
+            })
+            .collect();
+        assert_eq!(working_log_base_oids(&path), expected, "{}", path.display());
+    }
+    fs::remove_dir_all(&linked).unwrap();
+}

@@ -286,9 +286,11 @@ pub(super) fn rebase_start_marker_for_explicit_branch<'a>(
         .find(|entry| rebase_reflog_action_is(&entry.message, "start"))
 }
 
+/// Base OIDs of the worktree's working logs. Finds the storage directory the
+/// way checkpoints do when they write it, without running git.
 pub(super) fn working_log_base_oids(worktree: &Path) -> HashSet<String> {
     let mut out = HashSet::new();
-    let Ok(repo) = find_repository_in_path(&worktree.to_string_lossy()) else {
+    let Ok(repo) = discover_repository_in_path_no_git_exec(worktree) else {
         return out;
     };
     let Ok(entries) = fs::read_dir(&repo.storage.working_logs) else {

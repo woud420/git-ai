@@ -328,3 +328,89 @@ fn test_invalid_oid_returns_none() {
     assert_eq!(reader.try_read_blob(""), None);
     assert_eq!(reader.try_read_blob("abc"), None);
 }
+
+#[test]
+fn test_read_commit_parents_in_order() {
+    let temp = setup_git_dir();
+    let tree = "def456789012345678901234567890abcdef0123";
+    let (first, second) = (
+        "1111111111111111111111111111111111111111",
+        "2222222222222222222222222222222222222222",
+    );
+    let commits = [
+        ("abc123def456789012345678901234567890abcd", vec![]),
+        ("bcd123def456789012345678901234567890abcd", vec![first]),
+        (
+            "cde123def456789012345678901234567890abcd",
+            vec![first, second],
+        ),
+    ];
+    for (sha, parents) in &commits {
+        let parent_lines: String = parents.iter().map(|p| format!("parent {p}\n")).collect();
+        let body = format!("tree {tree}\n{parent_lines}author A <a@b.c> 1 +0000\n\nparent x\n");
+        write_loose_object(temp.path(), sha, "commit", body.as_bytes());
+    }
+
+    let reader = FastObjectReader::new(temp.path());
+    for (sha, parents) in &commits {
+        let expected: Vec<String> = parents.iter().map(|p| p.to_string()).collect();
+        assert_eq!(reader.try_read_commit_parents(sha), Some(expected));
+    }
+    assert_eq!(reader.try_read_commit_parents(tree), None);
+}
+
+#[test]
+fn test_read_commit_parents_falls_back_when_parents_may_be_rewritten() {
+    let sha = "abc123def456789012345678901234567890abcd";
+    let body = "tree def456789012345678901234567890abcdef0123\nparent 1111111111111111111111111111111111111111\n\nm\n";
+    let replace_ref = format!("refs/replace/{sha}");
+    let setups: [&dyn Fn(&Path); 4] = [
+        &|dir| fs::write(dir.join("shallow"), "x\n").unwrap(),
+        &|dir| {
+            fs::create_dir_all(dir.join("info")).unwrap();
+            fs::write(dir.join("info/grafts"), "x\n").unwrap();
+        },
+        &|dir| {
+            fs::create_dir_all(dir.join("refs/replace")).unwrap();
+            fs::write(dir.join(&replace_ref), format!("{sha}\n")).unwrap();
+        },
+        &|dir| fs::write(dir.join("packed-refs"), format!("{sha} {replace_ref}\n")).unwrap(),
+    ];
+    for setup in setups {
+        let temp = setup_git_dir();
+        write_loose_object(temp.path(), sha, "commit", body.as_bytes());
+        let reader = FastObjectReader::new(temp.path());
+        assert!(reader.try_read_commit_parents(sha).is_some());
+        setup(temp.path());
+        assert_eq!(reader.try_read_commit_parents(sha), None);
+    }
+}
+
+#[test]
+fn commit_parents_match_git_show_with_and_without_replace_refs() {
+    let tmp = crate::operations::git::test_utils::TmpRepo::new().unwrap();
+    let git = |args: &[&str]| tmp.git_command(args).unwrap().trim().to_string();
+    let root = tmp.commit_all("root").unwrap();
+    git(&["checkout", "-q", "-b", "side"]);
+    let side = tmp.commit_all("side").unwrap();
+    git(&["checkout", "-q", "-"]);
+    let main = tmp.commit_all("main").unwrap();
+    git(&["merge", "-q", "--no-ff", "-m", "merge", "side"]);
+    let merge = git(&["rev-parse", "HEAD"]);
+
+    let check = |sha: &str| {
+        let commit = tmp.gitai_repo().find_commit(sha.to_string()).unwrap();
+        let fast: Vec<String> = commit.parents().map(|parent| parent.id()).collect();
+        let shown = git(&["show", "-s", "--format=%P", sha]);
+        assert_eq!(fast.join(" "), shown, "parents of {sha}");
+    };
+    for sha in [&root, &side, &main, &merge] {
+        check(sha);
+    }
+    let reader = FastObjectReader::new(tmp.gitai_repo().common_dir());
+    assert!(reader.try_read_commit_parents(&merge).is_some());
+
+    git(&["replace", "--graft", &merge, &main]);
+    assert_eq!(reader.try_read_commit_parents(&merge), None);
+    check(&merge);
+}

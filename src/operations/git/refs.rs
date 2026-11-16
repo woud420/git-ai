@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 mod note_fanout;
 mod note_reads;
+mod notes_tip;
 
 pub use note_reads::note_blob_oids_for_commits_from_ref;
 pub(in crate::operations::git) use note_reads::{
@@ -109,18 +110,7 @@ fn prepare_notes_batch_write<'a>(
         return Ok(None);
     }
 
-    let mut args = repo.global_args_for_exec();
-    args.push("rev-parse".to_string());
-    args.push("--verify".to_string());
-    args.push("refs/notes/ai".to_string());
-    let existing_notes_tip = match exec_git(&args) {
-        Ok(output) => Some(String::from_utf8(output.stdout)?.trim().to_string()),
-        Err(GitAiError::GitCliError {
-            code: Some(128), ..
-        })
-        | Err(GitAiError::GitCliError { code: Some(1), .. }) => None,
-        Err(e) => return Err(e),
-    };
+    let existing_notes_tip = notes_tip::notes_ref_tip(repo)?;
 
     let mut deduped_entries: Vec<&(String, String)> = Vec::with_capacity(entries.len());
     let mut seen = HashSet::with_capacity(entries.len());

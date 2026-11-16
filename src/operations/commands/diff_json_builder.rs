@@ -152,14 +152,15 @@ pub(crate) fn merge_missing_prompts_and_sessions_from_authorship_note(
 // JSON hunk building
 // ============================================================================
 
+/// Build JSON hunks, recording every referenced commit in `commits` with
+/// default metadata for [`load_commit_metadata`] to fill in.
 pub fn build_json_hunks(
-    repo: &Repository,
     diff_hunks: &[DiffHunk],
     line_details: &HashMap<DiffLineKey, LineAttributionDetail>,
     line_contents: &HashMap<DiffLineKey, String>,
     diff_to_commit: &str,
     commits: &mut BTreeMap<String, DiffCommitMetadata>,
-) -> Result<Vec<DiffJsonHunk>, GitAiError> {
+) -> Vec<DiffJsonHunk> {
     let mut hunks: Vec<DiffJsonHunk> = Vec::new();
 
     for diff_hunk in diff_hunks {
@@ -182,9 +183,8 @@ pub fn build_json_hunks(
             commits,
         ));
     }
-    load_commit_metadata(repo, commits);
 
-    Ok(hunks)
+    hunks
 }
 
 fn build_json_hunk_segments(
@@ -346,7 +346,10 @@ pub(crate) fn reference_commit(
 /// Fill in metadata for every referenced commit with one `git log` and one
 /// batched note read. Commits git cannot resolve (such as the all-zero commit
 /// of uncommitted lines) are dropped from the map.
-fn load_commit_metadata(repo: &Repository, commits: &mut BTreeMap<String, DiffCommitMetadata>) {
+pub(crate) fn load_commit_metadata(
+    repo: &Repository,
+    commits: &mut BTreeMap<String, DiffCommitMetadata>,
+) {
     let commit_shas: Vec<String> = std::mem::take(commits).into_keys().collect();
     if commit_shas.is_empty() {
         return;

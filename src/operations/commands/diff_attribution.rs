@@ -17,7 +17,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::operations::commands::diff::{
     Attribution, DiffBuildArtifacts, DiffCommandOptions, DiffHunk, DiffLineKey, LineSide,
 };
-use crate::operations::commands::diff_json_builder::{build_json_hunks, extract_session_id};
+use crate::operations::commands::diff_json_builder::{
+    build_json_hunks, extract_session_id, load_commit_metadata,
+};
 use crate::operations::commands::diff_note_attribution::build_line_attribution_from_note;
 use crate::operations::commands::diff_parsing::{
     build_line_content_map, get_diff_sections_by_file,
@@ -78,13 +80,13 @@ pub fn build_diff_artifacts_with_note(
         build_line_attribution_data(repo, from_commit, to_commit, &hunks, options);
 
     let json_hunks = build_json_hunks(
-        repo,
         &hunks,
         &line_details,
         &line_contents,
         to_commit,
         &mut commits,
-    )?;
+    );
+    load_commit_metadata(repo, &mut commits);
 
     Ok(DiffBuildArtifacts {
         attributions,
@@ -99,9 +101,6 @@ pub fn build_diff_artifacts_with_note(
 }
 
 /// Build diff artifacts from pre-computed hunks, avoiding redundant git calls.
-///
-/// Used by the post-commit hook path where the caller already has the hunks
-/// from a single [`super::diff_parsing::get_diff_with_line_numbers`] call.
 pub fn build_diff_artifacts_from_hunks(
     repo: &Repository,
     hunks: Vec<DiffHunk>,
@@ -109,24 +108,26 @@ pub fn build_diff_artifacts_from_hunks(
     authorship_log: Option<&AuthorshipLog>,
 ) -> Result<DiffBuildArtifacts, GitAiError> {
     let effective_patterns = effective_ignore_patterns(repo, &[], &[]);
-    build_diff_artifacts_from_hunks_with_patterns(
-        repo,
+    let mut artifacts = build_diff_artifacts_without_commit_metadata(
         hunks,
         &effective_patterns,
         to_commit,
         authorship_log,
-    )
+    );
+    load_commit_metadata(repo, &mut artifacts.commits);
+    Ok(artifacts)
 }
 
 /// Like [`build_diff_artifacts_from_hunks`], for callers that already loaded
-/// the repo's effective ignore patterns.
-pub(crate) fn build_diff_artifacts_from_hunks_with_patterns(
-    repo: &Repository,
+/// the repo's effective ignore patterns and do not read `commits`, such as
+/// the post-commit hook path. It runs no git: the referenced commits keep
+/// default metadata, without the `git log` and note read that fill it in.
+pub(crate) fn build_diff_artifacts_without_commit_metadata(
     hunks: Vec<DiffHunk>,
     effective_patterns: &[String],
     to_commit: &str,
     authorship_log: Option<&AuthorshipLog>,
-) -> Result<DiffBuildArtifacts, GitAiError> {
+) -> DiffBuildArtifacts {
     let ignore_matcher = build_ignore_matcher(effective_patterns);
 
     let mut hunks = hunks;
@@ -154,15 +155,14 @@ pub(crate) fn build_diff_artifacts_from_hunks_with_patterns(
         };
 
     let json_hunks = build_json_hunks(
-        repo,
         &hunks,
         &line_details,
         &line_contents,
         to_commit,
         &mut commits,
-    )?;
+    );
 
-    Ok(DiffBuildArtifacts {
+    DiffBuildArtifacts {
         attributions,
         annotations_by_file,
         prompts,
@@ -171,7 +171,7 @@ pub(crate) fn build_diff_artifacts_from_hunks_with_patterns(
         json_hunks,
         commits,
         included_files,
-    })
+    }
 }
 
 // ============================================================================
@@ -502,4 +502,36 @@ fn collect_old_lines_by_blame_and_result(
     }
 
     lines_by_file_pair
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operations::commands::diff_parsing::get_diff_with_line_numbers;
+    use crate::operations::git::test_utils::TmpRepo;
+
+    #[test]
+    fn artifacts_without_commit_metadata_keep_hunks_and_skip_metadata() {
+        let tmp = TmpRepo::new().unwrap();
+        tmp.write_file("a.txt", "a\nb\n", false).unwrap();
+        let base = tmp.commit_all("base").unwrap();
+        tmp.write_file("a.txt", "a\nc\nd\n", false).unwrap();
+        let head = tmp.commit_all("edit").unwrap();
+        let repo = tmp.gitai_repo();
+        let hunks = || get_diff_with_line_numbers(repo, &base, &head).unwrap();
+        let log = AuthorshipLog::new();
+
+        let full = build_diff_artifacts_from_hunks(repo, hunks(), &head, Some(&log)).unwrap();
+        let bare = build_diff_artifacts_without_commit_metadata(hunks(), &[], &head, Some(&log));
+
+        let json = |hunks: &[_]| serde_json::to_string(hunks).unwrap();
+        assert_eq!(json(&full.json_hunks), json(&bare.json_hunks));
+        assert!(bare.json_hunks.iter().any(|h| h.hunk_kind == "deletion"));
+        assert!(!full.commits[&head].author.is_empty());
+        assert!(bare.commits[&head].author.is_empty());
+        assert_eq!(
+            full.commits.keys().collect::<Vec<_>>(),
+            bare.commits.keys().collect::<Vec<_>>()
+        );
+    }
 }

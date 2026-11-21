@@ -9,7 +9,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@opencode/plugin": "^2.2.6"
+    "@opencode/plugin": "^2.3.0"
   },
   "devDependencies": {
     "@types/node": "^26.x",

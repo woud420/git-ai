@@ -5,6 +5,9 @@ treating unlike acknowledgement contracts as the same metric. Its default
 `fork-vs-upstream-v1` profile compares a candidate with the pinned upstream
 reference.
 
+For in-process checkpoint IPC codec and direct control-socket acknowledgement
+benchmarks, see [IPC.md](IPC.md).
+
 The harness records two latency lanes:
 
 - `command_ack_ms`: process start through CLI return. This is reported for each

@@ -1,4 +1,3 @@
-use crate::clients::api::client::ApiContext;
 use crate::clients::auth::types::{
     DeviceAuthResponse, OAuthError, StoredCredentials, TokenResponse,
 };
@@ -73,7 +72,7 @@ impl OAuthClient {
     /// POST `body` to /worker/oauth/token.
     fn post_token_request(&self, body: &serde_json::Value) -> Result<http::Response, String> {
         let url = format!("{}/worker/oauth/token", self.base_url);
-        let (_agent, request) = ApiContext::http_post(&url, Some(30));
+        let (_agent, request) = http::post_request(&url, Some(30));
         let request = request.header("Content-Type", "application/json");
         http::send_with_body(request, &body.to_string())
             .map_err(|e| format!("Failed to connect to server: {}", e))
@@ -107,7 +106,7 @@ impl OAuthClient {
     pub fn start_device_flow(&self) -> Result<DeviceAuthResponse, String> {
         let url = format!("{}/worker/oauth/device/code", self.base_url);
 
-        let (_agent, request) = ApiContext::http_post(&url, Some(30));
+        let (_agent, request) = http::post_request(&url, Some(30));
         let request = request.header("Content-Type", "application/json");
         let response = http::send_with_body(request, "{}")
             .map_err(|e| format!("Failed to connect to server: {}", e))?;
@@ -380,6 +379,12 @@ mod tests {
         let mut server = mockito::Server::new();
         let pending = server
             .mock("POST", "/worker/oauth/token")
+            .match_header("User-Agent", concat!("git-ai/", env!("CARGO_PKG_VERSION")))
+            .match_header(
+                "X-Distinct-ID",
+                config::get_or_create_distinct_id().as_str(),
+            )
+            .match_header("Content-Type", "application/json")
             .with_status(400)
             .with_body(r#"{"error":"authorization_pending"}"#)
             .expect(1)

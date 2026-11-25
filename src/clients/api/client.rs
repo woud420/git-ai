@@ -134,17 +134,6 @@ impl ApiContext {
         }
     }
 
-    fn with_common_headers<Body>(
-        request: ureq::RequestBuilder<Body>,
-    ) -> ureq::RequestBuilder<Body> {
-        request
-            .header(
-                "User-Agent",
-                &format!("git-ai/{}", env!("CARGO_PKG_VERSION")),
-            )
-            .header("X-Distinct-ID", &config::get_or_create_distinct_id())
-    }
-
     /// Create a GET request with common headers (User-Agent, X-Distinct-ID)
     /// Use this for all HTTP GET requests to ensure consistent headers.
     /// The returned (Agent, Request) pair uses the system's native certificate store.
@@ -156,7 +145,7 @@ impl ApiContext {
         ureq::RequestBuilder<ureq::typestate::WithoutBody>,
     ) {
         let agent = http::build_agent(timeout_secs);
-        let request = Self::with_common_headers(agent.get(url));
+        let request = http::with_common_headers(agent.get(url));
         (agent, request)
     }
 
@@ -167,9 +156,7 @@ impl ApiContext {
         url: &str,
         timeout_secs: Option<u64>,
     ) -> (ureq::Agent, ureq::RequestBuilder<ureq::typestate::WithBody>) {
-        let agent = http::build_agent(timeout_secs);
-        let request = Self::with_common_headers(agent.post(url));
-        (agent, request)
+        http::post_request(url, timeout_secs)
     }
 
     /// Create a new API context, automatically using stored credentials if available
@@ -246,7 +233,7 @@ impl ApiContext {
         &self,
         url: &str,
     ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-        let request = Self::with_common_headers(self.agent.post(url));
+        let request = http::with_common_headers(self.agent.post(url));
         self.apply_auth_headers(request.header("Content-Type", "application/json"))
     }
 
@@ -254,7 +241,7 @@ impl ApiContext {
         &self,
         url: &str,
     ) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
-        self.apply_auth_headers(Self::with_common_headers(self.agent.get(url)))
+        self.apply_auth_headers(http::with_common_headers(self.agent.get(url)))
     }
 
     /// Make a POST request with JSON body

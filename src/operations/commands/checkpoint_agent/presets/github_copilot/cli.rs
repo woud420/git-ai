@@ -3,7 +3,6 @@ use super::super::{
     ParsedHookEvent, PostBashCall, PostFileEdit, PreBashCall, PreFileEdit, PresetContext,
 };
 use crate::error::GitAiError;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::ToolClass;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -49,17 +48,14 @@ pub(super) fn parse_cli_hooks(
     let mut metadata = HashMap::new();
     metadata.insert("source".to_string(), "copilot-cli".to_string());
 
-    let context = PresetContext {
-        agent_id: AgentId {
-            tool: "github-copilot-cli".to_string(),
-            id: session_id.clone(),
-            model: "unknown".to_string(),
-        },
-        external_session_id: session_id,
-        trace_id: trace_id.to_string(),
-        cwd: PathBuf::from(cwd),
+    let context = PresetContext::for_session(
+        "github-copilot-cli",
+        session_id,
+        "unknown",
+        trace_id,
+        PathBuf::from(cwd),
         metadata,
-    };
+    );
 
     let bash_command = parse::bash_command_from_hook_input(data);
 

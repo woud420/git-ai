@@ -1,6 +1,6 @@
 //! Claude Code agent implementation with sweep discovery.
 
-use super::discovery::{collect_files_recursively, transcript_file_stem};
+use super::discovery::{collect_files_recursively, has_extension, transcript_file_stem};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
@@ -43,9 +43,7 @@ impl ClaudeAgent {
     /// Scan for Claude conversation files in standard locations.
     fn scan_conversation_files() -> Vec<PathBuf> {
         collect_files_recursively(Self::conversation_roots(), |path| {
-            path.extension()
-                .map(|extension| extension == "jsonl")
-                .unwrap_or(false)
+            has_extension(path, "jsonl")
         })
     }
 
@@ -86,9 +84,7 @@ impl Agent for ClaudeAgent {
             crate::model::checkpoint_request::StreamFormat::ClaudeJsonl,
             Self::conversation_roots(),
             |path| {
-                if !crate::operations::streams::agent::checkpoint_stream_has_extension(
-                    path, "jsonl",
-                ) {
+                if !has_extension(path, "jsonl") {
                     return None;
                 }
                 let external_id = transcript_file_stem(path)?;

@@ -6,6 +6,14 @@ use serde_json::{Value, json};
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
+/// A runtime environment value, else the value compiled into the binary;
+/// an empty runtime value disables the setting.
+fn non_empty_setting(runtime: Option<String>, compiled: Option<&str>) -> Option<String> {
+    runtime
+        .or_else(|| compiled.map(str::to_string))
+        .filter(|s| !s.is_empty())
+}
+
 /// Flush buffered Sentry/PostHog events (errors, performance, messages).
 pub(super) fn flush_sentry_and_posthog(
     config: &Config,
@@ -19,40 +27,37 @@ pub(super) fn flush_sentry_and_posthog(
         .telemetry_enterprise_dsn()
         .map(|s| s.to_string())
         .or_else(|| {
-            std::env::var("SENTRY_ENTERPRISE")
-                .ok()
-                .or_else(|| option_env!("SENTRY_ENTERPRISE").map(|s| s.to_string()))
-                .filter(|s| !s.is_empty())
+            non_empty_setting(
+                std::env::var("SENTRY_ENTERPRISE").ok(),
+                option_env!("SENTRY_ENTERPRISE"),
+            )
         });
 
     // Check for OSS DSN
     let oss_dsn = if !config.telemetry_enabled() {
         None
     } else {
-        std::env::var("SENTRY_OSS")
-            .ok()
-            .or_else(|| option_env!("SENTRY_OSS").map(|s| s.to_string()))
-            .filter(|s| !s.is_empty())
+        non_empty_setting(std::env::var("SENTRY_OSS").ok(), option_env!("SENTRY_OSS"))
     };
 
     // Check for PostHog configuration
     let posthog_api_key = if !config.telemetry_enabled() {
         None
     } else {
-        std::env::var("POSTHOG_API_KEY")
-            .ok()
-            .or_else(|| option_env!("POSTHOG_API_KEY").map(|s| s.to_string()))
-            .filter(|s| !s.is_empty())
+        non_empty_setting(
+            std::env::var("POSTHOG_API_KEY").ok(),
+            option_env!("POSTHOG_API_KEY"),
+        )
     };
     let posthog = posthog_api_key.map(|key| (key, crate::clients::http::build_agent(Some(30))));
     // After the first failed send, the rest of this flush skips PostHog.
     let mut posthog_failed = false;
 
-    let posthog_host = std::env::var("POSTHOG_HOST")
-        .ok()
-        .or_else(|| option_env!("POSTHOG_HOST").map(|s| s.to_string()))
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "https://us.i.posthog.com".to_string());
+    let posthog_host = non_empty_setting(
+        std::env::var("POSTHOG_HOST").ok(),
+        option_env!("POSTHOG_HOST"),
+    )
+    .unwrap_or_else(|| "https://us.i.posthog.com".to_string());
 
     // Build Sentry clients
     let oss_client = oss_dsn.and_then(|dsn| SentryClient::from_dsn(&dsn));

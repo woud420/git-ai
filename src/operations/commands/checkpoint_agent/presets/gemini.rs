@@ -2,7 +2,6 @@ use super::parse;
 use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use crate::operations::commands::checkpoint_agent::path_utils::normalize_for_comparison;
 use crate::operations::mdm::paths::gemini_config_dir;
@@ -32,17 +31,14 @@ impl AgentPreset for GeminiPreset {
         let internal_tmp_dir = normalize_for_comparison(&gemini_config_dir().join("tmp"));
         file_paths.retain(|path| !normalize_for_comparison(path).starts_with(&internal_tmp_dir));
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "gemini".to_string(),
-                id: session_id.clone(),
-                model: "unknown".to_string(),
-            },
-            external_session_id: session_id,
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(cwd),
-            metadata: HashMap::from([("transcript_path".to_string(), transcript_path.to_string())]),
-        };
+        let context = PresetContext::for_session(
+            "gemini",
+            session_id,
+            "unknown",
+            trace_id,
+            PathBuf::from(cwd),
+            HashMap::from([("transcript_path".to_string(), transcript_path.to_string())]),
+        );
 
         let stream_source = Some(StreamSource {
             path: PathBuf::from(transcript_path),

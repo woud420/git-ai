@@ -35,6 +35,21 @@ fn collect_files_from_dir(
     }
 }
 
+pub(super) fn has_extension(path: &Path, expected: &str) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some(expected)
+}
+
+/// Binds a transcript file by its stem when it carries the expected extension.
+pub(super) fn stem_session_binding_with_extension(
+    path: &Path,
+    expected_extension: &str,
+) -> Option<(String, Option<String>)> {
+    if !has_extension(path, expected_extension) {
+        return None;
+    }
+    stem_session_binding(path)
+}
+
 pub(super) fn stem_session_binding(path: &Path) -> Option<(String, Option<String>)> {
     Some((transcript_file_stem(path)?, None))
 }

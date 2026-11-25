@@ -1,7 +1,6 @@
 use super::parse;
 use super::{AgentPreset, ParsedHookEvent, PresetContext, claude_wire};
 use crate::error::GitAiError;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use serde::Deserialize;
 use serde_json::Value;
@@ -264,17 +263,14 @@ impl AgentPreset for ClinePreset {
         metadata.insert("session_id".to_string(), input.task_id.clone());
         metadata.insert("tool_name".to_string(), tool.tool_name.clone());
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "cline".to_string(),
-                id: input.task_id.clone(),
-                model,
-            },
-            external_session_id: input.task_id.clone(),
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(cwd),
+        let context = PresetContext::for_session(
+            "cline",
+            input.task_id.clone(),
+            model,
+            trace_id,
+            PathBuf::from(cwd),
             metadata,
-        };
+        );
 
         let is_pre = input.hook_name == "PreToolUse";
         let is_bash = tool_class == ToolClass::Bash;

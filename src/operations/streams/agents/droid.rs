@@ -1,6 +1,6 @@
 //! Droid agent implementation with sweep discovery.
 
-use super::discovery::{collect_files_recursively, stem_session_binding};
+use super::discovery::{collect_files_recursively, has_extension, stem_session_binding};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::{HybridWatermark, WatermarkStrategy};
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
@@ -33,9 +33,7 @@ impl DroidAgent {
     fn scan_conversation_files() -> Vec<PathBuf> {
         // Droid transcripts are stored in ~/.factory/sessions/<project-dir>/<uuid>.jsonl.
         collect_files_recursively(Self::conversation_roots(), |path| {
-            path.extension()
-                .map(|extension| extension == "jsonl")
-                .unwrap_or(false)
+            has_extension(path, "jsonl")
                 && !path
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -62,9 +60,7 @@ impl Agent for DroidAgent {
             crate::model::checkpoint_request::StreamFormat::DroidJsonl,
             Self::conversation_roots(),
             |path| {
-                if !crate::operations::streams::agent::checkpoint_stream_has_extension(
-                    path, "jsonl",
-                ) {
+                if !has_extension(path, "jsonl") {
                     return None;
                 }
                 let name = path.file_name()?.to_str()?;

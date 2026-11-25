@@ -2,7 +2,6 @@ use super::parse;
 use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -130,17 +129,14 @@ impl AgentPreset for DroidPreset {
             metadata.insert("tool_name".to_string(), name.to_string());
         }
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "droid".to_string(),
-                id: session_id.clone(),
-                model: "unknown".to_string(),
-            },
-            external_session_id: session_id,
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(cwd),
+        let context = PresetContext::for_session(
+            "droid",
+            session_id,
+            "unknown",
+            trace_id,
+            PathBuf::from(cwd),
             metadata,
-        };
+        );
 
         let stream_source = Some(StreamSource {
             path: PathBuf::from(&resolved_transcript_path),

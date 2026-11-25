@@ -1,6 +1,6 @@
 //! Codex agent implementation with sweep discovery.
 
-use super::discovery::{collect_files_recursively, transcript_file_stem};
+use super::discovery::{collect_files_recursively, has_extension, transcript_file_stem};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::mdm::paths::codex_home_dir;
@@ -109,9 +109,7 @@ impl CodexAgent {
 
     fn scan_session_files() -> Vec<PathBuf> {
         collect_files_recursively(Self::session_roots(), |path| {
-            path.extension()
-                .map(|extension| extension == "jsonl")
-                .unwrap_or(false)
+            has_extension(path, "jsonl")
                 && path
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -169,9 +167,7 @@ impl Agent for CodexAgent {
             crate::model::checkpoint_request::StreamFormat::CodexJsonl,
             Self::session_roots(),
             |path| {
-                if !crate::operations::streams::agent::checkpoint_stream_has_extension(
-                    path, "jsonl",
-                ) {
+                if !has_extension(path, "jsonl") {
                     return None;
                 }
                 Some((

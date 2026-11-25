@@ -1,6 +1,9 @@
 //! Cursor agent implementation with sweep discovery.
 
-use super::discovery::{collect_files_recursively, stem_session_binding};
+use super::discovery::{
+    collect_files_recursively, has_extension, stem_session_binding,
+    stem_session_binding_with_extension,
+};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
@@ -39,9 +42,7 @@ impl CursorAgent {
     /// Scan for Cursor conversation files in standard locations.
     fn scan_conversation_files() -> Vec<PathBuf> {
         collect_files_recursively(Self::conversation_roots(), |path| {
-            path.extension()
-                .map(|extension| extension == "jsonl")
-                .unwrap_or(false)
+            has_extension(path, "jsonl")
         })
     }
 }
@@ -62,14 +63,7 @@ impl Agent for CursorAgent {
             "cursor",
             crate::model::checkpoint_request::StreamFormat::CursorJsonl,
             Self::conversation_roots(),
-            |path| {
-                if !crate::operations::streams::agent::checkpoint_stream_has_extension(
-                    path, "jsonl",
-                ) {
-                    return None;
-                }
-                stem_session_binding(path)
-            },
+            |path| stem_session_binding_with_extension(path, "jsonl"),
         )
     }
 

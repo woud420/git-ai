@@ -11,6 +11,21 @@ use std::collections::{HashMap, HashSet};
 use unicode_normalization::UnicodeNormalization;
 
 impl Repository {
+    /// `git diff -U0` arguments for added-line parsing, with permissive
+    /// rename detection so renamed files keep their added lines.
+    fn zero_context_diff_args(&self, from_ref: &str, to_ref: &str) -> Vec<String> {
+        let mut args = self.global_args_for_exec();
+        args.extend([
+            "diff".to_string(),
+            "-U0".to_string(),
+            "--no-color".to_string(),
+            "--find-renames=1%".to_string(),
+            from_ref.to_string(),
+            to_ref.to_string(),
+        ]);
+        args
+    }
+
     /// Get added line ranges from git diff between two commits
     /// Returns a HashMap of file paths to vectors of added line numbers
     ///
@@ -23,46 +38,16 @@ impl Repository {
         to_ref: &str,
         pathspecs: Option<&HashSet<String>>,
     ) -> Result<HashMap<String, Vec<u32>>, GitAiError> {
-        let mut args = self.global_args_for_exec();
-        args.push("diff".to_string());
-        args.push("-U0".to_string()); // Zero context lines
-        args.push("--no-color".to_string());
-        // Use permissive rename detection to properly handle renames
-        args.push("--find-renames=1%".to_string());
-        args.push(from_ref.to_string());
-        args.push(to_ref.to_string());
-
-        // Add pathspecs if provided (only as CLI args when under threshold).
-        // Force post-filtering when any pathspec contains non-ASCII characters,
-        // because NFC-normalised pathspecs may not match NFD entries in git's
-        // index on macOS when core.precomposeunicode is false.
-        let needs_post_filter = if let Some(paths) = pathspecs {
-            if paths.is_empty() {
-                return Ok(HashMap::new());
-            }
-            if paths.len() > MAX_PATHSPEC_ARGS || has_non_ascii_pathspec(paths) {
-                true
-            } else {
-                args.push("--".to_string());
-                for path in paths {
-                    args.push(path.clone());
-                }
-                false
-            }
-        } else {
-            false
+        let mut args = self.zero_context_diff_args(from_ref, to_ref);
+        let Some(post_filter) = append_pathspecs(&mut args, pathspecs) else {
+            return Ok(HashMap::new());
         };
 
         let output = exec_git_with_profile(&args, InternalGitProfile::PatchParse)?;
         let diff_output = String::from_utf8_lossy(&output.stdout);
 
         let mut result = parse_diff_added_lines_internal(&diff_output).all_lines;
-
-        if needs_post_filter && let Some(paths) = pathspecs {
-            let nfc_paths: HashSet<String> = paths.iter().map(|s| s.nfc().collect()).collect();
-            result.retain(|path, _| nfc_paths.contains(path));
-        }
-
+        post_filter.retain(&mut result);
         Ok(result)
     }
 
@@ -74,14 +59,7 @@ impl Repository {
         from_ref: &str,
         to_ref: &str,
     ) -> Result<(HashMap<String, Vec<u32>>, usize), GitAiError> {
-        let mut args = self.global_args_for_exec();
-        args.push("diff".to_string());
-        args.push("-U0".to_string());
-        args.push("--no-color".to_string());
-        args.push("--find-renames=1%".to_string());
-        args.push(from_ref.to_string());
-        args.push(to_ref.to_string());
-
+        let args = self.zero_context_diff_args(from_ref, to_ref);
         let output = exec_git_with_profile(&args, InternalGitProfile::PatchParse)?;
         let diff_output = String::from_utf8_lossy(&output.stdout);
 
@@ -139,22 +117,8 @@ impl Repository {
         args.push("--no-renames".to_string());
         args.push(from_ref.to_string());
 
-        // See diff_added_lines for why non-ASCII pathspecs need post-filtering.
-        let needs_post_filter = if let Some(paths) = pathspecs {
-            if paths.is_empty() {
-                return Ok((HashMap::new(), HashMap::new()));
-            }
-            if paths.len() > MAX_PATHSPEC_ARGS || has_non_ascii_pathspec(paths) {
-                true
-            } else {
-                args.push("--".to_string());
-                for path in paths {
-                    args.push(path.clone());
-                }
-                false
-            }
-        } else {
-            false
+        let Some(post_filter) = append_pathspecs(&mut args, pathspecs) else {
+            return Ok((HashMap::new(), HashMap::new()));
         };
 
         let output = exec_git_with_profile(&args, InternalGitProfile::PatchParse)?;
@@ -163,11 +127,8 @@ impl Repository {
         let (mut all_added, mut pure_insertions) =
             parse_diff_added_lines_with_insertions(&diff_output)?;
 
-        if needs_post_filter && let Some(paths) = pathspecs {
-            let nfc_paths: HashSet<String> = paths.iter().map(|s| s.nfc().collect()).collect();
-            all_added.retain(|path, _| nfc_paths.contains(path));
-            pure_insertions.retain(|path, _| nfc_paths.contains(path));
-        }
+        post_filter.retain(&mut all_added);
+        post_filter.retain(&mut pure_insertions);
 
         Ok((all_added, pure_insertions))
     }
@@ -354,6 +315,44 @@ pub fn parse_diff_added_lines_with_insertions(
 ) -> Result<(HashMap<String, Vec<u32>>, HashMap<String, Vec<u32>>), GitAiError> {
     let parsed = parse_diff_added_lines_internal(diff_output);
     Ok((parsed.all_lines, parsed.insertion_lines))
+}
+
+/// Paths a diff result must be narrowed to after parsing, when the
+/// pathspecs could not be passed to git directly.
+struct PathspecPostFilter(Option<HashSet<String>>);
+
+impl PathspecPostFilter {
+    fn retain<V>(&self, result: &mut HashMap<String, V>) {
+        if let Some(nfc_paths) = &self.0 {
+            result.retain(|path, _| nfc_paths.contains(path));
+        }
+    }
+}
+
+/// Appends `pathspecs` to `args` when git can apply them directly. Returns
+/// `None` for an empty set, which matches nothing.
+///
+/// Sets over the CLI threshold, or with any non-ASCII path, are filtered after
+/// parsing instead, because NFC-normalised pathspecs may not match NFD entries
+/// in git's index on macOS when core.precomposeunicode is false.
+fn append_pathspecs(
+    args: &mut Vec<String>,
+    pathspecs: Option<&HashSet<String>>,
+) -> Option<PathspecPostFilter> {
+    let Some(paths) = pathspecs else {
+        return Some(PathspecPostFilter(None));
+    };
+    if paths.is_empty() {
+        return None;
+    }
+    if paths.len() > MAX_PATHSPEC_ARGS || has_non_ascii_pathspec(paths) {
+        return Some(PathspecPostFilter(Some(
+            paths.iter().map(|s| s.nfc().collect()).collect(),
+        )));
+    }
+    args.push("--".to_string());
+    args.extend(paths.iter().cloned());
+    Some(PathspecPostFilter(None))
 }
 
 /// Returns true if any path in the set contains non-ASCII characters.

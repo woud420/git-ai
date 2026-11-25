@@ -260,10 +260,6 @@ pub(crate) fn checkpoint_stream_denied() -> StreamError {
     }
 }
 
-pub(crate) fn checkpoint_stream_has_extension(path: &Path, expected: &str) -> bool {
-    path.extension().and_then(|extension| extension.to_str()) == Some(expected)
-}
-
 pub(super) fn discover_path_sessions(
     tool: &str,
     paths: impl IntoIterator<Item = PathBuf>,

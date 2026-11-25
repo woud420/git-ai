@@ -4,8 +4,19 @@ use crate::model::api_types::DaemonLogEvent;
 use crate::model::daemon_control::CasSyncPayload;
 use crate::model::telemetry::TelemetryEnvelope;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 pub(super) const MAX_BUFFERED_EVENTS_PER_KIND: usize = 5000;
+
+/// Copies the entries of an event's JSON object context into `target`,
+/// overwriting keys already there.
+pub(super) fn extend_with_context(target: &mut BTreeMap<String, Value>, context: &Option<Value>) {
+    if let Some(Value::Object(entries)) = context {
+        for (key, value) in entries {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+}
 
 pub(super) struct ErrorEvent {
     pub(super) timestamp: String,

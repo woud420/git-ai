@@ -8,7 +8,8 @@ mod cas_flush;
 mod daemon_log_upload;
 mod metrics_flush;
 mod notes_flush;
-mod sentry_posthog;
+mod posthog;
+mod sentry;
 
 use crate::config::get_or_create_distinct_id;
 use crate::error::GitAiError;
@@ -32,7 +33,8 @@ use metrics_flush::{
     metrics_store, spawn_metrics_metadata_backfill, store_metrics_in_db_with,
 };
 use notes_flush::{flush_notes_for_await, flush_notes_with};
-use sentry_posthog::flush_sentry_and_posthog;
+use posthog::PostHogSink;
+use sentry::SentrySink;
 
 // Re-export for `telemetry_worker_tests.rs` (accessed via `super::telemetry_worker::flush_pending_metric_records_with`).
 #[cfg(test)]
@@ -441,6 +443,14 @@ fn reingest_metrics_in_db(
         .map_err(|error| error.to_string())
 }
 
+/// A runtime environment value, else the value compiled into the binary;
+/// an empty runtime value disables the setting.
+fn non_empty_setting(runtime: Option<String>, compiled: Option<&str>) -> Option<String> {
+    runtime
+        .or_else(|| compiled.map(str::to_string))
+        .filter(|s| !s.is_empty())
+}
+
 fn take_telemetry_flush_snapshot(
     buffer: &mut TelemetryBuffer,
     flush_mode: FlushMode,
@@ -464,18 +474,15 @@ fn flush_telemetry_batch(
     let config = crate::config::Config::get();
     let distinct_id = get_or_create_distinct_id();
 
-    // Flush Sentry events (errors, performance, messages)
-    let has_sentry_or_posthog =
+    let has_sentry_events =
         !batch.errors.is_empty() || !batch.performances.is_empty() || !batch.messages.is_empty();
-
-    if has_sentry_or_posthog {
-        flush_sentry_and_posthog(
-            config,
-            &distinct_id,
-            &batch.errors,
-            &batch.performances,
-            &batch.messages,
-        );
+    if has_sentry_events && let Some(sentry) = SentrySink::from_config(config, &distinct_id) {
+        sentry.send(&batch.errors, &batch.performances, &batch.messages);
+    }
+    if !batch.messages.is_empty()
+        && let Some(posthog) = PostHogSink::from_config(config, &distinct_id)
+    {
+        posthog.send(&batch.messages);
     }
 
     // Flush CAS records

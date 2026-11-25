@@ -476,14 +476,22 @@ fn flush_telemetry_batch(
 
     let has_sentry_events =
         !batch.errors.is_empty() || !batch.performances.is_empty() || !batch.messages.is_empty();
-    if has_sentry_events && let Some(sentry) = SentrySink::from_config(config, &distinct_id) {
-        sentry.send(&batch.errors, &batch.performances, &batch.messages);
-    }
-    if !batch.messages.is_empty()
-        && let Some(posthog) = PostHogSink::from_config(config, &distinct_id)
-    {
-        posthog.send(&batch.messages);
-    }
+    let sentry = has_sentry_events
+        .then(|| SentrySink::from_config(config, &distinct_id))
+        .flatten();
+    let posthog = (!batch.messages.is_empty())
+        .then(|| PostHogSink::from_config(config, &distinct_id))
+        .flatten();
+    // Each destination sends on its own thread, so a slow or unreachable one
+    // does not delay the others. The scope joins before the flush continues.
+    std::thread::scope(|scope| {
+        if let Some(sentry) = &sentry {
+            scope.spawn(|| sentry.send(&batch.errors, &batch.performances, &batch.messages));
+        }
+        if let Some(posthog) = &posthog {
+            scope.spawn(|| posthog.send(&batch.messages));
+        }
+    });
 
     // Flush CAS records
     if !batch.cas_records.is_empty() {

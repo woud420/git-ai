@@ -320,12 +320,47 @@ pub(super) fn repository_from_discovered_paths(
 
 pub fn discover_repository_in_path_no_git_exec(path: &Path) -> Result<Repository, GitAiError> {
     let paths = discover_repository_paths_no_git_exec(path)?;
-    repository_from_discovered_paths(
+    let mut repo = repository_from_discovered_paths(
         &paths.command_root,
         &paths.workdir,
         &paths.git_dir,
         &paths.git_common_dir,
-    )
+    )?;
+    // Git runs from the work tree root here, not from inside a git dir.
+    if paths.command_root == paths.workdir {
+        repo.discovered_is_bare = work_tree_is_bare(&paths.git_dir, &paths.git_common_dir);
+    }
+    Ok(repo)
+}
+
+/// What `git rev-parse --is-bare-repository` prints from a work tree root,
+/// when that is knowable without running it. Git then reads `core.bare` only
+/// from the repository's own config files, not from global or command-line
+/// config, so the answer is `false` when none of those files sets it to
+/// anything but false. Includes, a `true`, an unreadable file, or a
+/// `GIT_DIR` / `GIT_WORK_TREE` override give `None`, and
+/// [`Repository::is_bare_repository`] asks Git as before.
+fn work_tree_is_bare(git_dir: &Path, git_common_dir: &Path) -> Option<bool> {
+    if std::env::var_os("GIT_DIR").is_some() || std::env::var_os("GIT_WORK_TREE").is_some() {
+        return None;
+    }
+    let mut config_paths = vec![
+        git_common_dir.join("config"),
+        git_dir.join("config"),
+        git_dir.join("config.worktree"),
+    ];
+    config_paths.dedup();
+    for path in config_paths {
+        let config =
+            Repository::load_optional_config_file(&path, gix_config::Source::Local).ok()?;
+        let Some(config) = config else { continue };
+        let has_include = config.sections_by_name("include").is_some()
+            || config.sections_by_name("includeIf").is_some();
+        if has_include || !matches!(config.boolean("core.bare"), None | Some(Ok(false))) {
+            return None;
+        }
+    }
+    Some(false)
 }
 
 /// Check if any directory between `workdir` and `file_path` contains a `.git`
@@ -420,3 +455,7 @@ mod tests {
         assert!(has_intervening_git_dir(&file_path, workdir));
     }
 }
+
+#[cfg(test)]
+#[path = "discovery_no_exec_bareness_tests.rs"]
+mod bareness_tests;

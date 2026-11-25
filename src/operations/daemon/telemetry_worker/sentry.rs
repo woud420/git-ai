@@ -1,113 +1,70 @@
-//! Sentry and PostHog event dispatch for telemetry error/performance/message events.
+//! Sentry dispatch for buffered error, performance, and message events.
 
-use super::buffer::{ErrorEvent, MessageEvent, PerformanceEvent};
+use super::buffer::{ErrorEvent, MessageEvent, PerformanceEvent, extend_with_context};
+use super::non_empty_setting;
 use crate::config::Config;
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-/// A runtime environment value, else the value compiled into the binary;
-/// an empty runtime value disables the setting.
-fn non_empty_setting(runtime: Option<String>, compiled: Option<&str>) -> Option<String> {
-    runtime
-        .or_else(|| compiled.map(str::to_string))
-        .filter(|s| !s.is_empty())
+/// The Sentry projects one flush reports to.
+pub(super) struct SentrySink {
+    clients: Vec<SentryClient>,
+    base_tags: BTreeMap<String, Value>,
 }
 
-/// Flush buffered Sentry/PostHog events (errors, performance, messages).
-pub(super) fn flush_sentry_and_posthog(
-    config: &Config,
-    distinct_id: &str,
-    errors: &[ErrorEvent],
-    performances: &[PerformanceEvent],
-    messages: &[MessageEvent],
-) {
-    // Check for Enterprise DSN
-    let enterprise_dsn = config
-        .telemetry_enterprise_dsn()
-        .map(|s| s.to_string())
-        .or_else(|| {
-            non_empty_setting(
-                std::env::var("SENTRY_ENTERPRISE").ok(),
-                option_env!("SENTRY_ENTERPRISE"),
-            )
-        });
-
-    // Check for OSS DSN
-    let oss_dsn = if !config.telemetry_enabled() {
-        None
-    } else {
-        non_empty_setting(std::env::var("SENTRY_OSS").ok(), option_env!("SENTRY_OSS"))
-    };
-
-    // Check for PostHog configuration
-    let posthog_api_key = if !config.telemetry_enabled() {
-        None
-    } else {
-        non_empty_setting(
-            std::env::var("POSTHOG_API_KEY").ok(),
-            option_env!("POSTHOG_API_KEY"),
-        )
-    };
-    let posthog = posthog_api_key.map(|key| (key, crate::clients::http::build_agent(Some(30))));
-    // After the first failed send, the rest of this flush skips PostHog.
-    let mut posthog_failed = false;
-
-    let posthog_host = non_empty_setting(
-        std::env::var("POSTHOG_HOST").ok(),
-        option_env!("POSTHOG_HOST"),
-    )
-    .unwrap_or_else(|| "https://us.i.posthog.com".to_string());
-
-    // Build Sentry clients
-    let oss_client = oss_dsn.and_then(|dsn| SentryClient::from_dsn(&dsn));
-    let enterprise_client = enterprise_dsn.and_then(|dsn| SentryClient::from_dsn(&dsn));
-
-    let base_tags = base_tags(distinct_id);
-
-    for error in errors {
-        let event = sentry_error_event(error, &base_tags);
-        if let Some(client) = &oss_client {
-            client.send_event(event.clone());
-        }
-        if let Some(client) = &enterprise_client {
-            client.send_event(event);
-        }
+impl SentrySink {
+    /// The OSS project (when telemetry is on) and any enterprise project;
+    /// `None` when neither is configured.
+    pub(super) fn from_config(config: &Config, distinct_id: &str) -> Option<Self> {
+        let enterprise_dsn = config
+            .telemetry_enterprise_dsn()
+            .map(|s| s.to_string())
+            .or_else(|| {
+                non_empty_setting(
+                    std::env::var("SENTRY_ENTERPRISE").ok(),
+                    option_env!("SENTRY_ENTERPRISE"),
+                )
+            });
+        let oss_dsn = if config.telemetry_enabled() {
+            non_empty_setting(std::env::var("SENTRY_OSS").ok(), option_env!("SENTRY_OSS"))
+        } else {
+            None
+        };
+        let clients: Vec<SentryClient> = [oss_dsn, enterprise_dsn]
+            .into_iter()
+            .flatten()
+            .filter_map(|dsn| SentryClient::from_dsn(&dsn))
+            .collect();
+        (!clients.is_empty()).then(|| Self {
+            clients,
+            base_tags: base_tags(distinct_id),
+        })
     }
 
-    for perf in performances {
-        let event = sentry_performance_event(perf, &base_tags);
-        if let Some(client) = &oss_client {
-            client.send_event(event.clone());
-        }
-        if let Some(client) = &enterprise_client {
-            client.send_event(event);
-        }
-    }
-
-    // Messages go to Sentry and PostHog.
-    for msg in messages {
-        let sentry_event = sentry_message_event(msg, &base_tags);
-        if let Some(client) = &oss_client {
-            client.send_event(sentry_event.clone());
-        }
-        if let Some(client) = &enterprise_client {
-            client.send_event(sentry_event);
-        }
-
-        if let Some((api_key, agent)) = &posthog
-            && !posthog_failed
-        {
-            let endpoint = format!("{}/capture/", posthog_host.trim_end_matches('/'));
-            let ph_event = posthog_capture_event(msg, api_key, distinct_id);
-            let request = agent
-                .post(&endpoint)
-                .header("Content-Type", "application/json");
-            posthog_failed = crate::clients::http::send_with_body(
-                request,
-                &serde_json::to_string(&ph_event).unwrap_or_default(),
+    pub(super) fn send(
+        &self,
+        errors: &[ErrorEvent],
+        performances: &[PerformanceEvent],
+        messages: &[MessageEvent],
+    ) {
+        let events = errors
+            .iter()
+            .map(|error| sentry_error_event(error, &self.base_tags))
+            .chain(
+                performances
+                    .iter()
+                    .map(|perf| sentry_performance_event(perf, &self.base_tags)),
             )
-            .is_err();
+            .chain(
+                messages
+                    .iter()
+                    .map(|msg| sentry_message_event(msg, &self.base_tags)),
+            );
+        for event in events {
+            for client in &self.clients {
+                client.send_event(&event);
+            }
         }
     }
 }
@@ -122,16 +79,6 @@ fn base_tags(distinct_id: &str) -> BTreeMap<String, Value> {
 
 fn sentry_release() -> String {
     format!("git-ai@{}", env!("CARGO_PKG_VERSION"))
-}
-
-/// Copies the entries of an event's JSON object context into `target`,
-/// overwriting keys already there.
-fn extend_with_context(target: &mut BTreeMap<String, Value>, context: &Option<Value>) {
-    if let Some(Value::Object(entries)) = context {
-        for (key, value) in entries {
-            target.insert(key.clone(), value.clone());
-        }
-    }
 }
 
 fn sentry_error_event(error: &ErrorEvent, base_tags: &BTreeMap<String, Value>) -> Value {
@@ -184,24 +131,6 @@ fn sentry_message_event(msg: &MessageEvent, base_tags: &BTreeMap<String, Value>)
     })
 }
 
-fn posthog_capture_event(msg: &MessageEvent, api_key: &str, distinct_id: &str) -> Value {
-    let mut properties = BTreeMap::from([
-        ("os".to_string(), json!(std::env::consts::OS)),
-        ("arch".to_string(), json!(std::env::consts::ARCH)),
-        ("version".to_string(), json!(env!("CARGO_PKG_VERSION"))),
-        ("message".to_string(), json!(msg.message)),
-        ("level".to_string(), json!(msg.level)),
-    ]);
-    extend_with_context(&mut properties, &msg.context);
-    json!({
-        "api_key": api_key,
-        "event": msg.message,
-        "properties": properties,
-        "distinct_id": distinct_id,
-        "timestamp": msg.timestamp,
-    })
-}
-
 /// Minimal Sentry client for sending events to a Sentry DSN, built once per flush.
 struct SentryClient {
     endpoint: String,
@@ -235,7 +164,7 @@ impl SentryClient {
         })
     }
 
-    fn send_event(&self, event: Value) {
+    fn send_event(&self, event: &Value) {
         if self.failed.get() {
             return;
         }
@@ -250,7 +179,7 @@ impl SentryClient {
             .post(&self.endpoint)
             .header("X-Sentry-Auth", &auth_header)
             .header("Content-Type", "application/json");
-        let body = serde_json::to_string(&event).unwrap_or_default();
+        let body = serde_json::to_string(event).unwrap_or_default();
         // Only an unreachable endpoint ends the flush: an event the server
         // rejects says nothing about the events after it.
         self.failed
@@ -348,27 +277,6 @@ mod payload_tests {
             })
         );
     }
-
-    #[test]
-    fn posthog_capture_event_lets_context_override_properties() {
-        assert_eq!(
-            posthog_capture_event(&message(), "phc_key", "id-1"),
-            json!({
-                "api_key": "phc_key",
-                "event": "daemon started",
-                "properties": {
-                    "os": OS,
-                    "arch": ARCH,
-                    "version": VERSION,
-                    "message": "daemon started",
-                    "level": "from-context",
-                    "repo": "r",
-                },
-                "distinct_id": "id-1",
-                "timestamp": "2026-11-24T00:00:00Z",
-            })
-        );
-    }
 }
 
 #[cfg(test)]
@@ -415,8 +323,8 @@ mod tests {
     #[test]
     fn send_event_skips_the_endpoint_after_a_transport_failure() {
         let (client, connections) = client_answered_with("");
-        client.send_event(serde_json::json!({"message": "first"}));
-        client.send_event(serde_json::json!({"message": "second"}));
+        client.send_event(&serde_json::json!({"message": "first"}));
+        client.send_event(&serde_json::json!({"message": "second"}));
 
         assert!(client.failed.get());
         assert_eq!(connections.load(Ordering::SeqCst), 1);
@@ -427,8 +335,8 @@ mod tests {
         let (client, connections) = client_answered_with(
             "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         );
-        client.send_event(serde_json::json!({"message": "first"}));
-        client.send_event(serde_json::json!({"message": "second"}));
+        client.send_event(&serde_json::json!({"message": "first"}));
+        client.send_event(&serde_json::json!({"message": "second"}));
 
         assert!(!client.failed.get());
         assert_eq!(connections.load(Ordering::SeqCst), 2);

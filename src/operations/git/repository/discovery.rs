@@ -10,6 +10,7 @@ use crate::clients::git_cli::{exec_git, exec_git_allow_nonzero};
 use crate::error::GitAiError;
 use crate::operations::git::cat_file::{batch_path_specs, batch_read_blobs_by_name};
 use crate::operations::git::config_access_retry::with_config_access_retry;
+use crate::operations::git::fast_reader::FastObjectReader;
 use crate::operations::git::repo_storage::RepoStorage;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -219,16 +220,32 @@ pub fn find_repository_in_path(path: &str) -> Result<Repository, GitAiError> {
     find_repository(&global_args)
 }
 
+/// Reads each `(treeish, path)` from loose objects where it can, and the rest
+/// in one `git cat-file --batch`.
 pub(crate) fn batch_read_paths_at_treeishes(
     repo: &Repository,
     requests: &[(String, String)],
 ) -> Result<HashMap<(String, String), String>, GitAiError> {
-    let specs = batch_path_specs(repo, requests)?;
+    let reader = FastObjectReader::new(repo.common_dir());
+    let mut contents = HashMap::new();
+    let mut for_git = Vec::new();
+    for request in requests {
+        match reader.try_read_blob_at_path(&request.0, &request.1) {
+            Some(Some(blob)) => {
+                contents.insert(request.clone(), String::from_utf8_lossy(&blob).into_owned());
+            }
+            Some(None) => {}
+            None => for_git.push(request.clone()),
+        }
+    }
+    let specs = batch_path_specs(repo, &for_git)?;
     let names: Vec<String> = specs.iter().map(|(_, spec)| spec.clone()).collect();
     let blobs = batch_read_blobs_by_name(repo, &names)?;
-    Ok(specs
-        .into_iter()
-        .zip(blobs)
-        .filter_map(|((request, _), blob)| Some((request.clone(), blob?)))
-        .collect())
+    contents.extend(
+        specs
+            .into_iter()
+            .zip(blobs)
+            .filter_map(|((request, _), blob)| Some((request.clone(), blob?))),
+    );
+    Ok(contents)
 }

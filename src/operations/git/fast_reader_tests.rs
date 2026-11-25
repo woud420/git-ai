@@ -414,3 +414,146 @@ fn commit_parents_match_git_show_with_and_without_replace_refs() {
     assert_eq!(reader.try_read_commit_parents(&merge), None);
     check(&merge);
 }
+
+/// `git cat-file --batch` for each name: the blob's bytes, or `None`.
+fn cat_file_blobs(dir: &Path, names: &[String]) -> Vec<Option<Vec<u8>>> {
+    let mut child = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["cat-file", "--batch"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for name in names {
+        writeln!(stdin, "{name}").unwrap();
+    }
+    drop(stdin);
+    let out = child.wait_with_output().unwrap().stdout;
+    let mut pos = 0;
+    let mut blobs = Vec::new();
+    while pos < out.len() {
+        let end = pos + out[pos..].iter().position(|&b| b == b'\n').unwrap();
+        let header = std::str::from_utf8(&out[pos..end]).unwrap().to_string();
+        pos = end + 1;
+        let parts: Vec<&str> = header.split(' ').collect();
+        if parts.len() == 3 && parts[1] != "missing" {
+            let size: usize = parts[2].parse().unwrap();
+            blobs.push((parts[1] == "blob").then(|| out[pos..pos + size].to_vec()));
+            pos += size + 1;
+        } else {
+            blobs.push(None);
+        }
+    }
+    blobs
+}
+
+#[test]
+fn blob_at_path_matches_cat_file_and_defers_what_it_cannot_read() {
+    let tmp = crate::operations::git::test_utils::TmpRepo::new().unwrap();
+    let git = |args: &[&str]| tmp.git_command(args).unwrap().trim().to_string();
+    tmp.write_file("a.txt", "one\n", false).unwrap();
+    tmp.write_file("dir/sub/b.rs", "fn b() {}\n", false)
+        .unwrap();
+    let root = tmp.commit_all("root").unwrap();
+    tmp.write_file("a.txt", "one\ntwo\n", false).unwrap();
+    fs::write(tmp.path().join("latin1.txt"), b"caf\xe9\n").unwrap();
+    git(&["add", "a.txt", "latin1.txt"]);
+    // A symlink and a newline in a name, staged without touching the disk.
+    let target = git(&["hash-object", "-w", "a.txt"]);
+    git(&[
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        &format!("120000,{target},link"),
+    ]);
+    git(&[
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        &format!("100644,{target},dir/new\nline"),
+    ]);
+    let source = tmp.path().to_string_lossy().to_string();
+    git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        &source,
+        "module",
+    ]);
+    git(&["commit", "-q", "-m", "second"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    let tree = git(&["rev-parse", "HEAD^{tree}"]);
+
+    let paths = [
+        "a.txt",
+        "dir/sub/b.rs",
+        "latin1.txt",
+        "link",
+        "module",
+        "dir",
+        "dir/sub",
+        "missing.txt",
+        "a.txt/inside",
+        "dir/missing/x",
+        "dir/new\nline",
+    ];
+    let reader = FastObjectReader::new(tmp.gitai_repo().common_dir());
+    for treeish in [
+        head.clone(),
+        format!("{head}^"),
+        root.clone(),
+        format!("{root}^"),
+        tree,
+    ] {
+        // cat-file can't take a newline in a name, so that entry goes by OID.
+        let listing = tmp.git_command(&["ls-tree", "-z", &treeish, "dir/"]);
+        let newline_entry = listing
+            .unwrap_or_default()
+            .split('\0')
+            .find_map(|entry| entry.strip_suffix("\tdir/new\nline").map(str::to_string))
+            .and_then(|entry| entry.split(' ').nth(2).map(str::to_string));
+        let names: Vec<String> = paths
+            .iter()
+            .map(|path| match (path.contains('\n'), &newline_entry) {
+                (false, _) => format!("{treeish}:{path}"),
+                (true, Some(oid)) => oid.clone(),
+                (true, None) => format!("{treeish}:missing.txt"),
+            })
+            .collect();
+        let expected = cat_file_blobs(tmp.path(), &names);
+        for (path, expected) in paths.iter().zip(expected) {
+            let fast = reader.try_read_blob_at_path(&treeish, path);
+            assert_eq!(fast, Some(expected), "{treeish}:{path:?}");
+        }
+    }
+
+    for (treeish, path) in [
+        ("HEAD", "a.txt"),
+        (head.as_str(), "./a.txt"),
+        (head.as_str(), "dir//sub/b.rs"),
+        (head.as_str(), "dir/../a.txt"),
+        (head.as_str(), "dir/"),
+    ] {
+        assert_eq!(
+            reader.try_read_blob_at_path(treeish, path),
+            None,
+            "{treeish}:{path:?}"
+        );
+    }
+    let other = git(&["rev-parse", &format!("{root}:a.txt")]);
+    git(&["replace", &target, &other]);
+    assert_eq!(
+        reader.try_read_blob_at_path(&head, "a.txt"),
+        None,
+        "replaced"
+    );
+    git(&["replace", "-d", &target]);
+    assert!(reader.try_read_blob_at_path(&head, "a.txt").is_some());
+    git(&["repack", "-adq"]);
+    git(&["prune-packed"]);
+    assert_eq!(reader.try_read_blob_at_path(&head, "a.txt"), None, "packed");
+}

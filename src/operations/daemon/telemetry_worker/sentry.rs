@@ -14,9 +14,12 @@ pub(super) struct SentrySink {
 }
 
 impl SentrySink {
-    /// The OSS project (when telemetry is on) and any enterprise project;
-    /// `None` when neither is configured.
+    /// The OSS project and any enterprise project. `None` while the master
+    /// telemetry switch is off, or when neither project is configured.
     pub(super) fn from_config(config: &Config, distinct_id: &str) -> Option<Self> {
+        if !config.telemetry_enabled() {
+            return None;
+        }
         let enterprise_dsn = config
             .telemetry_enterprise_dsn()
             .map(|s| s.to_string())
@@ -26,11 +29,8 @@ impl SentrySink {
                     option_env!("SENTRY_ENTERPRISE"),
                 )
             });
-        let oss_dsn = if config.telemetry_enabled() {
-            non_empty_setting(std::env::var("SENTRY_OSS").ok(), option_env!("SENTRY_OSS"))
-        } else {
-            None
-        };
+        let oss_dsn =
+            non_empty_setting(std::env::var("SENTRY_OSS").ok(), option_env!("SENTRY_OSS"));
         let clients: Vec<SentryClient> = [oss_dsn, enterprise_dsn]
             .into_iter()
             .flatten()
@@ -328,6 +328,28 @@ mod tests {
         });
         let client = SentryClient::from_dsn(&format!("http://key@127.0.0.1:{port}/1")).unwrap();
         (client, connections)
+    }
+
+    fn config_with_enterprise_dsn(telemetry_enabled: bool) -> crate::config::Config {
+        let mut config = crate::config::tests::create_test_config(vec![], vec![]);
+        config.telemetry_enabled = telemetry_enabled;
+        config.telemetry_enterprise_dsn = Some("https://key@sentry.corp/7".to_string());
+        config
+    }
+
+    #[test]
+    fn enterprise_dsn_is_not_used_while_telemetry_is_off() {
+        assert!(SentrySink::from_config(&config_with_enterprise_dsn(false), "id").is_none());
+    }
+
+    #[test]
+    fn enterprise_dsn_is_used_when_telemetry_is_on() {
+        let sink = SentrySink::from_config(&config_with_enterprise_dsn(true), "id").unwrap();
+        assert!(
+            sink.clients
+                .iter()
+                .any(|client| client.endpoint == "https://sentry.corp/api/7/store/")
+        );
     }
 
     #[test]

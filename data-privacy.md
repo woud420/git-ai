@@ -88,9 +88,10 @@ daemon-log uploads, or heartbeats can be sent. API metrics and daemon logs also
 require login or an API key; daemon-log upload additionally respects its
 feature flag.
 
-`telemetry_enterprise_dsn` is an independent explicit opt-in. When configured,
-errors can be sent to that DSN even while the master telemetry setting is off.
-The endpoint operator, not this fork, controls received data.
+`telemetry_enterprise_dsn` (or a `SENTRY_ENTERPRISE` value) adds a second
+Sentry destination for the same error, performance, and message events. It is
+also gated by the master `telemetry` setting: nothing is sent to it while
+telemetry is off. The endpoint operator, not this fork, controls received data.
 
 Other actions that can make network requests include:
 

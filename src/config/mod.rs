@@ -232,12 +232,11 @@ impl Config {
                 .is_some_and(|root| repo_root_matches_patterns(&self.allowed_repositories, root))
     }
 
-    /// Returns true if OSS telemetry is disabled.
     /// Master telemetry switch. Telemetry is off by default; egress
     /// (Sentry/PostHog, metrics upload, daemon log upload, heartbeats) only
     /// runs when the `telemetry` config key is "on" (or the legacy
-    /// `telemetry_oss` key is "on"). An explicitly configured
-    /// `telemetry_enterprise_dsn` is its own opt-in and is not gated here.
+    /// `telemetry_oss` key is "on"). This also gates a configured
+    /// `telemetry_enterprise_dsn`.
     pub fn telemetry_enabled(&self) -> bool {
         self.telemetry_enabled
     }

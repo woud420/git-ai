@@ -1,0 +1,31 @@
+name: Clean up pull request caches
+
+# A pull request's caches are scoped to refs/pull/<number>/merge, so no other
+# branch can restore them. Once the pull request closes they only take space
+# from the repository's 10 GB cache quota, so delete them right away instead
+# of waiting seven days for GitHub to evict them.
+#
+# Pull requests from forks get a read-only token here, so their caches are
+# left to expire on their own.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  delete-caches:
+    name: Delete caches for the closed pull request
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+    steps:
+      - name: Delete caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CACHE_REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: gh cache delete --all --ref "$CACHE_REF" --succeed-on-no-caches

@@ -43,7 +43,7 @@ pub struct FamilySequencerOrder {
 #[doc(hidden)]
 pub struct FamilySequencerState {
     pub(crate) next_ordinal: u64,
-    pub(crate) entries: BTreeMap<FamilySequencerOrder, FamilySequencerEntry>,
+    entries: BTreeMap<FamilySequencerOrder, FamilySequencerEntry>,
 }
 
 impl FamilySequencerState {
@@ -65,6 +65,54 @@ impl FamilySequencerState {
         self.next_ordinal = self.next_ordinal.saturating_add(1);
         self.entries.insert(order, entry);
         order
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub(super) fn ordered_entries(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&FamilySequencerOrder, &FamilySequencerEntry)> {
+        self.entries.iter()
+    }
+
+    pub(super) fn has_non_pending_entries(&self) -> bool {
+        self.entries
+            .values()
+            .any(|entry| !matches!(entry, FamilySequencerEntry::PendingRoot { .. }))
+    }
+
+    pub(super) fn replace_pending_root(
+        &mut self,
+        root_sid: &str,
+        slot: &PendingRootSlot,
+        replacement: FamilySequencerEntry,
+    ) -> Result<(), GitAiError> {
+        // Keep the established sequencing diagnostics on an inconsistent slot.
+        match self.entries.get_mut(&slot.order) {
+            Some(entry @ FamilySequencerEntry::PendingRoot { .. }) => {
+                *entry = replacement;
+                Ok(())
+            }
+            Some(_) => Err(GitAiError::Generic(format!(
+                "sequencer entry for sid={} family={} order={:?} was not pending",
+                root_sid, slot.family, slot.order
+            ))),
+            None => Err(GitAiError::Generic(format!(
+                "missing pending root sequencer entry for sid={} family={} order={:?}",
+                root_sid, slot.family, slot.order
+            ))),
+        }
+    }
+
+    pub(super) fn take_ready_entry(
+        &mut self,
+        order: &FamilySequencerOrder,
+    ) -> FamilySequencerEntry {
+        self.entries
+            .remove(order)
+            .expect("selected entry remains queued under the sequencer lock")
     }
 }
 

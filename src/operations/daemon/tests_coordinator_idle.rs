@@ -54,7 +54,7 @@ async fn idle_root_close_marker_reclaims_pending_sequencer_slot() {
             .lock()
             .unwrap()
             .get(family)
-            .is_none_or(|state| state.entries.is_empty())
+            .is_none_or(FamilySequencerState::is_empty)
     );
 }
 

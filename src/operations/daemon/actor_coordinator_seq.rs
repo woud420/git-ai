@@ -158,7 +158,7 @@ impl ActorDaemonCoordinator {
                 }
             })?;
             map.iter()
-                .filter(|(_, state)| !state.entries.is_empty())
+                .filter(|(_, state)| !state.is_empty())
                 .map(|(family, _)| family.clone())
                 .collect::<Vec<_>>()
         };
@@ -219,7 +219,6 @@ impl ActorDaemonCoordinator {
         let Some(slot) = self.take_pending_root_slot(root_sid)? else {
             return Ok(None);
         };
-        let family = slot.family.clone();
         {
             let mut sequencers = self.family_sequencers_by_family.lock().map_err(|_| {
                 PersistenceError::LockPoisoned {
@@ -227,29 +226,11 @@ impl ActorDaemonCoordinator {
                 }
             })?;
             let state = sequencers
-                .entry(family.clone())
+                .entry(slot.family.clone())
                 .or_insert_with(FamilySequencerState::new);
-            let Some(entry) = state.entries.get_mut(&slot.order) else {
-                // Retain the established diagnostic text for sequencing failures.
-                return Err(GitAiError::Generic(format!(
-                    "missing pending root sequencer entry for sid={} family={} order={:?}",
-                    root_sid, family, slot.order
-                )));
-            };
-            match entry {
-                FamilySequencerEntry::PendingRoot { .. } => {
-                    *entry = replacement;
-                }
-                _ => {
-                    // Retain the established diagnostic text for sequencing failures.
-                    return Err(GitAiError::Generic(format!(
-                        "sequencer entry for sid={} family={} order={:?} was not pending",
-                        root_sid, family, slot.order
-                    )));
-                }
-            }
+            state.replace_pending_root(root_sid, &slot, replacement)?;
         }
-        Ok(Some(family))
+        Ok(Some(slot.family))
     }
 
     pub(crate) fn family_entry_blocked_by_prior_open_trace_root(

@@ -205,7 +205,7 @@ impl ActorDaemonCoordinator {
         }
         if let Ok(map) = self.family_sequencers_by_family.lock() {
             for state in map.values() {
-                if !state.entries.is_empty() {
+                if !state.is_empty() {
                     return true;
                 }
             }

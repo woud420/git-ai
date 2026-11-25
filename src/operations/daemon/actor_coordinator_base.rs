@@ -407,7 +407,7 @@ impl ActorDaemonCoordinator {
             map.retain(|_, errors| !errors.is_empty());
         }
         if let Ok(mut map) = self.family_sequencers_by_family.lock() {
-            map.retain(|_, state| !state.entries.is_empty());
+            map.retain(|_, state| !state.is_empty());
         }
         if let Ok(mut map) = self.side_effect_exec_locks.lock() {
             // Prune only locks nobody holds (the map's own Arc is the single

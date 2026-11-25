@@ -404,7 +404,7 @@ async fn later_nonsequencer_command_cannot_overtake_blocked_family_command() {
                 .lock()
                 .unwrap()
                 .get(&family)
-                .is_some_and(|state| state.entries.is_empty());
+                .is_some_and(FamilySequencerState::is_empty);
             if entry_was_popped && coord.has_inflight_family_effects() {
                 break;
             }

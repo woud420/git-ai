@@ -26,12 +26,10 @@ impl ActorDaemonCoordinator {
 
         match self.family_sequencers_by_family.lock() {
             Ok(map) => {
-                if map.values().any(|state| {
-                    state
-                        .entries
-                        .values()
-                        .any(|entry| !matches!(entry, FamilySequencerEntry::PendingRoot { .. }))
-                }) {
+                if map
+                    .values()
+                    .any(FamilySequencerState::has_non_pending_entries)
+                {
                     return true;
                 }
             }
@@ -75,12 +73,9 @@ impl ActorDaemonCoordinator {
         }
         self.accepting_checkpoints.store(false, Ordering::Release);
 
-        let has_queued_entries = sequencers.values().any(|state| {
-            state
-                .entries
-                .values()
-                .any(|entry| !matches!(entry, FamilySequencerEntry::PendingRoot { .. }))
-        });
+        let has_queued_entries = sequencers
+            .values()
+            .any(FamilySequencerState::has_non_pending_entries);
         let busy = self.pending_checkpoint_admissions.load(Ordering::Acquire) > 0
             || self.queued_trace_payloads.load(Ordering::Acquire) > 0
             || self.next_trace_ingest_seq.load(Ordering::Acquire)

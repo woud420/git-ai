@@ -130,7 +130,7 @@ impl ActorDaemonCoordinator {
         state: &FamilySequencerState,
     ) -> Result<Vec<FamilySequencerOrder>, GitAiError> {
         let mut ready = Vec::new();
-        for (order, entry) in &state.entries {
+        for (order, entry) in state.ordered_entries() {
             if let FamilySequencerEntry::PendingRoot { root_sid } = entry {
                 if self.commit_editor_is_waiting(root_sid) {
                     continue;

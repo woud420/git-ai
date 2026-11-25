@@ -175,10 +175,7 @@ impl ActorDaemonCoordinator {
                 .entry(family.to_string())
                 .or_insert_with(FamilySequencerState::new);
             for order in self.ready_family_orders(family, state)? {
-                let entry = state
-                    .entries
-                    .remove(&order)
-                    .expect("selected entry remains queued under the sequencer lock");
+                let entry = state.take_ready_entry(&order);
                 ready.push((order.ordinal, entry));
             }
         }

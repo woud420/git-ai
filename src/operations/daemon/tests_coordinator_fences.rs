@@ -31,9 +31,7 @@ async fn graceful_shutdown_drains_visible_trace_ingest_and_late_ready_work() {
         .expect("shutdown task should not panic");
     assert!(response.ok, "graceful shutdown failed: {response:?}");
     assert!(
-        coord.family_sequencers_by_family.lock().unwrap()["late-family"]
-            .entries
-            .is_empty(),
+        coord.family_sequencers_by_family.lock().unwrap()["late-family"].is_empty(),
         "late ready work must be drained before shutdown acknowledges"
     );
 }
@@ -57,7 +55,7 @@ async fn graceful_shutdown_ignores_entries_blocked_by_an_open_root() {
     assert!(response.ok, "graceful shutdown failed: {response:?}");
     assert_eq!(
         coord.family_sequencers_by_family.lock().unwrap()["blocked-family"]
-            .entries
+            .ordered_entries()
             .len(),
         2,
         "blocked entries must stay ordered for replay instead of running early"

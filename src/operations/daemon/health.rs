@@ -103,12 +103,13 @@ impl DaemonHealthSnapshot {
                     snapshot_partial = true;
                 }
                 for (key, state) in sequencers.iter().take(HEALTH_FAMILY_OBSERVATION_LIMIT) {
-                    if state.entries.is_empty() {
+                    if state.is_empty() {
                         continue;
                     }
                     let remaining =
                         HEALTH_SEQUENCER_ENTRY_OBSERVATION_LIMIT.saturating_sub(entries_observed);
-                    if state.entries.len() > remaining {
+                    let mut entries = state.ordered_entries().peekable();
+                    if entries.len() > remaining {
                         snapshot_partial = true;
                     }
                     if remaining == 0 {
@@ -118,11 +119,11 @@ impl DaemonHealthSnapshot {
                     else {
                         continue;
                     };
-                    if let Some((order, entry)) = state.entries.first_key_value() {
+                    if let Some((order, entry)) = entries.peek() {
                         health.front_kind = Some(entry_kind(entry));
                         health.front_started_at_ns = Some(order.started_at_ns);
                     }
-                    for (order, entry) in state.entries.iter().take(remaining) {
+                    for (order, entry) in entries.take(remaining) {
                         let age_ms = age_ms(now_ns, order.started_at_ns);
                         health.entries = health.entries.saturating_add(1);
                         health.oldest_entry_age_ms = health.oldest_entry_age_ms.max(age_ms);

@@ -63,33 +63,10 @@ pub(super) fn flush_sentry_and_posthog(
     let oss_client = oss_dsn.and_then(|dsn| SentryClient::from_dsn(&dsn));
     let enterprise_client = enterprise_dsn.and_then(|dsn| SentryClient::from_dsn(&dsn));
 
-    // Build base tags
-    let mut base_tags = BTreeMap::new();
-    base_tags.insert("os".to_string(), json!(std::env::consts::OS));
-    base_tags.insert("arch".to_string(), json!(std::env::consts::ARCH));
-    base_tags.insert("distinct_id".to_string(), json!(distinct_id));
+    let base_tags = base_tags(distinct_id);
 
-    // Send errors
     for error in errors {
-        let mut extra = BTreeMap::new();
-        if let Some(ctx) = &error.context
-            && let Some(obj) = ctx.as_object()
-        {
-            for (key, value) in obj {
-                extra.insert(key.clone(), value.clone());
-            }
-        }
-
-        let event = json!({
-            "message": error.message,
-            "level": "error",
-            "timestamp": error.timestamp,
-            "platform": "other",
-            "tags": base_tags,
-            "extra": extra,
-            "release": format!("git-ai@{}", env!("CARGO_PKG_VERSION")),
-        });
-
+        let event = sentry_error_event(error, &base_tags);
         if let Some(client) = &oss_client {
             client.send_event(event.clone());
         }
@@ -98,36 +75,8 @@ pub(super) fn flush_sentry_and_posthog(
         }
     }
 
-    // Send performance events
     for perf in performances {
-        let mut extra = BTreeMap::new();
-        extra.insert("operation".to_string(), json!(perf.operation));
-        extra.insert("duration_ms".to_string(), json!(perf.duration_ms));
-        if let Some(ctx) = &perf.context
-            && let Some(obj) = ctx.as_object()
-        {
-            for (key, value) in obj {
-                extra.insert(key.clone(), value.clone());
-            }
-        }
-
-        let mut perf_tags = base_tags.clone();
-        if let Some(tags) = &perf.tags {
-            for (key, value) in tags {
-                perf_tags.insert(key.clone(), json!(value));
-            }
-        }
-
-        let event = json!({
-            "message": format!("Performance: {} ({}ms)", perf.operation, perf.duration_ms),
-            "level": "info",
-            "timestamp": perf.timestamp,
-            "platform": "other",
-            "tags": perf_tags,
-            "extra": extra,
-            "release": format!("git-ai@{}", env!("CARGO_PKG_VERSION")),
-        });
-
+        let event = sentry_performance_event(perf, &base_tags);
         if let Some(client) = &oss_client {
             client.send_event(event.clone());
         }
@@ -136,27 +85,9 @@ pub(super) fn flush_sentry_and_posthog(
         }
     }
 
-    // Send messages (to Sentry + PostHog)
+    // Messages go to Sentry and PostHog.
     for msg in messages {
-        let mut extra = BTreeMap::new();
-        if let Some(ctx) = &msg.context
-            && let Some(obj) = ctx.as_object()
-        {
-            for (key, value) in obj {
-                extra.insert(key.clone(), value.clone());
-            }
-        }
-
-        let sentry_event = json!({
-            "message": msg.message,
-            "level": msg.level,
-            "timestamp": msg.timestamp,
-            "platform": "other",
-            "tags": base_tags,
-            "extra": extra,
-            "release": format!("git-ai@{}", env!("CARGO_PKG_VERSION")),
-        });
-
+        let sentry_event = sentry_message_event(msg, &base_tags);
         if let Some(client) = &oss_client {
             client.send_event(sentry_event.clone());
         }
@@ -164,33 +95,11 @@ pub(super) fn flush_sentry_and_posthog(
             client.send_event(sentry_event);
         }
 
-        // PostHog only gets messages
         if let Some((api_key, agent)) = &posthog
             && !posthog_failed
         {
-            let mut properties = BTreeMap::new();
-            properties.insert("os".to_string(), json!(std::env::consts::OS));
-            properties.insert("arch".to_string(), json!(std::env::consts::ARCH));
-            properties.insert("version".to_string(), json!(env!("CARGO_PKG_VERSION")));
-            properties.insert("message".to_string(), json!(msg.message));
-            properties.insert("level".to_string(), json!(msg.level));
-            if let Some(ctx) = &msg.context
-                && let Some(obj) = ctx.as_object()
-            {
-                for (key, value) in obj {
-                    properties.insert(key.clone(), value.clone());
-                }
-            }
-
             let endpoint = format!("{}/capture/", posthog_host.trim_end_matches('/'));
-            let mut ph_event = json!({
-                "api_key": api_key,
-                "event": msg.message,
-                "properties": properties,
-                "distinct_id": distinct_id,
-            });
-            ph_event["timestamp"] = json!(msg.timestamp);
-
+            let ph_event = posthog_capture_event(msg, api_key, distinct_id);
             let request = agent
                 .post(&endpoint)
                 .header("Content-Type", "application/json");
@@ -201,6 +110,96 @@ pub(super) fn flush_sentry_and_posthog(
             .is_err();
         }
     }
+}
+
+fn base_tags(distinct_id: &str) -> BTreeMap<String, Value> {
+    BTreeMap::from([
+        ("os".to_string(), json!(std::env::consts::OS)),
+        ("arch".to_string(), json!(std::env::consts::ARCH)),
+        ("distinct_id".to_string(), json!(distinct_id)),
+    ])
+}
+
+fn sentry_release() -> String {
+    format!("git-ai@{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Copies the entries of an event's JSON object context into `target`,
+/// overwriting keys already there.
+fn extend_with_context(target: &mut BTreeMap<String, Value>, context: &Option<Value>) {
+    if let Some(Value::Object(entries)) = context {
+        for (key, value) in entries {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+fn sentry_error_event(error: &ErrorEvent, base_tags: &BTreeMap<String, Value>) -> Value {
+    let mut extra = BTreeMap::new();
+    extend_with_context(&mut extra, &error.context);
+    json!({
+        "message": error.message,
+        "level": "error",
+        "timestamp": error.timestamp,
+        "platform": "other",
+        "tags": base_tags,
+        "extra": extra,
+        "release": sentry_release(),
+    })
+}
+
+fn sentry_performance_event(perf: &PerformanceEvent, base_tags: &BTreeMap<String, Value>) -> Value {
+    let mut extra = BTreeMap::new();
+    extra.insert("operation".to_string(), json!(perf.operation));
+    extra.insert("duration_ms".to_string(), json!(perf.duration_ms));
+    extend_with_context(&mut extra, &perf.context);
+
+    let mut tags = base_tags.clone();
+    for (key, value) in perf.tags.iter().flatten() {
+        tags.insert(key.clone(), json!(value));
+    }
+
+    json!({
+        "message": format!("Performance: {} ({}ms)", perf.operation, perf.duration_ms),
+        "level": "info",
+        "timestamp": perf.timestamp,
+        "platform": "other",
+        "tags": tags,
+        "extra": extra,
+        "release": sentry_release(),
+    })
+}
+
+fn sentry_message_event(msg: &MessageEvent, base_tags: &BTreeMap<String, Value>) -> Value {
+    let mut extra = BTreeMap::new();
+    extend_with_context(&mut extra, &msg.context);
+    json!({
+        "message": msg.message,
+        "level": msg.level,
+        "timestamp": msg.timestamp,
+        "platform": "other",
+        "tags": base_tags,
+        "extra": extra,
+        "release": sentry_release(),
+    })
+}
+
+fn posthog_capture_event(msg: &MessageEvent, api_key: &str, distinct_id: &str) -> Value {
+    let mut properties = BTreeMap::from([
+        ("os".to_string(), json!(std::env::consts::OS)),
+        ("arch".to_string(), json!(std::env::consts::ARCH)),
+        ("version".to_string(), json!(env!("CARGO_PKG_VERSION"))),
+        ("message".to_string(), json!(msg.message)),
+        ("level".to_string(), json!(msg.level)),
+    ]);
+    extend_with_context(&mut properties, &msg.context);
+    json!({
+        "api_key": api_key,
+        "event": msg.message,
+        "properties": properties,
+        "distinct_id": distinct_id,
+        "timestamp": msg.timestamp,
+    })
 }
 
 /// Minimal Sentry client for sending events to a Sentry DSN, built once per flush.
@@ -256,6 +255,119 @@ impl SentryClient {
         // rejects says nothing about the events after it.
         self.failed
             .set(crate::clients::http::send_with_body(request, &body).is_err());
+    }
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    const OS: &str = std::env::consts::OS;
+    const ARCH: &str = std::env::consts::ARCH;
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+    fn message() -> MessageEvent {
+        MessageEvent {
+            timestamp: "2026-11-24T00:00:00Z".to_string(),
+            message: "daemon started".to_string(),
+            level: "warning".to_string(),
+            context: Some(json!({"level": "from-context", "repo": "r"})),
+        }
+    }
+
+    #[test]
+    fn sentry_error_event_copies_object_context_into_extra() {
+        let error = ErrorEvent {
+            timestamp: "t".to_string(),
+            message: "boom".to_string(),
+            context: Some(json!({"file": "a.rs"})),
+        };
+        assert_eq!(
+            sentry_error_event(&error, &base_tags("id-1")),
+            json!({
+                "message": "boom",
+                "level": "error",
+                "timestamp": "t",
+                "platform": "other",
+                "tags": {"os": OS, "arch": ARCH, "distinct_id": "id-1"},
+                "extra": {"file": "a.rs"},
+                "release": format!("git-ai@{VERSION}"),
+            })
+        );
+    }
+
+    #[test]
+    fn sentry_error_event_ignores_non_object_context() {
+        let error = ErrorEvent {
+            timestamp: "t".to_string(),
+            message: "boom".to_string(),
+            context: Some(json!(["not", "an", "object"])),
+        };
+        assert_eq!(
+            sentry_error_event(&error, &base_tags("id-1"))["extra"],
+            json!({})
+        );
+    }
+
+    #[test]
+    fn sentry_performance_event_lets_context_and_tags_override_defaults() {
+        let perf = PerformanceEvent {
+            timestamp: "t".to_string(),
+            operation: "checkpoint".to_string(),
+            duration_ms: 12,
+            context: Some(json!({"duration_ms": "from-context", "files": 3})),
+            tags: Some(HashMap::from([("os".to_string(), "custom".to_string())])),
+        };
+        assert_eq!(
+            sentry_performance_event(&perf, &base_tags("id-1")),
+            json!({
+                "message": "Performance: checkpoint (12ms)",
+                "level": "info",
+                "timestamp": "t",
+                "platform": "other",
+                "tags": {"os": "custom", "arch": ARCH, "distinct_id": "id-1"},
+                "extra": {"operation": "checkpoint", "duration_ms": "from-context", "files": 3},
+                "release": format!("git-ai@{VERSION}"),
+            })
+        );
+    }
+
+    #[test]
+    fn sentry_message_event_keeps_the_message_level() {
+        assert_eq!(
+            sentry_message_event(&message(), &base_tags("id-1")),
+            json!({
+                "message": "daemon started",
+                "level": "warning",
+                "timestamp": "2026-11-24T00:00:00Z",
+                "platform": "other",
+                "tags": {"os": OS, "arch": ARCH, "distinct_id": "id-1"},
+                "extra": {"level": "from-context", "repo": "r"},
+                "release": format!("git-ai@{VERSION}"),
+            })
+        );
+    }
+
+    #[test]
+    fn posthog_capture_event_lets_context_override_properties() {
+        assert_eq!(
+            posthog_capture_event(&message(), "phc_key", "id-1"),
+            json!({
+                "api_key": "phc_key",
+                "event": "daemon started",
+                "properties": {
+                    "os": OS,
+                    "arch": ARCH,
+                    "version": VERSION,
+                    "message": "daemon started",
+                    "level": "from-context",
+                    "repo": "r",
+                },
+                "distinct_id": "id-1",
+                "timestamp": "2026-11-24T00:00:00Z",
+            })
+        );
     }
 }
 

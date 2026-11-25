@@ -384,49 +384,21 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
       - name: Check Ubuntu shards
         env:
-          EXPECTED_JOBS: 3
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-          JOB_PREFIX: 'Test on ubuntu-latest '
-        run: |
-          set -euo pipefail
-          jobs_json=$(gh run view "$GITHUB_RUN_ID" --json jobs)
-          JOBS_JSON="$jobs_json" python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          expected_jobs = int(os.environ["EXPECTED_JOBS"])
-          job_prefix = os.environ["JOB_PREFIX"]
-          jobs = json.loads(os.environ["JOBS_JSON"])["jobs"]
-          matching_jobs = sorted(
-              [job for job in jobs if job["name"].startswith(job_prefix)],
-              key=lambda job: job["name"],
-          )
-
-          if len(matching_jobs) != expected_jobs:
-              print(
-                  f"Expected {expected_jobs} jobs with prefix {job_prefix!r}, "
-                  f"found {len(matching_jobs)}",
-                  file=sys.stderr,
-              )
-              for job in matching_jobs:
-                  print(f"  {job['name']}: {job['status']} / {job['conclusion']}")
-              sys.exit(1)
-
-          failed_jobs = [
-              job for job in matching_jobs if job["conclusion"] != "success"
-          ]
-          for job in matching_jobs:
-              print(f"{job['name']}: {job['status']} / {job['conclusion']}")
-
-          if failed_jobs:
-              print("One or more Ubuntu test shards failed", file=sys.stderr)
-              sys.exit(1)
-          PY
-          echo "Ubuntu test shards completed successfully"
+        run: >-
+          python3 scripts/ci/check_test_shards.py
+          --prefix 'Test on ubuntu-latest '
+          --expected 3
+          --label Ubuntu
 
   macos-test-complete:
     name: Test on macos-latest
@@ -434,49 +406,21 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
       - name: Check macOS shards
         env:
-          EXPECTED_JOBS: 5
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-          JOB_PREFIX: 'Test on macos-latest '
-        run: |
-          set -euo pipefail
-          jobs_json=$(gh run view "$GITHUB_RUN_ID" --json jobs)
-          JOBS_JSON="$jobs_json" python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          expected_jobs = int(os.environ["EXPECTED_JOBS"])
-          job_prefix = os.environ["JOB_PREFIX"]
-          jobs = json.loads(os.environ["JOBS_JSON"])["jobs"]
-          matching_jobs = sorted(
-              [job for job in jobs if job["name"].startswith(job_prefix)],
-              key=lambda job: job["name"],
-          )
-
-          if len(matching_jobs) != expected_jobs:
-              print(
-                  f"Expected {expected_jobs} jobs with prefix {job_prefix!r}, "
-                  f"found {len(matching_jobs)}",
-                  file=sys.stderr,
-              )
-              for job in matching_jobs:
-                  print(f"  {job['name']}: {job['status']} / {job['conclusion']}")
-              sys.exit(1)
-
-          failed_jobs = [
-              job for job in matching_jobs if job["conclusion"] != "success"
-          ]
-          for job in matching_jobs:
-              print(f"{job['name']}: {job['status']} / {job['conclusion']}")
-
-          if failed_jobs:
-              print("One or more macOS test shards failed", file=sys.stderr)
-              sys.exit(1)
-          PY
-          echo "macOS test shards completed successfully"
+        run: >-
+          python3 scripts/ci/check_test_shards.py
+          --prefix 'Test on macos-latest '
+          --expected 5
+          --label macOS
 
   windows-test-complete:
     name: Test on windows-latest
@@ -484,49 +428,21 @@ jobs:
     if: ${{ always() && github.event_name != 'merge_group' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
       - name: Check Windows shards
         env:
-          EXPECTED_JOBS: 7
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-          JOB_PREFIX: 'Test on windows-latest '
-        run: |
-          set -euo pipefail
-          jobs_json=$(gh run view "$GITHUB_RUN_ID" --json jobs)
-          JOBS_JSON="$jobs_json" python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          expected_jobs = int(os.environ["EXPECTED_JOBS"])
-          job_prefix = os.environ["JOB_PREFIX"]
-          jobs = json.loads(os.environ["JOBS_JSON"])["jobs"]
-          matching_jobs = sorted(
-              [job for job in jobs if job["name"].startswith(job_prefix)],
-              key=lambda job: job["name"],
-          )
-
-          if len(matching_jobs) != expected_jobs:
-              print(
-                  f"Expected {expected_jobs} jobs with prefix {job_prefix!r}, "
-                  f"found {len(matching_jobs)}",
-                  file=sys.stderr,
-              )
-              for job in matching_jobs:
-                  print(f"  {job['name']}: {job['status']} / {job['conclusion']}")
-              sys.exit(1)
-
-          failed_jobs = [
-              job for job in matching_jobs if job["conclusion"] != "success"
-          ]
-          for job in matching_jobs:
-              print(f"{job['name']}: {job['status']} / {job['conclusion']}")
-
-          if failed_jobs:
-              print("One or more Windows test shards failed", file=sys.stderr)
-              sys.exit(1)
-          PY
-          echo "Windows test shards completed successfully"
+        run: >-
+          python3 scripts/ci/check_test_shards.py
+          --prefix 'Test on windows-latest '
+          --expected 7
+          --label Windows
 
   test-ignored:
     name: Test SCM e2e tests on just Ubuntu

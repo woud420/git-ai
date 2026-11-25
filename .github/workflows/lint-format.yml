@@ -96,6 +96,10 @@ jobs:
         shell: bash
         run: python3 -m unittest discover -s .github/actions/setup-rust -p 'test_*.py'
 
+      - name: Test CI shard summary
+        shell: bash
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+
       - run: make lint
 
   doc:

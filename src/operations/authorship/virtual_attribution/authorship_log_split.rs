@@ -81,7 +81,7 @@ impl VirtualAttributions {
             commit_sha,
             effective_pathspecs,
             final_state_snapshot,
-            precomputed_parent_diff,
+            diff_context,
         )?;
 
         // A pending replacement can share a line number with different committed

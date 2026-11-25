@@ -23,6 +23,7 @@ pub(crate) use types::AuthorshipLogDiffContext;
 pub use types::VirtualAttributions;
 
 pub(crate) use attestation::committed_hunks_from_diff_result;
+pub(crate) use diff_utils::committed_hunks_from_added_lines;
 
 #[cfg(test)]
 mod tests_attestation;

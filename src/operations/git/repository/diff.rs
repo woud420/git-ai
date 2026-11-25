@@ -317,6 +317,39 @@ pub fn parse_diff_added_lines_with_insertions(
     Ok((parsed.all_lines, parsed.insertion_lines))
 }
 
+/// The per-file added lines `Repository::diff_added_lines` would return for
+/// `pathspecs`, read from the same diff taken without a pathspec, when the two
+/// are byte-for-byte the same: git would get every pathspec as a literal path,
+/// and each file the diff shows is unrenamed and named exactly by one of them.
+/// Restricting to a set that holds every changed path then leaves rename
+/// detection the same candidates, so it changes nothing. `None` otherwise.
+pub(crate) fn added_lines_if_pathspecs_cover(
+    full_diff: &str,
+    pathspecs: &HashSet<String>,
+) -> Option<HashMap<String, Vec<u32>>> {
+    if pathspecs.is_empty()
+        || pathspecs.len() > MAX_PATHSPEC_ARGS
+        || has_non_ascii_pathspec(pathspecs)
+        || pathspecs.iter().any(|path| path.starts_with(':'))
+    {
+        return None;
+    }
+    for line in full_diff.lines() {
+        if line.starts_with("rename from ") || line.starts_with("copy from ") {
+            return None;
+        }
+        let Some(pair) = line.strip_prefix("diff --git a/") else {
+            continue;
+        };
+        let half = pair.len().checked_sub(3).filter(|n| n % 2 == 0)? / 2;
+        let path = pair.get(..half)?;
+        if pair.get(half..)? != format!(" b/{path}") || !pathspecs.contains(path) {
+            return None;
+        }
+    }
+    Some(parse_diff_added_lines_internal(full_diff).all_lines)
+}
+
 /// Paths a diff result must be narrowed to after parsing, when the
 /// pathspecs could not be passed to git directly.
 struct PathspecPostFilter(Option<HashSet<String>>);
@@ -408,6 +441,10 @@ fn parse_hunk_header_counts(line: &str) -> Option<(u32, u32, u32)> {
 
     Some((start, count, old_count))
 }
+
+#[cfg(test)]
+#[path = "diff_reuse_tests.rs"]
+mod reuse_tests;
 
 #[cfg(test)]
 mod tests {

@@ -12,21 +12,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Amp agent that discovers conversations from Amp thread JSON files.
-pub struct AmpAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Amp agent that discovers conversations from Amp thread JSON files.
+    AmpAgent
 }
 
 impl AmpAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     /// Returns the path to Amp thread files.
     ///
     /// Checks `GIT_AI_AMP_THREADS_PATH` env var first, then falls back to
@@ -69,12 +60,6 @@ impl AmpAgent {
         Err(StreamError::Fatal {
             message: "Could not determine Amp threads path".to_string(),
         })
-    }
-}
-
-impl Default for AmpAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -7,28 +7,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub struct CopilotCliAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    CopilotCliAgent
 }
 
 impl CopilotCliAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn session_state_base_dir() -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".copilot/session-state"))
-    }
-}
-
-impl Default for CopilotCliAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -104,12 +89,7 @@ impl Agent for CopilotCliAgent {
         &self,
         event: &serde_json::Value,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        let id = event.get("id").and_then(|v| v.as_str()).map(String::from);
-        let parent_id = event
-            .get("parentId")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        (id, parent_id, None)
+        super::copilot::transcript_event_ids(event)
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {

@@ -10,24 +10,15 @@ use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Gemini agent that discovers conversations from Gemini CLI session storage.
-///
-/// Gemini CLI stores JSONL chat transcripts under `.gemini/tmp/<project>/chats/`
-/// within the configured Gemini CLI home.
-pub struct GeminiAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Gemini agent that discovers conversations from Gemini CLI session storage.
+    ///
+    /// Gemini CLI stores JSONL chat transcripts under `.gemini/tmp/<project>/chats/`
+    /// within the configured Gemini CLI home.
+    GeminiAgent
 }
 
 impl GeminiAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn session_roots() -> Vec<PathBuf> {
         vec![gemini_config_dir().join("tmp")]
     }
@@ -68,12 +59,6 @@ impl GeminiAgent {
         }
 
         paths
-    }
-}
-
-impl Default for GeminiAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

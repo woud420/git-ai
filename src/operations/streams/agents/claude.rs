@@ -1,6 +1,8 @@
 //! Claude Code agent implementation with sweep discovery.
 
-use super::discovery::{collect_files_recursively, has_extension, transcript_file_stem};
+use super::discovery::{
+    collect_files_recursively, has_extension, leading_jsonl_cwd, transcript_file_stem,
+};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
@@ -8,21 +10,12 @@ use crate::operations::streams::reader::read_jsonl_byte_stream;
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::path::{Path, PathBuf};
 
-/// Claude Code agent that discovers conversations from Claude Code storage.
-pub struct ClaudeAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Claude Code agent that discovers conversations from Claude Code storage.
+    ClaudeAgent
 }
 
 impl ClaudeAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn conversation_roots() -> Vec<PathBuf> {
         // Check CLAUDE_CONFIG_DIR override first
         let base_dir = if let Ok(config_dir) = std::env::var("CLAUDE_CONFIG_DIR") {
@@ -64,12 +57,6 @@ impl ClaudeAgent {
             }
         }
         None
-    }
-}
-
-impl Default for ClaudeAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -158,21 +145,7 @@ impl Agent for ClaudeAgent {
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
-        // Check up to 50 lines for a top-level "cwd" field
-        for line in
-            crate::operations::streams::reader::read_leading_jsonl_lines(stream_path, 50).ok()?
-        {
-            if line.is_empty() {
-                continue;
-            }
-            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&line)
-                && let Some(cwd) = obj.get("cwd").and_then(|v| v.as_str())
-                && !cwd.is_empty()
-            {
-                return Some(PathBuf::from(cwd));
-            }
-        }
-        None
+        leading_jsonl_cwd(stream_path, 50, "/cwd")
     }
 
     fn streams(&self) -> Vec<StreamDescriptor> {

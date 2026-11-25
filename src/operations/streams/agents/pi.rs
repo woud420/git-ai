@@ -9,21 +9,12 @@ use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
-/// Pi agent that reads Pi JSONL session files.
-pub struct PiAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Pi agent that reads Pi JSONL session files.
+    PiAgent
 }
 
 impl PiAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn session_roots() -> Vec<PathBuf> {
         let mut roots = Vec::new();
         if let Ok(path) = std::env::var("PI_CODING_AGENT_SESSION_DIR")
@@ -35,12 +26,6 @@ impl PiAgent {
             roots.push(home.join(".pi/agent/sessions"));
         }
         roots
-    }
-}
-
-impl Default for PiAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

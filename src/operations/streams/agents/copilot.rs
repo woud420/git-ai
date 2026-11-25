@@ -14,21 +14,12 @@ use crate::operations::streams::timestamp::event_timestamp_or_file_time;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// GitHub Copilot agent that discovers conversations from Copilot storage.
-pub struct CopilotAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// GitHub Copilot agent that discovers conversations from Copilot storage.
+    CopilotAgent
 }
 
 impl CopilotAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn legacy_transcript_roots() -> Vec<PathBuf> {
         dirs::config_dir()
             .into_iter()
@@ -203,12 +194,6 @@ impl CopilotAgent {
     }
 }
 
-impl Default for CopilotAgent {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Agent for CopilotAgent {
     fn validate_checkpoint_stream(
         &self,
@@ -325,13 +310,7 @@ impl Agent for CopilotAgent {
         if event.get("span").is_some() {
             return super::copilot_otel::extract_otel_event_ids(event);
         }
-        // Existing copilot transcript event ID extraction
-        let id = event.get("id").and_then(|v| v.as_str()).map(String::from);
-        let parent_id = event
-            .get("parentId")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        (id, parent_id, None)
+        transcript_event_ids(event)
     }
 
     fn extract_event_session_id(&self, event: &serde_json::Value) -> Option<String> {
@@ -395,6 +374,18 @@ impl Agent for CopilotAgent {
         }
         None
     }
+}
+
+/// Copilot transcript events carry `id` and `parentId`, but no tool-use id.
+pub(super) fn transcript_event_ids(
+    event: &serde_json::Value,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let id = event.get("id").and_then(|v| v.as_str()).map(String::from);
+    let parent_id = event
+        .get("parentId")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    (id, parent_id, None)
 }
 
 /// Read Copilot session JSON incrementally.

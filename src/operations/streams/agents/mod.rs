@@ -1,3 +1,34 @@
+/// Declares a stream agent whose only state is its read batch size. `new()` and
+/// `Default` use `agent::DEFAULT_BATCH_SIZE`; unit tests can shrink it with
+/// `with_batch_size` to exercise paging.
+macro_rules! batch_sized_agent {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        pub struct $name {
+            batch_size: usize,
+        }
+
+        impl $name {
+            pub fn new() -> Self {
+                Self {
+                    batch_size: $crate::operations::streams::agent::DEFAULT_BATCH_SIZE,
+                }
+            }
+
+            #[cfg(test)]
+            pub fn with_batch_size(batch_size: usize) -> Self {
+                Self { batch_size }
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+    };
+}
+
 mod amp;
 pub mod claude;
 mod codex;

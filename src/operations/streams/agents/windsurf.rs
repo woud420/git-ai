@@ -19,7 +19,7 @@ pub struct WindsurfAgent {
 impl WindsurfAgent {
     pub fn new() -> Self {
         Self {
-            batch_size: 1000,
+            batch_size: crate::operations::streams::agent::DEFAULT_BATCH_SIZE,
             #[cfg(test)]
             home: None,
         }
@@ -36,7 +36,7 @@ impl WindsurfAgent {
     #[cfg(test)]
     pub(crate) fn with_home(home: PathBuf) -> Self {
         Self {
-            batch_size: 1000,
+            batch_size: crate::operations::streams::agent::DEFAULT_BATCH_SIZE,
             home: Some(home),
         }
     }

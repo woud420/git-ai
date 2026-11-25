@@ -12,21 +12,12 @@ use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::file_time_fallback;
 use std::path::{Path, PathBuf};
 
-/// Cursor agent that discovers conversations from Cursor storage.
-pub struct CursorAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Cursor agent that discovers conversations from Cursor storage.
+    CursorAgent
 }
 
 impl CursorAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn conversation_roots() -> Vec<PathBuf> {
         let base_dir = if let Ok(config_dir) = std::env::var("CURSOR_CONFIG_DIR") {
             Some(PathBuf::from(config_dir))
@@ -44,12 +35,6 @@ impl CursorAgent {
         collect_files_recursively(Self::conversation_roots(), |path| {
             has_extension(path, "jsonl")
         })
-    }
-}
-
-impl Default for CursorAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

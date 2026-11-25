@@ -35,6 +35,24 @@ fn collect_files_from_dir(
     }
 }
 
+/// The first non-empty string at `pointer` among a transcript's first `max_lines` JSONL lines.
+pub(super) fn leading_jsonl_cwd(path: &Path, max_lines: usize, pointer: &str) -> Option<PathBuf> {
+    for line in
+        crate::operations::streams::reader::read_leading_jsonl_lines(path, max_lines).ok()?
+    {
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&line)
+            && let Some(cwd) = obj.pointer(pointer).and_then(|v| v.as_str())
+            && !cwd.is_empty()
+        {
+            return Some(PathBuf::from(cwd));
+        }
+    }
+    None
+}
+
 pub(super) fn has_extension(path: &Path, expected: &str) -> bool {
     path.extension().and_then(|extension| extension.to_str()) == Some(expected)
 }

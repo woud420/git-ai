@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::clients::git_cli::exec_git_stdin;
 use crate::error::GitAiError;
+use crate::operations::git::config_access_retry::with_config_access_retry;
 use crate::operations::git::repository::Repository;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,11 +64,18 @@ pub(crate) fn stable_patch_ids_for_commits(
     log_args.extend(["--format=medium".to_string(), "-p".to_string()]);
 
     let stdin_data = unique_commits.join("\n") + "\n";
-    let log_output = exec_git_stdin(&log_args, stdin_data.as_bytes())?;
+    // Both commands only read, so retrying Git for Windows' transient config denial is safe.
+    let log_output = with_config_access_retry(
+        || exec_git_stdin(&log_args, stdin_data.as_bytes()),
+        std::thread::sleep,
+    )?;
 
     let mut patch_args = repo.global_args_for_exec();
     patch_args.extend(["patch-id".to_string(), "--stable".to_string()]);
-    let patch_output = exec_git_stdin(&patch_args, &log_output.stdout)?;
+    let patch_output = with_config_access_retry(
+        || exec_git_stdin(&patch_args, &log_output.stdout),
+        std::thread::sleep,
+    )?;
 
     let patch_ids: HashMap<String, String> = String::from_utf8_lossy(&patch_output.stdout)
         .lines()

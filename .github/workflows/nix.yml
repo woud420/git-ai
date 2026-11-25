@@ -2,8 +2,38 @@ name: Nix flake check
 
 on:
   pull_request:
+    paths:
+      # Everything the flake checks compile: the crate, its tests and benches,
+      # and the files they embed with include_str!/include_bytes!.
+      - 'src/**'
+      - 'tests/**'
+      - 'benches/**'
+      - 'agent-support/**'
+      - '.agents/skills/**'
+      - '.github/workflows/test.yml'
+      - '.github/workflows/lint-format.yml'
+      - '.cargo/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/nix.yml'
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'benches/**'
+      - 'agent-support/**'
+      - '.agents/skills/**'
+      - '.github/workflows/test.yml'
+      - '.github/workflows/lint-format.yml'
+      - '.cargo/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/nix.yml'
   merge_group:
     branches: [main]
   workflow_dispatch:

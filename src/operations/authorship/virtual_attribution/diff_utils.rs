@@ -14,32 +14,24 @@ pub(super) fn collect_committed_hunks(
     commit_sha: &str,
     pathspecs: Option<&HashSet<String>>,
 ) -> Result<HashMap<String, Vec<LineRange>>, GitAiError> {
-    let mut committed_hunks: HashMap<String, Vec<LineRange>> = HashMap::new();
+    // Initial commit: diff against the empty tree.
+    let from = match parent_sha {
+        "initial" => empty_tree_for(commit_sha),
+        parent => parent,
+    };
+    let added_lines = repo.diff_added_lines(from, commit_sha, pathspecs)?;
+    Ok(committed_hunks_from_added_lines(added_lines))
+}
 
-    // Handle initial commit (no parent)
-    if parent_sha == "initial" {
-        // For initial commit, use git diff against the empty tree
-        let added_lines =
-            repo.diff_added_lines(empty_tree_for(commit_sha), commit_sha, pathspecs)?;
-
-        for (file_path, lines) in added_lines {
-            if !lines.is_empty() {
-                committed_hunks.insert(file_path, LineRange::compress_lines(&lines));
-            }
-        }
-        return Ok(committed_hunks);
-    }
-
-    // Use git diff to get added lines directly
-    let added_lines = repo.diff_added_lines(parent_sha, commit_sha, pathspecs)?;
-
-    for (file_path, lines) in added_lines {
-        if !lines.is_empty() {
-            committed_hunks.insert(file_path, LineRange::compress_lines(&lines));
-        }
-    }
-
-    Ok(committed_hunks)
+/// Line ranges per file from added line numbers, leaving out files with none.
+pub(crate) fn committed_hunks_from_added_lines(
+    added_lines: HashMap<String, Vec<u32>>,
+) -> HashMap<String, Vec<LineRange>> {
+    added_lines
+        .into_iter()
+        .filter(|(_, lines)| !lines.is_empty())
+        .map(|(file_path, lines)| (file_path, LineRange::compress_lines(&lines)))
+        .collect()
 }
 
 /// Detect file renames between parent and commit. Returns a map of old_path → new_path.

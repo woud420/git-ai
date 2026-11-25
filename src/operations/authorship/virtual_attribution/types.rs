@@ -29,6 +29,9 @@ pub struct VirtualAttributions {
 pub(crate) struct AuthorshipLogDiffContext<'a> {
     pub precomputed_parent_diff: Option<&'a crate::operations::authorship::rewrite::DiffTreeResult>,
     pub fallback_committed_diff_base: Option<&'a str>,
+    /// The `-U0` diff from `fallback_committed_diff_base` to the commit with
+    /// no pathspec, when the caller already has it for its own use.
+    pub committed_diff_text: Option<&'a str>,
 }
 
 impl VirtualAttributions {

@@ -2,9 +2,9 @@ use super::attestation::committed_hunks_from_diff_result;
 use super::carryover_snapshot::build_carryover_snapshot;
 use super::diff_utils::{
     collect_committed_hunks, collect_unstaged_hunks, collect_unstaged_hunks_from_snapshot,
-    detect_renames_in_commit,
+    committed_hunks_from_added_lines, detect_renames_in_commit,
 };
-use super::types::VirtualAttributions;
+use super::types::{AuthorshipLogDiffContext, VirtualAttributions};
 use crate::error::GitAiError;
 use crate::model::attribution_tracker::LineAttribution;
 use crate::model::authorship_log::{
@@ -12,7 +12,7 @@ use crate::model::authorship_log::{
 };
 use crate::model::authorship_log_serialization::{AttestationEntry, AuthorshipLog};
 use crate::model::working_log::CheckpointKind;
-use crate::operations::git::repository::Repository;
+use crate::operations::git::repository::{Repository, added_lines_if_pathspecs_cover};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -78,10 +78,16 @@ pub(super) fn collect_commit_and_workdir_hunks(
     commit_sha: &str,
     effective_pathspecs: Option<&HashSet<String>>,
     final_state_snapshot: Option<&HashMap<String, String>>,
-    precomputed: Option<&crate::operations::authorship::rewrite::DiffTreeResult>,
+    diff_context: AuthorshipLogDiffContext<'_>,
 ) -> Result<CommitAndWorkdirHunks, GitAiError> {
-    let committed = if let Some(diff) = precomputed {
+    let committed = if let Some(diff) = diff_context.precomputed_parent_diff {
         committed_hunks_from_diff_result(diff, effective_pathspecs)
+    } else if let Some(added_lines) = diff_context
+        .committed_diff_text
+        .zip(effective_pathspecs)
+        .and_then(|(text, paths)| added_lines_if_pathspecs_cover(text, paths))
+    {
+        committed_hunks_from_added_lines(added_lines)
     } else {
         collect_committed_hunks(repo, fallback_diff_base, commit_sha, effective_pathspecs)?
     };

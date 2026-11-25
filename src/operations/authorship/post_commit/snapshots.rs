@@ -74,14 +74,9 @@ pub(super) fn recovery_committed_hunks(
     }
 
     let (added_lines, _deleted_count) = parse_diff_added_lines(commit_diff.text()?)?;
-    Ok(added_lines
-        .into_iter()
-        .filter(|(_, lines)| !lines.is_empty())
-        .map(|(path, lines)| {
-            (
-                path,
-                crate::model::authorship_log::LineRange::compress_lines(&lines),
-            )
-        })
-        .collect())
+    Ok(
+        crate::operations::authorship::virtual_attribution::committed_hunks_from_added_lines(
+            added_lines,
+        ),
+    )
 }

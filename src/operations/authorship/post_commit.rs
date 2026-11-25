@@ -176,6 +176,13 @@ where
     }
 
     let committed_diff_base = single_commit_diff_base(&parent_sha, &commit_sha);
+    let mut commit_diff = CommitDiffText::new(repo, &parent_sha, &commit_sha);
+    // Without a precomputed diff the recovery below needs this diff anyway;
+    // taking it first lets the split reuse it instead of a pathspec diff.
+    let committed_diff_text = match context.precomputed_parent_diff {
+        Some(_) => None,
+        None => Some(commit_diff.text()?),
+    };
     let (mut authorship_log, initial_attributions, initial_file_contents) = working_va
         .to_authorship_log_and_initial_working_log_with_precomputed_diff(
             repo,
@@ -186,11 +193,11 @@ where
             AuthorshipLogDiffContext {
                 precomputed_parent_diff: context.precomputed_parent_diff,
                 fallback_committed_diff_base: Some(&committed_diff_base),
+                committed_diff_text,
             },
         )?;
 
     authorship_log.metadata.base_commit_sha = commit_sha.clone();
-    let mut commit_diff = CommitDiffText::new(repo, &parent_sha, &commit_sha);
 
     // Lines added by the commit being finalized, from the batched parent→commit
     // diff when supplied (no extra spawn) and the shared single-commit diff otherwise.

@@ -10,28 +10,12 @@ use crate::operations::mdm::spinner::Spinner;
 use crate::process_spawn::is_interactive_terminal;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use super::stats::{CommitStats, stats_for_commit_stats_with_authorship};
-
 const RECENT_COMMIT_WINDOW: Duration = Duration::from_secs(60);
 const AUTHORSHIP_NOTE_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTHORSHIP_NOTE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WAIT_MESSAGE: &str = "Waiting for git-ai to process this commit";
 
-pub(super) fn stats_for_commit(
-    repo: &Repository,
-    commit_sha: &str,
-    ignore_patterns: &[String],
-) -> Result<CommitStats, GitAiError> {
-    let authorship_log = wait_for_recent_authorship(repo, commit_sha)?;
-    stats_for_commit_stats_with_authorship(
-        repo,
-        commit_sha,
-        ignore_patterns,
-        authorship_log.as_ref(),
-    )
-}
-
-fn wait_for_recent_authorship(
+pub(super) fn wait_for_recent_authorship(
     repo: &Repository,
     commit_sha: &str,
 ) -> Result<Option<AuthorshipLog>, GitAiError> {

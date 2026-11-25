@@ -28,6 +28,24 @@ pub fn build_agent(timeout_secs: Option<u64>) -> ureq::Agent {
     builder.build().new_agent()
 }
 
+pub(super) fn with_common_headers<Body>(
+    request: ureq::RequestBuilder<Body>,
+) -> ureq::RequestBuilder<Body> {
+    request
+        .header("User-Agent", concat!("git-ai/", env!("CARGO_PKG_VERSION")))
+        .header("X-Distinct-ID", &crate::config::get_or_create_distinct_id())
+}
+
+/// Build a standalone POST request with the standard client headers.
+pub(super) fn post_request(
+    url: &str,
+    timeout_secs: Option<u64>,
+) -> (ureq::Agent, ureq::RequestBuilder<WithBody>) {
+    let agent = build_agent(timeout_secs);
+    let request = with_common_headers(agent.post(url));
+    (agent, request)
+}
+
 /// HTTP response wrapper that normalizes ureq's error handling.
 /// ureq treats non-2xx responses as errors; this wrapper treats them as normal
 /// responses (matching minreq's previous behavior and what callers expect).

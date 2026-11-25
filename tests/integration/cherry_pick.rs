@@ -1,5 +1,5 @@
 use crate::repos::test_file::ExpectedLineExt;
-use crate::repos::test_repo::TestRepo;
+use crate::repos::test_repo::{TestRepo, real_git_executable};
 use git_ai::model::authorship_log::PromptRecord;
 use git_ai::model::working_log::AgentId;
 use git_ai::operations::git::notes_api::write_note;
@@ -74,6 +74,60 @@ fn test_single_commit_cherry_pick() {
             session_id
         );
     }
+}
+
+/// Git for Windows can briefly deny reading `.git/config` while another Git
+/// process rewrites it (e.g. `git branch -D`). The daemon's patch-id lookup for
+/// the cherry-pick must retry that denial instead of failing the rewrite.
+#[test]
+fn test_cherry_pick_retries_transient_config_denial_in_patch_ids() {
+    let mut repo = TestRepo::new_dedicated_daemon();
+    let main_branch = {
+        let mut file = repo.filename("file.txt");
+        file.set_contents(crate::lines!["Initial content"]);
+        repo.stage_all_and_commit("Initial commit").unwrap();
+        let main_branch = repo.current_branch();
+        repo.git(&["checkout", "-b", "feature"]).unwrap();
+        file.insert_at(1, crate::lines!["AI feature line".ai()]);
+        main_branch
+    };
+    repo.stage_all_and_commit("Add AI feature").unwrap();
+    let feature_commit = repo.git(&["rev-parse", "HEAD"]).unwrap().trim().to_string();
+    repo.git(&["checkout", &main_branch]).unwrap();
+    repo.sync_daemon();
+
+    // Deny the daemon's first patch-id `git log` (the only `--format=medium` caller) once.
+    let shim_binary = env!("CARGO_BIN_EXE_git-ai-test-git-shim");
+    let shim_path = repo.test_home_path().join(if cfg!(windows) {
+        "config-denial-git-shim.exe"
+    } else {
+        "config-denial-git-shim"
+    });
+    fs::copy(shim_binary, &shim_path).expect("config denial Git shim should be copied");
+    let shim_path = shim_path.to_str().expect("shim path should be utf-8");
+    let marker_path = repo.test_home_path().join("config-denial.marker");
+    let marker = marker_path.to_str().expect("marker path should be utf-8");
+    let real_git = real_git_executable();
+    repo.patch_git_ai_config(|patch| patch.git_path = Some(shim_path.to_string()));
+    repo.restart_dedicated_daemon_with_env_for_test(&[
+        ("GIT_AI_TEST_GIT_SHIM_TARGET", real_git),
+        ("GIT_AI_TEST_GIT_SHIM_FALLBACK_TARGET", real_git),
+        ("GIT_AI_TEST_GIT_SHIM_CONFIG_DENIAL_ARG", "--format=medium"),
+        ("GIT_AI_TEST_GIT_SHIM_CONFIG_DENIAL_MARKER", marker),
+    ]);
+
+    repo.git(&["cherry-pick", &feature_commit]).unwrap();
+
+    repo.patch_git_ai_config(|patch| patch.git_path = Some(real_git.to_string()));
+    let mut file = repo.filename("file.txt");
+    file.assert_lines_and_blame(crate::lines![
+        "Initial content".ai(),
+        "AI feature line".ai(),
+    ]);
+    assert!(
+        marker_path.is_file(),
+        "shim should have injected the config denial into the patch-id lookup"
+    );
 }
 
 #[test]

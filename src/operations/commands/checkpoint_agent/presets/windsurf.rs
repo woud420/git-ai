@@ -2,7 +2,6 @@ use super::parse;
 use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -94,17 +93,14 @@ impl AgentPreset for WindsurfPreset {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let cwd_str = cwd_path.to_string_lossy().to_string();
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "windsurf".to_string(),
-                id: trajectory_id.clone(),
-                model,
-            },
-            external_session_id: trajectory_id,
-            trace_id: trace_id.to_string(),
-            cwd: cwd_path,
-            metadata: HashMap::from([("transcript_path".to_string(), transcript_path.clone())]),
-        };
+        let context = PresetContext::for_session(
+            "windsurf",
+            trajectory_id,
+            model,
+            trace_id,
+            cwd_path,
+            HashMap::from([("transcript_path".to_string(), transcript_path.clone())]),
+        );
 
         let stream_source = Some(StreamSource {
             path: PathBuf::from(&transcript_path),

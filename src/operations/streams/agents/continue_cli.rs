@@ -1,6 +1,6 @@
 //! Continue CLI agent implementation with sweep discovery.
 
-use super::discovery::stem_session_binding;
+use super::discovery::{stem_session_binding, stem_session_binding_with_extension};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_sessions};
@@ -73,13 +73,7 @@ impl Agent for ContinueAgent {
             "continue-cli",
             crate::model::checkpoint_request::StreamFormat::ContinueJson,
             Self::session_roots(),
-            |path| {
-                if !crate::operations::streams::agent::checkpoint_stream_has_extension(path, "json")
-                {
-                    return None;
-                }
-                stem_session_binding(path)
-            },
+            |path| stem_session_binding_with_extension(path, "json"),
         )
     }
 

@@ -1,6 +1,5 @@
 use super::{AgentPreset, ParsedHookEvent, PresetContext, claude_wire, parse};
 use crate::error::GitAiError;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -62,17 +61,14 @@ impl AgentPreset for OpenCodePreset {
             metadata.insert("__test_storage_path".to_string(), test_path);
         }
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "opencode".to_string(),
-                id: session_id.clone(),
-                model: "unknown".to_string(),
-            },
-            external_session_id: session_id,
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(&cwd),
+        let context = PresetContext::for_session(
+            "opencode",
+            session_id,
+            "unknown",
+            trace_id,
+            PathBuf::from(&cwd),
             metadata,
-        };
+        );
 
         Ok(vec![claude_wire::build_wire_event(
             is_pre,

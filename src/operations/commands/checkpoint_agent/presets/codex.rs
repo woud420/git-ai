@@ -5,7 +5,6 @@ use super::{
 };
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use crate::operations::mdm::paths::codex_home_dir;
 use std::collections::HashMap;
@@ -130,17 +129,14 @@ impl AgentPreset for CodexPreset {
             .unwrap_or("unknown")
             .to_string();
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "codex".to_string(),
-                id: session_id.clone(),
-                model,
-            },
-            external_session_id: session_id,
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(cwd),
+        let context = PresetContext::for_session(
+            "codex",
+            session_id,
+            model,
+            trace_id,
+            PathBuf::from(cwd),
             metadata,
-        };
+        );
 
         let stream_source = transcript_path.map(|path| {
             Self::stream_source_for_rollout(PathBuf::from(path), &context.external_session_id)

@@ -2,7 +2,6 @@ use super::parse;
 use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -65,17 +64,14 @@ impl AgentPreset for ClaudePreset {
 
         let is_bash = tool_class == ToolClass::Bash;
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "claude".to_string(),
-                id: session_id.clone(),
-                model: "unknown".to_string(),
-            },
-            external_session_id: session_id.clone(),
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(cwd),
-            metadata: HashMap::from([("transcript_path".to_string(), transcript_path.to_string())]),
-        };
+        let context = PresetContext::for_session(
+            "claude",
+            session_id.clone(),
+            "unknown",
+            trace_id,
+            PathBuf::from(cwd),
+            HashMap::from([("transcript_path".to_string(), transcript_path.to_string())]),
+        );
 
         let transcript_path_buf = PathBuf::from(transcript_path);
         let external_parent_session_id =

@@ -1,5 +1,6 @@
 //! Pi agent implementation with sweep discovery.
 
+use super::discovery::has_extension;
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::streams::agent::{Agent, StreamDescriptor};
@@ -55,9 +56,7 @@ impl Agent for PiAgent {
             crate::model::checkpoint_request::StreamFormat::PiJsonl,
             Self::session_roots(),
             |path| {
-                if !crate::operations::streams::agent::checkpoint_stream_has_extension(
-                    path, "jsonl",
-                ) {
+                if !has_extension(path, "jsonl") {
                     return None;
                 }
                 let file = std::fs::File::open(path).ok()?;

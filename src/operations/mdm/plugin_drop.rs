@@ -4,13 +4,14 @@
 //! generated TypeScript file into a fixed per-tool location, substituting the
 //! git-ai binary path into an `include_str!`-embedded template. Detection,
 //! up-to-date checking, and install/uninstall all follow the same shape;
-//! this module holds that shared logic so each agent module only declares a
-//! [`FileDropSpec`] plus whatever it does beyond the archetype (see
-//! `agents/opencode.rs` for the legacy-path migration it layers on top).
+//! this module holds that shared logic, including the `HookInstaller` impl,
+//! so each agent module only declares a [`FileDropSpec`] and implements
+//! [`FileDropInstaller`].
 
 use crate::error::GitAiError;
+use crate::operations::mdm::editor_cli::binary_exists;
 use crate::operations::mdm::file_ops::{generate_diff, read_optional, write_atomic};
-use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstallerParams};
+use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +34,54 @@ pub struct FileDropSpec {
     pub detect_binary_names: &'static [&'static str],
     /// `HookInstaller::process_names`.
     pub process_names: &'static [&'static str],
+    /// A path used by older installs; removed on install and uninstall so it
+    /// cannot shadow `dest_path`.
+    pub legacy_dest_path: Option<fn() -> PathBuf>,
+}
+
+/// A hook installer whose behavior is fully described by a [`FileDropSpec`].
+pub trait FileDropInstaller: Send + Sync {
+    const SPEC: &'static FileDropSpec;
+}
+
+impl<T: FileDropInstaller> HookInstaller for T {
+    fn name(&self) -> &str {
+        T::SPEC.name
+    }
+
+    fn id(&self) -> &str {
+        T::SPEC.id
+    }
+
+    fn process_names(&self) -> Vec<&str> {
+        T::SPEC.process_names.to_vec()
+    }
+
+    fn check_hooks(&self, params: &HookInstallerParams) -> Result<HookCheckResult, GitAiError> {
+        file_drop_check_hooks(T::SPEC, params, binary_exists)
+    }
+
+    fn install_hooks(
+        &self,
+        params: &HookInstallerParams,
+        dry_run: bool,
+    ) -> Result<Option<String>, GitAiError> {
+        file_drop_install(T::SPEC, params, dry_run)
+    }
+
+    fn uninstall_hooks(
+        &self,
+        _params: &HookInstallerParams,
+        dry_run: bool,
+    ) -> Result<Option<String>, GitAiError> {
+        file_drop_uninstall(T::SPEC, dry_run)
+    }
+}
+
+fn remove_legacy_dest(spec: &FileDropSpec, dry_run: bool) {
+    if !dry_run && let Some(legacy_dest_path) = spec.legacy_dest_path {
+        let _ = fs::remove_file(legacy_dest_path());
+    }
 }
 
 /// Generate the file content with the absolute binary path substituted in.
@@ -80,6 +129,7 @@ pub fn file_drop_install(
     params: &HookInstallerParams,
     dry_run: bool,
 ) -> Result<Option<String>, GitAiError> {
+    remove_legacy_dest(spec, dry_run);
     let dest_path = (spec.dest_path)();
 
     let existing_content = read_optional(&dest_path)?.unwrap_or_default();
@@ -103,6 +153,7 @@ pub fn file_drop_uninstall(
     spec: &FileDropSpec,
     dry_run: bool,
 ) -> Result<Option<String>, GitAiError> {
+    remove_legacy_dest(spec, dry_run);
     let dest_path = (spec.dest_path)();
 
     if !dest_path.exists() {
@@ -138,6 +189,7 @@ mod tests {
             local_config_dir: ".git-ai-plugin-drop-missing",
             detect_binary_names: &["first", "second"],
             process_names: &[],
+            legacy_dest_path: None,
         };
         let params = HookInstallerParams {
             binary_path: PathBuf::from("git-ai"),

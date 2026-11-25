@@ -5,7 +5,6 @@ use super::super::{
 };
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -51,17 +50,14 @@ pub(super) fn parse_legacy_extension_hooks(
             ));
         }
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "github-copilot".to_string(),
-                id: session_id.clone(),
-                model: "unknown".to_string(),
-            },
-            external_session_id: session_id,
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(cwd),
-            metadata: HashMap::new(),
-        };
+        let context = PresetContext::for_session(
+            "github-copilot",
+            session_id,
+            "unknown",
+            trace_id,
+            PathBuf::from(cwd),
+            HashMap::new(),
+        );
 
         return Ok(vec![ParsedHookEvent::PreFileEdit(PreFileEdit {
             context,
@@ -99,17 +95,14 @@ pub(super) fn parse_legacy_extension_hooks(
         chat_session_path.to_string(),
     );
 
-    let context = PresetContext {
-        agent_id: AgentId {
-            tool: "github-copilot".to_string(),
-            id: session_id.clone(),
-            model: "unknown".to_string(),
-        },
-        external_session_id: session_id,
-        trace_id: trace_id.to_string(),
-        cwd: PathBuf::from(cwd),
+    let context = PresetContext::for_session(
+        "github-copilot",
+        session_id,
+        "unknown",
+        trace_id,
+        PathBuf::from(cwd),
         metadata,
-    };
+    );
 
     let stream_source = Some(StreamSource {
         path: PathBuf::from(chat_session_path),
@@ -198,17 +191,14 @@ pub(super) fn parse_vscode_native_hooks(
     // Determine transcript format: newer native uses EventStreamJsonl
     let transcript_format = super::transcript_format(transcript_path.as_deref().unwrap());
 
-    let context = PresetContext {
-        agent_id: AgentId {
-            tool: "github-copilot".to_string(),
-            id: session_id.clone(),
-            model: "unknown".to_string(),
-        },
-        external_session_id: session_id,
-        trace_id: trace_id.to_string(),
-        cwd: PathBuf::from(cwd),
+    let context = PresetContext::for_session(
+        "github-copilot",
+        session_id,
+        "unknown",
+        trace_id,
+        PathBuf::from(cwd),
         metadata,
-    };
+    );
 
     let stream_source = transcript_path.map(|tp| StreamSource {
         path: PathBuf::from(tp),

@@ -42,6 +42,30 @@ pub struct PresetContext {
     pub metadata: HashMap<String, String>,
 }
 
+impl PresetContext {
+    /// Context for an agent whose checkpoint id is its external session id.
+    pub(crate) fn for_session(
+        tool: &str,
+        session_id: String,
+        model: impl Into<String>,
+        trace_id: &str,
+        cwd: PathBuf,
+        metadata: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            agent_id: AgentId {
+                tool: tool.to_string(),
+                id: session_id.clone(),
+                model: model.into(),
+            },
+            external_session_id: session_id,
+            trace_id: trace_id.to_string(),
+            cwd,
+            metadata,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ParsedHookEvent {
     PreFileEdit(PreFileEdit),

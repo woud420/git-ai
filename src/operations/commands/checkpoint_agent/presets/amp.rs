@@ -5,7 +5,6 @@ use super::{
 };
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -113,17 +112,14 @@ impl AgentPreset for AmpPreset {
             .or(tool_use_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "amp".to_string(),
-                id: session_id.clone(),
-                model: "unknown".to_string(),
-            },
-            external_session_id: session_id,
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(cwd),
+        let context = PresetContext::for_session(
+            "amp",
+            session_id,
+            "unknown",
+            trace_id,
+            PathBuf::from(cwd),
             metadata,
-        };
+        );
 
         let bash_command = hook_input
             .tool_input

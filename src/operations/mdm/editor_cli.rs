@@ -130,6 +130,11 @@ fn find_editor_cli_js(cli_name: &str) -> Option<EditorCliCommand> {
     None
 }
 
+/// `cli.js` inside an Electron app's resources directory.
+fn electron_cli_js(resources_dir: PathBuf) -> PathBuf {
+    resources_dir.join("app").join("out").join("cli.js")
+}
+
 /// Return candidate (electron_binary, cli_js) paths for a given editor
 fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
     let mut candidates = Vec::new();
@@ -144,11 +149,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                     let app = apps_dir.join("Cursor.app");
                     candidates.push((
                         app.join("Contents").join("MacOS").join("Cursor"),
-                        app.join("Contents")
-                            .join("Resources")
-                            .join("app")
-                            .join("out")
-                            .join("cli.js"),
+                        electron_cli_js(app.join("Contents").join("Resources")),
                     ));
                 }
             }
@@ -162,13 +163,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                     // Extracted AppImage location
                     home.join(".local").join("share").join("Cursor"),
                 ] {
-                    candidates.push((
-                        base.join("cursor"),
-                        base.join("resources")
-                            .join("app")
-                            .join("out")
-                            .join("cli.js"),
-                    ));
+                    candidates.push((base.join("cursor"), electron_cli_js(base.join("resources"))));
                 }
             }
 
@@ -178,10 +173,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                     let base = PathBuf::from(&localappdata).join("Programs").join("Cursor");
                     candidates.push((
                         base.join("Cursor.exe"),
-                        base.join("resources")
-                            .join("app")
-                            .join("out")
-                            .join("cli.js"),
+                        electron_cli_js(base.join("resources")),
                     ));
                 }
             }
@@ -193,11 +185,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                     let app = apps_dir.join("Windsurf.app");
                     candidates.push((
                         app.join("Contents").join("MacOS").join("Windsurf"),
-                        app.join("Contents")
-                            .join("Resources")
-                            .join("app")
-                            .join("out")
-                            .join("cli.js"),
+                        electron_cli_js(app.join("Contents").join("Resources")),
                     ));
                 }
             }
@@ -210,10 +198,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                 ] {
                     candidates.push((
                         base.join("windsurf"),
-                        base.join("resources")
-                            .join("app")
-                            .join("out")
-                            .join("cli.js"),
+                        electron_cli_js(base.join("resources")),
                     ));
                 }
             }
@@ -225,10 +210,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                         .join("Windsurf");
                     candidates.push((
                         base.join("Windsurf.exe"),
-                        base.join("resources")
-                            .join("app")
-                            .join("out")
-                            .join("cli.js"),
+                        electron_cli_js(base.join("resources")),
                     ));
                 }
             }
@@ -244,11 +226,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                         let app = apps_dir.join(app_name);
                         candidates.push((
                             app.join("Contents").join("MacOS").join("Electron"),
-                            app.join("Contents")
-                                .join("Resources")
-                                .join("app")
-                                .join("out")
-                                .join("cli.js"),
+                            electron_cli_js(app.join("Contents").join("Resources")),
                         ));
                     }
                 }
@@ -263,13 +241,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                     PathBuf::from("/usr/share/code-insiders"),
                     PathBuf::from("/snap/code/current/usr/share/code"),
                 ] {
-                    candidates.push((
-                        base.join("code"),
-                        base.join("resources")
-                            .join("app")
-                            .join("out")
-                            .join("cli.js"),
-                    ));
+                    candidates.push((base.join("code"), electron_cli_js(base.join("resources"))));
                 }
             }
 
@@ -280,10 +252,7 @@ fn get_editor_cli_candidates(cli_name: &str) -> Vec<(PathBuf, PathBuf)> {
                         let base = PathBuf::from(&localappdata).join("Programs").join(dir_name);
                         candidates.push((
                             base.join("Code.exe"),
-                            base.join("resources")
-                                .join("app")
-                                .join("out")
-                                .join("cli.js"),
+                            electron_cli_js(base.join("resources")),
                         ));
                     }
                 }
@@ -396,11 +365,7 @@ mod tests {
         #[cfg(all(unix, not(target_os = "macos")))]
         {
             let electron = base.join("cursor");
-            let cli_js = base
-                .join("resources")
-                .join("app")
-                .join("out")
-                .join("cli.js");
+            let cli_js = electron_cli_js(base.join("resources"));
             fs::create_dir_all(cli_js.parent().unwrap()).unwrap();
             fs::write(&electron, "fake-electron").unwrap();
             fs::write(&cli_js, "fake-cli-js").unwrap();

@@ -1,8 +1,7 @@
-use crate::error::GitAiError;
-use crate::operations::mdm::editor_cli::binary_exists;
-use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::paths::home_dir;
-use crate::operations::mdm::plugin_drop::{self, FileDropSpec};
+#[cfg(test)]
+use crate::operations::mdm::plugin_drop;
+use crate::operations::mdm::plugin_drop::{FileDropInstaller, FileDropSpec};
 #[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
@@ -36,6 +35,7 @@ const PI_SPEC: FileDropSpec = FileDropSpec {
     // override of HookInstaller::process_names below, matching pre-refactor
     // behavior of relying on the trait's default empty list).
     process_names: &[],
+    legacy_dest_path: None,
 };
 
 pub struct PiInstaller;
@@ -53,39 +53,14 @@ impl PiInstaller {
     }
 }
 
-impl HookInstaller for PiInstaller {
-    fn name(&self) -> &str {
-        PI_SPEC.name
-    }
-
-    fn id(&self) -> &str {
-        PI_SPEC.id
-    }
-
-    fn check_hooks(&self, params: &HookInstallerParams) -> Result<HookCheckResult, GitAiError> {
-        plugin_drop::file_drop_check_hooks(&PI_SPEC, params, binary_exists)
-    }
-
-    fn install_hooks(
-        &self,
-        params: &HookInstallerParams,
-        dry_run: bool,
-    ) -> Result<Option<String>, GitAiError> {
-        plugin_drop::file_drop_install(&PI_SPEC, params, dry_run)
-    }
-
-    fn uninstall_hooks(
-        &self,
-        _params: &HookInstallerParams,
-        dry_run: bool,
-    ) -> Result<Option<String>, GitAiError> {
-        plugin_drop::file_drop_uninstall(&PI_SPEC, dry_run)
-    }
+impl FileDropInstaller for PiInstaller {
+    const SPEC: &'static FileDropSpec = &PI_SPEC;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::mdm::hook_installer::{HookInstaller, HookInstallerParams};
     use crate::operations::mdm::test_env::with_temp_home;
     use serial_test::serial;
     use std::fs;

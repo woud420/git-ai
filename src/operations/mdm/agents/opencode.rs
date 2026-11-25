@@ -1,9 +1,7 @@
-use crate::error::GitAiError;
-use crate::operations::mdm::editor_cli::binary_exists;
-use crate::operations::mdm::hook_installer::{HookCheckResult, HookInstaller, HookInstallerParams};
 use crate::operations::mdm::paths::home_dir;
-use crate::operations::mdm::plugin_drop::{self, FileDropSpec};
-use std::fs;
+#[cfg(test)]
+use crate::operations::mdm::plugin_drop;
+use crate::operations::mdm::plugin_drop::{FileDropInstaller, FileDropSpec};
 #[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
@@ -35,6 +33,7 @@ const OPENCODE_SPEC: FileDropSpec = FileDropSpec {
     local_config_dir: ".opencode",
     detect_binary_names: &["opencode", "opencode2"],
     process_names: &["opencode", "opencode2"],
+    legacy_dest_path: Some(opencode_legacy_plugin_path),
 };
 
 /// Path of the plugin file from old installations (`~/.config/opencode/plugin/`,
@@ -65,53 +64,14 @@ impl OpenCodeInstaller {
     }
 }
 
-impl HookInstaller for OpenCodeInstaller {
-    fn name(&self) -> &str {
-        OPENCODE_SPEC.name
-    }
-
-    fn id(&self) -> &str {
-        OPENCODE_SPEC.id
-    }
-
-    fn process_names(&self) -> Vec<&str> {
-        OPENCODE_SPEC.process_names.to_vec()
-    }
-
-    fn check_hooks(&self, params: &HookInstallerParams) -> Result<HookCheckResult, GitAiError> {
-        plugin_drop::file_drop_check_hooks(&OPENCODE_SPEC, params, binary_exists)
-    }
-
-    fn install_hooks(
-        &self,
-        params: &HookInstallerParams,
-        dry_run: bool,
-    ) -> Result<Option<String>, GitAiError> {
-        // Remove legacy plugin from old installations (~/.config/opencode/plugin/ singular)
-        if !dry_run {
-            let _ = fs::remove_file(opencode_legacy_plugin_path());
-        }
-
-        plugin_drop::file_drop_install(&OPENCODE_SPEC, params, dry_run)
-    }
-
-    fn uninstall_hooks(
-        &self,
-        _params: &HookInstallerParams,
-        dry_run: bool,
-    ) -> Result<Option<String>, GitAiError> {
-        // Remove legacy plugin from old installations (~/.config/opencode/plugin/ singular)
-        if !dry_run {
-            let _ = fs::remove_file(opencode_legacy_plugin_path());
-        }
-
-        plugin_drop::file_drop_uninstall(&OPENCODE_SPEC, dry_run)
-    }
+impl FileDropInstaller for OpenCodeInstaller {
+    const SPEC: &'static FileDropSpec = &OPENCODE_SPEC;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::mdm::hook_installer::{HookInstaller, HookInstallerParams};
     use crate::operations::mdm::test_env::{with_fake_binary_on_path, with_temp_home};
     use serial_test::serial;
     use std::fs;

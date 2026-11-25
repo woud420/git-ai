@@ -2,7 +2,6 @@ use super::parse;
 use super::{AgentPreset, ParsedHookEvent, PresetContext, StreamFormat, StreamSource, claude_wire};
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -112,17 +111,14 @@ impl AgentPreset for CursorPreset {
             metadata.insert("transcript_path".to_string(), tp.clone());
         }
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "cursor".to_string(),
-                id: conversation_id.clone(),
-                model,
-            },
-            external_session_id: conversation_id.clone(),
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(&cwd),
+        let context = PresetContext::for_session(
+            "cursor",
+            conversation_id.clone(),
+            model,
+            trace_id,
+            PathBuf::from(&cwd),
             metadata,
-        };
+        );
 
         let stream_source = transcript_path.map(|tp| StreamSource {
             path: PathBuf::from(tp),

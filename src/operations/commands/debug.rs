@@ -965,21 +965,10 @@ fn format_timeout_capture_error(
         command
     );
     append_debug_diagnostics(&mut message, &output.diagnostics);
-    if let Some(wait_error) = output.wait_error {
+    if let Some(wait_error) = &output.wait_error {
         message.push_str(&format!("; failed while waiting: {}", wait_error));
     }
-    if !output.stdout.trim().is_empty() {
-        message.push_str(&format!(
-            "; stdout before timeout: {}",
-            output.stdout.trim()
-        ));
-    }
-    if !output.stderr.trim().is_empty() {
-        message.push_str(&format!(
-            "; stderr before timeout: {}",
-            output.stderr.trim()
-        ));
-    }
+    append_captured_output(&mut message, "timeout", &output);
     message
 }
 
@@ -987,19 +976,16 @@ fn format_wait_capture_error(command: &str, output: TimedCommandOutput) -> Strin
     let wait_error = output.wait_error.as_deref().unwrap_or("unknown wait error");
     let mut message = format!("failed while waiting for '{}': {}", command, wait_error);
     append_debug_diagnostics(&mut message, &output.diagnostics);
-    if !output.stdout.trim().is_empty() {
-        message.push_str(&format!(
-            "; stdout before wait failure: {}",
-            output.stdout.trim()
-        ));
-    }
-    if !output.stderr.trim().is_empty() {
-        message.push_str(&format!(
-            "; stderr before wait failure: {}",
-            output.stderr.trim()
-        ));
-    }
+    append_captured_output(&mut message, "wait failure", &output);
     message
+}
+
+fn append_captured_output(message: &mut String, failure: &str, output: &TimedCommandOutput) {
+    for (stream, text) in [("stdout", &output.stdout), ("stderr", &output.stderr)] {
+        if !text.trim().is_empty() {
+            message.push_str(&format!("; {stream} before {failure}: {}", text.trim()));
+        }
+    }
 }
 
 fn append_debug_diagnostics(message: &mut String, diagnostics: &[String]) {

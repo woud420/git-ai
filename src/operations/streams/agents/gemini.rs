@@ -1,6 +1,6 @@
 //! Gemini agent implementation with sweep discovery.
 
-use super::discovery::stem_session_binding;
+use super::discovery::{has_extension, stem_session_binding};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::mdm::paths::gemini_config_dir;
@@ -88,9 +88,7 @@ impl Agent for GeminiAgent {
             crate::model::checkpoint_request::StreamFormat::GeminiJsonl,
             Self::session_roots(),
             |path| {
-                if !crate::operations::streams::agent::checkpoint_stream_has_extension(
-                    path, "jsonl",
-                ) || path.parent()?.file_name()?.to_str()? != "chats"
+                if !has_extension(path, "jsonl") || path.parent()?.file_name()?.to_str()? != "chats"
                 {
                     return None;
                 }

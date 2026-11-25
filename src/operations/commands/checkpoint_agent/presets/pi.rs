@@ -4,7 +4,6 @@ use super::{
 };
 use crate::error::GitAiError;
 use crate::model::authorship_log_serialization::generate_session_id;
-use crate::model::working_log::AgentId;
 use crate::operations::commands::checkpoint_agent::bash_tool::{self, Agent, ToolClass};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -142,17 +141,14 @@ impl AgentPreset for PiPreset {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
-        let context = PresetContext {
-            agent_id: AgentId {
-                tool: "pi".to_string(),
-                id: session_id.clone(),
-                model: model_final,
-            },
-            external_session_id: session_id,
-            trace_id: trace_id.to_string(),
-            cwd: PathBuf::from(&cwd),
+        let context = PresetContext::for_session(
+            "pi",
+            session_id,
+            model_final,
+            trace_id,
+            PathBuf::from(&cwd),
             metadata,
-        };
+        );
 
         let stream_source = {
             let path = PathBuf::from(&session_path);

@@ -68,7 +68,13 @@ pub fn stats_command(
         refname
     );
 
-    let stats = super::recent_stats::stats_for_commit(repo, &target, ignore_patterns)?;
+    let authorship_log = super::recent_stats::wait_for_recent_authorship(repo, &target)?;
+    let stats = stats_for_commit_stats_with_authorship(
+        repo,
+        &target,
+        ignore_patterns,
+        authorship_log.as_ref(),
+    )?;
 
     if json {
         let json_str = serde_json::to_string(&stats)?;

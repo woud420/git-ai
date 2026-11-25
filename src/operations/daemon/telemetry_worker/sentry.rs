@@ -4,8 +4,8 @@ use super::buffer::{ErrorEvent, MessageEvent, PerformanceEvent, extend_with_cont
 use super::non_empty_setting;
 use crate::config::Config;
 use serde_json::{Value, json};
-use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The Sentry projects one flush reports to.
 pub(super) struct SentrySink {
@@ -61,11 +61,18 @@ impl SentrySink {
                     .iter()
                     .map(|msg| sentry_message_event(msg, &self.base_tags)),
             );
-        for event in events {
+        let events: Vec<Value> = events.collect();
+        // One thread per project, so an unreachable project does not delay
+        // the others; each still sends its events in order.
+        std::thread::scope(|scope| {
             for client in &self.clients {
-                client.send_event(&event);
+                scope.spawn(|| {
+                    for event in &events {
+                        client.send_event(event);
+                    }
+                });
             }
-        }
+        });
     }
 }
 
@@ -137,7 +144,7 @@ struct SentryClient {
     public_key: String,
     agent: ureq::Agent,
     /// Set by the first failed send; the rest of this flush skips the endpoint.
-    failed: Cell<bool>,
+    failed: AtomicBool,
 }
 
 impl SentryClient {
@@ -160,12 +167,12 @@ impl SentryClient {
             endpoint,
             public_key,
             agent: crate::clients::http::build_agent(Some(30)),
-            failed: Cell::new(false),
+            failed: AtomicBool::new(false),
         })
     }
 
     fn send_event(&self, event: &Value) {
-        if self.failed.get() {
+        if self.failed.load(Ordering::Relaxed) {
             return;
         }
         let auth_header = format!(
@@ -182,8 +189,10 @@ impl SentryClient {
         let body = serde_json::to_string(event).unwrap_or_default();
         // Only an unreachable endpoint ends the flush: an event the server
         // rejects says nothing about the events after it.
-        self.failed
-            .set(crate::clients::http::send_with_body(request, &body).is_err());
+        self.failed.store(
+            crate::clients::http::send_with_body(request, &body).is_err(),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -281,7 +290,8 @@ mod payload_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::SentryClient;
+    use super::{ErrorEvent, SentryClient, SentrySink};
+    use std::collections::BTreeMap;
     use std::io::Write;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -321,12 +331,34 @@ mod tests {
     }
 
     #[test]
+    fn sink_sends_every_event_to_every_project_even_when_one_is_down() {
+        const REJECTED: &str =
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        let (up, up_connections) = client_answered_with(REJECTED);
+        let (down, down_connections) = client_answered_with("");
+        let sink = SentrySink {
+            clients: vec![down, up],
+            base_tags: BTreeMap::new(),
+        };
+        let error = |message: &str| ErrorEvent {
+            timestamp: "t".to_string(),
+            message: message.to_string(),
+            context: None,
+        };
+
+        sink.send(&[error("first"), error("second")], &[], &[]);
+
+        assert_eq!(up_connections.load(Ordering::SeqCst), 2);
+        assert_eq!(down_connections.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn send_event_skips_the_endpoint_after_a_transport_failure() {
         let (client, connections) = client_answered_with("");
         client.send_event(&serde_json::json!({"message": "first"}));
         client.send_event(&serde_json::json!({"message": "second"}));
 
-        assert!(client.failed.get());
+        assert!(client.failed.load(Ordering::SeqCst));
         assert_eq!(connections.load(Ordering::SeqCst), 1);
     }
 
@@ -338,7 +370,7 @@ mod tests {
         client.send_event(&serde_json::json!({"message": "first"}));
         client.send_event(&serde_json::json!({"message": "second"}));
 
-        assert!(!client.failed.get());
+        assert!(!client.failed.load(Ordering::SeqCst));
         assert_eq!(connections.load(Ordering::SeqCst), 2);
     }
 }

@@ -240,14 +240,89 @@ impl<'a> FastObjectReader<'a> {
 
     fn parents_may_be_rewritten(&self) -> bool {
         let dir = self.common_dir;
-        std::env::var_os("GIT_REPLACE_REF_BASE").is_some()
+        self.objects_may_be_replaced()
             || dir.join("shallow").exists()
             || dir.join("info").join("grafts").exists()
+    }
+
+    /// Whether Git could read other objects than the loose files hold: a
+    /// replace ref, or refs this reader can't list.
+    fn objects_may_be_replaced(&self) -> bool {
+        let dir = self.common_dir;
+        std::env::var_os("GIT_REPLACE_REF_BASE").is_some()
             || dir.join("reftable").exists()
             || fs::read_dir(dir.join("refs").join("replace"))
                 .is_ok_and(|mut entries| entries.next().is_some())
             || fs::read_to_string(dir.join("packed-refs"))
                 .is_ok_and(|packed| packed.contains(" refs/replace/"))
+    }
+
+    /// A loose object's type and content.
+    fn read_loose(&self, oid: &str) -> Option<(String, Vec<u8>)> {
+        let mut data = self.decompress_object(oid)?;
+        let null_pos = data.iter().position(|&b| b == 0)?;
+        let kind = std::str::from_utf8(&data[..null_pos])
+            .ok()?
+            .split(' ')
+            .next()?;
+        let kind = kind.to_string();
+        Some((kind, data.split_off(null_pos + 1)))
+    }
+
+    /// The blob that `git cat-file --batch` prints for `<treeish>:<path>`,
+    /// where `treeish` is a full commit or tree OID, or a commit OID followed
+    /// by `^` for its first parent, read from loose objects.
+    ///
+    /// `Some(None)` when Git reports no blob there: no such entry, a
+    /// directory or submodule, or a root commit's missing parent. `None` when only Git can tell: a packed or
+    /// absent object, alternates, replace refs, an object directory set in
+    /// the environment, or a path that isn't plain `a/b/c`.
+    pub fn try_read_blob_at_path(&self, treeish: &str, path: &str) -> Option<Option<Vec<u8>>> {
+        if self.objects_may_be_replaced()
+            || std::env::var_os("GIT_OBJECT_DIRECTORY").is_some()
+            || std::env::var_os("GIT_ALTERNATE_OBJECT_DIRECTORIES").is_some()
+        {
+            return None;
+        }
+        let names: Vec<&str> = path.split('/').collect();
+        if names.iter().any(|name| matches!(*name, "" | "." | "..")) {
+            return None;
+        }
+        let treeish = match treeish.strip_suffix('^') {
+            Some(child) => match self.try_read_commit_parents(child)?.into_iter().next() {
+                Some(parent) => parent,
+                None => return Some(None),
+            },
+            None => treeish.to_string(),
+        };
+        let mut tree_oid = match self.read_loose(&treeish)? {
+            (kind, _) if kind == "tree" => treeish,
+            (kind, _) if kind == "commit" => self.try_read_commit_tree_oid(&treeish)?,
+            _ => return None,
+        };
+        for (depth, name) in names.iter().enumerate() {
+            let (kind, entries) = self.read_loose(&tree_oid)?;
+            if kind != "tree" {
+                return None;
+            }
+            let Some((mode, oid)) = tree_entry_lookup(&entries, name, oid_byte_len(&tree_oid))?
+            else {
+                return Some(None);
+            };
+            let is_dir = mode == DIRECTORY_MODE;
+            if depth + 1 < names.len() {
+                if !is_dir {
+                    return Some(None);
+                }
+                tree_oid = oid;
+            } else if is_dir || mode == GITLINK_MODE {
+                return Some(None);
+            } else {
+                let (kind, content) = self.read_loose(&oid)?;
+                return (kind == "blob").then_some(Some(content));
+            }
+        }
+        None
     }
 
     /// Traverse a tree (and subtrees) to find the blob OID at the given path.
@@ -303,10 +378,23 @@ impl<'a> FastObjectReader<'a> {
 /// Mode of a tree entry that is itself a tree.
 pub(crate) const DIRECTORY_MODE: u32 = 0o40000;
 
+/// Mode of a submodule entry.
+const GITLINK_MODE: u32 = 0o160000;
+
 /// The mode and OID of the entry called `name` in a tree object's raw entries.
 ///
 /// Tree entry format: `{mode} {name}\0{raw-binary-hash}`
-pub(crate) fn tree_entry(mut data: &[u8], name: &str, hash_len: usize) -> Option<(u32, String)> {
+pub(crate) fn tree_entry(data: &[u8], name: &str, hash_len: usize) -> Option<(u32, String)> {
+    tree_entry_lookup(data, name, hash_len).flatten()
+}
+
+/// Like [`tree_entry`], telling a missing entry (`Some(None)`) apart from
+/// entries it can't parse (`None`).
+fn tree_entry_lookup(
+    mut data: &[u8],
+    name: &str,
+    hash_len: usize,
+) -> Option<Option<(u32, String)>> {
     while !data.is_empty() {
         // Find the space separating mode from name
         let space_pos = data.iter().position(|&b| b == b' ')?;
@@ -327,12 +415,12 @@ pub(crate) fn tree_entry(mut data: &[u8], name: &str, hash_len: usize) -> Option
                 .iter()
                 .map(|b| format!("{:02x}", b))
                 .collect::<String>();
-            return Some((u32::from_str_radix(mode, 8).ok()?, oid));
+            return Some(Some((u32::from_str_radix(mode, 8).ok()?, oid)));
         }
 
         data = &data[hash_start + hash_len..];
     }
-    None
+    Some(None)
 }
 
 #[cfg(test)]

@@ -461,6 +461,8 @@ fn blob_at_path_matches_cat_file_and_defers_what_it_cannot_read() {
     fs::write(tmp.path().join("latin1.txt"), b"caf\xe9\n").unwrap();
     git(&["add", "a.txt", "latin1.txt"]);
     // A symlink and a newline in a name, staged without touching the disk.
+    // Git for Windows refuses the newline unless NTFS path checks are off.
+    git(&["config", "core.protectNTFS", "false"]);
     let target = git(&["hash-object", "-w", "a.txt"]);
     git(&[
         "update-index",

@@ -11,25 +11,16 @@ use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use crate::operations::streams::timestamp::file_time_fallback;
 use std::path::{Path, PathBuf};
 
-/// Continue CLI agent that reads Continue JSON transcript files.
-///
-/// Uses `RecordIndexWatermark` because the format has no timestamps at all.
-/// We track how many history entries we've already processed and skip that
-/// many on re-read.
-pub struct ContinueAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Continue CLI agent that reads Continue JSON transcript files.
+    ///
+    /// Uses `RecordIndexWatermark` because the format has no timestamps at all.
+    /// We track how many history entries we've already processed and skip that
+    /// many on re-read.
+    ContinueAgent
 }
 
 impl ContinueAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn session_roots() -> Vec<PathBuf> {
         dirs::home_dir()
             .into_iter()
@@ -54,12 +45,6 @@ impl ContinueAgent {
         }
 
         paths
-    }
-}
-
-impl Default for ContinueAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

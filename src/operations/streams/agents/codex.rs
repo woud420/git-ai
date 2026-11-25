@@ -1,6 +1,8 @@
 //! Codex agent implementation with sweep discovery.
 
-use super::discovery::{collect_files_recursively, has_extension, transcript_file_stem};
+use super::discovery::{
+    collect_files_recursively, has_extension, leading_jsonl_cwd, transcript_file_stem,
+};
 use crate::model::stream_types::{StreamBatch, StreamError};
 use crate::model::stream_watermark::WatermarkStrategy;
 use crate::operations::mdm::paths::codex_home_dir;
@@ -9,21 +11,12 @@ use crate::operations::streams::reader::read_jsonl_byte_stream;
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::path::{Path, PathBuf};
 
-/// Codex agent that reads Codex JSONL transcript files.
-pub struct CodexAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Codex agent that reads Codex JSONL transcript files.
+    CodexAgent
 }
 
 impl CodexAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn session_roots() -> Vec<PathBuf> {
         let codex_home = codex_home_dir();
         ["sessions", "archived_sessions"]
@@ -150,12 +143,6 @@ impl CodexAgent {
     }
 }
 
-impl Default for CodexAgent {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Agent for CodexAgent {
     fn validate_checkpoint_stream(
         &self,
@@ -212,26 +199,8 @@ impl Agent for CodexAgent {
     }
 
     fn infer_cwd(&self, stream_path: &Path) -> Option<PathBuf> {
-        // Codex has cwd in session_meta or turn_context payload events
-        for line in
-            crate::operations::streams::reader::read_leading_jsonl_lines(stream_path, 20).ok()?
-        {
-            if line.is_empty() {
-                continue;
-            }
-            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&line) {
-                // Check payload.cwd (session_meta and turn_context)
-                if let Some(cwd) = obj
-                    .get("payload")
-                    .and_then(|p| p.get("cwd"))
-                    .and_then(|v| v.as_str())
-                    && !cwd.is_empty()
-                {
-                    return Some(PathBuf::from(cwd));
-                }
-            }
-        }
-        None
+        // Codex has cwd in session_meta and turn_context payload events.
+        leading_jsonl_cwd(stream_path, 20, "/payload/cwd")
     }
 
     fn streams(&self) -> Vec<StreamDescriptor> {

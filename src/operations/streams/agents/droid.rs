@@ -7,21 +7,12 @@ use crate::operations::streams::agent::{Agent, StreamDescriptor, discover_path_s
 use crate::operations::streams::sweep::{DiscoveredSession, StreamFormat};
 use std::path::{Path, PathBuf};
 
-/// Droid agent that discovers conversations from Droid storage.
-pub struct DroidAgent {
-    batch_size: usize,
+batch_sized_agent! {
+    /// Droid agent that discovers conversations from Droid storage.
+    DroidAgent
 }
 
 impl DroidAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
-
     fn conversation_roots() -> Vec<PathBuf> {
         dirs::home_dir()
             .into_iter()
@@ -40,12 +31,6 @@ impl DroidAgent {
                     .map(|name| name.contains(".settings."))
                     .unwrap_or(false)
         })
-    }
-}
-
-impl Default for DroidAgent {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

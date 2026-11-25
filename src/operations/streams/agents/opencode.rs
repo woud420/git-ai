@@ -19,20 +19,9 @@ mod budget_tests;
 #[cfg(test)]
 mod v2_tests;
 
-/// OpenCode agent that reads from an OpenCode SQLite database.
-pub struct OpenCodeAgent {
-    batch_size: usize,
-}
-
-impl OpenCodeAgent {
-    pub fn new() -> Self {
-        Self { batch_size: 1000 }
-    }
-
-    #[cfg(test)]
-    pub fn with_batch_size(batch_size: usize) -> Self {
-        Self { batch_size }
-    }
+batch_sized_agent! {
+    /// OpenCode agent that reads from an OpenCode SQLite database.
+    OpenCodeAgent
 }
 
 fn extract_opencode_event_timestamp(event: &serde_json::Value) -> Option<u32> {
@@ -52,12 +41,6 @@ fn extract_opencode_event_timestamp(event: &serde_json::Value) -> Option<u32> {
             })
         })?;
     Some((millis / 1000) as u32)
-}
-
-impl Default for OpenCodeAgent {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Agent for OpenCodeAgent {

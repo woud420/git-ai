@@ -16,6 +16,9 @@ use std::time::Duration;
 /// disambiguates when multiple shared streams exist.
 pub const SHARED_STREAM_SESSION_ID: &str = "__shared__";
 
+/// Events per `read_incremental` call unless an agent overrides `batch_size_hint`.
+pub(crate) const DEFAULT_BATCH_SIZE: usize = 1000;
+
 /// Type alias for the custom path resolver function used in `PathResolverKind::Custom`.
 pub type PathResolverFn = Box<dyn Fn(&Path) -> Option<PathBuf> + Send + Sync>;
 
@@ -121,7 +124,7 @@ pub trait Agent: Send + Sync {
     /// Bounds peak memory to batch_size × avg_event_size instead of file_size.
     /// The caller loops until an empty batch is returned.
     fn batch_size_hint(&self) -> usize {
-        1000
+        DEFAULT_BATCH_SIZE
     }
 
     /// Select the session identifier passed to `read_incremental`.

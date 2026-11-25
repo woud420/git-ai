@@ -7,11 +7,11 @@ use crate::operations::daemon::parsed_invocation_for_normalized_command;
 use crate::operations::git::cli_parser::{
     explicit_rebase_branch_arg, parse_git_cli_args, summarize_rebase_args,
 };
-use crate::operations::git::find_repository_in_path;
 use crate::operations::git::oid::{
     is_full_oid as is_valid_git_oid, is_non_zero_oid as valid_non_zero_oid,
 };
 use crate::operations::git::repo_state::{common_dir_for_git_dir, git_dir_for_worktree};
+use crate::operations::git::repository::discover_repository_in_path_no_git_exec;
 use crate::operations::git::sequencer_args::{
     cherry_pick_source_args_from_command_args, revert_source_args_from_command_args,
 };

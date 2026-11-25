@@ -340,18 +340,7 @@ fn print_ci_help_and_exit() -> ! {
     eprintln!("  local            Run CI locally by event name and flags");
     eprintln!("                   Usage: git-ai ci local <event> [flags]");
     eprintln!("                   Events:");
-    eprintln!(
-        "                     merge  --merge-commit-sha <sha> --base-ref <ref> --head-ref <ref> --head-sha <sha> --base-sha <sha> [--fork-clone-url <url>]"
-    );
-    eprintln!(
-        "                            [--skip-fetch-notes] [--skip-fetch-base] [--skip-fetch-fork-notes] [--skip-fetch] [--skip-push]"
-    );
-    eprintln!(
-        "                     sync   --previous-head-sha <sha> --head-sha <sha> --base-ref <ref> [--base-sha <sha>]"
-    );
-    eprintln!(
-        "                            [--remote <name-or-url>] [--skip-fetch-notes] [--skip-fetch-sync-refs] [--skip-fetch] [--skip-push]"
-    );
+    print_ci_local_events("                   ");
     std::process::exit(1);
 }
 
@@ -361,19 +350,20 @@ fn print_ci_local_help_and_exit() -> ! {
     eprintln!("Usage: git-ai ci local <event> [flags]");
     eprintln!();
     eprintln!("Events:");
-    eprintln!(
-        "  merge  --merge-commit-sha <sha> --base-ref <ref> --head-ref <ref> --head-sha <sha> --base-sha <sha> [--fork-clone-url <url>]"
-    );
-    eprintln!(
-        "         [--skip-fetch-notes] [--skip-fetch-base] [--skip-fetch-fork-notes] [--skip-fetch] [--skip-push]"
-    );
-    eprintln!(
-        "  sync   --previous-head-sha <sha> --head-sha <sha> --base-ref <ref> [--base-sha <sha>]"
-    );
-    eprintln!(
-        "         [--remote <name-or-url>] [--skip-fetch-notes] [--skip-fetch-sync-refs] [--skip-fetch] [--skip-push]"
-    );
+    print_ci_local_events("");
     std::process::exit(1);
+}
+
+/// The `ci local` event usage, shared by the `ci` and `ci local` help screens.
+fn print_ci_local_events(indent: &str) {
+    for line in [
+        "  merge  --merge-commit-sha <sha> --base-ref <ref> --head-ref <ref> --head-sha <sha> --base-sha <sha> [--fork-clone-url <url>]",
+        "         [--skip-fetch-notes] [--skip-fetch-base] [--skip-fetch-fork-notes] [--skip-fetch] [--skip-push]",
+        "  sync   --previous-head-sha <sha> --head-sha <sha> --base-ref <ref> [--base-sha <sha>]",
+        "         [--remote <name-or-url>] [--skip-fetch-notes] [--skip-fetch-sync-refs] [--skip-fetch] [--skip-push]",
+    ] {
+        eprintln!("{indent}{line}");
+    }
 }
 
 fn print_ci_github_help_and_exit() -> ! {

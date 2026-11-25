@@ -32,6 +32,10 @@ from benchmark_common import (
     run_cmd,
 )
 
+# perf's cpu-clock sampling rate when none is given; keeps long nightly
+# profiles small.
+DEFAULT_PERF_FREQUENCY_HZ = 99
+
 
 @dataclasses.dataclass(frozen=True)
 class Variant:
@@ -83,6 +87,7 @@ def clone_seed_repo(repo_url: str, seed_repo_dir: Path, real_git: Path) -> tuple
 def start_perf_profiler(
     daemon_proc: subprocess.Popen[str] | None,
     output_path: Path,
+    frequency_hz: int,
 ) -> tuple[subprocess.Popen[bytes], TextIO]:
     if daemon_proc is None:
         raise BenchmarkError("Cannot profile a daemon that is not running")
@@ -102,7 +107,7 @@ def start_perf_profiler(
                 "-e",
                 "cpu-clock",
                 "-F",
-                "99",
+                str(frequency_hz),
                 "--call-graph",
                 "dwarf,4096",
                 "--output",
@@ -164,6 +169,7 @@ def setup_variant_runtime(
     runtime_root: Path,
     real_git: Path,
     profile_output: Path | None = None,
+    perf_frequency_hz: int = DEFAULT_PERF_FREQUENCY_HZ,
 ) -> tuple[
     dict[str, str],
     Path,
@@ -231,7 +237,9 @@ def setup_variant_runtime(
             env["GIT_AI_DAEMON_CHECKPOINT_DELEGATE"] = "true"
             env["GIT_AI_DAEMON_CONTROL_SOCKET"] = str(control_socket)
             if profile_output is not None:
-                profiler = start_perf_profiler(daemon_proc, profile_output)
+                profiler = start_perf_profiler(
+                    daemon_proc, profile_output, perf_frequency_hz
+                )
     except BaseException:
         if profiler is not None:
             try:
@@ -550,6 +558,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Collect one perf.data profile per daemon variant and repetition.",
     )
+    parser.add_argument(
+        "--perf-frequency",
+        type=int,
+        default=DEFAULT_PERF_FREQUENCY_HZ,
+        help="perf sampling frequency in Hz for --flamegraph-dir profiles.",
+    )
     parser.add_argument("--keep-artifacts", action="store_true")
     return parser.parse_args()
 
@@ -566,6 +580,8 @@ def main() -> int:
         raise BenchmarkError("--repetitions must be positive")
     if args.margin_pct < 0:
         raise BenchmarkError("--margin-pct must be non-negative")
+    if args.perf_frequency <= 0:
+        raise BenchmarkError("--perf-frequency must be positive")
 
     if args.work_root is None:
         work_root = Path(tempfile.mkdtemp(prefix="git-ai-nasty-modes-"))
@@ -650,7 +666,11 @@ def main() -> int:
                     else None
                 )
                 env, git_bin, daemon_proc, home_dir, profiler = setup_variant_runtime(
-                    variant, runtime_root, real_git, profile_output
+                    variant,
+                    runtime_root,
+                    real_git,
+                    profile_output,
+                    args.perf_frequency,
                 )
                 try:
                     cmd = [
@@ -752,6 +772,7 @@ def main() -> int:
             "margin_pct": args.margin_pct,
             "margin_baseline": args.margin_baseline,
             "flamegraph_dir": str(args.flamegraph_dir) if args.flamegraph_dir else None,
+            "perf_frequency_hz": args.perf_frequency if args.flamegraph_dir else None,
             "variants": {v.key: str(v.binary) for v in variants},
         }
 

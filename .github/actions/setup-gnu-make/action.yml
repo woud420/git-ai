@@ -10,9 +10,22 @@ runs:
         echo "GNU_MAKE_VERSION=4.4.1" >> "$GITHUB_ENV"
         echo "GNU_MAKE_SHA256=dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3" >> "$GITHUB_ENV"
 
+    # Downloading Make on every job made CI depend on ftp.gnu.org and the
+    # Chocolatey feed, which both fail intermittently. Main's runs save the
+    # installed Make here; other runs reuse it and only download on a miss.
+    - name: Restore GNU Make
+      if: runner.os != 'macOS'
+      id: gnu-make-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gnu-make-${{ env.GNU_MAKE_VERSION }}
+        key: gnu-make-${{ env.GNU_MAKE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
     - name: Install GNU Make (Linux)
       if: runner.os == 'Linux'
       shell: bash
+      env:
+        GNU_MAKE_CACHE_HIT: ${{ steps.gnu-make-cache.outputs.cache-hit }}
       # The path is derived only from the fixed, checksum-verified Make version above.
       run: | # zizmor: ignore[github-env]
         set -euo pipefail
@@ -20,15 +33,28 @@ runs:
         source_dir="$RUNNER_TEMP/make-$GNU_MAKE_VERSION"
         prefix="$RUNNER_TEMP/gnu-make-$GNU_MAKE_VERSION"
 
-        curl --fail --location --retry 3 \
-          "https://ftp.gnu.org/gnu/make/make-$GNU_MAKE_VERSION.tar.gz" \
-          --output "$archive"
-        echo "$GNU_MAKE_SHA256  $archive" | sha256sum --check -
-        tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
-        cd "$source_dir"
-        ./configure --prefix="$prefix"
-        make --jobs 2
-        make install
+        if [ "$GNU_MAKE_CACHE_HIT" != "true" ]; then
+          # ftpmirror.gnu.org redirects to a nearby mirror; the checksum
+          # verifies whichever host answers.
+          for host in ftpmirror.gnu.org ftp.gnu.org; do
+            if curl --fail --location --retry 3 --connect-timeout 20 \
+              "https://$host/gnu/make/make-$GNU_MAKE_VERSION.tar.gz" \
+              --output "$archive"; then
+              break
+            fi
+            rm -f "$archive"
+          done
+          if [ ! -f "$archive" ]; then
+            echo "Could not download GNU Make $GNU_MAKE_VERSION" >&2
+            exit 1
+          fi
+          echo "$GNU_MAKE_SHA256  $archive" | sha256sum --check -
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+          cd "$source_dir"
+          ./configure --prefix="$prefix"
+          make --jobs 2
+          make install
+        fi
         echo "$prefix/bin" >> "$GITHUB_PATH"
 
     - name: Install GNU Make (macOS)
@@ -43,18 +69,33 @@ runs:
     - name: Install GNU Make (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
-      run: |
-        # The community feed intermittently answers 5xx; one bad response
-        # should not fail every Windows job before it builds anything.
-        $attempts = 4
-        for ($attempt = 1; $attempt -le $attempts; $attempt++) {
-          choco install make --version=4.4.1 --no-progress --yes
-          if ($LASTEXITCODE -eq 0 -or $attempt -eq $attempts) { break }
-          $delay = 15 * [math]::Pow(2, $attempt - 1)
-          Write-Host "choco install failed (exit $LASTEXITCODE); retrying in $delay s ($attempt/$attempts)"
-          Start-Sleep -Seconds $delay
+      env:
+        GNU_MAKE_CACHE_HIT: ${{ steps.gnu-make-cache.outputs.cache-hit }}
+      # The path is derived only from the runner temp directory and the fixed Make version.
+      run: | # zizmor: ignore[github-env]
+        $bin =Join-Path $env:RUNNER_TEMP "gnu-make-$env:GNU_MAKE_VERSION\bin"
+        if ($env:GNU_MAKE_CACHE_HIT -ne 'true') {
+          # The community feed intermittently answers 5xx; one bad response
+          # should not fail every Windows job before it builds anything.
+          $attempts = 4
+          for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+            choco install make --version=4.4.1 --no-progress --yes
+            if ($LASTEXITCODE -eq 0 -or $attempt -eq $attempts) { break }
+            $delay = 15 * [math]::Pow(2, $attempt - 1)
+            Write-Host "choco install failed (exit $LASTEXITCODE); retrying in $delay s ($attempt/$attempts)"
+            Start-Sleep -Seconds $delay
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # Cache the package's own make.exe, not Chocolatey's shim, which
+          # only works where Chocolatey installed the package.
+          $package = Join-Path $env:ChocolateyInstall 'lib\make'
+          $exe = Get-ChildItem $package -Recurse -Filter make.exe | Select-Object -First 1
+          if (-not $exe) { throw "make.exe not found under $package" }
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          Copy-Item (Join-Path $exe.DirectoryName '*') $bin -Recurse
         }
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Add-Content -Path $env:GITHUB_PATH -Value $bin
 
     - name: Verify GNU Make (Unix)
       if: runner.os != 'Windows'
